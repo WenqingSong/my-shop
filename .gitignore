@@ -1,0 +1,20 @@
+# 编译产物
+/my-shop
+/main
+*.exe
+*.test
+*.out
+
+# 测试与覆盖率
+coverage.out
+
+# 本地环境变量
+.env
+
+# 日志
+logs/
+*.log
+
+# IDE
+.idea/
+.vscode/

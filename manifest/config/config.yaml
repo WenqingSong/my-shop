@@ -1,0 +1,32 @@
+# 服务配置
+server:
+  # HTTP 监听地址，可通过环境变量 SERVER_ADDRESS 覆盖，例如 ":8080"
+  address: ":8000"
+
+# 数据库配置（以下均为开发默认值，可通过环境变量覆盖）
+# 对应环境变量：DATABASE_DEFAULT_TYPE / HOST / PORT / USER / PASS / NAME / CHARSET / DEBUG
+database:
+  default:
+    type: "mysql"
+    host: "127.0.0.1"
+    port: "3306"
+    user: "root"
+    pass: "root"
+    name: "my_shop"
+    charset: "utf8"
+    debug: false
+
+# Redis 配置（以下均为开发默认值，可通过环境变量覆盖）
+# 对应环境变量：REDIS_DEFAULT_ADDRESS / DB / PASS
+redis:
+  default:
+    address: "127.0.0.1:6379"
+    db: 0
+    pass: ""
+
+# 启动配置（以下均为开发默认值，可通过环境变量覆盖）
+# 对应环境变量：STARTUP_DEPENDENCY_TIMEOUT
+startup:
+  dependency:
+    # 启动依赖连通性校验超时时间（秒）
+    timeout: 30
