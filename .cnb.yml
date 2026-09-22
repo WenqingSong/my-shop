@@ -1,0 +1,12 @@
+$:
+  vscode:
+    - runner:
+        cpus: 8
+      docker:
+        image: docker.cnb.cool/arthur-cloud-native/jetbrains/goland:5.0.0
+      services:
+        - vscode
+        - docker
+      stages:
+        - name: docker-compose-up
+          script: docker compose up -d
