@@ -1,9 +1,13 @@
 # 编译产物
 /my-shop
 /main
+/bin/
 *.exe
 *.test
 *.out
+
+# 运行时临时目录
+/tmp/
 
 # 测试与覆盖率
 coverage.out
@@ -18,3 +22,4 @@ logs/
 # IDE
 .idea/
 .vscode/
+.Trash-0/
