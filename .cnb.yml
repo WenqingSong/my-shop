@@ -3,7 +3,7 @@ $:
     - runner:
         cpus: 8
       docker:
-        image: docker.cnb.cool/arthur-cloud-native/jetbrains/goland:5.0.0
+        image: docker.cnb.cool/arthur-cloud-native/jetbrains/goland:5.0.1
       services:
         - vscode
         - docker
