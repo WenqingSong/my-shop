@@ -1,410 +1,105 @@
 # 全局 Agent 协同规范
 
-## 1. 目标
+## **1. 目标与适用范围**
 
-本项目采用 AI Agent 辅助开发。
+本项目使用 Agent 分担实现、测试、审查和交付验证。Owner 决定需求、重要方案和最终是否接受任务，并掌握关键业务逻辑。
 
-核心目标不是让 Agent 完全替代开发者，而是：
+本文件规定跨角色的协作规则。仓库根目录的 `AGENTS.md` 规定长期工程基线；`docs/agent/Five-AgentResponsibilityBoundary.md` 规定角色职责；各角色 Prompt 规定本角色的执行方法。当前业务需求以对应任务文件为准。普通任务不为凑齐角色而调用所有 Agent。
 
-- Agent 承担大量代码实现、测试、Review 和重复性工程工作；
-- Owner 掌握需求、核心设计和关键业务逻辑；
-- 每个任务具有明确 Scope 和验收标准；
-- 所有重要结论可以追踪；
-- 不因为 Agent 协作引入无意义的流程复杂度。
+## **2. 统一路径与文件职责**
 
----
-
-# 2. 角色
-
-项目包含五种 Agent。
-
-## Task Builder
-
-负责建立当前任务的协同文件。
-
-不写生产代码。
-
-## Coder
-
-负责：
-
-- 实现代码；
-- 编写或补充测试；
-- 修复 Cleaner Findings。
-
-## Cleaner
-
-独立检查 Coder 的实现。
-
-负责：
-
-- Review Diff；
-- 运行必要测试；
-- 检查业务正确性；
-- 检查测试质量；
-- 产生 Findings；
-- 标记 Owner 应重点理解的核心逻辑；
-- 给出适合人工 Mutation 验证的关键不变量。
-
-Cleaner 默认不修改生产代码。
-
-## Analyst
-
-只在复杂任务中启用。
-
-负责：
-
-- 调查现有实现；
-- 分析架构和依赖；
-- 找出根因；
-- 比较重要方案；
-- 给出设计约束。
-
-Analyst 不负责最终业务决策。
-
-## Deliverer
-
-只在重要里程碑或最终交付时启用。
-
-负责独立验证：
-
-- Build；
-- Test；
-- Integration；
-- Race；
-- API；
-- Docker；
-- 部署或其他交付要求。
-
----
-
-# 3. Owner
-
-Owner 是最终负责人。
-
-Owner 不是 Agent。
-
-Owner 负责：
-
-- 提出需求；
-- 决定 Scope；
-- 决定重要架构方案；
-- 理解关键业务逻辑；
-- 对关键不变量进行必要的人工验证；
-- 决定任务是否接受；
-- 决定是否 Commit、Merge、Deploy。
-
-Agent 不得代替 Owner 做最终接受决定。
-
----
-
-# 4. 默认工作流
-
-普通任务：
-
-```
-Owner
-  ↓
-Task Builder
-  ↓
-Coder
-  ↓
-Cleaner
-  ↓
-┌────────────────────┐
-│ 有 Finding         │
-↓                    │
-Coder 修复            │
-↓                    │
-Cleaner 复审 ─────────┘
-  ↓
-CLEAN
-  ↓
-Owner 核心逻辑验证
-  ↓
-Task Done
-```
-
-复杂任务：
-
-```
-Owner
-  ↓
-Task Builder
-  ↓
-Analyst
-  ↓
-Owner 确认关键方案
-  ↓
-Coder
-  ↓
-Cleaner
-  ↓
-Owner
-```
-
-重要里程碑：
-
-```
-Coder
- ↓
-Cleaner CLEAN
- ↓
-Owner 核心验证
- ↓
-Deliverer
- ↓
-Owner 最终决定
-```
-
----
-
-# 5. 协同目录
-
-每个独立任务建立目录：
-
-```
-.agent/tasks/<task-slug>/
-```
-
-默认包含：
+每个独立任务使用：
 
 ```
 .agent/tasks/<task-slug>/
 ├── task.md
 ├── findings.md
 ├── core-logic.md
-└── delivery.md
+├── delivery.md
+└── contract.md                 # 仅复杂任务创建
 ```
 
-复杂任务可以增加：
+**文件内容写入责任**`task.md`Goal、Scope、Out of Scope、Acceptance Criteria、背景、验证要求、初始路由和审查基线Task Builder 初始化；Owner 可亲自修改，或明确指示 Task Builder 更新任务定义`contract.md`经确认的技术约束、接口、数据语义和关键不变量Analyst 起草；Owner 确认；Analyst 根据 Owner 的明确决定记录确认结果`findings.md`Review 结果、稳定编号的 Finding、复审结论Cleaner`core-logic.md`最终实现中值得 Owner 重点理解的逻辑和可选 Mutation 建议Cleaner`delivery.md`里程碑的运行与交付验证Deliverer
+
+`design.md` 可以是项目已有的设计资料，不是每个任务的必建文件。Task Builder 初始化四个默认文件；简单任务不创建空的 `contract.md`。Coder 负责代码和测试，默认不维护上述协同文件。
+
+`task.md` 中的 `Initial Route` 只记录 Task Builder 创建任务时的去向（`READY_FOR_CODER` 或 `READY_FOR_ANALYST`），不作为持续更新的任务状态。后续结果分别由对应角色写在其负责的文件中。Owner 后来改变任务时，以更新后的 Complexity、Task Builder 的本次交接结论和已有审查状态确定下一步；不得沿用过期的 Initial Route 跳过必要的 Analyst 或 Cleaner。
+
+## **3. 指令、证据与冲突**
+
+执行要求的优先顺序：
+
+1. Owner 当前明确指令；
+2. 当前 `task.md` 的 Goal、Scope、Out of Scope 和 Acceptance Criteria；
+3. Owner 已确认的 `contract.md` 和适用的已确认设计；
+4. `AGENTS.md` 的项目工程基线；
+5. 本规范、职责边界与角色 Prompt。
+
+真实代码、测试结果和运行日志用于判定**当前事实**，不能自行改变任务目标。Agent 报告和旧文档只作为辅助材料。Owner 当前指令若改变了既有目标或验收标准，先由 Owner 或依其明确指示的 Task Builder 更新 `task.md`；若影响已确认的 Contract，还须取得 Owner 对修订方案的确认。若任务与已确认的 Contract、真实系统约束或安全要求明显冲突，不得暗自选择一边；应给出冲突位置、证据和需要 Owner 决定的事项。不得泄漏凭据、绕过明确的认证授权要求，或吞掉关键错误制造成功。
+
+## **4. 角色与默认路由**
+
+**角色核心问题主要输出**Task Builder本次到底要交付什么？任务定义与协同文件初始化Analyst复杂任务有哪些可行方案和必须保持的不变量？分析结论与待确认的 `contract.md`Coder如何按已确定的任务和约束完成实现？生产代码、必要测试和验证结果Cleaner实际 Diff 是否满足任务、测试是否可信？`findings.md`；通过后填写 `core-logic.md`Deliverer重要里程碑作为交付物能否实际运行？`delivery.md`
+
+普通任务：
 
 ```
-contract.md
+Owner → Task Builder → Coder → Cleaner
+                         ↑          │ CHANGES_REQUIRED
+                         └──────────┘
+Cleaner CLEAN → Owner 核心逻辑检查 → Owner 决定是否接受
 ```
 
----
-
-# 6. 文件职责
-
-## task.md
-
-当前任务的唯一任务定义。
-
-包括：
-
-- Goal；
-- Scope；
-- Out of Scope；
-- Acceptance Criteria；
-- Relevant Context；
-- Verification；
-- 当前任务状态。
-
-Task Builder 负责初始化。
-
-后续 Agent 只能读取，不得自行改变任务目标和验收标准。
-
----
-
-## findings.md
-
-Cleaner 的 Review 结果。
-
-包含：
-
-- Finding ID；
-- 严重程度；
-- 文件位置；
-- 实际行为；
-- 预期行为；
-- 影响；
-- 证据；
-- 修复状态。
-
-Coder 可以引用 Finding，但不得修改 Cleaner 原始 Finding。
-
-Cleaner 负责关闭或重新打开 Finding。
-
----
-
-## core-logic.md
-
-Cleaner 在 Review 完成后生成。
-
-只记录 Owner 真正值得重点理解的代码。
-
-例如：
-
-- 权限判断；
-- 事务边界；
-- 库存扣减；
-- 一人一单；
-- 幂等；
-- 状态流转；
-- Redis Lua；
-- Kafka Consumer；
-- 补偿逻辑；
-- 并发控制。
-
-不记录普通 DTO、简单 CRUD、样板代码。
-
----
-
-## contract.md
-
-只有复杂任务才创建。
-
-记录：
-
-- 重要设计决定；
-- 接口边界；
-- 数据一致性要求；
-- 行为不变量；
-- 错误语义；
-- 关键限制。
-
-主要由 Analyst 产生，由 Owner 确认。
-
----
-
-## delivery.md
-
-重要里程碑使用。
-
-由 Deliverer 写入：
-
-- 验收环境；
-- 测试命令；
-- 验收结果；
-- 未验证事项；
-- 剩余风险；
-- 最终交付状态。
-
-普通小任务可以保留空文件，不要求填写。
-
----
-
-# 7. 事实优先级
-
-发生冲突时按照以下顺序判断：
+复杂任务在 Coder 前增加：
 
 ```
-1. Owner 当前明确指令
-2. task.md
-3. contract.md
-4. 真实代码
-5. 自动化测试结果
-6. Agent 报告
-7. 旧文档或注释
+Task Builder → Analyst → Owner 确认关键方案 → Coder
 ```
 
-但如果：
+重要里程碑在 Cleaner CLEAN 且 Owner 完成核心逻辑验证后，由 Owner 决定是否启动 Deliverer；Deliverer 验证的必须是 Cleaner 已审查的同一版本。Deliverer 给出交付结果，Owner 再作最终接受决定。普通小任务不必调用 Deliverer。
 
-```
-task.md / contract.md
-```
+Owner 或实际调度 Agent 的人负责按上述结果发起下一角色，不新增“调度 Agent”。已有足够信息时直接交接；只有重大业务或设计选择需要 Owner 决定。
 
-与真实代码存在明显冲突，Agent 不得偷偷选择一边。
+## **5. 阶段关口与结果**
 
-必须明确报告冲突。
+**当前阶段允许进入下一阶段的条件下一步**Task Builder任务可执行、可验收；初始路由已写入 `task.md`NORMAL 交 Coder；COMPLEX 交 AnalystAnalyst`contract.md` 已记录推荐方案、关键不变量和验证要求等待 Owner 明确确认；Analyst 记录确认后的方案与 `APPROVED` 状态，再交 CoderCoder实现、必要测试和自验完成；报告 `READY_FOR_CLEANER`交 CleanerCleaner`CHANGES_REQUIRED`Coder 修复 Finding，再由 Cleaner 复审Cleaner`CLEAN`Owner 检查核心逻辑；里程碑可交 DelivererDeliverer`FAIL`实现问题退回 Coder → Cleaner；设计问题交 Analyst → OwnerDeliverer`PASS` 或 `CONDITIONAL_PASS`Owner 依据证据与剩余风险决定是否接受
 
----
+复杂任务的 `contract.md` 未标记 `APPROVED` 时，Coder 不开始实现；Owner 的明确确认是修改该状态的依据。Analyst 不得自行批准自己的推荐方案。
 
-# 8. 公共规则
+Cleaner 逐项将 Acceptance Criteria 标为 `PASS`、`FAIL` 或 `NOT_VERIFIED`。只有全部 AC 有充分证据支持 `PASS`、没有开放的 P0/P1/P2，且适用的关键测试通过，才能给出 `CLEAN`。若真实环境是验证某项 AC 的必要条件但当前不可用，应标为 `NOT_VERIFIED`，说明缺少的条件；不得为了继续流程而将其写成 `PASS` 或宣布 `CLEAN`。Deliverer 在 Cleaner `CLEAN` 后对重要里程碑独立执行交付级验证。
 
-所有 Agent 都必须遵守：
+如需改变 AC 或接受与原 AC 不同的行为，由 Owner 明确调整任务定义后再继续审查；Agent 不得用口头“例外”自行宣布通过。P3 是否处理由 Owner 决定。
 
-1. 不擅自扩大当前任务 Scope。
-2. 不修改与当前任务无关的代码。
-3. 不覆盖 Owner 或其他 Agent 已有修改。
-4. 不为了测试通过而降低测试标准。
-5. 不删除失败测试来制造成功。
-6. 不把推测写成已验证事实。
-7. 重要结论应尽量提供代码、Diff、测试或日志证据。
-8. 不因为存在 AI Agent 就跳过错误处理和测试。
-9. 没有明确授权时不得 Push、Force Push 或改写 Git 历史。
-10. Agent 不得自行决定部署生产环境。
-11. 已经获得完成任务所需信息后，应开始执行，不进行无目的调查。
-12. 如果实际实现要求突破明确 Scope，停止扩大修改并报告。
+## **6. 任务基线、Scope 与 Diff**
 
----
+Task Builder 创建任务时，在 `task.md` 记录任务开始时的 Git 基线（例如 Commit ID）和已有未提交修改的文件清单。若现有修改可能与任务重叠，应保留足以区分任务前后变更的基线证据，或先在独立工作区隔离；仅记录同一文件名不足以区分新旧修改。若尚无可用 Git 基线，应如实记录。已有修改不得擅自覆盖、丢弃或归入 Coder 的成果。
 
-# 9. Finding 严重程度
+Coder 结束前检查工作区。Cleaner 审查当前任务的**全部相关变更**：基线之后的已跟踪文件、暂存区变更及新增未跟踪文件；同时排除或单独说明任务开始前已存在的修改。若已有修改与任务重叠且无法区分归属，先澄清再判断，不得根据一份不完整的 `git diff` 宣布审查完成。
 
-统一使用：
+Cleaner 在 `findings.md` 记录本次审查对象，足以区分 Commit、未提交 Diff 和新增文件。`CLEAN` 只对该对象有效；此后生产代码、测试或任务约束发生实质变化，应由 Cleaner 检查变化并重新给出结论。Deliverer 开始前核对交付对象与最近一次 `CLEAN` 的审查对象一致；不一致则先退回 Cleaner。Owner 执行 Mutation 后，也应恢复到已审查的正确实现。
 
-```
-P0
-安全漏洞、数据损坏、严重不可用。
+所有角色只处理当前 Scope。实际实现需要突破明确 Scope 时，停止扩大修改并报告。不得修改无关代码、覆盖 Owner 或其他 Agent 的已有工作，或为了让验证通过而降低测试标准。
 
-P1
-核心业务行为错误，禁止接受当前实现。
+## **7. Finding 与复审**
 
-P2
-特定场景错误、可靠性问题、明显维护风险。
+Finding 使用稳定编号 `CLEAN-001`、`CLEAN-002` 等，并说明触发条件、实际与预期行为、影响、证据及必要的修复边界：
 
-P3
-低风险问题或非阻塞改进建议。
-```
+**级别含义是否阻塞 CLEAN**P0安全漏洞、数据损坏、严重不可用是P1核心业务行为错误是P2特定场景错误、可靠性问题或明显维护风险是P3低风险问题或非阻塞改进由 Owner 决定是否处理
 
-P0、P1、P2 默认必须解决后才能认为 Cleaner CLEAN。
+只有 Cleaner 创建、关闭或重新打开 Finding。Coder 可以引用 Finding 并修复代码，不得改写原始 Finding 或自行关闭。Cleaner 复审原问题、修复 Diff、回归测试和新引入的风险。
 
-P3 是否处理由 Owner 决定。
+Deliverer 发现交付失败时记录在 `delivery.md`；不建立第二套长期 Finding。实现缺陷退回 Coder → Cleaner，设计问题交 Analyst → Owner。
 
----
+## **8. Owner 的核心逻辑验证**
 
-# 10. 核心逻辑原则
+Cleaner 在实现稳定后，从最终代码中标记真正值得 Owner 理解的权限、安全、事务、并发、库存、幂等、状态流转及一致性逻辑，不罗列 DTO 或普通样板代码。每项给出位置、业务不变量、相关测试；必要时建议少量高价值 Mutation。
 
-Owner 不需要逐行检查 Agent 生成的全部代码。
+Mutation 是可选的人工验证：临时破坏一条关键业务不变量，预期对应测试失败，随后恢复正确实现并确认工作区状态。Owner 不需要逐行重新 Review 全部 Diff。最终接受、Commit、Merge、Push 与 Deploy 均由 Owner 决定；没有明确授权时 Agent 不执行 Push、Force Push、改写历史或生产部署。最终接受结论及明确保留的风险应留在当前任务记录、Issue 或 PR 中，不另建一套状态文档。
 
-Cleaner 应负责从完整 Diff 中筛选真正重要的业务逻辑。
+## **9. 共同执行原则**
 
-核心逻辑通常满足至少一个条件：
-
-- 决定权限；
-- 修改资金、库存、订单等重要数据；
-- 涉及事务；
-- 涉及并发；
-- 涉及缓存一致性；
-- 涉及幂等；
-- 涉及消息可靠性；
-- 涉及状态机；
-- 涉及安全边界；
-- 出错可能造成明显业务后果。
-
----
-
-# 11. Mutation 验证原则
-
-Cleaner 可以针对重要业务不变量提出 Mutation 建议。
-
-例如原代码：
-
-```
-if user.IsAdmin == 1 {
-    // allow
-}
-```
-
-Cleaner 可以建议 Owner 临时修改：
-
-```
-if user.IsAdmin == 0 {
-```
-
-然后重新执行对应测试。
-
-预期：
-
-```
-测试失败
-```
-
-说明现有测试能够发现该业务语义被破坏。
-
-Mutation 只针对重要逻辑。
-
-不要对普通 CRUD 和样板代码机械执行。
-
-验证完成后必须恢复正确实现。
+- 优先依据真实代码、测试和运行证据陈述结论；区分已验证事实、推断和未知项。
+- Coder 实现并自测；Cleaner 独立审查代码与测试质量；Deliverer 在适用的里程碑独立验证实际运行。三者可以运行部分相同命令，但必须回答各自负责的问题。
+- 未运行的检查标记为 `NOT_VERIFIED` 或 `NOT_EXECUTED`，写明原因，不得记为 `PASS`。
+- 调查以当前任务为界；证据足以支持下一步时停止无目的调查。
+- 任一角色发现无法安全继续的冲突，应输出 `BLOCKED`、证据和所需决定，不得用推测填补关键业务规则。
