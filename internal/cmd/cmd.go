@@ -9,6 +9,8 @@ import (
 
 	"cnb.cool/go-cloud-devops/my-shop/internal/boot"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/health"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
+	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 )
 
 var (
@@ -23,8 +25,19 @@ var (
 
 			s := g.Server()
 			s.Group("/", func(group *ghttp.RouterGroup) {
-				group.Middleware(ghttp.MiddlewareHandlerResponse)
+				group.Middleware(middleware.Response)
 				group.Bind(health.NewV1())
+
+				iamCtrl := iam.NewV1()
+				// 公开接口：注册、登录（无需 token）。
+				group.POST("/register", iamCtrl.Register)
+				group.POST("/login", iamCtrl.Login)
+
+				// 受保护接口：/me 需要 Bearer Token 认证。
+				group.Group("/", func(protected *ghttp.RouterGroup) {
+					protected.Middleware(middleware.Auth)
+					protected.GET("/me", iamCtrl.Me)
+				})
 			})
 			s.Run()
 			return nil
