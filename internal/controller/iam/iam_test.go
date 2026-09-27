@@ -111,6 +111,56 @@ func signToken(t *testing.T, secret, sub, iss string, iat, exp time.Time) string
 	return tok
 }
 
+// signTokenWithSid 签发一个带 sid、验签可通过但 sid 可任意指定的 token，用于构造「会话缺失」等场景。
+func signTokenWithSid(t *testing.T, secret, sub, sid string) string {
+	t.Helper()
+	now := time.Now()
+	claims := auth.Claims{
+		Sid: sid,
+		RegisteredClaims: gojwt.RegisteredClaims{
+			Subject:   sub,
+			Issuer:    auth.Issuer,
+			IssuedAt:  gojwt.NewNumericDate(now),
+			ExpiresAt: gojwt.NewNumericDate(now.Add(time.Hour)),
+		},
+	}
+	tok, err := gojwt.NewWithClaims(gojwt.SigningMethodHS256, claims).SignedString([]byte(secret))
+	if err != nil {
+		t.Fatalf("sign token with sid: %v", err)
+	}
+	return tok
+}
+
+// tokenSid 解码 token 返回其 sid 声明。
+func tokenSid(t *testing.T, token string) string {
+	t.Helper()
+	claims, err := auth.ParseWithSecret([]byte(testJWTSecret), token)
+	if err != nil {
+		t.Fatalf("parse token: %v", err)
+	}
+	return claims.Sid
+}
+
+// sessionFields 读取 Redis 中 sid 对应 session 的 Hash 字段。
+func sessionFields(t *testing.T, sid string) map[string]string {
+	t.Helper()
+	v, err := g.Redis().HGetAll(context.Background(), auth.SessionKey(sid))
+	if err != nil {
+		t.Fatalf("hgetall session: %v", err)
+	}
+	return v.MapStrStr()
+}
+
+// sessionTTL 读取 sid 对应 session 的剩余 TTL（秒）。
+func sessionTTL(t *testing.T, sid string) int64 {
+	t.Helper()
+	ttl, err := g.Redis().TTL(context.Background(), auth.SessionKey(sid))
+	if err != nil {
+		t.Fatalf("ttl session: %v", err)
+	}
+	return ttl
+}
+
 // setupIAMServer 配置数据库、幂等建表并启动带中间件与路由的测试服务器，返回 base URL。
 func setupIAMServer(t *testing.T) string {
 	t.Helper()
@@ -124,7 +174,13 @@ func setupIAMServer(t *testing.T) string {
 		t.Fatalf("clean users: %v", err)
 	}
 
+	if err := g.Redis().FlushDB(ctx); err != nil {
+		t.Fatalf("clean redis: %v", err)
+	}
+
 	s := g.Server(guid.S())
+	// 使用随机端口，避免与其它测试包（如 health）在并行 go test 下争用默认 8000 端口。
+	s.SetPort(0)
 	s.Group("/", func(group *ghttp.RouterGroup) {
 		group.Middleware(middleware.Response)
 		ctrl := iamController.NewV1()
@@ -133,6 +189,10 @@ func setupIAMServer(t *testing.T) string {
 		group.Group("/", func(protected *ghttp.RouterGroup) {
 			protected.Middleware(middleware.Auth)
 			protected.GET("/me", ctrl.Me)
+		})
+		group.Group("/", func(protected *ghttp.RouterGroup) {
+			protected.Middleware(middleware.AuthSignatureOnly)
+			protected.POST("/logout", ctrl.Logout)
 		})
 	})
 	s.SetDumpRouterMap(false)
@@ -224,6 +284,21 @@ func TestIAMEndToEnd(t *testing.T) {
 		t.Fatalf("expected exp-iat=%ds, got %v", auth.ExpiresIn, d)
 	}
 
+	// IAM V2：token 必须携带 sid，且 Redis 中已写入对应 session（user_id == sub，未撤销，TTL>0）。
+	if claims.Sid == "" {
+		t.Fatal("expected non-empty sid in token claims")
+	}
+	sf := sessionFields(t, claims.Sid)
+	if sf["user_id"] != fmt.Sprintf("%d", aliceID) {
+		t.Fatalf("expected session user_id=%d, got %q", aliceID, sf["user_id"])
+	}
+	if sf["revoked"] != "0" {
+		t.Fatalf("expected session not revoked, got %q", sf["revoked"])
+	}
+	if ttl := sessionTTL(t, claims.Sid); ttl <= 0 {
+		t.Fatalf("expected session TTL > 0, got %d", ttl)
+	}
+
 	// AC-005：错误密码与不存在用户返回相同 code/message/status（防枚举）。
 	wrong := doRequest(t, base, "POST", "/login", map[string]any{"username": "alice", "password": "wrongpass123"}, nil)
 	ghost := doRequest(t, base, "POST", "/login", map[string]any{"username": "ghost", "password": "password123"}, nil)
@@ -310,5 +385,239 @@ func TestConcurrentRegisterSameUsername(t *testing.T) {
 	}
 	if count := userCount(t, username); count != 1 {
 		t.Fatalf("expected 1 row for %q, got %d", username, count)
+	}
+}
+
+// registerAndLogin 注册并登录用户，返回 (access_token, sid)。
+func registerAndLogin(t *testing.T, base, username, password string) (string, string) {
+	t.Helper()
+	reg := doRequest(t, base, "POST", "/register", map[string]any{"username": username, "password": password}, nil)
+	if reg.Status != 200 || reg.Code != 0 {
+		t.Fatalf("register %s: status=%d code=%d", username, reg.Status, reg.Code)
+	}
+	login := doRequest(t, base, "POST", "/login", map[string]any{"username": username, "password": password}, nil)
+	if login.Status != 200 || login.Code != 0 {
+		t.Fatalf("login %s: status=%d code=%d", username, login.Status, login.Code)
+	}
+	token, _ := login.Data["access_token"].(string)
+	if token == "" {
+		t.Fatalf("login %s: empty access_token", username)
+	}
+	return token, tokenSid(t, token)
+}
+
+// TestLogoutRevokesSessionThenMe401 覆盖 AC-003/INV-003：登出后 session 标记 revoked，token 立即失效且 key 保留。
+func TestLogoutRevokesSessionThenMe401(t *testing.T) {
+	base := setupIAMServer(t)
+	token, sid := registerAndLogin(t, base, "alice", "password123")
+
+	lo := doRequest(t, base, "POST", "/logout", nil, map[string]string{"Authorization": "Bearer " + token})
+	if lo.Status != 200 || lo.Code != 0 {
+		t.Fatalf("logout: status=%d code=%d", lo.Status, lo.Code)
+	}
+	if lo.Data != nil {
+		t.Fatalf("logout should return data=null, got %v", lo.Data)
+	}
+
+	// 撤销为逻辑标记：key 仍在、revoked=1、TTL 未清零。
+	sf := sessionFields(t, sid)
+	if sf["revoked"] != "1" {
+		t.Fatalf("expected revoked=1, got %q", sf["revoked"])
+	}
+	if ttl := sessionTTL(t, sid); ttl <= 0 {
+		t.Fatalf("expected session key retained with TTL>0 after logout, got %d", ttl)
+	}
+
+	me := doRequest(t, base, "GET", "/me", nil, map[string]string{"Authorization": "Bearer " + token})
+	if me.Status != 401 || me.Code != 1002 {
+		t.Fatalf("me after logout: status=%d code=%d", me.Status, me.Code)
+	}
+	if me.Data != nil {
+		t.Fatalf("me after logout: expected no user data, got %v", me.Data)
+	}
+}
+
+// TestLogoutIdempotent 覆盖 AC-006：重复登出同一 token 幂等，均返回 200/0。
+func TestLogoutIdempotent(t *testing.T) {
+	base := setupIAMServer(t)
+	token, _ := registerAndLogin(t, base, "alice", "password123")
+
+	for i := 0; i < 2; i++ {
+		lo := doRequest(t, base, "POST", "/logout", nil, map[string]string{"Authorization": "Bearer " + token})
+		if lo.Status != 200 || lo.Code != 0 {
+			t.Fatalf("logout #%d: status=%d code=%d", i+1, lo.Status, lo.Code)
+		}
+	}
+
+	me := doRequest(t, base, "GET", "/me", nil, map[string]string{"Authorization": "Bearer " + token})
+	if me.Status != 401 || me.Code != 1002 {
+		t.Fatalf("me after repeated logout: status=%d code=%d", me.Status, me.Code)
+	}
+}
+
+// TestLogoutRequiresToken 覆盖 AC-006：无 token 访问 /logout 返回 401。
+func TestLogoutRequiresToken(t *testing.T) {
+	base := setupIAMServer(t)
+	lo := doRequest(t, base, "POST", "/logout", nil, nil)
+	if lo.Status != 401 || lo.Code != 1002 {
+		t.Fatalf("logout without token: status=%d code=%d", lo.Status, lo.Code)
+	}
+}
+
+// TestLogoutDoesNotAffectOtherSessions 覆盖 AC-007/INV-004：登出仅撤销当前 sid。
+func TestLogoutDoesNotAffectOtherSessions(t *testing.T) {
+	base := setupIAMServer(t)
+	tokenA, _ := registerAndLogin(t, base, "alice", "password123")
+	tokenB, _ := registerAndLogin(t, base, "bob", "password123")
+
+	doRequest(t, base, "POST", "/logout", nil, map[string]string{"Authorization": "Bearer " + tokenA})
+
+	meA := doRequest(t, base, "GET", "/me", nil, map[string]string{"Authorization": "Bearer " + tokenA})
+	if meA.Status != 401 || meA.Code != 1002 {
+		t.Fatalf("me with revoked tokenA: status=%d code=%d", meA.Status, meA.Code)
+	}
+	meB := doRequest(t, base, "GET", "/me", nil, map[string]string{"Authorization": "Bearer " + tokenB})
+	if meB.Status != 200 || meB.Code != 0 {
+		t.Fatalf("me with independent tokenB: status=%d code=%d", meB.Status, meB.Code)
+	}
+	if meB.Data["username"] != "bob" {
+		t.Fatalf("me tokenB unexpected data: %v", meB.Data)
+	}
+}
+
+// TestSessionMissingTokenReturns401 覆盖 AC-005：验签通过但 sid 在 Redis 不存在 → 401。
+func TestSessionMissingTokenReturns401(t *testing.T) {
+	base := setupIAMServer(t)
+	token, sid := registerAndLogin(t, base, "alice", "password123")
+
+	// 删除 session，模拟 TTL 到期/Redis 被清空。
+	if _, err := g.Redis().Del(context.Background(), auth.SessionKey(sid)); err != nil {
+		t.Fatalf("del session: %v", err)
+	}
+
+	me := doRequest(t, base, "GET", "/me", nil, map[string]string{"Authorization": "Bearer " + token})
+	if me.Status != 401 || me.Code != 1002 {
+		t.Fatalf("me with missing session: status=%d code=%d", me.Status, me.Code)
+	}
+	if me.Data != nil {
+		t.Fatalf("me with missing session: expected no data, got %v", me.Data)
+	}
+}
+
+// TestTokenWithoutSidReturns401 覆盖 sid 缺失场景：旧无状态 token（无 sid）不再放行。
+func TestTokenWithoutSidReturns401(t *testing.T) {
+	base := setupIAMServer(t)
+	registerAndLogin(t, base, "alice", "password123")
+
+	now := time.Now()
+	noSid := signToken(t, testJWTSecret, "1", auth.Issuer, now, now.Add(time.Hour))
+	me := doRequest(t, base, "GET", "/me", nil, map[string]string{"Authorization": "Bearer " + noSid})
+	if me.Status != 401 || me.Code != 1002 {
+		t.Fatalf("me with sid-less token: status=%d code=%d", me.Status, me.Code)
+	}
+}
+
+// TestUnknownSidTokenReturns401 覆盖「验签通过但 sid 不在 Redis」：用不存在的 sid 构造 token。
+func TestUnknownSidTokenReturns401(t *testing.T) {
+	base := setupIAMServer(t)
+	registerAndLogin(t, base, "alice", "password123")
+
+	token := signTokenWithSid(t, testJWTSecret, "1", "deadbeefdeadbeefdeadbeefdeadbeef")
+	me := doRequest(t, base, "GET", "/me", nil, map[string]string{"Authorization": "Bearer " + token})
+	if me.Status != 401 || me.Code != 1002 {
+		t.Fatalf("me with unknown sid: status=%d code=%d", me.Status, me.Code)
+	}
+}
+
+// TestLogoutIgnoresClientSid 覆盖 INV-005：登出目标 sid 来自 token，忽略请求体中的 sid。
+func TestLogoutIgnoresClientSid(t *testing.T) {
+	base := setupIAMServer(t)
+	tokenA, sidA := registerAndLogin(t, base, "alice", "password123")
+	tokenB, sidB := registerAndLogin(t, base, "bob", "password123")
+
+	// 请求体携带 bob 的 sid，但应被忽略，仍只撤销 alice（tokenA）自己的会话。
+	lo := doRequest(t, base, "POST", "/logout", map[string]any{"sid": sidB}, map[string]string{"Authorization": "Bearer " + tokenA})
+	if lo.Status != 200 || lo.Code != 0 {
+		t.Fatalf("logout with body sid: status=%d code=%d", lo.Status, lo.Code)
+	}
+
+	if sf := sessionFields(t, sidA); sf["revoked"] != "1" {
+		t.Fatalf("expected sidA revoked=1, got %q", sf["revoked"])
+	}
+	if sf := sessionFields(t, sidB); sf["revoked"] != "0" {
+		t.Fatalf("expected sidB not revoked, got %q", sf["revoked"])
+	}
+	meB := doRequest(t, base, "GET", "/me", nil, map[string]string{"Authorization": "Bearer " + tokenB})
+	if meB.Status != 200 || meB.Code != 0 {
+		t.Fatalf("me with tokenB after logoutA: status=%d code=%d", meB.Status, meB.Code)
+	}
+}
+
+// TestRedisWrongTypeFailClosed 覆盖 INV-006：Redis 查询返回错误时，鉴权 fail-closed 返回 401。
+func TestRedisWrongTypeFailClosed(t *testing.T) {
+	base := setupIAMServer(t)
+	token, sid := registerAndLogin(t, base, "alice", "password123")
+
+	// 将 session key 改成 string 类型，使 HGETALL 返回 WRONGTYPE 错误，模拟 Redis 查询失败。
+	if _, err := g.Redis().Do(context.Background(), "SET", auth.SessionKey(sid), "not-a-hash"); err != nil {
+		t.Fatalf("set wrong type: %v", err)
+	}
+
+	me := doRequest(t, base, "GET", "/me", nil, map[string]string{"Authorization": "Bearer " + token})
+	if me.Status != 401 || me.Code != 1002 {
+		t.Fatalf("me with redis error: expected fail-closed 401, got status=%d code=%d", me.Status, me.Code)
+	}
+	if me.Data != nil {
+		t.Fatalf("me with redis error: expected no data, got %v", me.Data)
+	}
+}
+
+// TestSessionTTLExpiryReturns401 覆盖 AC-004：TTL 到期后 key 自然消失，访问受保护接口仍返回 401。
+func TestSessionTTLExpiryReturns401(t *testing.T) {
+	t.Setenv("AUTH_SESSION_TTL", "1")
+	base := setupIAMServer(t)
+	token, sid := registerAndLogin(t, base, "alice", "password123")
+
+	// 等待 TTL 到期，key 自然消失。
+	time.Sleep(2 * time.Second)
+	if n, err := g.Redis().Exists(context.Background(), auth.SessionKey(sid)); err != nil || n != 0 {
+		t.Fatalf("expected session key expired (exists=0), got n=%d err=%v", n, err)
+	}
+
+	me := doRequest(t, base, "GET", "/me", nil, map[string]string{"Authorization": "Bearer " + token})
+	if me.Status != 401 || me.Code != 1002 {
+		t.Fatalf("me after TTL expiry: status=%d code=%d", me.Status, me.Code)
+	}
+}
+
+// TestConcurrentLogoutSameToken 覆盖并发撤销原子性：同一 token 并发登出，全部幂等成功且最终 revoked=1。
+func TestConcurrentLogoutSameToken(t *testing.T) {
+	base := setupIAMServer(t)
+	token, sid := registerAndLogin(t, base, "alice", "password123")
+
+	const n = 10
+	results := make(chan result, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			res, err := request(base, "POST", "/logout", nil, map[string]string{"Authorization": "Bearer " + token})
+			if err != nil {
+				res = result{Code: -1}
+			}
+			results <- res
+		}()
+	}
+	wg.Wait()
+	close(results)
+
+	for res := range results {
+		if res.Status != 200 || res.Code != 0 {
+			t.Fatalf("concurrent logout: status=%d code=%d", res.Status, res.Code)
+		}
+	}
+	if sf := sessionFields(t, sid); sf["revoked"] != "1" {
+		t.Fatalf("expected revoked=1 after concurrent logout, got %q", sf["revoked"])
 	}
 }

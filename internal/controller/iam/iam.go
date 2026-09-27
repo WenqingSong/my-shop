@@ -35,3 +35,15 @@ func (c *ControllerV1) Me(ctx context.Context, req *v1.MeReq) (res *v1.MeRes, er
 	}
 	return service.Iam().Me(ctx, principal.UserID)
 }
+
+// Logout 登出当前会话：从 Principal 取 sid 撤销会话，成功时返回 data=null。
+func (c *ControllerV1) Logout(ctx context.Context, req *v1.LogoutReq) (res *v1.LogoutRes, err error) {
+	principal, ok := middleware.PrincipalFromContext(ctx)
+	if !ok {
+		return nil, codes.New(codes.CodeUnauthorized)
+	}
+	if _, err := service.Iam().Logout(ctx, principal.Sid); err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
