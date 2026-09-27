@@ -9,6 +9,8 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/glog"
+
+	"cnb.cool/go-cloud-devops/my-shop/internal/auth"
 )
 
 const (
@@ -27,15 +29,43 @@ const (
 	checkRetryInterval       = time.Second
 )
 
-// Bootstrap applies configuration (with environment variable overrides) and
-// validates connectivity to MySQL and Redis before the HTTP server starts.
+// createUsersTableSQL 是 users 表的幂等 DDL，可在每日重置环境下重复执行。
+const createUsersTableSQL = `
+CREATE TABLE IF NOT EXISTS users (
+  id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  username      VARCHAR(24)     NOT NULL,
+  password_hash VARCHAR(60)     NOT NULL,
+  created_at    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_username (username)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+`
+
+// Bootstrap 应用配置（支持环境变量覆盖），校验 JWT 密钥、检查 MySQL/Redis 连通性，
+// 并在 HTTP 服务启动前确保 users 表存在。
 func Bootstrap(ctx context.Context) error {
 	applyServerConfig(ctx)
 	if err := applyDatabaseConfig(ctx); err != nil {
 		return err
 	}
 	applyRedisConfig(ctx)
-	return waitForDependencies(ctx, dependencyTimeout(ctx))
+	if _, err := auth.Secret(ctx); err != nil {
+		return err
+	}
+	if err := waitForDependencies(ctx, dependencyTimeout(ctx)); err != nil {
+		return err
+	}
+	return ensureUsersTable(ctx)
+}
+
+// ensureUsersTable 幂等创建 users 表。
+func ensureUsersTable(ctx context.Context) error {
+	if _, err := g.DB().Exec(ctx, createUsersTableSQL); err != nil {
+		return gerror.Wrap(err, "确保 users 表存在")
+	}
+	glog.Info(ctx, "users 表已就绪")
+	return nil
 }
 
 // dependencyTimeout returns the maximum time the startup dependency check may

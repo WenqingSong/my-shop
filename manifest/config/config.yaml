@@ -24,6 +24,15 @@ redis:
     db: 0
     pass: ""
 
+# 认证配置（以下均为开发默认值，可通过环境变量覆盖）
+# 对应环境变量：AUTH_JWT_SECRET
+auth:
+  jwt:
+    # JWT 签名密钥（HS256）。
+    # ⚠️ 开发环境默认值，仅用于本地/CI 每日重置环境。
+    # 生产环境必须通过环境变量 AUTH_JWT_SECRET 注入真实密钥，禁止使用此默认值。
+    secret: "c49d0fea5cf77761ca6d0275545b9501686dd40cc313b072c36972d6128fc403"
+
 # 启动配置（以下均为开发默认值，可通过环境变量覆盖）
 # 对应环境变量：STARTUP_DEPENDENCY_TIMEOUT
 startup:
