@@ -26,6 +26,12 @@ const (
 	// 认证/用户域（IAM）2000-2999。
 	CodeUsernameExists     Code = 2001 // 用户名已存在 → 409
 	CodeInvalidCredentials Code = 2002 // 用户名或密码错误 → 401
+
+	// 商品分类域（Category）3000-3999。
+	CodeCategoryNotFound      Code = 3001 // 分类不存在 → 404
+	CodeCategoryNameExists    Code = 3002 // 同级重名 → 409
+	CodeCategoryHasChildren   Code = 3003 // 有子分类不能删除 → 409
+	CodeCategoryInvalidParent Code = 3004 // 父分类非法 → 400
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -35,15 +41,19 @@ type codeInfo struct {
 }
 
 var codeTable = map[Code]codeInfo{
-	CodeOK:                 {http.StatusOK, "OK"},
-	CodeInternalError:      {http.StatusInternalServerError, "内部错误"},
-	CodeInvalidArgument:    {http.StatusBadRequest, "参数错误"},
-	CodeUnauthorized:       {http.StatusUnauthorized, "未授权"},
-	CodeForbidden:          {http.StatusForbidden, "禁止访问"},
-	CodeNotFound:           {http.StatusNotFound, "未找到"},
-	CodeServiceUnavailable: {http.StatusServiceUnavailable, "服务不可用"},
-	CodeUsernameExists:     {http.StatusConflict, "用户名已存在"},
-	CodeInvalidCredentials: {http.StatusUnauthorized, "用户名或密码错误"},
+	CodeOK:                    {http.StatusOK, "OK"},
+	CodeInternalError:         {http.StatusInternalServerError, "内部错误"},
+	CodeInvalidArgument:       {http.StatusBadRequest, "参数错误"},
+	CodeUnauthorized:          {http.StatusUnauthorized, "未授权"},
+	CodeForbidden:             {http.StatusForbidden, "禁止访问"},
+	CodeNotFound:              {http.StatusNotFound, "未找到"},
+	CodeServiceUnavailable:    {http.StatusServiceUnavailable, "服务不可用"},
+	CodeUsernameExists:        {http.StatusConflict, "用户名已存在"},
+	CodeInvalidCredentials:    {http.StatusUnauthorized, "用户名或密码错误"},
+	CodeCategoryNotFound:      {http.StatusNotFound, "分类不存在"},
+	CodeCategoryNameExists:    {http.StatusConflict, "同级重名"},
+	CodeCategoryHasChildren:   {http.StatusConflict, "有子分类不能删除"},
+	CodeCategoryInvalidParent: {http.StatusBadRequest, "父分类非法"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。

@@ -42,8 +42,24 @@ CREATE TABLE IF NOT EXISTS users (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 `
 
+// createCategoriesTableSQL 是 categories 表的幂等 DDL，可在每日重置环境下重复执行。
+// 复合唯一键 (parent_id, name) 保证同级分类名唯一，是同级重名判定的存储层兜底。
+const createCategoriesTableSQL = `
+CREATE TABLE IF NOT EXISTS categories (
+  id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  parent_id  BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  name       VARCHAR(64)     NOT NULL,
+  sort       INT             NOT NULL DEFAULT 0,
+  status     TINYINT         NOT NULL DEFAULT 1,
+  created_at DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_parent_name (parent_id, name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+`
+
 // Bootstrap 应用配置（支持环境变量覆盖），校验 JWT 密钥、检查 MySQL/Redis 连通性，
-// 并在 HTTP 服务启动前确保 users 表存在。
+// 并在 HTTP 服务启动前确保 users 与 categories 表存在。
 func Bootstrap(ctx context.Context) error {
 	applyServerConfig(ctx)
 	if err := applyDatabaseConfig(ctx); err != nil {
@@ -56,7 +72,15 @@ func Bootstrap(ctx context.Context) error {
 	if err := waitForDependencies(ctx, dependencyTimeout(ctx)); err != nil {
 		return err
 	}
-	return ensureUsersTable(ctx)
+	return ensureTables(ctx)
+}
+
+// ensureTables 幂等创建业务所需的数据表。
+func ensureTables(ctx context.Context) error {
+	if err := ensureUsersTable(ctx); err != nil {
+		return err
+	}
+	return ensureCategoriesTable(ctx)
 }
 
 // ensureUsersTable 幂等创建 users 表。
@@ -65,6 +89,15 @@ func ensureUsersTable(ctx context.Context) error {
 		return gerror.Wrap(err, "确保 users 表存在")
 	}
 	glog.Info(ctx, "users 表已就绪")
+	return nil
+}
+
+// ensureCategoriesTable 幂等创建 categories 表。
+func ensureCategoriesTable(ctx context.Context) error {
+	if _, err := g.DB().Exec(ctx, createCategoriesTableSQL); err != nil {
+		return gerror.Wrap(err, "确保 categories 表存在")
+	}
+	glog.Info(ctx, "categories 表已就绪")
 	return nil
 }
 
