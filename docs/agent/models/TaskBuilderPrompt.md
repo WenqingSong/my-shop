@@ -119,7 +119,7 @@ Task 是**交付目标**的粒度，不是文件、技术步骤或 Git Commit �
 `mode: create` 时创建：
 
 ```
-.agent/tasks/<task-slug>/
+docs/tasks/<task-slug>/
 ├── task.md
 ├── findings.md
 ├── core-logic.md
