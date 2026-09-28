@@ -16,7 +16,6 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/util/guid"
 
-	"cnb.cool/go-cloud-devops/my-shop/internal/auth"
 	"cnb.cool/go-cloud-devops/my-shop/internal/boot"
 	categoriesController "cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
 	iamController "cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
@@ -120,8 +119,15 @@ func setupCategoriesServer(t *testing.T) (base, token string) {
 	if err := boot.Bootstrap(ctx); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
+	// 幂等清理：清空 categories 与 users，并 FlushDB Redis，保证 register/login 可重复执行。
 	if _, err := g.DB().Exec(ctx, "DELETE FROM categories"); err != nil {
 		t.Fatalf("clean categories: %v", err)
+	}
+	if _, err := g.DB().Exec(ctx, "DELETE FROM users"); err != nil {
+		t.Fatalf("clean users: %v", err)
+	}
+	if err := g.Redis().FlushDB(ctx); err != nil {
+		t.Fatalf("clean redis: %v", err)
 	}
 
 	s := g.Server(guid.S())
@@ -149,11 +155,33 @@ func setupCategoriesServer(t *testing.T) (base, token string) {
 
 	time.Sleep(100 * time.Millisecond)
 
-	tok, err := auth.GenerateWithSecret([]byte(testJWTSecret), 1)
-	if err != nil {
-		t.Fatalf("generate token: %v", err)
+	base = fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort())
+	tok := registerAndLogin(t, base, "catadmin", "password123")
+	return base, tok
+}
+
+// registerAndLogin 注册并登录固定测试用户，返回有真实 Redis session 的 access token。
+// 依赖 setupCategoriesServer 中的幂等清理，可重复执行。
+func registerAndLogin(t *testing.T, base, username, password string) string {
+	t.Helper()
+	reg := doRequest(t, base, "POST", "/register", map[string]any{"username": username, "password": password}, nil)
+	if reg.Status != 200 || reg.Code != 0 {
+		t.Fatalf("register %s: status=%d code=%d msg=%q", username, reg.Status, reg.Code, reg.Message)
 	}
-	return fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort()), tok
+	login := doRequest(t, base, "POST", "/login", map[string]any{"username": username, "password": password}, nil)
+	if login.Status != 200 || login.Code != 0 {
+		t.Fatalf("login %s: status=%d code=%d msg=%q", username, login.Status, login.Code, login.Message)
+	}
+	var d struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.Unmarshal(login.Data, &d); err != nil {
+		t.Fatalf("unmarshal login res: %v", err)
+	}
+	if d.AccessToken == "" {
+		t.Fatalf("login %s: empty access_token", username)
+	}
+	return d.AccessToken
 }
 
 func dbCount(t *testing.T, where map[string]any) int {
