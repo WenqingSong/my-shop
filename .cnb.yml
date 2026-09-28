@@ -10,3 +10,15 @@ $:
       stages:
         - name: docker-compose-up
           script: docker compose up -d
+
+main:
+  push:
+    - name: check-github-secret
+      imports:
+        - https://cnb.cool/framework-station/my-shop-secrets/-/blob/main/github-mirror.yml
+      stages:
+        - name: check-github-credential
+          script: |
+            test -n "${GITHUB_USERNAME:-}"
+            test -n "${GITHUB_TOKEN:-}"
+            echo "GitHub mirror credential loaded successfully"
