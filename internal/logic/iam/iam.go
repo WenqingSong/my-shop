@@ -75,8 +75,9 @@ func (s *sIam) Register(ctx context.Context, req *v1.RegisterReq) (*v1.RegisterR
 	return &v1.RegisterRes{Id: id, Username: req.Username}, nil
 }
 
-// Login 按 username 查找用户 → 校验 bcrypt 哈希 → 签发 JWT。
+// Login 按 username 查找用户 → 校验 bcrypt 哈希 → 生成 sid 写 Redis session → 签发含 sid 的 JWT。
 // 不存在用户与密码错误统一返回 INVALID_CREDENTIALS，并对不存在用户做假哈希比对对齐耗时。
+// 写 session 失败视为登录失败（返回 500，不签发 token），保证「返回的 token 必有有效 session」。
 func (s *sIam) Login(ctx context.Context, req *v1.LoginReq) (*v1.LoginRes, error) {
 	if err := validateUsername(req.Username); err != nil {
 		return nil, err
@@ -99,7 +100,19 @@ func (s *sIam) Login(ctx context.Context, req *v1.LoginReq) (*v1.LoginRes, error
 		return nil, codes.New(codes.CodeInvalidCredentials)
 	}
 
-	token, err := auth.Generate(ctx, user.ID)
+	sid, err := auth.NewSid()
+	if err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("生成 sid: %w", err))
+	}
+	ttl, err := auth.SessionTTL(ctx)
+	if err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("读取会话 TTL: %w", err))
+	}
+	if err := auth.CreateSession(ctx, sid, user.ID, ttl); err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("写入会话: %w", err))
+	}
+
+	token, err := auth.Generate(ctx, user.ID, sid)
 	if err != nil {
 		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("签发 access token: %w", err))
 	}
@@ -109,6 +122,14 @@ func (s *sIam) Login(ctx context.Context, req *v1.LoginReq) (*v1.LoginRes, error
 		TokenType:   "Bearer",
 		ExpiresIn:   auth.ExpiresIn,
 	}, nil
+}
+
+// Logout 撤销 sid 对应的会话（幂等）。Redis 错误返回 500，不吞掉后返回成功。
+func (s *sIam) Logout(ctx context.Context, sid string) (*v1.LogoutRes, error) {
+	if err := auth.RevokeSession(ctx, sid); err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("撤销会话: %w", err))
+	}
+	return &v1.LogoutRes{}, nil
 }
 
 // Me 按已认证的 userID 查询用户，返回 id + username。

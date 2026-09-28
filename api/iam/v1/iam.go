@@ -39,3 +39,11 @@ type MeRes struct {
 	Id       int64  `json:"id" dc:"当前用户 id"`
 	Username string `json:"username" dc:"当前用户名"`
 }
+
+// LogoutReq 登出当前会话请求。sid 来自当前 token，不接受客户端指定。
+type LogoutReq struct {
+	g.Meta `path:"/logout" method:"post" tags:"IAM" summary:"登出当前会话"`
+}
+
+// LogoutRes 登出当前会话响应（无业务字段，成功时 data 为 null）。
+type LogoutRes struct{}

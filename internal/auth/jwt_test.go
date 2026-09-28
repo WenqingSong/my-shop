@@ -13,7 +13,7 @@ func testSecret() []byte {
 }
 
 func TestGenerateClaims(t *testing.T) {
-	token, err := GenerateWithSecret(testSecret(), 42)
+	token, err := GenerateWithSecret(testSecret(), 42, "sid-abc123")
 	if err != nil {
 		t.Fatalf("GenerateWithSecret: %v", err)
 	}
@@ -23,6 +23,9 @@ func TestGenerateClaims(t *testing.T) {
 	}
 	if claims.Subject != "42" {
 		t.Fatalf("expected sub %q, got %q", "42", claims.Subject)
+	}
+	if claims.Sid != "sid-abc123" {
+		t.Fatalf("expected sid %q, got %q", "sid-abc123", claims.Sid)
 	}
 	if claims.Issuer != Issuer {
 		t.Fatalf("expected iss %q, got %q", Issuer, claims.Issuer)
@@ -36,7 +39,7 @@ func TestGenerateClaims(t *testing.T) {
 }
 
 func TestParseRejectsWrongSecret(t *testing.T) {
-	token, err := GenerateWithSecret(testSecret(), 1)
+	token, err := GenerateWithSecret(testSecret(), 1, "sid-1")
 	if err != nil {
 		t.Fatalf("GenerateWithSecret: %v", err)
 	}

@@ -24,6 +24,8 @@ const (
 // Claims 是 IAM 签发的 JWT 声明。
 type Claims struct {
 	gojwt.RegisteredClaims
+	// Sid 是本次登录会话的唯一标识，作为 JWT 与 Redis session 之间的桥梁。
+	Sid string `json:"sid,omitempty"`
 }
 
 // Secret 读取并校验 JWT 签名密钥（auth.jwt.secret / AUTH_JWT_SECRET）。
@@ -43,19 +45,20 @@ func Secret(ctx context.Context) ([]byte, error) {
 	return []byte(secret), nil
 }
 
-// Generate 为指定用户签发 access token（密钥来自配置）。
-func Generate(ctx context.Context, userID int64) (string, error) {
+// Generate 为指定用户签发含 sid 的 access token（密钥来自配置）。
+func Generate(ctx context.Context, userID int64, sid string) (string, error) {
 	secret, err := Secret(ctx)
 	if err != nil {
 		return "", err
 	}
-	return GenerateWithSecret(secret, userID)
+	return GenerateWithSecret(secret, userID, sid)
 }
 
-// GenerateWithSecret 使用给定密钥签发 access token，便于单元测试。
-func GenerateWithSecret(secret []byte, userID int64) (string, error) {
+// GenerateWithSecret 使用给定密钥签发含 sid 的 access token，便于单元测试。
+func GenerateWithSecret(secret []byte, userID int64, sid string) (string, error) {
 	now := time.Now()
 	claims := Claims{
+		Sid: sid,
 		RegisteredClaims: gojwt.RegisteredClaims{
 			Subject:   strconv.FormatInt(userID, 10),
 			Issuer:    Issuer,
