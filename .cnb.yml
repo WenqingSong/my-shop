@@ -1,24 +1,75 @@
-$:
-  vscode:
-    - runner:
-        cpus: 8
-      docker:
-        image: docker.cnb.cool/arthur-cloud-native/jetbrains/goland:5.0.1
-      services:
-        - vscode
-        - docker
-      stages:
-        - name: docker-compose-up
-          script: docker compose up -d
-
 main:
+  pull_request:
+    - name: pr-check
+      services:
+        - docker
+      docker:
+        image: golang:1.24
+        volumes:
+          - /go/pkg/mod
+          - /root/.cache/go-build
+      stages:
+        - name: start-dependencies
+          script: |
+            docker compose up -d
+            bash -c 'source scripts/lib.sh; wait_for_deps'
+
+        - name: test
+          script: make test
+
   push:
-    - name: check-github-secret
+    - name: main-ci-and-github-mirror
+      services:
+        - docker
+      docker:
+        image: golang:1.24
+        volumes:
+          - /go/pkg/mod
+          - /root/.cache/go-build
       imports:
         - https://cnb.cool/framework-station/my-shop-secrets/-/blob/main/github-mirror.yml
       stages:
-        - name: check-github-credential
+        - name: start-dependencies
           script: |
-            test -n "${GITHUB_USERNAME:-}"
-            test -n "${GITHUB_TOKEN:-}"
-            echo "GitHub mirror credential loaded successfully"
+            docker compose up -d
+            bash -c 'source scripts/lib.sh; wait_for_deps'
+
+        - name: test
+          script: make test
+
+        - name: build
+          script: |
+            mkdir -p bin
+            go build -trimpath -o bin/my-shop .
+
+        - name: sync-all-branches-and-tags-to-github
+          script: |
+            set -euo pipefail
+
+            printf 'machine github.com\nlogin %s\npassword %s\n' \
+              "${GITHUB_USERNAME}" "${GITHUB_TOKEN}" > "${HOME}/.netrc"
+            chmod 600 "${HOME}/.netrc"
+            trap 'rm -f "${HOME}/.netrc"' EXIT
+
+            git fetch origin \
+              '+refs/heads/*:refs/remotes/cnb/*' \
+              '+refs/tags/*:refs/tags/*' \
+              --prune
+
+            git remote remove github-mirror 2>/dev/null || true
+            git remote add github-mirror \
+              https://github.com/WenqingSong/my-shop.git
+
+            for ref in $(git for-each-ref \
+              --format='%(refname)' refs/remotes/cnb); do
+              branch="${ref#refs/remotes/cnb/}"
+              if [ "${branch}" = "HEAD" ]; then
+                continue
+              fi
+              echo "Syncing branch: ${branch}"
+              git push github-mirror \
+                "${ref}:refs/heads/${branch}"
+            done
+
+            echo "Syncing tags"
+            git push github-mirror --tags
