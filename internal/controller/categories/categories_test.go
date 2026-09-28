@@ -149,7 +149,15 @@ func setupCategoriesServer(t *testing.T) (base, token string) {
 
 	time.Sleep(100 * time.Millisecond)
 
-	tok, err := auth.GenerateWithSecret([]byte(testJWTSecret), 1)
+	// 有状态鉴权升级后，token 必须携带 sid 且 Redis 中存在有效会话，否则中间件按 401 拒绝。
+	sid, err := auth.NewSid()
+	if err != nil {
+		t.Fatalf("new sid: %v", err)
+	}
+	if err := auth.CreateSession(ctx, sid, 1, 3600); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	tok, err := auth.GenerateWithSecret([]byte(testJWTSecret), 1, sid)
 	if err != nil {
 		t.Fatalf("generate token: %v", err)
 	}
