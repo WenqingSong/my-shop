@@ -115,6 +115,8 @@ func assertOK(t *testing.T, res apiResult, op string) {
 func setupCategoriesServer(t *testing.T) (base, token string) {
 	t.Helper()
 	t.Setenv("AUTH_JWT_SECRET", testJWTSecret)
+	// 使用独立的 Redis DB，避免与 iam 测试（默认 DB 0 且会 FlushDB）并行执行时互相清库导致会话被误删。
+	t.Setenv("REDIS_DEFAULT_DB", "1")
 
 	ctx := context.Background()
 	if err := boot.Bootstrap(ctx); err != nil {
@@ -149,7 +151,20 @@ func setupCategoriesServer(t *testing.T) (base, token string) {
 
 	time.Sleep(100 * time.Millisecond)
 
-	tok, err := auth.GenerateWithSecret([]byte(testJWTSecret), 1)
+	// 有状态会话模型下，Auth 中间件会校验 JWT 内 sid 对应的 Redis 会话。
+	// 因此需先生成 sid、写入会话，再签发带 sid 的 token，否则受保护接口一律 401。
+	sid, err := auth.NewSid()
+	if err != nil {
+		t.Fatalf("generate sid: %v", err)
+	}
+	ttl, err := auth.SessionTTL(ctx)
+	if err != nil {
+		t.Fatalf("session ttl: %v", err)
+	}
+	if err := auth.CreateSession(ctx, sid, 1, ttl); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	tok, err := auth.GenerateWithSecret([]byte(testJWTSecret), 1, sid)
 	if err != nil {
 		t.Fatalf("generate token: %v", err)
 	}
