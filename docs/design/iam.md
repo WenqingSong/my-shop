@@ -60,7 +60,7 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
   - `user_id`：用户 id 的十进制字符串（用于与 JWT `sub` 交叉校验，纵深防御）。
   - `revoked`：`"0"`（未撤销）/ `"1"`（已撤销）。
 - **TTL**：`auth.session.ttl` 秒，默认 3600，必须 > 0，可经 `AUTH_SESSION_TTL` 覆盖。
-- **有效访问窗口** = `min(JWT exp, session TTL)`；任一到期访问受保护接口均返回 401。正常流程 session 在 `iat` 之后写入，Redis 过期略晚于 JWT exp，JWT exp 为主导失效点。
+- **有效访问窗口** = `min(JWT exp, session TTL)`；任一到期访问受保护接口均返回 401。正常流程 session 先写入，Redis 过期略早于/等于 JWT exp，session 为主导失效点（差距为亚秒级，安全影响可忽略）。
 
 ## 4. 鉴权与登出流程
 
