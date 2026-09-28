@@ -33,10 +33,16 @@ var (
 				group.POST("/register", iamCtrl.Register)
 				group.POST("/login", iamCtrl.Login)
 
-				// 受保护接口：/me 需要 Bearer Token 认证。
+				// 受保护接口：/me 需要 Bearer Token 认证 + 会话有效性校验。
 				group.Group("/", func(protected *ghttp.RouterGroup) {
 					protected.Middleware(middleware.Auth)
 					protected.GET("/me", iamCtrl.Me)
+				})
+
+				// 受保护接口：/logout 仅验签（幂等撤销，即使 session 已撤销/缺失也能到达 handler）。
+				group.Group("/", func(protected *ghttp.RouterGroup) {
+					protected.Middleware(middleware.AuthSignatureOnly)
+					protected.POST("/logout", iamCtrl.Logout)
 				})
 			})
 			s.Run()
