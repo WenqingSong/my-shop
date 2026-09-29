@@ -58,6 +58,67 @@ CREATE TABLE IF NOT EXISTS categories (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 `
 
+// createAdminsTableSQL 是 admins 表的幂等 DDL（后台管理员身份）。
+// username 唯一约束是「管理员用户名唯一」的存储层兜底。
+const createAdminsTableSQL = `
+CREATE TABLE IF NOT EXISTS admins (
+  id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  username      VARCHAR(24)     NOT NULL,
+  password_hash VARCHAR(60)     NOT NULL,
+  status        TINYINT         NOT NULL DEFAULT 1,
+  is_super      TINYINT         NOT NULL DEFAULT 0,
+  created_at    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_admin_username (username)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+`
+
+// createRolesTableSQL 是 roles 表的幂等 DDL（角色）。
+const createRolesTableSQL = `
+CREATE TABLE IF NOT EXISTS roles (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  name        VARCHAR(64)     NOT NULL,
+  description VARCHAR(255)    NOT NULL DEFAULT '',
+  created_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_role_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+`
+
+// createPermissionsTableSQL 是 permissions 表的幂等 DDL（权限，code 为稳定唯一 key）。
+const createPermissionsTableSQL = `
+CREATE TABLE IF NOT EXISTS permissions (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  code        VARCHAR(64)     NOT NULL,
+  name        VARCHAR(64)     NOT NULL,
+  description VARCHAR(255)    NOT NULL DEFAULT '',
+  created_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_permission_code (code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+`
+
+// createAdminRolesTableSQL 是 admin_roles 关联表的幂等 DDL（管理员↔角色，复合主键保证唯一）。
+const createAdminRolesTableSQL = `
+CREATE TABLE IF NOT EXISTS admin_roles (
+  admin_id BIGINT UNSIGNED NOT NULL,
+  role_id  BIGINT UNSIGNED NOT NULL,
+  PRIMARY KEY (admin_id, role_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+`
+
+// createRolePermissionsTableSQL 是 role_permissions 关联表的幂等 DDL（角色↔权限，复合主键保证唯一）。
+const createRolePermissionsTableSQL = `
+CREATE TABLE IF NOT EXISTS role_permissions (
+  role_id       BIGINT UNSIGNED NOT NULL,
+  permission_id BIGINT UNSIGNED NOT NULL,
+  PRIMARY KEY (role_id, permission_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+`
+
 // Bootstrap 应用配置（支持环境变量覆盖），校验 JWT 密钥、检查 MySQL/Redis 连通性，
 // 并在 HTTP 服务启动前确保 users 与 categories 表存在。
 func Bootstrap(ctx context.Context) error {
@@ -72,7 +133,13 @@ func Bootstrap(ctx context.Context) error {
 	if err := waitForDependencies(ctx, dependencyTimeout(ctx)); err != nil {
 		return err
 	}
-	return ensureTables(ctx)
+	if err := ensureTables(ctx); err != nil {
+		return err
+	}
+	if err := seedSuperAdmin(ctx); err != nil {
+		return err
+	}
+	return seedPermissions(ctx)
 }
 
 // ensureTables 幂等创建业务所需的数据表。
@@ -80,7 +147,22 @@ func ensureTables(ctx context.Context) error {
 	if err := ensureUsersTable(ctx); err != nil {
 		return err
 	}
-	return ensureCategoriesTable(ctx)
+	if err := ensureCategoriesTable(ctx); err != nil {
+		return err
+	}
+	if err := ensureAdminsTable(ctx); err != nil {
+		return err
+	}
+	if err := ensureRolesTable(ctx); err != nil {
+		return err
+	}
+	if err := ensurePermissionsTable(ctx); err != nil {
+		return err
+	}
+	if err := ensureAdminRolesTable(ctx); err != nil {
+		return err
+	}
+	return ensureRolePermissionsTable(ctx)
 }
 
 // ensureUsersTable 幂等创建 users 表。
@@ -98,6 +180,51 @@ func ensureCategoriesTable(ctx context.Context) error {
 		return gerror.Wrap(err, "确保 categories 表存在")
 	}
 	glog.Info(ctx, "categories 表已就绪")
+	return nil
+}
+
+// ensureAdminsTable 幂等创建 admins 表。
+func ensureAdminsTable(ctx context.Context) error {
+	if _, err := g.DB().Exec(ctx, createAdminsTableSQL); err != nil {
+		return gerror.Wrap(err, "确保 admins 表存在")
+	}
+	glog.Info(ctx, "admins 表已就绪")
+	return nil
+}
+
+// ensureRolesTable 幂等创建 roles 表。
+func ensureRolesTable(ctx context.Context) error {
+	if _, err := g.DB().Exec(ctx, createRolesTableSQL); err != nil {
+		return gerror.Wrap(err, "确保 roles 表存在")
+	}
+	glog.Info(ctx, "roles 表已就绪")
+	return nil
+}
+
+// ensurePermissionsTable 幂等创建 permissions 表。
+func ensurePermissionsTable(ctx context.Context) error {
+	if _, err := g.DB().Exec(ctx, createPermissionsTableSQL); err != nil {
+		return gerror.Wrap(err, "确保 permissions 表存在")
+	}
+	glog.Info(ctx, "permissions 表已就绪")
+	return nil
+}
+
+// ensureAdminRolesTable 幂等创建 admin_roles 关联表。
+func ensureAdminRolesTable(ctx context.Context) error {
+	if _, err := g.DB().Exec(ctx, createAdminRolesTableSQL); err != nil {
+		return gerror.Wrap(err, "确保 admin_roles 表存在")
+	}
+	glog.Info(ctx, "admin_roles 表已就绪")
+	return nil
+}
+
+// ensureRolePermissionsTable 幂等创建 role_permissions 关联表。
+func ensureRolePermissionsTable(ctx context.Context) error {
+	if _, err := g.DB().Exec(ctx, createRolePermissionsTableSQL); err != nil {
+		return gerror.Wrap(err, "确保 role_permissions 表存在")
+	}
+	glog.Info(ctx, "role_permissions 表已就绪")
 	return nil
 }
 

@@ -19,12 +19,15 @@ import (
 
 	"cnb.cool/go-cloud-devops/my-shop/internal/auth"
 	"cnb.cool/go-cloud-devops/my-shop/internal/boot"
-	iamController "cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
+	"cnb.cool/go-cloud-devops/my-shop/internal/cmd"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 )
 
-const testJWTSecret = "test-secret-0123456789-0123456789-0123456789" // >= 32 bytes
+const (
+	testJWTSecret     = "test-secret-0123456789-0123456789-0123456789" // >= 32 bytes
+	testAdminPassword = "test-admin-password-123"
+)
 
 type result struct {
 	Status  int
@@ -98,12 +101,15 @@ func userCount(t *testing.T, username string) int {
 
 func signToken(t *testing.T, secret, sub, iss string, iat, exp time.Time) string {
 	t.Helper()
-	claims := auth.Claims{RegisteredClaims: gojwt.RegisteredClaims{
-		Subject:   sub,
-		Issuer:    iss,
-		IssuedAt:  gojwt.NewNumericDate(iat),
-		ExpiresAt: gojwt.NewNumericDate(exp),
-	}}
+	claims := auth.Claims{
+		Type: auth.TypeUser,
+		RegisteredClaims: gojwt.RegisteredClaims{
+			Subject:   sub,
+			Issuer:    iss,
+			IssuedAt:  gojwt.NewNumericDate(iat),
+			ExpiresAt: gojwt.NewNumericDate(exp),
+		},
+	}
 	tok, err := gojwt.NewWithClaims(gojwt.SigningMethodHS256, claims).SignedString([]byte(secret))
 	if err != nil {
 		t.Fatalf("sign token: %v", err)
@@ -116,7 +122,8 @@ func signTokenWithSid(t *testing.T, secret, sub, sid string) string {
 	t.Helper()
 	now := time.Now()
 	claims := auth.Claims{
-		Sid: sid,
+		Sid:  sid,
+		Type: auth.TypeUser,
 		RegisteredClaims: gojwt.RegisteredClaims{
 			Subject:   sub,
 			Issuer:    auth.Issuer,
@@ -165,6 +172,8 @@ func sessionTTL(t *testing.T, sid string) int64 {
 func setupIAMServer(t *testing.T) string {
 	t.Helper()
 	t.Setenv("AUTH_JWT_SECRET", testJWTSecret)
+	// Bootstrap 会执行超级管理员 seed：提供测试密码，避免「未配置密码」触发启动 fail-fast。
+	t.Setenv("ADMIN_SUPER_PASSWORD", testAdminPassword)
 
 	ctx := context.Background()
 	if err := boot.Bootstrap(ctx); err != nil {
@@ -183,17 +192,7 @@ func setupIAMServer(t *testing.T) string {
 	s.SetPort(0)
 	s.Group("/", func(group *ghttp.RouterGroup) {
 		group.Middleware(middleware.Response)
-		ctrl := iamController.NewV1()
-		group.POST("/register", ctrl.Register)
-		group.POST("/login", ctrl.Login)
-		group.Group("/", func(protected *ghttp.RouterGroup) {
-			protected.Middleware(middleware.Auth)
-			protected.GET("/me", ctrl.Me)
-		})
-		group.Group("/", func(protected *ghttp.RouterGroup) {
-			protected.Middleware(middleware.AuthSignatureOnly)
-			protected.POST("/logout", ctrl.Logout)
-		})
+		cmd.RegisterFrontendRoutes(group)
 	})
 	s.SetDumpRouterMap(false)
 	s.Start()
@@ -273,6 +272,9 @@ func TestIAMEndToEnd(t *testing.T) {
 	}
 	if claims.Subject != fmt.Sprintf("%d", aliceID) {
 		t.Fatalf("expected sub=%d, got %q", aliceID, claims.Subject)
+	}
+	if claims.Type != auth.TypeUser {
+		t.Fatalf("expected type=%q, got %q", auth.TypeUser, claims.Type)
 	}
 	if claims.Issuer != auth.Issuer {
 		t.Fatalf("expected iss=%q, got %q", auth.Issuer, claims.Issuer)
