@@ -12,6 +12,8 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 
 单 access token，无 refresh token、无滑动续期、无会话列表/登出全部设备/强制下线。
 
+本系统存在两个互相隔离的身份域：**前台用户**（`users` + `type=user` + `iam:session:{sid}` + `Auth`）与**后台管理员**（`admins` + `type=admin` + `iam:admin:session:{sid}` + `AdminAuth`）。两者使用独立凭据表、独立 token 类型、独立 Session Key 前缀与独立认证中间件，后端始终独立验证身份域（详见「5. 安全边界」）。
+
 ## 2. 架构与组件
 
 ```
@@ -28,13 +30,28 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
         仅验签+exp → 取 Principal.Sid → 原子撤销 session（幂等）
 ```
 
+后台管理员域（独立于前台用户域）：
+
+```
+  ├─ POST /admin/v1/login     （公开）
+  │     校验凭据 → 校验 status → 生成 sid → 写 Redis admin session → 签发 type=admin JWT
+  │
+  ├─ GET /admin/v1/me         （受保护，AdminAuth 中间件）
+  │     验签+exp → type=admin → 校验 admin session → 校验 admins.status → 注入 AdminPrincipal
+  │
+  └─ POST /admin/v1/logout    （受保护，AdminAuthSignatureOnly 中间件）
+        仅验签+exp+type=admin → 取 AdminPrincipal.Sid → 原子撤销 admin session（幂等）
+```
+
 事实来源：
 
 | 组件 | 角色 |
 | --- | --- |
-| MySQL `users` | 用户身份事实来源（id/username/password_hash） |
-| Redis `iam:session:{sid}` | 会话状态事实来源（存在性 + revoked + user_id 绑定） |
-| JWT | `sub + sid + exp` 的签名凭证，不是事实来源 |
+| MySQL `users` | 前台用户身份事实来源（id/username/password_hash） |
+| MySQL `admins` | 后台管理员身份事实来源（id/username/password_hash/status/is_super） |
+| Redis `iam:session:{sid}` | 前台会话状态事实来源（存在性 + revoked + user_id 绑定） |
+| Redis `iam:admin:session:{sid}` | 后台管理员会话状态事实来源（存在性 + revoked + admin_id 绑定） |
+| JWT | `sub + type + sid + exp` 的签名凭证，不是事实来源 |
 
 ## 3. 数据模型
 
@@ -42,7 +59,8 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 
 | 声明 | 类型 | 说明 |
 | --- | --- | --- |
-| `sub` | string | 用户 id（十进制字符串） |
+| `sub` | string | 主体 id（十进制字符串）：前台为用户 id，后台为管理员 id |
+| `type` | string | 身份域标识：`"user"`（前台用户）或 `"admin"`（后台管理员） |
 | `iss` | string | 恒为 `surgecart` |
 | `iat` / `exp` | numeric date | 签发/过期时间，`exp = iat + 3600` |
 | `sid` | string | 会话 id（自定义声明，非标准 `jti`），与 Redis session 一一对应 |
@@ -61,6 +79,17 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
   - `revoked`：`"0"`（未撤销）/ `"1"`（已撤销）。
 - **TTL**：`auth.session.ttl` 秒，默认 3600，必须 > 0，可经 `AUTH_SESSION_TTL` 覆盖。
 - **有效访问窗口** = `min(JWT exp, session TTL)`；任一到期访问受保护接口均返回 401。正常流程 session 在 `iat` 之后写入，Redis 过期略晚于 JWT exp，JWT exp 为主导失效点。
+
+### 3.4 管理员会话
+
+后台管理员会话与前台用户会话结构对称但完全隔离：
+
+- **Key**：`iam:admin:session:{sid}`（独立前缀，不与前台 `iam:session:` 共享）。
+- **Value**：Hash，字段：
+  - `admin_id`：管理员 id 的十进制字符串（用于与 JWT `sub` 交叉校验）。
+  - `revoked`：`"0"`（未撤销）/ `"1"`（已撤销）。
+- **TTL**：复用 `auth.session.ttl`，默认 3600。
+- 管理员鉴权除校验会话外，还每请求查询 `admins.status`（禁用/不存在→401），实现禁用即时失效。
 
 ## 4. 鉴权与登出流程
 
@@ -101,6 +130,17 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 - **密钥与凭据**：不硬编码 Redis 地址 / JWT 密钥；密码 bcrypt 存储；Token/密钥不进日志或错误响应。
 - **身份信任**：服务端验证身份，不信任客户端提交的 `sid` 或用户身份；`Principal` 是唯一身份来源。
 
+### 5.1 身份域隔离
+
+前台用户与后台管理员是两个互相隔离的身份域。**两个前端不会主动互调 ≠ 调用者不能直接访问另一个 API**：前端是否互相调用只是客户端行为，后端不能据此假定某个 API 只会被某个前端调用。后端身份域隔离由以下四要素独立保证，与客户端无关：
+
+1. **独立凭据表**：前台登录只查询 `users`（`internal/logic/iam/iam.go`），后台登录只查询 `admins`（`internal/logic/admin/admin.go`）；同一 username 允许同时存在于两张表，分别代表两个独立账号。
+2. **Token type**：前台登录签发 `type=user`，后台登录签发 `type=admin`；`Auth` 拒绝 `type=admin`、`AdminAuth` 拒绝 `type=user`，二者「type 不符」均返回 403（`1003`）。
+3. **独立 Session Key**：前台使用 `iam:session:{sid}`，后台使用 `iam:admin:session:{sid}`；双方的创建/校验/撤销只操作各自前缀，互不读取或撤销对方会话。
+4. **独立认证中间件**：前台受保护接口挂 `Auth`/`AuthSignatureOnly`，后台受保护接口挂 `AdminAuth`/`AdminAuthSignatureOnly`（另叠加 `RequirePermission` 授权）。
+
+后台判定顺序：验签+exp → 401；`type≠admin` → 403；会话无效 → 401；`admins` 不存在/禁用 → 401；权限不足 → 403。
+
 ## 6. 错误码与 HTTP 状态
 
 沿用 `{code,message,data}` 与集中错误码体系（`internal/codes`）：
@@ -131,9 +171,13 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 
 | 模块 | 路径 |
 | --- | --- |
-| JWT 签发/校验 | `internal/auth/jwt.go` |
-| 会话管理（sid 生成/TTL/建会话/校验/撤销） | `internal/auth/session.go` |
-| 鉴权中间件 | `internal/middleware/auth.go`（`Auth` / `AuthSignatureOnly`） |
+| JWT 签发/校验（含 `type` 声明） | `internal/auth/jwt.go` |
+| 会话管理（前台/管理员 sid 生成/TTL/建会话/校验/撤销） | `internal/auth/session.go` |
+| 前台鉴权中间件 | `internal/middleware/auth.go`（`Auth` / `AuthSignatureOnly`） |
+| 后台鉴权中间件 | `internal/middleware/auth.go`（`AdminAuth` / `AdminAuthSignatureOnly` / `RequirePermission`） |
 | 身份注入 | `internal/middleware/principal.go` |
-| 登录/登出业务 | `internal/logic/iam/iam.go` |
+| 前台登录/登出业务 | `internal/logic/iam/iam.go` |
+| 后台登录/登出与 RBAC 业务 | `internal/logic/admin/admin.go` |
+| 前台路由 | `internal/cmd/routes_frontend.go` |
+| 后台路由 | `internal/cmd/routes_admin.go` |
 | 错误码 | `internal/codes/codes.go` |
