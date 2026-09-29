@@ -160,10 +160,10 @@ func setupCategoriesServer(t *testing.T) (base, token string) {
 	return base, token
 }
 
-// loginAdmin 经 /admin/v1/login 登录取管理员 token。
+// loginAdmin 经 /admin/login 登录取管理员 token。
 func loginAdmin(t *testing.T, base, username, password string) string {
 	t.Helper()
-	res := doRequest(t, base, "POST", "/admin/v1/login", map[string]any{"username": username, "password": password}, nil)
+	res := doRequest(t, base, "POST", "/admin/login", map[string]any{"username": username, "password": password}, nil)
 	if res.Status != 200 || res.Code != 0 {
 		t.Fatalf("login %s: status=%d code=%d msg=%q", username, res.Status, res.Code, res.Message)
 	}
@@ -179,10 +179,10 @@ func loginAdmin(t *testing.T, base, username, password string) string {
 	return d.AccessToken
 }
 
-// createAdmin 经 /admin/v1/admins 创建普通管理员，返回其 id。
+// createAdmin 经 /admin/admins 创建普通管理员，返回其 id。
 func createAdmin(t *testing.T, base, token, username, password string) int64 {
 	t.Helper()
-	res := doRequest(t, base, "POST", "/admin/v1/admins", map[string]any{"username": username, "password": password}, map[string]string{"Authorization": "Bearer " + token})
+	res := doRequest(t, base, "POST", "/admin/admins", map[string]any{"username": username, "password": password}, map[string]string{"Authorization": "Bearer " + token})
 	assertOK(t, res, "create admin "+username)
 	var d struct {
 		Id int64 `json:"id"`
@@ -217,7 +217,7 @@ func dbStatus(t *testing.T, id int64) int {
 
 func createCategory(t *testing.T, base, token string, parentID int64, name string, sort int) int64 {
 	t.Helper()
-	res := doRequest(t, base, "POST", "/admin/v1/categories", map[string]any{
+	res := doRequest(t, base, "POST", "/categories", map[string]any{
 		"parent_id": parentID,
 		"name":      name,
 		"sort":      sort,
@@ -237,7 +237,7 @@ func createCategory(t *testing.T, base, token string, parentID int64, name strin
 
 func getList(t *testing.T, base string) listData {
 	t.Helper()
-	res := doRequest(t, base, "GET", "/api/v1/categories", nil, nil)
+	res := doRequest(t, base, "GET", "/categories", nil, nil)
 	assertOK(t, res, "list")
 	var d listData
 	if err := json.Unmarshal(res.Data, &d); err != nil {
@@ -248,7 +248,7 @@ func getList(t *testing.T, base string) listData {
 
 func getDetail(t *testing.T, base string, id int64) detailData {
 	t.Helper()
-	res := doRequest(t, base, "GET", fmt.Sprintf("/api/v1/categories/%d", id), nil, nil)
+	res := doRequest(t, base, "GET", fmt.Sprintf("/categories/%d", id), nil, nil)
 	assertOK(t, res, "detail")
 	var d detailData
 	if err := json.Unmarshal(res.Data, &d); err != nil {
@@ -262,7 +262,7 @@ func TestCategoriesEndToEnd(t *testing.T) {
 	authHeader := map[string]string{"Authorization": "Bearer " + token}
 
 	// AC-004：无 token 创建返回 401。
-	res := doRequest(t, base, "POST", "/admin/v1/categories", map[string]any{"name": "手机"}, nil)
+	res := doRequest(t, base, "POST", "/categories", map[string]any{"name": "手机"}, nil)
 	if res.Status != 401 || res.Code != 1002 {
 		t.Fatalf("create without token: status=%d code=%d", res.Status, res.Code)
 	}
@@ -272,7 +272,7 @@ func TestCategoriesEndToEnd(t *testing.T) {
 	pcID := createCategory(t, base, token, 0, "电脑", 10)
 
 	// AC-005：同级重复创建同名返回 409，且不产生重复行。
-	dup := doRequest(t, base, "POST", "/admin/v1/categories", map[string]any{"parent_id": 0, "name": "手机"}, authHeader)
+	dup := doRequest(t, base, "POST", "/categories", map[string]any{"parent_id": 0, "name": "手机"}, authHeader)
 	if dup.Status != 409 || dup.Code != 3002 {
 		t.Fatalf("duplicate create: status=%d code=%d", dup.Status, dup.Code)
 	}
@@ -308,7 +308,7 @@ func TestCategoriesEndToEnd(t *testing.T) {
 	if d.CreatedAt == "" || d.UpdatedAt == "" {
 		t.Fatalf("expected non-empty created_at/updated_at: %+v", d)
 	}
-	missing := doRequest(t, base, "GET", "/api/v1/categories/999999", nil, nil)
+	missing := doRequest(t, base, "GET", "/categories/999999", nil, nil)
 	if missing.Status != 404 || missing.Code != 3001 {
 		t.Fatalf("missing detail: status=%d code=%d", missing.Status, missing.Code)
 	}
@@ -317,24 +317,24 @@ func TestCategoriesEndToEnd(t *testing.T) {
 	}
 
 	// AC-006：无 token 更新返回 401；带 token 分别改名/改排序/改状态/改父。
-	res = doRequest(t, base, "PUT", fmt.Sprintf("/admin/v1/categories/%d", pcID), map[string]any{"name": "电脑设备"}, nil)
+	res = doRequest(t, base, "PUT", fmt.Sprintf("/categories/%d", pcID), map[string]any{"name": "电脑设备"}, nil)
 	if res.Status != 401 || res.Code != 1002 {
 		t.Fatalf("update without token: status=%d code=%d", res.Status, res.Code)
 	}
-	res = doRequest(t, base, "PUT", fmt.Sprintf("/admin/v1/categories/%d", pcID), map[string]any{"name": "电脑设备", "sort": 5}, authHeader)
+	res = doRequest(t, base, "PUT", fmt.Sprintf("/categories/%d", pcID), map[string]any{"name": "电脑设备", "sort": 5}, authHeader)
 	assertOK(t, res, "rename+resort pc")
 	d = getDetail(t, base, pcID)
 	if d.Name != "电脑设备" || d.Sort != 5 {
 		t.Fatalf("unexpected pc after update: %+v", d)
 	}
 	// AC-006（CLEAN-002）：更新不存在的 id 返回 404/3001。
-	res = doRequest(t, base, "PUT", "/admin/v1/categories/999999", map[string]any{"name": "不存在"}, authHeader)
+	res = doRequest(t, base, "PUT", "/categories/999999", map[string]any{"name": "不存在"}, authHeader)
 	if res.Status != 404 || res.Code != 3001 {
 		t.Fatalf("update missing id: status=%d code=%d", res.Status, res.Code)
 	}
 	// AC-005（改名）：在手机下新增兄弟分类「手机壳」，再将「手机配件」改名为「手机壳」→ 同级重名 409。
 	createCategory(t, base, token, phoneID, "手机壳", 0)
-	res = doRequest(t, base, "PUT", fmt.Sprintf("/admin/v1/categories/%d", accessoryID), map[string]any{"name": "手机壳"}, authHeader)
+	res = doRequest(t, base, "PUT", fmt.Sprintf("/categories/%d", accessoryID), map[string]any{"name": "手机壳"}, authHeader)
 	if res.Status != 409 || res.Code != 3002 {
 		t.Fatalf("rename to sibling name: status=%d code=%d", res.Status, res.Code)
 	}
@@ -343,11 +343,11 @@ func TestCategoriesEndToEnd(t *testing.T) {
 	}
 
 	// AC-007：更新 parent_id 指向自身或后代返回 400，数据不变。
-	res = doRequest(t, base, "PUT", fmt.Sprintf("/admin/v1/categories/%d", phoneID), map[string]any{"parent_id": phoneID}, authHeader)
+	res = doRequest(t, base, "PUT", fmt.Sprintf("/categories/%d", phoneID), map[string]any{"parent_id": phoneID}, authHeader)
 	if res.Status != 400 || res.Code != 3004 {
 		t.Fatalf("parent self: status=%d code=%d", res.Status, res.Code)
 	}
-	res = doRequest(t, base, "PUT", fmt.Sprintf("/admin/v1/categories/%d", phoneID), map[string]any{"parent_id": accessoryID}, authHeader)
+	res = doRequest(t, base, "PUT", fmt.Sprintf("/categories/%d", phoneID), map[string]any{"parent_id": accessoryID}, authHeader)
 	if res.Status != 400 || res.Code != 3004 {
 		t.Fatalf("parent descendant: status=%d code=%d", res.Status, res.Code)
 	}
@@ -358,17 +358,17 @@ func TestCategoriesEndToEnd(t *testing.T) {
 	// AC-008：三级分类下再建子分类（或改父导致超 3 级）返回 400。
 	midID := createCategory(t, base, token, pcID, "电脑子类", 0)
 	deepID := createCategory(t, base, token, midID, "三级子类", 0)
-	res = doRequest(t, base, "POST", "/admin/v1/categories", map[string]any{"parent_id": deepID, "name": "四级子类"}, authHeader)
+	res = doRequest(t, base, "POST", "/categories", map[string]any{"parent_id": deepID, "name": "四级子类"}, authHeader)
 	if res.Status != 400 || res.Code != 3004 {
 		t.Fatalf("create level-4: status=%d code=%d", res.Status, res.Code)
 	}
 	// 把 phoneID（顶级）改到 deepID（三级）下会变成 4 级。
-	res = doRequest(t, base, "PUT", fmt.Sprintf("/admin/v1/categories/%d", phoneID), map[string]any{"parent_id": deepID}, authHeader)
+	res = doRequest(t, base, "PUT", fmt.Sprintf("/categories/%d", phoneID), map[string]any{"parent_id": deepID}, authHeader)
 	if res.Status != 400 || res.Code != 3004 {
 		t.Fatalf("reparent to level-4: status=%d code=%d", res.Status, res.Code)
 	}
 	// CLEAN-001 回归：移动含子节点的子树，自身层级 ≤3 但后代将超过 3 级，必须 400/3004 且父子关系不变。
-	res = doRequest(t, base, "PUT", fmt.Sprintf("/admin/v1/categories/%d", phoneID), map[string]any{"parent_id": midID}, authHeader)
+	res = doRequest(t, base, "PUT", fmt.Sprintf("/categories/%d", phoneID), map[string]any{"parent_id": midID}, authHeader)
 	if res.Status != 400 || res.Code != 3004 {
 		t.Fatalf("move subtree causing descendant level-4: status=%d code=%d", res.Status, res.Code)
 	}
@@ -377,31 +377,31 @@ func TestCategoriesEndToEnd(t *testing.T) {
 	}
 
 	// AC-009：无 token 删除返回 401；有子分类删除返回 409 且数据不变；叶子删除成功且详情 404。
-	res = doRequest(t, base, "DELETE", fmt.Sprintf("/admin/v1/categories/%d", phoneID), nil, nil)
+	res = doRequest(t, base, "DELETE", fmt.Sprintf("/categories/%d", phoneID), nil, nil)
 	if res.Status != 401 || res.Code != 1002 {
 		t.Fatalf("delete without token: status=%d code=%d", res.Status, res.Code)
 	}
-	res = doRequest(t, base, "DELETE", fmt.Sprintf("/admin/v1/categories/%d", phoneID), nil, authHeader)
+	res = doRequest(t, base, "DELETE", fmt.Sprintf("/categories/%d", phoneID), nil, authHeader)
 	if res.Status != 409 || res.Code != 3003 {
 		t.Fatalf("delete with children: status=%d code=%d", res.Status, res.Code)
 	}
 	if n := dbCount(t, map[string]any{"id": phoneID}); n != 1 {
 		t.Fatalf("phone should still exist after refused delete")
 	}
-	res = doRequest(t, base, "DELETE", fmt.Sprintf("/admin/v1/categories/%d", accessoryID), nil, authHeader)
+	res = doRequest(t, base, "DELETE", fmt.Sprintf("/categories/%d", accessoryID), nil, authHeader)
 	assertOK(t, res, "delete leaf")
-	after := doRequest(t, base, "GET", fmt.Sprintf("/api/v1/categories/%d", accessoryID), nil, nil)
+	after := doRequest(t, base, "GET", fmt.Sprintf("/categories/%d", accessoryID), nil, nil)
 	if after.Status != 404 || after.Code != 3001 {
 		t.Fatalf("deleted detail: status=%d code=%d", after.Status, after.Code)
 	}
 	// AC-009（CLEAN-002）：删除不存在的 id 返回 404/3001。
-	res = doRequest(t, base, "DELETE", "/admin/v1/categories/999999", nil, authHeader)
+	res = doRequest(t, base, "DELETE", "/categories/999999", nil, authHeader)
 	if res.Status != 404 || res.Code != 3001 {
 		t.Fatalf("delete missing id: status=%d code=%d", res.Status, res.Code)
 	}
 
 	// AC-010：禁用分类后记录仍在、树不再展示该分类及其子树、详情仍可访问。
-	res = doRequest(t, base, "PUT", fmt.Sprintf("/admin/v1/categories/%d", phoneID), map[string]any{"status": 0}, authHeader)
+	res = doRequest(t, base, "PUT", fmt.Sprintf("/categories/%d", phoneID), map[string]any{"status": 0}, authHeader)
 	assertOK(t, res, "disable phone")
 	if dbStatus(t, phoneID) != 0 {
 		t.Fatalf("phone should be status=0 in DB")
@@ -433,7 +433,7 @@ func TestConcurrentCreateSameName(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			res, err := request(base, "POST", "/admin/v1/categories", map[string]any{"parent_id": 0, "name": name}, authHeader)
+			res, err := request(base, "POST", "/categories", map[string]any{"parent_id": 0, "name": name}, authHeader)
 			if err != nil {
 				res = apiResult{Code: -1}
 			}
@@ -473,7 +473,7 @@ func TestCategoryWriteAuthorization(t *testing.T) {
 	superH := map[string]string{"Authorization": "Bearer " + superToken}
 
 	// 无 token 写 → 401。
-	res := doRequest(t, base, "POST", "/admin/v1/categories", map[string]any{"name": "x"}, nil)
+	res := doRequest(t, base, "POST", "/categories", map[string]any{"name": "x"}, nil)
 	if res.Status != 401 || res.Code != 1002 {
 		t.Fatalf("no token: status=%d code=%d", res.Status, res.Code)
 	}
@@ -483,7 +483,7 @@ func TestCategoryWriteAuthorization(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate user token: %v", err)
 	}
-	res = doRequest(t, base, "POST", "/admin/v1/categories", map[string]any{"name": "x"}, map[string]string{"Authorization": "Bearer " + userToken})
+	res = doRequest(t, base, "POST", "/categories", map[string]any{"name": "x"}, map[string]string{"Authorization": "Bearer " + userToken})
 	if res.Status != 403 || res.Code != 1003 {
 		t.Fatalf("user token: status=%d code=%d", res.Status, res.Code)
 	}
@@ -492,7 +492,7 @@ func TestCategoryWriteAuthorization(t *testing.T) {
 	createAdmin(t, base, superToken, "catwriter", "catwriterpass123")
 	writerToken := loginAdmin(t, base, "catwriter", "catwriterpass123")
 	before := dbCount(t, nil)
-	res = doRequest(t, base, "POST", "/admin/v1/categories", map[string]any{"parent_id": 0, "name": "越权分类"}, map[string]string{"Authorization": "Bearer " + writerToken})
+	res = doRequest(t, base, "POST", "/categories", map[string]any{"parent_id": 0, "name": "越权分类"}, map[string]string{"Authorization": "Bearer " + writerToken})
 	if res.Status != 403 || res.Code != 1003 {
 		t.Fatalf("no-perm admin: status=%d code=%d", res.Status, res.Code)
 	}
@@ -501,6 +501,6 @@ func TestCategoryWriteAuthorization(t *testing.T) {
 	}
 
 	// 超级管理员写 → 成功。
-	res = doRequest(t, base, "POST", "/admin/v1/categories", map[string]any{"parent_id": 0, "name": "手机"}, superH)
+	res = doRequest(t, base, "POST", "/categories", map[string]any{"parent_id": 0, "name": "手机"}, superH)
 	assertOK(t, res, "super create category")
 }

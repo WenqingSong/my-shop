@@ -141,7 +141,7 @@ func setupAdminServer(t *testing.T) (base, superToken string) {
 
 func loginAdmin(t *testing.T, base, username, password string) string {
 	t.Helper()
-	res := doRequest(t, base, "POST", "/admin/v1/login", map[string]any{"username": username, "password": password}, nil)
+	res := doRequest(t, base, "POST", "/admin/login", map[string]any{"username": username, "password": password}, nil)
 	if res.Status != 200 || res.Code != 0 {
 		t.Fatalf("login %s: status=%d code=%d msg=%q", username, res.Status, res.Code, res.Message)
 	}
@@ -159,7 +159,7 @@ func loginAdmin(t *testing.T, base, username, password string) string {
 
 func createAdmin(t *testing.T, base, token, username, password string) int64 {
 	t.Helper()
-	res := doRequest(t, base, "POST", "/admin/v1/admins", map[string]any{"username": username, "password": password}, authHeader(token))
+	res := doRequest(t, base, "POST", "/admin/admins", map[string]any{"username": username, "password": password}, authHeader(token))
 	assertOK(t, res, "create admin "+username)
 	var d struct {
 		Id int64 `json:"id"`
@@ -175,7 +175,7 @@ func createAdmin(t *testing.T, base, token, username, password string) int64 {
 
 func createRole(t *testing.T, base, token, name string) int64 {
 	t.Helper()
-	res := doRequest(t, base, "POST", "/admin/v1/roles", map[string]any{"name": name, "description": "desc-" + name}, authHeader(token))
+	res := doRequest(t, base, "POST", "/admin/roles", map[string]any{"name": name, "description": "desc-" + name}, authHeader(token))
 	assertOK(t, res, "create role "+name)
 	var d struct {
 		Id int64 `json:"id"`
@@ -188,7 +188,7 @@ func createRole(t *testing.T, base, token, name string) int64 {
 
 func createPermission(t *testing.T, base, token, code, name string) int64 {
 	t.Helper()
-	res := doRequest(t, base, "POST", "/admin/v1/permissions", map[string]any{"code": code, "name": name}, authHeader(token))
+	res := doRequest(t, base, "POST", "/admin/permissions", map[string]any{"code": code, "name": name}, authHeader(token))
 	assertOK(t, res, "create permission "+code)
 	var d struct {
 		Id int64 `json:"id"`
@@ -210,7 +210,7 @@ func ensurePermission(t *testing.T, base, token, code, name string) int64 {
 		return v.Int64()
 	}
 
-	res := doRequest(t, base, "POST", "/admin/v1/permissions", map[string]any{"code": code, "name": name}, authHeader(token))
+	res := doRequest(t, base, "POST", "/admin/permissions", map[string]any{"code": code, "name": name}, authHeader(token))
 	if res.Status == 200 && res.Code == 0 {
 		var d struct {
 			Id int64 `json:"id"`
@@ -267,7 +267,7 @@ func adminStatus(t *testing.T, id int64) int {
 func TestAdminLogin(t *testing.T) {
 	base, _ := setupAdminServer(t)
 
-	res := doRequest(t, base, "POST", "/admin/v1/login", map[string]any{"username": testSuperUsername, "password": testAdminPassword}, nil)
+	res := doRequest(t, base, "POST", "/admin/login", map[string]any{"username": testSuperUsername, "password": testAdminPassword}, nil)
 	if res.Status != 200 || res.Code != 0 {
 		t.Fatalf("login success: status=%d code=%d msg=%q", res.Status, res.Code, res.Message)
 	}
@@ -294,8 +294,8 @@ func TestAdminLogin(t *testing.T) {
 	}
 
 	// 错误密码与不存在管理员返回相同的 code/message（防枚举）。
-	wrong := doRequest(t, base, "POST", "/admin/v1/login", map[string]any{"username": testSuperUsername, "password": "wrongpass123"}, nil)
-	ghost := doRequest(t, base, "POST", "/admin/v1/login", map[string]any{"username": "ghost", "password": testAdminPassword}, nil)
+	wrong := doRequest(t, base, "POST", "/admin/login", map[string]any{"username": testSuperUsername, "password": "wrongpass123"}, nil)
+	ghost := doRequest(t, base, "POST", "/admin/login", map[string]any{"username": "ghost", "password": testAdminPassword}, nil)
 	if wrong.Status != 401 || wrong.Code != 2002 {
 		t.Fatalf("wrong password: status=%d code=%d", wrong.Status, wrong.Code)
 	}
@@ -304,11 +304,11 @@ func TestAdminLogin(t *testing.T) {
 	}
 }
 
-// TestAdminMe 覆盖 AC-003/AC-013：/admin/v1/me 返回 id/username/is_super/roles；无 token 返回 401。
+// TestAdminMe 覆盖 AC-003/AC-013：/admin/me 返回 id/username/is_super/roles；无 token 返回 401。
 func TestAdminMe(t *testing.T) {
 	base, superToken := setupAdminServer(t)
 
-	res := doRequest(t, base, "GET", "/admin/v1/me", nil, authHeader(superToken))
+	res := doRequest(t, base, "GET", "/admin/me", nil, authHeader(superToken))
 	assertOK(t, res, "me")
 	var d struct {
 		Id       int64    `json:"id"`
@@ -327,7 +327,7 @@ func TestAdminMe(t *testing.T) {
 	}
 
 	// 无 token 访问 → 401。
-	noToken := doRequest(t, base, "GET", "/admin/v1/me", nil, nil)
+	noToken := doRequest(t, base, "GET", "/admin/me", nil, nil)
 	if noToken.Status != 401 || noToken.Code != 1002 {
 		t.Fatalf("me without token: status=%d code=%d", noToken.Status, noToken.Code)
 	}
@@ -340,10 +340,10 @@ func grantRole(t *testing.T, base, token string, adminID int64, roleName string,
 	roleID := createRole(t, base, token, roleName)
 	for _, code := range permCodes {
 		permID := ensurePermission(t, base, token, code, code)
-		res := doRequest(t, base, "POST", fmt.Sprintf("/admin/v1/roles/%d/permissions", roleID), map[string]any{"permission_id": permID}, authHeader(token))
+		res := doRequest(t, base, "POST", fmt.Sprintf("/admin/roles/%d/permissions", roleID), map[string]any{"permission_id": permID}, authHeader(token))
 		assertOK(t, res, "assign permission "+code)
 	}
-	res := doRequest(t, base, "POST", fmt.Sprintf("/admin/v1/admins/%d/roles", adminID), map[string]any{"role_id": roleID}, authHeader(token))
+	res := doRequest(t, base, "POST", fmt.Sprintf("/admin/admins/%d/roles", adminID), map[string]any{"role_id": roleID}, authHeader(token))
 	assertOK(t, res, "assign role "+roleName)
 	return roleID
 }
@@ -354,16 +354,16 @@ func TestAdminCreateDeleteAndProtection(t *testing.T) {
 	base, superToken := setupAdminServer(t)
 	superH := authHeader(superToken)
 
-	// 通过 /admin/v1/me 获取超级管理员 id。
-	me := doRequest(t, base, "GET", "/admin/v1/me", nil, superH)
+	// 通过 /admin/me 获取超级管理员 id。
+	me := doRequest(t, base, "GET", "/admin/me", nil, superH)
 	var meData struct {
 		Id int64 `json:"id"`
 	}
 	_ = json.Unmarshal(me.Data, &meData)
 	superID := meData.Id
 
-	// AC-004：不存在公开注册入口（/admin/v1/register → 404，路由不存在）。
-	reg := doRequest(t, base, "POST", "/admin/v1/register", map[string]any{"username": "x", "password": "password123"}, nil)
+	// AC-004：不存在公开注册入口（/admin/register → 404，路由不存在）。
+	reg := doRequest(t, base, "POST", "/admin/register", map[string]any{"username": "x", "password": "password123"}, nil)
 	if reg.Status != 404 {
 		t.Fatalf("admin register should be 404, got status=%d code=%d", reg.Status, reg.Code)
 	}
@@ -379,15 +379,15 @@ func TestAdminCreateDeleteAndProtection(t *testing.T) {
 		[]string{"admin:disable", "admin:delete", "admin:assign_role"})
 
 	// AC-007：超级管理员不可被禁用/删除/改角色，返回 2005 且无写入。
-	res := doRequest(t, base, "PUT", fmt.Sprintf("/admin/v1/admins/%d/status", superID), map[string]any{"status": 0}, superH)
+	res := doRequest(t, base, "PUT", fmt.Sprintf("/admin/admins/%d/status", superID), map[string]any{"status": 0}, superH)
 	if res.Status != 403 || res.Code != 2005 {
 		t.Fatalf("disable super: status=%d code=%d", res.Status, res.Code)
 	}
-	res = doRequest(t, base, "DELETE", fmt.Sprintf("/admin/v1/admins/%d", superID), nil, superH)
+	res = doRequest(t, base, "DELETE", fmt.Sprintf("/admin/admins/%d", superID), nil, superH)
 	if res.Status != 403 || res.Code != 2005 {
 		t.Fatalf("delete super: status=%d code=%d", res.Status, res.Code)
 	}
-	res = doRequest(t, base, "POST", fmt.Sprintf("/admin/v1/admins/%d/roles", superID), map[string]any{"role_id": managerRoleID}, superH)
+	res = doRequest(t, base, "POST", fmt.Sprintf("/admin/admins/%d/roles", superID), map[string]any{"role_id": managerRoleID}, superH)
 	if res.Status != 403 || res.Code != 2005 {
 		t.Fatalf("assign role to super: status=%d code=%d", res.Status, res.Code)
 	}
@@ -398,15 +398,15 @@ func TestAdminCreateDeleteAndProtection(t *testing.T) {
 	// AC-008：普通管理员不能操作自身，返回 2006 且无写入（即使持有对应权限）。
 	aliceToken := loginAdmin(t, base, "alice", "alicepass123")
 	aliceH := authHeader(aliceToken)
-	res = doRequest(t, base, "PUT", fmt.Sprintf("/admin/v1/admins/%d/status", aliceID), map[string]any{"status": 0}, aliceH)
+	res = doRequest(t, base, "PUT", fmt.Sprintf("/admin/admins/%d/status", aliceID), map[string]any{"status": 0}, aliceH)
 	if res.Status != 403 || res.Code != 2006 {
 		t.Fatalf("self disable: status=%d code=%d", res.Status, res.Code)
 	}
-	res = doRequest(t, base, "DELETE", fmt.Sprintf("/admin/v1/admins/%d", aliceID), nil, aliceH)
+	res = doRequest(t, base, "DELETE", fmt.Sprintf("/admin/admins/%d", aliceID), nil, aliceH)
 	if res.Status != 403 || res.Code != 2006 {
 		t.Fatalf("self delete: status=%d code=%d", res.Status, res.Code)
 	}
-	res = doRequest(t, base, "POST", fmt.Sprintf("/admin/v1/admins/%d/roles", aliceID), map[string]any{"role_id": managerRoleID}, aliceH)
+	res = doRequest(t, base, "POST", fmt.Sprintf("/admin/admins/%d/roles", aliceID), map[string]any{"role_id": managerRoleID}, aliceH)
 	if res.Status != 403 || res.Code != 2006 {
 		t.Fatalf("self assign role: status=%d code=%d", res.Status, res.Code)
 	}
@@ -416,11 +416,11 @@ func TestAdminCreateDeleteAndProtection(t *testing.T) {
 
 	// 普通管理员可操作他人（非自身、非超级），验证防护仅针对自身。
 	bobID := createAdmin(t, base, superToken, "bob", "bobpass123")
-	res = doRequest(t, base, "PUT", fmt.Sprintf("/admin/v1/admins/%d/status", bobID), map[string]any{"status": 0}, aliceH)
+	res = doRequest(t, base, "PUT", fmt.Sprintf("/admin/admins/%d/status", bobID), map[string]any{"status": 0}, aliceH)
 	assertOK(t, res, "alice disable bob")
 
 	// AC-006：超级管理员删除普通管理员成功。
-	res = doRequest(t, base, "DELETE", fmt.Sprintf("/admin/v1/admins/%d", aliceID), nil, superH)
+	res = doRequest(t, base, "DELETE", fmt.Sprintf("/admin/admins/%d", aliceID), nil, superH)
 	assertOK(t, res, "delete alice")
 	if n := dbCount(t, "admins", map[string]any{"id": aliceID}); n != 0 {
 		t.Fatalf("alice should be deleted, got %d rows", n)
@@ -435,28 +435,28 @@ func TestAdminDisableImmediateRevocation(t *testing.T) {
 	aliceID := createAdmin(t, base, superToken, "alice", "alicepass123")
 	aliceToken := loginAdmin(t, base, "alice", "alicepass123")
 
-	// 禁用前 /admin/v1/me 可用。
-	me := doRequest(t, base, "GET", "/admin/v1/me", nil, authHeader(aliceToken))
+	// 禁用前 /admin/me 可用。
+	me := doRequest(t, base, "GET", "/admin/me", nil, authHeader(aliceToken))
 	assertOK(t, me, "me before disable")
 
 	// 超级管理员禁用 alice。
-	res := doRequest(t, base, "PUT", fmt.Sprintf("/admin/v1/admins/%d/status", aliceID), map[string]any{"status": 0}, superH)
+	res := doRequest(t, base, "PUT", fmt.Sprintf("/admin/admins/%d/status", aliceID), map[string]any{"status": 0}, superH)
 	assertOK(t, res, "disable alice")
 
 	// 旧 token 立即失效 → 401。
-	after := doRequest(t, base, "GET", "/admin/v1/me", nil, authHeader(aliceToken))
+	after := doRequest(t, base, "GET", "/admin/me", nil, authHeader(aliceToken))
 	if after.Status != 401 || after.Code != 1002 {
 		t.Fatalf("me after disable: status=%d code=%d", after.Status, after.Code)
 	}
 
 	// 重新登录也被拒 → 401（禁用）。
-	relogin := doRequest(t, base, "POST", "/admin/v1/login", map[string]any{"username": "alice", "password": "alicepass123"}, nil)
+	relogin := doRequest(t, base, "POST", "/admin/login", map[string]any{"username": "alice", "password": "alicepass123"}, nil)
 	if relogin.Status != 401 {
 		t.Fatalf("relogin disabled admin: status=%d code=%d", relogin.Status, relogin.Code)
 	}
 
 	// 重新启用后可再次登录。
-	res = doRequest(t, base, "PUT", fmt.Sprintf("/admin/v1/admins/%d/status", aliceID), map[string]any{"status": 1}, superH)
+	res = doRequest(t, base, "PUT", fmt.Sprintf("/admin/admins/%d/status", aliceID), map[string]any{"status": 1}, superH)
 	assertOK(t, res, "re-enable alice")
 	_ = loginAdmin(t, base, "alice", "alicepass123")
 }
@@ -468,11 +468,11 @@ func TestRolePermissionManagement(t *testing.T) {
 
 	// AC-009：角色创建/列表/更新/删除。
 	roleID := createRole(t, base, superToken, "editor")
-	dup := doRequest(t, base, "POST", "/admin/v1/roles", map[string]any{"name": "editor"}, superH)
+	dup := doRequest(t, base, "POST", "/admin/roles", map[string]any{"name": "editor"}, superH)
 	if dup.Status != 409 || dup.Code != 2008 {
 		t.Fatalf("duplicate role: status=%d code=%d", dup.Status, dup.Code)
 	}
-	list := doRequest(t, base, "GET", "/admin/v1/roles", nil, superH)
+	list := doRequest(t, base, "GET", "/admin/roles", nil, superH)
 	assertOK(t, list, "list roles")
 	var listData struct {
 		Items []struct {
@@ -486,31 +486,31 @@ func TestRolePermissionManagement(t *testing.T) {
 	if len(listData.Items) != 1 || listData.Items[0].Id != roleID || listData.Items[0].Name != "editor" {
 		t.Fatalf("unexpected role list: %+v", listData.Items)
 	}
-	upd := doRequest(t, base, "PUT", fmt.Sprintf("/admin/v1/roles/%d", roleID), map[string]any{"name": "editor-v2"}, superH)
+	upd := doRequest(t, base, "PUT", fmt.Sprintf("/admin/roles/%d", roleID), map[string]any{"name": "editor-v2"}, superH)
 	assertOK(t, upd, "update role")
 
 	// AC-010：权限创建/列表/更新。
 	permID := createPermission(t, base, superToken, "article:create", "创建文章")
-	dupPerm := doRequest(t, base, "POST", "/admin/v1/permissions", map[string]any{"code": "article:create", "name": "重复"}, superH)
+	dupPerm := doRequest(t, base, "POST", "/admin/permissions", map[string]any{"code": "article:create", "name": "重复"}, superH)
 	if dupPerm.Status != 409 || dupPerm.Code != 2010 {
 		t.Fatalf("duplicate permission: status=%d code=%d", dupPerm.Status, dupPerm.Code)
 	}
 
 	// AC-011：角色↔权限分配/移除。
-	assign := doRequest(t, base, "POST", fmt.Sprintf("/admin/v1/roles/%d/permissions", roleID), map[string]any{"permission_id": permID}, superH)
+	assign := doRequest(t, base, "POST", fmt.Sprintf("/admin/roles/%d/permissions", roleID), map[string]any{"permission_id": permID}, superH)
 	assertOK(t, assign, "assign role permission")
 	// 重复分配幂等。
-	assign = doRequest(t, base, "POST", fmt.Sprintf("/admin/v1/roles/%d/permissions", roleID), map[string]any{"permission_id": permID}, superH)
+	assign = doRequest(t, base, "POST", fmt.Sprintf("/admin/roles/%d/permissions", roleID), map[string]any{"permission_id": permID}, superH)
 	assertOK(t, assign, "assign role permission again")
 
 	// AC-012：管理员↔角色分配/移除。
 	aliceID := createAdmin(t, base, superToken, "alice", "alicepass123")
-	assignRole := doRequest(t, base, "POST", fmt.Sprintf("/admin/v1/admins/%d/roles", aliceID), map[string]any{"role_id": roleID}, superH)
+	assignRole := doRequest(t, base, "POST", fmt.Sprintf("/admin/admins/%d/roles", aliceID), map[string]any{"role_id": roleID}, superH)
 	assertOK(t, assignRole, "assign admin role")
 
-	// /admin/v1/me 展示所属角色。
+	// /admin/me 展示所属角色。
 	aliceToken := loginAdmin(t, base, "alice", "alicepass123")
-	me := doRequest(t, base, "GET", "/admin/v1/me", nil, authHeader(aliceToken))
+	me := doRequest(t, base, "GET", "/admin/me", nil, authHeader(aliceToken))
 	var meData struct {
 		Roles []string `json:"roles"`
 	}
@@ -521,23 +521,23 @@ func TestRolePermissionManagement(t *testing.T) {
 		t.Fatalf("unexpected admin roles: %v", meData.Roles)
 	}
 
-	// 移除角色后 /admin/v1/me 不再展示。
-	removeRole := doRequest(t, base, "DELETE", fmt.Sprintf("/admin/v1/admins/%d/roles/%d", aliceID, roleID), nil, superH)
+	// 移除角色后 /admin/me 不再展示。
+	removeRole := doRequest(t, base, "DELETE", fmt.Sprintf("/admin/admins/%d/roles/%d", aliceID, roleID), nil, superH)
 	assertOK(t, removeRole, "remove admin role")
-	me = doRequest(t, base, "GET", "/admin/v1/me", nil, authHeader(aliceToken))
+	me = doRequest(t, base, "GET", "/admin/me", nil, authHeader(aliceToken))
 	_ = json.Unmarshal(me.Data, &meData)
 	if len(meData.Roles) != 0 {
 		t.Fatalf("expected no roles after remove, got %v", meData.Roles)
 	}
 
 	// 删除角色（级联清理关联）后角色不存在。
-	del := doRequest(t, base, "DELETE", fmt.Sprintf("/admin/v1/roles/%d", roleID), nil, superH)
+	del := doRequest(t, base, "DELETE", fmt.Sprintf("/admin/roles/%d", roleID), nil, superH)
 	assertOK(t, del, "delete role")
 	if n := dbCount(t, "roles", map[string]any{"id": roleID}); n != 0 {
 		t.Fatalf("role should be deleted, got %d rows", n)
 	}
 	// 删除权限。
-	del = doRequest(t, base, "DELETE", fmt.Sprintf("/admin/v1/permissions/%d", permID), nil, superH)
+	del = doRequest(t, base, "DELETE", fmt.Sprintf("/admin/permissions/%d", permID), nil, superH)
 	assertOK(t, del, "delete permission")
 	if n := dbCount(t, "permissions", map[string]any{"id": permID}); n != 0 {
 		t.Fatalf("permission should be deleted, got %d rows", n)
@@ -555,7 +555,7 @@ func TestAuthorizationMatrix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate user token: %v", err)
 	}
-	res := doRequest(t, base, "GET", "/admin/v1/me", nil, authHeader(userToken))
+	res := doRequest(t, base, "GET", "/admin/me", nil, authHeader(userToken))
 	if res.Status != 403 || res.Code != 1003 {
 		t.Fatalf("user token on /admin: status=%d code=%d", res.Status, res.Code)
 	}
@@ -565,15 +565,15 @@ func TestAuthorizationMatrix(t *testing.T) {
 	bobToken := loginAdmin(t, base, "bob", "bobpass123")
 	bobH := authHeader(bobToken)
 
-	// AC-015：无权限访问 /admin/v1/roles → 403。
-	res = doRequest(t, base, "GET", "/admin/v1/roles", nil, bobH)
+	// AC-015：无权限访问 /admin/roles → 403。
+	res = doRequest(t, base, "GET", "/admin/roles", nil, bobH)
 	if res.Status != 403 || res.Code != 1003 {
 		t.Fatalf("no-perm list roles: status=%d code=%d", res.Status, res.Code)
 	}
 
 	// AC-018：无权限调用写接口「创建角色」→ 403 且无写入。
 	before := dbCount(t, "roles", nil)
-	res = doRequest(t, base, "POST", "/admin/v1/roles", map[string]any{"name": "should-not-exist"}, bobH)
+	res = doRequest(t, base, "POST", "/admin/roles", map[string]any{"name": "should-not-exist"}, bobH)
 	if res.Status != 403 || res.Code != 1003 {
 		t.Fatalf("no-perm create role: status=%d code=%d", res.Status, res.Code)
 	}
@@ -582,7 +582,7 @@ func TestAuthorizationMatrix(t *testing.T) {
 	}
 
 	// AC-019：bob 尝试通过请求体给自己/他人分配角色 → 403 且无写入（目标 id 不作为权限证明）。
-	res = doRequest(t, base, "POST", fmt.Sprintf("/admin/v1/admins/%d/roles", bobID), map[string]any{"role_id": 1}, bobH)
+	res = doRequest(t, base, "POST", fmt.Sprintf("/admin/admins/%d/roles", bobID), map[string]any{"role_id": 1}, bobH)
 	if res.Status != 403 || res.Code != 1003 {
 		t.Fatalf("self-elevate via body: status=%d code=%d", res.Status, res.Code)
 	}
@@ -593,14 +593,14 @@ func TestAuthorizationMatrix(t *testing.T) {
 	// 超级管理员创建 role:list 权限并赋给 bob 的角色。
 	permID := ensurePermission(t, base, superToken, "role:list", "查看角色")
 	roleID := createRole(t, base, superToken, "viewer")
-	doRequest(t, base, "POST", fmt.Sprintf("/admin/v1/roles/%d/permissions", roleID), map[string]any{"permission_id": permID}, superH)
-	doRequest(t, base, "POST", fmt.Sprintf("/admin/v1/admins/%d/roles", bobID), map[string]any{"role_id": roleID}, superH)
+	doRequest(t, base, "POST", fmt.Sprintf("/admin/roles/%d/permissions", roleID), map[string]any{"permission_id": permID}, superH)
+	doRequest(t, base, "POST", fmt.Sprintf("/admin/admins/%d/roles", bobID), map[string]any{"role_id": roleID}, superH)
 
-	// AC-016：有权限后 bob 可访问 /admin/v1/roles。
-	res = doRequest(t, base, "GET", "/admin/v1/roles", nil, bobH)
+	// AC-016：有权限后 bob 可访问 /admin/roles。
+	res = doRequest(t, base, "GET", "/admin/roles", nil, bobH)
 	assertOK(t, res, "bob list roles after grant")
 
 	// AC-017：超级管理员无论是否显式持有权限均放行。
-	res = doRequest(t, base, "GET", "/admin/v1/roles", nil, superH)
+	res = doRequest(t, base, "GET", "/admin/roles", nil, superH)
 	assertOK(t, res, "super list roles")
 }

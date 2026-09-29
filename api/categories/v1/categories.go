@@ -19,7 +19,7 @@ type Category struct {
 
 // ListReq 树形分类列表请求。
 type ListReq struct {
-	g.Meta `path:"/api/v1/categories" method:"get" tags:"分类" summary:"树形分类列表（仅启用项）"`
+	g.Meta `path:"/categories" method:"get" tags:"分类" summary:"树形分类列表（仅启用项）"`
 }
 
 // ListRes 树形分类列表响应。
@@ -29,7 +29,7 @@ type ListRes struct {
 
 // DetailReq 分类详情请求。
 type DetailReq struct {
-	g.Meta `path:"/api/v1/categories/:id" method:"get" tags:"分类" summary:"分类详情"`
+	g.Meta `path:"/categories/:id" method:"get" tags:"分类" summary:"分类详情"`
 	Id     int64 `json:"id" in:"path" v:"required" dc:"分类 id"`
 }
 
@@ -40,7 +40,7 @@ type DetailRes struct {
 
 // CreateReq 创建分类请求。
 type CreateReq struct {
-	g.Meta   `path:"/admin/v1/categories" method:"post" tags:"分类" summary:"创建分类"`
+	g.Meta   `path:"/categories" method:"post" tags:"分类" summary:"创建分类"`
 	ParentId int64  `json:"parent_id" dc:"父分类 id，0 表示顶级"`
 	Name     string `json:"name" v:"required" dc:"分类名，非空且不超过 64 字符"`
 	Sort     int    `json:"sort" dc:"同级排序值，默认 0"`
@@ -54,7 +54,7 @@ type CreateRes struct {
 
 // UpdateReq 更新分类请求（仅提交需要变更的字段）。
 type UpdateReq struct {
-	g.Meta   `path:"/admin/v1/categories/:id" method:"put" tags:"分类" summary:"更新分类"`
+	g.Meta   `path:"/categories/:id" method:"put" tags:"分类" summary:"更新分类"`
 	Id       int64   `json:"id" in:"path" v:"required" dc:"分类 id"`
 	ParentId *int64  `json:"parent_id" dc:"父分类 id，0 表示顶级"`
 	Name     *string `json:"name" dc:"分类名，非空且不超过 64 字符"`
@@ -69,7 +69,7 @@ type UpdateRes struct {
 
 // DeleteReq 删除分类请求。
 type DeleteReq struct {
-	g.Meta `path:"/admin/v1/categories/:id" method:"delete" tags:"分类" summary:"删除分类"`
+	g.Meta `path:"/categories/:id" method:"delete" tags:"分类" summary:"删除分类"`
 	Id     int64 `json:"id" in:"path" v:"required" dc:"分类 id"`
 }
 

@@ -4,7 +4,7 @@ import "github.com/gogf/gf/v2/frame/g"
 
 // LoginReq 管理员登录请求。
 type LoginReq struct {
-	g.Meta   `path:"/admin/v1/login" method:"post" tags:"后台认证" summary:"管理员登录"`
+	g.Meta   `path:"/admin/login" method:"post" tags:"后台认证" summary:"管理员登录"`
 	Username string `json:"username" v:"required" dc:"管理员用户名"`
 	Password string `json:"password" v:"required" dc:"管理员密码"`
 }
@@ -18,7 +18,7 @@ type LoginRes struct {
 
 // MeReq 获取当前登录管理员请求。
 type MeReq struct {
-	g.Meta `path:"/admin/v1/me" method:"get" tags:"后台认证" summary:"获取当前登录管理员"`
+	g.Meta `path:"/admin/me" method:"get" tags:"后台认证" summary:"获取当前登录管理员"`
 }
 
 // MeRes 获取当前登录管理员响应。
@@ -31,7 +31,7 @@ type MeRes struct {
 
 // LogoutReq 登出当前管理员请求。sid 来自当前 token，不接受客户端指定。
 type LogoutReq struct {
-	g.Meta `path:"/admin/v1/logout" method:"post" tags:"后台认证" summary:"登出当前管理员"`
+	g.Meta `path:"/admin/logout" method:"post" tags:"后台认证" summary:"登出当前管理员"`
 }
 
 // LogoutRes 登出当前管理员响应（无业务字段，成功时 data 为 null）。
@@ -39,7 +39,7 @@ type LogoutRes struct{}
 
 // CreateAdminReq 创建普通管理员请求（is_super 恒为 0）。
 type CreateAdminReq struct {
-	g.Meta   `path:"/admin/v1/admins" method:"post" tags:"管理员" summary:"创建普通管理员"`
+	g.Meta   `path:"/admin/admins" method:"post" tags:"管理员" summary:"创建普通管理员"`
 	Username string `json:"username" v:"required" dc:"管理员用户名，3~24 位大小写字母或数字"`
 	Password string `json:"password" v:"required" dc:"管理员密码，8~24 位"`
 }
@@ -52,7 +52,7 @@ type CreateAdminRes struct {
 
 // UpdateAdminStatusReq 禁用/启用管理员请求。
 type UpdateAdminStatusReq struct {
-	g.Meta `path:"/admin/v1/admins/:id/status" method:"put" tags:"管理员" summary:"禁用/启用管理员"`
+	g.Meta `path:"/admin/admins/:id/status" method:"put" tags:"管理员" summary:"禁用/启用管理员"`
 	Id     int64 `json:"id" in:"path" v:"required" dc:"管理员 id"`
 	Status int   `json:"status" v:"required|in:0,1" dc:"1 启用 / 0 禁用"`
 }
@@ -62,7 +62,7 @@ type UpdateAdminStatusRes struct{}
 
 // DeleteAdminReq 删除管理员请求。
 type DeleteAdminReq struct {
-	g.Meta `path:"/admin/v1/admins/:id" method:"delete" tags:"管理员" summary:"删除管理员"`
+	g.Meta `path:"/admin/admins/:id" method:"delete" tags:"管理员" summary:"删除管理员"`
 	Id     int64 `json:"id" in:"path" v:"required" dc:"管理员 id"`
 }
 
@@ -71,7 +71,7 @@ type DeleteAdminRes struct{}
 
 // AssignAdminRoleReq 为管理员分配角色请求。
 type AssignAdminRoleReq struct {
-	g.Meta `path:"/admin/v1/admins/:id/roles" method:"post" tags:"管理员" summary:"为管理员分配角色"`
+	g.Meta `path:"/admin/admins/:id/roles" method:"post" tags:"管理员" summary:"为管理员分配角色"`
 	Id     int64 `json:"id" in:"path" v:"required" dc:"管理员 id"`
 	RoleId int64 `json:"role_id" v:"required" dc:"角色 id"`
 }
@@ -81,7 +81,7 @@ type AssignAdminRoleRes struct{}
 
 // RemoveAdminRoleReq 移除管理员角色请求。
 type RemoveAdminRoleReq struct {
-	g.Meta `path:"/admin/v1/admins/:id/roles/:role_id" method:"delete" tags:"管理员" summary:"移除管理员角色"`
+	g.Meta `path:"/admin/admins/:id/roles/:role_id" method:"delete" tags:"管理员" summary:"移除管理员角色"`
 	Id     int64 `json:"id" in:"path" v:"required" dc:"管理员 id"`
 	RoleId int64 `json:"role_id" in:"path" v:"required" dc:"角色 id"`
 }
@@ -98,7 +98,7 @@ type Role struct {
 
 // CreateRoleReq 创建角色请求。
 type CreateRoleReq struct {
-	g.Meta      `path:"/admin/v1/roles" method:"post" tags:"角色" summary:"创建角色"`
+	g.Meta      `path:"/admin/roles" method:"post" tags:"角色" summary:"创建角色"`
 	Name        string `json:"name" v:"required" dc:"角色名，非空且不超过 64 字符"`
 	Description string `json:"description" dc:"角色描述，不超过 255 字符"`
 }
@@ -110,7 +110,7 @@ type CreateRoleRes struct {
 
 // ListRoleReq 角色列表请求。
 type ListRoleReq struct {
-	g.Meta `path:"/admin/v1/roles" method:"get" tags:"角色" summary:"角色列表"`
+	g.Meta `path:"/admin/roles" method:"get" tags:"角色" summary:"角色列表"`
 }
 
 // ListRoleRes 角色列表响应。
@@ -120,7 +120,7 @@ type ListRoleRes struct {
 
 // UpdateRoleReq 更新角色请求（仅提交需要变更的字段）。
 type UpdateRoleReq struct {
-	g.Meta      `path:"/admin/v1/roles/:id" method:"put" tags:"角色" summary:"更新角色"`
+	g.Meta      `path:"/admin/roles/:id" method:"put" tags:"角色" summary:"更新角色"`
 	Id          int64   `json:"id" in:"path" v:"required" dc:"角色 id"`
 	Name        *string `json:"name" dc:"角色名，非空且不超过 64 字符"`
 	Description *string `json:"description" dc:"角色描述，不超过 255 字符"`
@@ -133,7 +133,7 @@ type UpdateRoleRes struct {
 
 // DeleteRoleReq 删除角色请求。
 type DeleteRoleReq struct {
-	g.Meta `path:"/admin/v1/roles/:id" method:"delete" tags:"角色" summary:"删除角色"`
+	g.Meta `path:"/admin/roles/:id" method:"delete" tags:"角色" summary:"删除角色"`
 	Id     int64 `json:"id" in:"path" v:"required" dc:"角色 id"`
 }
 
@@ -142,7 +142,7 @@ type DeleteRoleRes struct{}
 
 // AssignRolePermissionReq 为角色分配权限请求。
 type AssignRolePermissionReq struct {
-	g.Meta       `path:"/admin/v1/roles/:id/permissions" method:"post" tags:"角色" summary:"为角色分配权限"`
+	g.Meta       `path:"/admin/roles/:id/permissions" method:"post" tags:"角色" summary:"为角色分配权限"`
 	Id           int64 `json:"id" in:"path" v:"required" dc:"角色 id"`
 	PermissionId int64 `json:"permission_id" v:"required" dc:"权限 id"`
 }
@@ -152,7 +152,7 @@ type AssignRolePermissionRes struct{}
 
 // RemoveRolePermissionReq 移除角色权限请求。
 type RemoveRolePermissionReq struct {
-	g.Meta       `path:"/admin/v1/roles/:id/permissions/:permission_id" method:"delete" tags:"角色" summary:"移除角色权限"`
+	g.Meta       `path:"/admin/roles/:id/permissions/:permission_id" method:"delete" tags:"角色" summary:"移除角色权限"`
 	Id           int64 `json:"id" in:"path" v:"required" dc:"角色 id"`
 	PermissionId int64 `json:"permission_id" in:"path" v:"required" dc:"权限 id"`
 }
@@ -170,7 +170,7 @@ type Permission struct {
 
 // CreatePermissionReq 创建权限请求。
 type CreatePermissionReq struct {
-	g.Meta      `path:"/admin/v1/permissions" method:"post" tags:"权限" summary:"创建权限"`
+	g.Meta      `path:"/admin/permissions" method:"post" tags:"权限" summary:"创建权限"`
 	Code        string `json:"code" v:"required" dc:"权限 code，非空且不超过 64 字符"`
 	Name        string `json:"name" v:"required" dc:"权限名，非空且不超过 64 字符"`
 	Description string `json:"description" dc:"权限描述，不超过 255 字符"`
@@ -183,7 +183,7 @@ type CreatePermissionRes struct {
 
 // ListPermissionReq 权限列表请求。
 type ListPermissionReq struct {
-	g.Meta `path:"/admin/v1/permissions" method:"get" tags:"权限" summary:"权限列表"`
+	g.Meta `path:"/admin/permissions" method:"get" tags:"权限" summary:"权限列表"`
 }
 
 // ListPermissionRes 权限列表响应。
@@ -193,7 +193,7 @@ type ListPermissionRes struct {
 
 // UpdatePermissionReq 更新权限请求（仅提交需要变更的字段）。
 type UpdatePermissionReq struct {
-	g.Meta      `path:"/admin/v1/permissions/:id" method:"put" tags:"权限" summary:"更新权限"`
+	g.Meta      `path:"/admin/permissions/:id" method:"put" tags:"权限" summary:"更新权限"`
 	Id          int64   `json:"id" in:"path" v:"required" dc:"权限 id"`
 	Code        *string `json:"code" dc:"权限 code，非空且不超过 64 字符"`
 	Name        *string `json:"name" dc:"权限名，非空且不超过 64 字符"`
@@ -207,7 +207,7 @@ type UpdatePermissionRes struct {
 
 // DeletePermissionReq 删除权限请求。
 type DeletePermissionReq struct {
-	g.Meta `path:"/admin/v1/permissions/:id" method:"delete" tags:"权限" summary:"删除权限"`
+	g.Meta `path:"/admin/permissions/:id" method:"delete" tags:"权限" summary:"删除权限"`
 	Id     int64 `json:"id" in:"path" v:"required" dc:"权限 id"`
 }
 

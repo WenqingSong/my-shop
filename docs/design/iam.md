@@ -17,14 +17,14 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 ```
 客户端
   │
-  ├─ POST /api/v1/register  （公开）
-  ├─ POST /api/v1/login     （公开）
+  ├─ POST /register  （公开）
+  ├─ POST /login     （公开）
   │     校验凭据 → 生成 sid → 写 Redis session → 签发含 sid 的 JWT → 返回 token
   │
-  ├─ GET /api/v1/me         （受保护，Auth 中间件）
+  ├─ GET /me         （受保护，Auth 中间件）
   │     验签+exp → 校验 Redis session（存在/未撤销/user_id 匹配）→ 注入 Principal
   │
-  └─ POST /api/v1/logout    （受保护，AuthSignatureOnly 中间件）
+  └─ POST /logout    （受保护，AuthSignatureOnly 中间件）
         仅验签+exp → 取 Principal.Sid → 原子撤销 session（幂等）
 ```
 
@@ -78,7 +78,7 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 
 ### 4.2 鉴权（同步，每请求）
 
-`GET /api/v1/me` 挂载 `Auth` 中间件：
+`GET /me` 挂载 `Auth` 中间件：
 
 1. 提取 `Authorization: Bearer <token>`。
 2. `auth.Parse`：验签 + `exp` 校验 + issuer + 限定 HS256。失败 → 401（不触达 Redis）。
@@ -88,7 +88,7 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 
 ### 4.3 登出（同步，幂等）
 
-`POST /api/v1/logout` 挂载 `AuthSignatureOnly` 中间件（仅验签 + `exp`，**不查 session**，保证重复登出即使 session 已撤销/缺失也能到达 handler）：
+`POST /logout` 挂载 `AuthSignatureOnly` 中间件（仅验签 + `exp`，**不查 session**，保证重复登出即使 session 已撤销/缺失也能到达 handler）：
 
 1. 从 `Principal.Sid` 取 sid（**不接受**请求体/参数中的 sid）。
 2. 原子撤销（Lua）：仅当 key 存在时 `HSET revoked=1`，保持剩余 TTL，不创建新 key；key 不存在视为已登出。

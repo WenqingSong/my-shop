@@ -38,49 +38,49 @@ func collectRoutes(t *testing.T) map[string]bool {
 	return got
 }
 
-// TestRouteTable 锁定最终路由表：前台 /api/v1、后台 /admin/v1 的完整路径存在，
-// 且不存在旧路径、旧分类写路径、公开注册入口或重复前缀。
+// TestRouteTable 锁定最终路由表：Contract 原路径（前台无版本前缀、后台 /admin、分类写 /categories）存在，
+// 且不存在 /api/v1、/admin/v1 前缀、公开注册入口或重复前缀。
 func TestRouteTable(t *testing.T) {
 	got := collectRoutes(t)
 
 	want := []string{
 		// 前台公开接口。
-		"POST /api/v1/register",
-		"POST /api/v1/login",
-		"GET /api/v1/categories",
-		"GET /api/v1/categories/:id",
+		"POST /register",
+		"POST /login",
+		"GET /categories",
+		"GET /categories/:id",
 		// 前台登录用户接口。
-		"GET /api/v1/me",
-		"POST /api/v1/logout",
+		"GET /me",
+		"POST /logout",
 		// 健康检查。
 		"GET /health",
 		// 后台公开接口。
-		"POST /admin/v1/login",
-		"POST /admin/v1/logout",
+		"POST /admin/login",
+		"POST /admin/logout",
 		// 后台认证接口。
-		"GET /admin/v1/me",
+		"GET /admin/me",
 		// 管理员管理。
-		"POST /admin/v1/admins",
-		"PUT /admin/v1/admins/:id/status",
-		"DELETE /admin/v1/admins/:id",
-		"POST /admin/v1/admins/:id/roles",
-		"DELETE /admin/v1/admins/:id/roles/:role_id",
+		"POST /admin/admins",
+		"PUT /admin/admins/:id/status",
+		"DELETE /admin/admins/:id",
+		"POST /admin/admins/:id/roles",
+		"DELETE /admin/admins/:id/roles/:role_id",
 		// 角色管理。
-		"POST /admin/v1/roles",
-		"GET /admin/v1/roles",
-		"PUT /admin/v1/roles/:id",
-		"DELETE /admin/v1/roles/:id",
-		"POST /admin/v1/roles/:id/permissions",
-		"DELETE /admin/v1/roles/:id/permissions/:permission_id",
+		"POST /admin/roles",
+		"GET /admin/roles",
+		"PUT /admin/roles/:id",
+		"DELETE /admin/roles/:id",
+		"POST /admin/roles/:id/permissions",
+		"DELETE /admin/roles/:id/permissions/:permission_id",
 		// 权限管理。
-		"POST /admin/v1/permissions",
-		"GET /admin/v1/permissions",
-		"PUT /admin/v1/permissions/:id",
-		"DELETE /admin/v1/permissions/:id",
-		// 后台分类管理。
-		"POST /admin/v1/categories",
-		"PUT /admin/v1/categories/:id",
-		"DELETE /admin/v1/categories/:id",
+		"POST /admin/permissions",
+		"GET /admin/permissions",
+		"PUT /admin/permissions/:id",
+		"DELETE /admin/permissions/:id",
+		// 分类写接口（复用 /categories 路径，AdminAuth + RequirePermission 保护）。
+		"POST /categories",
+		"PUT /categories/:id",
+		"DELETE /categories/:id",
 	}
 	for _, w := range want {
 		if !got[w] {
@@ -89,24 +89,36 @@ func TestRouteTable(t *testing.T) {
 	}
 
 	forbidden := []string{
-		// 旧前台路径。
-		"POST /register",
-		"POST /login",
-		"GET /me",
-		"POST /logout",
-		"GET /categories",
-		"GET /categories/:id",
-		// 旧分类写路径。
-		"POST /categories",
-		"PUT /categories/:id",
-		"DELETE /categories/:id",
-		// 旧后台路径（无 /v1）。
-		"POST /admin/login",
-		"POST /admin/logout",
-		"GET /admin/me",
-		"POST /admin/admins",
+		// /api/v1/* 前缀路径不应存在。
+		"POST /api/v1/register",
+		"POST /api/v1/login",
+		"GET /api/v1/me",
+		"POST /api/v1/logout",
+		"GET /api/v1/categories",
+		"GET /api/v1/categories/:id",
+		"POST /api/v1/categories",
+		"PUT /api/v1/categories/:id",
+		"DELETE /api/v1/categories/:id",
+		// /admin/v1/* 前缀路径不应存在。
+		"POST /admin/v1/login",
+		"POST /admin/v1/logout",
+		"GET /admin/v1/me",
+		"POST /admin/v1/admins",
+		"PUT /admin/v1/admins/:id/status",
+		"DELETE /admin/v1/admins/:id",
+		"POST /admin/v1/roles",
+		"GET /admin/v1/roles",
+		"PUT /admin/v1/roles/:id",
+		"DELETE /admin/v1/roles/:id",
+		"POST /admin/v1/permissions",
+		"GET /admin/v1/permissions",
+		"PUT /admin/v1/permissions/:id",
+		"DELETE /admin/v1/permissions/:id",
+		"POST /admin/v1/categories",
+		"PUT /admin/v1/categories/:id",
+		"DELETE /admin/v1/categories/:id",
 		// 公开注册入口。
-		"POST /admin/v1/register",
+		"POST /admin/register",
 		// 重复前缀。
 		"POST /api/v1/api/v1/register",
 		"GET /api/v1/api/v1/me",
