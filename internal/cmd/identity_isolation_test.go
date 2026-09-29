@@ -174,7 +174,7 @@ func isoClaims(t *testing.T, token string) *auth.Claims {
 // isoFrontendLogin 前台登录成功并返回 (token, sid)。
 func isoFrontendLogin(t *testing.T, base, username, password string) (string, string) {
 	t.Helper()
-	res := isoDo(t, base, "POST", "/api/v1/login", map[string]any{"username": username, "password": password}, nil)
+	res := isoDo(t, base, "POST", "/login", map[string]any{"username": username, "password": password}, nil)
 	if res.Status != 200 || res.Code != 0 {
 		t.Fatalf("frontend login %s: status=%d code=%d msg=%q", username, res.Status, res.Code, res.Message)
 	}
@@ -188,7 +188,7 @@ func isoFrontendLogin(t *testing.T, base, username, password string) (string, st
 // isoAdminLogin 后台登录成功并返回 (token, sid)。
 func isoAdminLogin(t *testing.T, base, username, password string) (string, string) {
 	t.Helper()
-	res := isoDo(t, base, "POST", "/admin/v1/login", map[string]any{"username": username, "password": password}, nil)
+	res := isoDo(t, base, "POST", "/admin/login", map[string]any{"username": username, "password": password}, nil)
 	if res.Status != 200 || res.Code != 0 {
 		t.Fatalf("admin login %s: status=%d code=%d msg=%q", username, res.Status, res.Code, res.Message)
 	}
@@ -234,7 +234,7 @@ func TestIdentityDomainLoginSourceIsolation(t *testing.T) {
 
 	// AC-001：只存在于 admins 的账号调用前台登录 → 401/2002，且不创建前台 session。
 	isoInsertAdmin(t, "adminonly", "adminpass123")
-	res := isoDo(t, base, "POST", "/api/v1/login", map[string]any{"username": "adminonly", "password": "adminpass123"}, nil)
+	res := isoDo(t, base, "POST", "/login", map[string]any{"username": "adminonly", "password": "adminpass123"}, nil)
 	if res.Status != 401 || res.Code != 2002 {
 		t.Fatalf("frontend login with admin-only account: status=%d code=%d", res.Status, res.Code)
 	}
@@ -247,7 +247,7 @@ func TestIdentityDomainLoginSourceIsolation(t *testing.T) {
 
 	// AC-002：只存在于 users 的账号调用后台登录 → 401/2002，且不创建管理员 session。
 	isoInsertUser(t, "useronly", "userpass123")
-	res = isoDo(t, base, "POST", "/admin/v1/login", map[string]any{"username": "useronly", "password": "userpass123"}, nil)
+	res = isoDo(t, base, "POST", "/admin/login", map[string]any{"username": "useronly", "password": "userpass123"}, nil)
 	if res.Status != 401 || res.Code != 2002 {
 		t.Fatalf("admin login with user-only account: status=%d code=%d", res.Status, res.Code)
 	}
@@ -258,8 +258,8 @@ func TestIdentityDomainLoginSourceIsolation(t *testing.T) {
 		t.Fatalf("admin login with user-only account must not create admin session, got %v", keys)
 	}
 
-	// AC-007：不存在公开管理员注册入口，POST /admin/v1/register → 404。
-	res = isoDo(t, base, "POST", "/admin/v1/register", map[string]any{"username": "x", "password": "password123"}, nil)
+	// AC-007：不存在公开管理员注册入口，POST /admin/register → 404。
+	res = isoDo(t, base, "POST", "/admin/register", map[string]any{"username": "x", "password": "password123"}, nil)
 	if res.Status != 404 {
 		t.Fatalf("admin register should be 404, got status=%d code=%d", res.Status, res.Code)
 	}
@@ -285,7 +285,7 @@ func TestIdentityDomainSameNameDifferentPasswords(t *testing.T) {
 	}
 
 	// 前台登录 + 后台密码 → 认证失败。
-	res := isoDo(t, base, "POST", "/api/v1/login", map[string]any{"username": username, "password": adminPwd}, nil)
+	res := isoDo(t, base, "POST", "/login", map[string]any{"username": username, "password": adminPwd}, nil)
 	if res.Status != 401 || res.Code != 2002 {
 		t.Fatalf("frontend login with admin password: status=%d code=%d", res.Status, res.Code)
 	}
@@ -297,7 +297,7 @@ func TestIdentityDomainSameNameDifferentPasswords(t *testing.T) {
 	}
 
 	// 后台登录 + 前台密码 → 认证失败。
-	res = isoDo(t, base, "POST", "/admin/v1/login", map[string]any{"username": username, "password": userPwd}, nil)
+	res = isoDo(t, base, "POST", "/admin/login", map[string]any{"username": username, "password": userPwd}, nil)
 	if res.Status != 401 || res.Code != 2002 {
 		t.Fatalf("admin login with user password: status=%d code=%d", res.Status, res.Code)
 	}
@@ -313,15 +313,15 @@ func TestIdentityDomainTokenTypeIsolation(t *testing.T) {
 	adminToken, _ := isoAdminLogin(t, base, isoSuperUsername, isoAdminPassword)
 
 	// type=user token 访问后台受保护接口 → 403/1003。
-	res := isoDo(t, base, "GET", "/admin/v1/me", nil, isoAuthHeader(userToken))
+	res := isoDo(t, base, "GET", "/admin/me", nil, isoAuthHeader(userToken))
 	if res.Status != 403 || res.Code != 1003 {
-		t.Fatalf("user token on /admin/v1/me: status=%d code=%d", res.Status, res.Code)
+		t.Fatalf("user token on /admin/me: status=%d code=%d", res.Status, res.Code)
 	}
 
 	// type=admin token 访问前台受保护接口 → 403/1003。
-	res = isoDo(t, base, "GET", "/api/v1/me", nil, isoAuthHeader(adminToken))
+	res = isoDo(t, base, "GET", "/me", nil, isoAuthHeader(adminToken))
 	if res.Status != 403 || res.Code != 1003 {
-		t.Fatalf("admin token on /api/v1/me: status=%d code=%d", res.Status, res.Code)
+		t.Fatalf("admin token on /me: status=%d code=%d", res.Status, res.Code)
 	}
 }
 
@@ -370,14 +370,14 @@ func TestAdminLogoutFullChain(t *testing.T) {
 	// 管理员登录。
 	adminToken, adminSid := isoAdminLogin(t, base, isoSuperUsername, isoAdminPassword)
 
-	// (1) 登出前 /admin/v1/me 可用。
-	me := isoDo(t, base, "GET", "/admin/v1/me", nil, isoAuthHeader(adminToken))
+	// (1) 登出前 /admin/me 可用。
+	me := isoDo(t, base, "GET", "/admin/me", nil, isoAuthHeader(adminToken))
 	if me.Status != 200 || me.Code != 0 {
 		t.Fatalf("admin me before logout: status=%d code=%d", me.Status, me.Code)
 	}
 
-	// (2) 调用 /admin/v1/logout 成功，data=null。
-	lo := isoDo(t, base, "POST", "/admin/v1/logout", nil, isoAuthHeader(adminToken))
+	// (2) 调用 /admin/logout 成功，data=null。
+	lo := isoDo(t, base, "POST", "/admin/logout", nil, isoAuthHeader(adminToken))
 	if lo.Status != 200 || lo.Code != 0 {
 		t.Fatalf("admin logout: status=%d code=%d", lo.Status, lo.Code)
 	}
@@ -390,20 +390,20 @@ func TestAdminLogoutFullChain(t *testing.T) {
 		t.Fatalf("expected admin session revoked=1, got %q", fields["revoked"])
 	}
 
-	// (4) 原 token 再访问 /admin/v1/me 失败。
-	me = isoDo(t, base, "GET", "/admin/v1/me", nil, isoAuthHeader(adminToken))
+	// (4) 原 token 再访问 /admin/me 失败。
+	me = isoDo(t, base, "GET", "/admin/me", nil, isoAuthHeader(adminToken))
 	if me.Status != 401 || me.Code != 1002 {
 		t.Fatalf("admin me after logout: status=%d code=%d", me.Status, me.Code)
 	}
 
 	// (5) 再次登出保持幂等。
-	lo = isoDo(t, base, "POST", "/admin/v1/logout", nil, isoAuthHeader(adminToken))
+	lo = isoDo(t, base, "POST", "/admin/logout", nil, isoAuthHeader(adminToken))
 	if lo.Status != 200 || lo.Code != 0 {
 		t.Fatalf("admin repeat logout: status=%d code=%d", lo.Status, lo.Code)
 	}
 
 	// (6) 不影响前台用户 session。
-	meU := isoDo(t, base, "GET", "/api/v1/me", nil, isoAuthHeader(userToken))
+	meU := isoDo(t, base, "GET", "/me", nil, isoAuthHeader(userToken))
 	if meU.Status != 200 || meU.Code != 0 {
 		t.Fatalf("frontend me after admin logout: status=%d code=%d", meU.Status, meU.Code)
 	}
@@ -425,7 +425,7 @@ func TestAdminLogoutRedisErrorReturns500(t *testing.T) {
 		t.Fatalf("corrupt admin session key: %v", err)
 	}
 
-	lo := isoDo(t, base, "POST", "/admin/v1/logout", nil, isoAuthHeader(adminToken))
+	lo := isoDo(t, base, "POST", "/admin/logout", nil, isoAuthHeader(adminToken))
 	if lo.Status != 500 || lo.Code != 1000 {
 		t.Fatalf("admin logout with redis error: expected 500/1000, got status=%d code=%d", lo.Status, lo.Code)
 	}
