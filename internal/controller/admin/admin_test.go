@@ -304,7 +304,7 @@ func TestAdminLogin(t *testing.T) {
 	}
 }
 
-// TestAdminMe 覆盖 AC-003/AC-013：/admin/me 返回 id/username/is_super/roles；无 token 返回 401。
+// TestAdminMe 覆盖 AC-003/AC-013：/admin/v1/me 返回 id/username/is_super/roles；无 token 返回 401。
 func TestAdminMe(t *testing.T) {
 	base, superToken := setupAdminServer(t)
 
@@ -354,7 +354,7 @@ func TestAdminCreateDeleteAndProtection(t *testing.T) {
 	base, superToken := setupAdminServer(t)
 	superH := authHeader(superToken)
 
-	// 通过 /admin/me 获取超级管理员 id。
+	// 通过 /admin/v1/me 获取超级管理员 id。
 	me := doRequest(t, base, "GET", "/admin/v1/me", nil, superH)
 	var meData struct {
 		Id int64 `json:"id"`
@@ -362,7 +362,7 @@ func TestAdminCreateDeleteAndProtection(t *testing.T) {
 	_ = json.Unmarshal(me.Data, &meData)
 	superID := meData.Id
 
-	// AC-004：不存在公开注册入口（/admin/register → 404，路由不存在）。
+	// AC-004：不存在公开注册入口（/admin/v1/register → 404，路由不存在）。
 	reg := doRequest(t, base, "POST", "/admin/v1/register", map[string]any{"username": "x", "password": "password123"}, nil)
 	if reg.Status != 404 {
 		t.Fatalf("admin register should be 404, got status=%d code=%d", reg.Status, reg.Code)
@@ -435,7 +435,7 @@ func TestAdminDisableImmediateRevocation(t *testing.T) {
 	aliceID := createAdmin(t, base, superToken, "alice", "alicepass123")
 	aliceToken := loginAdmin(t, base, "alice", "alicepass123")
 
-	// 禁用前 /admin/me 可用。
+	// 禁用前 /admin/v1/me 可用。
 	me := doRequest(t, base, "GET", "/admin/v1/me", nil, authHeader(aliceToken))
 	assertOK(t, me, "me before disable")
 
@@ -508,7 +508,7 @@ func TestRolePermissionManagement(t *testing.T) {
 	assignRole := doRequest(t, base, "POST", fmt.Sprintf("/admin/v1/admins/%d/roles", aliceID), map[string]any{"role_id": roleID}, superH)
 	assertOK(t, assignRole, "assign admin role")
 
-	// /admin/me 展示所属角色。
+	// /admin/v1/me 展示所属角色。
 	aliceToken := loginAdmin(t, base, "alice", "alicepass123")
 	me := doRequest(t, base, "GET", "/admin/v1/me", nil, authHeader(aliceToken))
 	var meData struct {
@@ -521,7 +521,7 @@ func TestRolePermissionManagement(t *testing.T) {
 		t.Fatalf("unexpected admin roles: %v", meData.Roles)
 	}
 
-	// 移除角色后 /admin/me 不再展示。
+	// 移除角色后 /admin/v1/me 不再展示。
 	removeRole := doRequest(t, base, "DELETE", fmt.Sprintf("/admin/v1/admins/%d/roles/%d", aliceID, roleID), nil, superH)
 	assertOK(t, removeRole, "remove admin role")
 	me = doRequest(t, base, "GET", "/admin/v1/me", nil, authHeader(aliceToken))
@@ -565,7 +565,7 @@ func TestAuthorizationMatrix(t *testing.T) {
 	bobToken := loginAdmin(t, base, "bob", "bobpass123")
 	bobH := authHeader(bobToken)
 
-	// AC-015：无权限访问 /admin/roles → 403。
+	// AC-015：无权限访问 /admin/v1/roles → 403。
 	res = doRequest(t, base, "GET", "/admin/v1/roles", nil, bobH)
 	if res.Status != 403 || res.Code != 1003 {
 		t.Fatalf("no-perm list roles: status=%d code=%d", res.Status, res.Code)
@@ -596,7 +596,7 @@ func TestAuthorizationMatrix(t *testing.T) {
 	doRequest(t, base, "POST", fmt.Sprintf("/admin/v1/roles/%d/permissions", roleID), map[string]any{"permission_id": permID}, superH)
 	doRequest(t, base, "POST", fmt.Sprintf("/admin/v1/admins/%d/roles", bobID), map[string]any{"role_id": roleID}, superH)
 
-	// AC-016：有权限后 bob 可访问 /admin/roles。
+	// AC-016：有权限后 bob 可访问 /admin/v1/roles。
 	res = doRequest(t, base, "GET", "/admin/v1/roles", nil, bobH)
 	assertOK(t, res, "bob list roles after grant")
 

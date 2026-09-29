@@ -115,9 +115,8 @@ func assertOK(t *testing.T, res apiResult, op string) {
 }
 
 // setupCategoriesServer 清空 RBAC 表后 Bootstrap（以测试密码重建超级管理员）、清空 categories，
-// 挂载真实后台路由（复用 cmd.RegisterAdminRoutes，含 /admin/login 与分类写接口迁移挂载），
-// 返回 base 与超级管理员 token。分类写接口现由 AdminAuth + RequirePermission 保护，
-// 因此用超级管理员 token（IsSuper 放行）驱动写操作。
+// 挂载真实路由（复用 cmd.RegisterFrontendRoutes + cmd.RegisterAdminRoutes），返回 base 与超级管理员 token。
+// 分类写接口现由 AdminAuth + RequirePermission 保护，因此用超级管理员 token（IsSuper 放行）驱动写操作。
 func setupCategoriesServer(t *testing.T) (base, token string) {
 	t.Helper()
 	t.Setenv("AUTH_JWT_SECRET", testJWTSecret)
@@ -161,7 +160,7 @@ func setupCategoriesServer(t *testing.T) (base, token string) {
 	return base, token
 }
 
-// loginAdmin 经 /admin/login 登录取管理员 token。
+// loginAdmin 经 /admin/v1/login 登录取管理员 token。
 func loginAdmin(t *testing.T, base, username, password string) string {
 	t.Helper()
 	res := doRequest(t, base, "POST", "/admin/v1/login", map[string]any{"username": username, "password": password}, nil)
@@ -180,7 +179,7 @@ func loginAdmin(t *testing.T, base, username, password string) string {
 	return d.AccessToken
 }
 
-// createAdmin 经 /admin/admins 创建普通管理员，返回其 id。
+// createAdmin 经 /admin/v1/admins 创建普通管理员，返回其 id。
 func createAdmin(t *testing.T, base, token, username, password string) int64 {
 	t.Helper()
 	res := doRequest(t, base, "POST", "/admin/v1/admins", map[string]any{"username": username, "password": password}, map[string]string{"Authorization": "Bearer " + token})
