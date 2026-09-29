@@ -19,7 +19,7 @@ import (
 
 	"cnb.cool/go-cloud-devops/my-shop/internal/auth"
 	"cnb.cool/go-cloud-devops/my-shop/internal/boot"
-	iamController "cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
+	"cnb.cool/go-cloud-devops/my-shop/internal/cmd"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 )
@@ -192,17 +192,7 @@ func setupIAMServer(t *testing.T) string {
 	s.SetPort(0)
 	s.Group("/", func(group *ghttp.RouterGroup) {
 		group.Middleware(middleware.Response)
-		ctrl := iamController.NewV1()
-		group.POST("/register", ctrl.Register)
-		group.POST("/login", ctrl.Login)
-		group.Group("/", func(protected *ghttp.RouterGroup) {
-			protected.Middleware(middleware.Auth)
-			protected.GET("/me", ctrl.Me)
-		})
-		group.Group("/", func(protected *ghttp.RouterGroup) {
-			protected.Middleware(middleware.AuthSignatureOnly)
-			protected.POST("/logout", ctrl.Logout)
-		})
+		cmd.RegisterFrontendRoutes(group)
 	})
 	s.SetDumpRouterMap(false)
 	s.Start()
@@ -216,7 +206,7 @@ func TestIAMEndToEnd(t *testing.T) {
 	base := setupIAMServer(t)
 
 	// AC-001：合法注册成功，密码以 bcrypt 哈希存储且含盐。
-	reg := doRequest(t, base, "POST", "/register", map[string]any{"username": "alice", "password": "password123"}, nil)
+	reg := doRequest(t, base, "POST", "/api/v1/register", map[string]any{"username": "alice", "password": "password123"}, nil)
 	if reg.Status != 200 || reg.Code != 0 {
 		t.Fatalf("register alice: status=%d code=%d msg=%q", reg.Status, reg.Code, reg.Message)
 	}
@@ -230,7 +220,7 @@ func TestIAMEndToEnd(t *testing.T) {
 	}
 
 	// 相同密码注册另一个用户，哈希应不同（含随机盐）。
-	doRequest(t, base, "POST", "/register", map[string]any{"username": "bob", "password": "password123"}, nil)
+	doRequest(t, base, "POST", "/api/v1/register", map[string]any{"username": "bob", "password": "password123"}, nil)
 	if bobHash := userPasswordHash(t, "bob"); bobHash == aliceHash {
 		t.Fatal("expected different bcrypt hashes for same password")
 	}
@@ -246,7 +236,7 @@ func TestIAMEndToEnd(t *testing.T) {
 		{"carol", "aaaaaaaaaaaaaaaaaaaaaaaaa"}, // 密码过长（25 位）
 	}
 	for _, c := range invalid {
-		res := doRequest(t, base, "POST", "/register", map[string]any{"username": c.username, "password": c.password}, nil)
+		res := doRequest(t, base, "POST", "/api/v1/register", map[string]any{"username": c.username, "password": c.password}, nil)
 		if res.Status != 400 || res.Code != 1001 {
 			t.Fatalf("register invalid (%q): status=%d code=%d", c.username, res.Status, res.Code)
 		}
@@ -256,7 +246,7 @@ func TestIAMEndToEnd(t *testing.T) {
 	}
 
 	// AC-003：重复注册返回 409 冲突，且不覆盖既有用户。
-	dup := doRequest(t, base, "POST", "/register", map[string]any{"username": "alice", "password": "otherpass123"}, nil)
+	dup := doRequest(t, base, "POST", "/api/v1/register", map[string]any{"username": "alice", "password": "otherpass123"}, nil)
 	if dup.Status != 409 || dup.Code != 2001 {
 		t.Fatalf("register duplicate alice: status=%d code=%d", dup.Status, dup.Code)
 	}
@@ -265,7 +255,7 @@ func TestIAMEndToEnd(t *testing.T) {
 	}
 
 	// AC-004：正确凭据登录成功，返回 token，JWT 声明符合约定。
-	login := doRequest(t, base, "POST", "/login", map[string]any{"username": "alice", "password": "password123"}, nil)
+	login := doRequest(t, base, "POST", "/api/v1/login", map[string]any{"username": "alice", "password": "password123"}, nil)
 	if login.Status != 200 || login.Code != 0 {
 		t.Fatalf("login alice: status=%d code=%d msg=%q", login.Status, login.Code, login.Message)
 	}
@@ -312,8 +302,8 @@ func TestIAMEndToEnd(t *testing.T) {
 	}
 
 	// AC-005：错误密码与不存在用户返回相同 code/message/status（防枚举）。
-	wrong := doRequest(t, base, "POST", "/login", map[string]any{"username": "alice", "password": "wrongpass123"}, nil)
-	ghost := doRequest(t, base, "POST", "/login", map[string]any{"username": "ghost", "password": "password123"}, nil)
+	wrong := doRequest(t, base, "POST", "/api/v1/login", map[string]any{"username": "alice", "password": "wrongpass123"}, nil)
+	ghost := doRequest(t, base, "POST", "/api/v1/login", map[string]any{"username": "ghost", "password": "password123"}, nil)
 	if wrong.Status != 401 || wrong.Code != 2002 {
 		t.Fatalf("login wrong password: status=%d code=%d", wrong.Status, wrong.Code)
 	}
@@ -322,7 +312,7 @@ func TestIAMEndToEnd(t *testing.T) {
 	}
 
 	// AC-006：有效 token 访问 /me 返回 id 与 username，id 与 sub 一致。
-	me := doRequest(t, base, "GET", "/me", nil, map[string]string{"Authorization": "Bearer " + accessToken})
+	me := doRequest(t, base, "GET", "/api/v1/me", nil, map[string]string{"Authorization": "Bearer " + accessToken})
 	if me.Status != 200 || me.Code != 0 {
 		t.Fatalf("me with valid token: status=%d code=%d", me.Status, me.Code)
 	}
@@ -343,7 +333,7 @@ func TestIAMEndToEnd(t *testing.T) {
 		{"wrong issuer", map[string]string{"Authorization": "Bearer " + signToken(t, testJWTSecret, fmt.Sprintf("%d", aliceID), "evil", now, now.Add(time.Hour))}},
 	}
 	for _, c := range badCases {
-		res := doRequest(t, base, "GET", "/me", nil, c.headers)
+		res := doRequest(t, base, "GET", "/api/v1/me", nil, c.headers)
 		if res.Status != 401 || res.Code != 1002 {
 			t.Fatalf("me %s: status=%d code=%d", c.name, res.Status, res.Code)
 		}
@@ -368,7 +358,7 @@ func TestConcurrentRegisterSameUsername(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			res, err := request(base, "POST", "/register", map[string]any{"username": username, "password": password}, nil)
+			res, err := request(base, "POST", "/api/v1/register", map[string]any{"username": username, "password": password}, nil)
 			if err != nil {
 				res = result{Code: -1}
 			}
@@ -403,11 +393,11 @@ func TestConcurrentRegisterSameUsername(t *testing.T) {
 // registerAndLogin 注册并登录用户，返回 (access_token, sid)。
 func registerAndLogin(t *testing.T, base, username, password string) (string, string) {
 	t.Helper()
-	reg := doRequest(t, base, "POST", "/register", map[string]any{"username": username, "password": password}, nil)
+	reg := doRequest(t, base, "POST", "/api/v1/register", map[string]any{"username": username, "password": password}, nil)
 	if reg.Status != 200 || reg.Code != 0 {
 		t.Fatalf("register %s: status=%d code=%d", username, reg.Status, reg.Code)
 	}
-	login := doRequest(t, base, "POST", "/login", map[string]any{"username": username, "password": password}, nil)
+	login := doRequest(t, base, "POST", "/api/v1/login", map[string]any{"username": username, "password": password}, nil)
 	if login.Status != 200 || login.Code != 0 {
 		t.Fatalf("login %s: status=%d code=%d", username, login.Status, login.Code)
 	}
@@ -423,7 +413,7 @@ func TestLogoutRevokesSessionThenMe401(t *testing.T) {
 	base := setupIAMServer(t)
 	token, sid := registerAndLogin(t, base, "alice", "password123")
 
-	lo := doRequest(t, base, "POST", "/logout", nil, map[string]string{"Authorization": "Bearer " + token})
+	lo := doRequest(t, base, "POST", "/api/v1/logout", nil, map[string]string{"Authorization": "Bearer " + token})
 	if lo.Status != 200 || lo.Code != 0 {
 		t.Fatalf("logout: status=%d code=%d", lo.Status, lo.Code)
 	}
@@ -440,7 +430,7 @@ func TestLogoutRevokesSessionThenMe401(t *testing.T) {
 		t.Fatalf("expected session key retained with TTL>0 after logout, got %d", ttl)
 	}
 
-	me := doRequest(t, base, "GET", "/me", nil, map[string]string{"Authorization": "Bearer " + token})
+	me := doRequest(t, base, "GET", "/api/v1/me", nil, map[string]string{"Authorization": "Bearer " + token})
 	if me.Status != 401 || me.Code != 1002 {
 		t.Fatalf("me after logout: status=%d code=%d", me.Status, me.Code)
 	}
@@ -455,13 +445,13 @@ func TestLogoutIdempotent(t *testing.T) {
 	token, _ := registerAndLogin(t, base, "alice", "password123")
 
 	for i := 0; i < 2; i++ {
-		lo := doRequest(t, base, "POST", "/logout", nil, map[string]string{"Authorization": "Bearer " + token})
+		lo := doRequest(t, base, "POST", "/api/v1/logout", nil, map[string]string{"Authorization": "Bearer " + token})
 		if lo.Status != 200 || lo.Code != 0 {
 			t.Fatalf("logout #%d: status=%d code=%d", i+1, lo.Status, lo.Code)
 		}
 	}
 
-	me := doRequest(t, base, "GET", "/me", nil, map[string]string{"Authorization": "Bearer " + token})
+	me := doRequest(t, base, "GET", "/api/v1/me", nil, map[string]string{"Authorization": "Bearer " + token})
 	if me.Status != 401 || me.Code != 1002 {
 		t.Fatalf("me after repeated logout: status=%d code=%d", me.Status, me.Code)
 	}
@@ -470,7 +460,7 @@ func TestLogoutIdempotent(t *testing.T) {
 // TestLogoutRequiresToken 覆盖 AC-006：无 token 访问 /logout 返回 401。
 func TestLogoutRequiresToken(t *testing.T) {
 	base := setupIAMServer(t)
-	lo := doRequest(t, base, "POST", "/logout", nil, nil)
+	lo := doRequest(t, base, "POST", "/api/v1/logout", nil, nil)
 	if lo.Status != 401 || lo.Code != 1002 {
 		t.Fatalf("logout without token: status=%d code=%d", lo.Status, lo.Code)
 	}
@@ -482,13 +472,13 @@ func TestLogoutDoesNotAffectOtherSessions(t *testing.T) {
 	tokenA, _ := registerAndLogin(t, base, "alice", "password123")
 	tokenB, _ := registerAndLogin(t, base, "bob", "password123")
 
-	doRequest(t, base, "POST", "/logout", nil, map[string]string{"Authorization": "Bearer " + tokenA})
+	doRequest(t, base, "POST", "/api/v1/logout", nil, map[string]string{"Authorization": "Bearer " + tokenA})
 
-	meA := doRequest(t, base, "GET", "/me", nil, map[string]string{"Authorization": "Bearer " + tokenA})
+	meA := doRequest(t, base, "GET", "/api/v1/me", nil, map[string]string{"Authorization": "Bearer " + tokenA})
 	if meA.Status != 401 || meA.Code != 1002 {
 		t.Fatalf("me with revoked tokenA: status=%d code=%d", meA.Status, meA.Code)
 	}
-	meB := doRequest(t, base, "GET", "/me", nil, map[string]string{"Authorization": "Bearer " + tokenB})
+	meB := doRequest(t, base, "GET", "/api/v1/me", nil, map[string]string{"Authorization": "Bearer " + tokenB})
 	if meB.Status != 200 || meB.Code != 0 {
 		t.Fatalf("me with independent tokenB: status=%d code=%d", meB.Status, meB.Code)
 	}
@@ -507,7 +497,7 @@ func TestSessionMissingTokenReturns401(t *testing.T) {
 		t.Fatalf("del session: %v", err)
 	}
 
-	me := doRequest(t, base, "GET", "/me", nil, map[string]string{"Authorization": "Bearer " + token})
+	me := doRequest(t, base, "GET", "/api/v1/me", nil, map[string]string{"Authorization": "Bearer " + token})
 	if me.Status != 401 || me.Code != 1002 {
 		t.Fatalf("me with missing session: status=%d code=%d", me.Status, me.Code)
 	}
@@ -523,7 +513,7 @@ func TestTokenWithoutSidReturns401(t *testing.T) {
 
 	now := time.Now()
 	noSid := signToken(t, testJWTSecret, "1", auth.Issuer, now, now.Add(time.Hour))
-	me := doRequest(t, base, "GET", "/me", nil, map[string]string{"Authorization": "Bearer " + noSid})
+	me := doRequest(t, base, "GET", "/api/v1/me", nil, map[string]string{"Authorization": "Bearer " + noSid})
 	if me.Status != 401 || me.Code != 1002 {
 		t.Fatalf("me with sid-less token: status=%d code=%d", me.Status, me.Code)
 	}
@@ -535,7 +525,7 @@ func TestUnknownSidTokenReturns401(t *testing.T) {
 	registerAndLogin(t, base, "alice", "password123")
 
 	token := signTokenWithSid(t, testJWTSecret, "1", "deadbeefdeadbeefdeadbeefdeadbeef")
-	me := doRequest(t, base, "GET", "/me", nil, map[string]string{"Authorization": "Bearer " + token})
+	me := doRequest(t, base, "GET", "/api/v1/me", nil, map[string]string{"Authorization": "Bearer " + token})
 	if me.Status != 401 || me.Code != 1002 {
 		t.Fatalf("me with unknown sid: status=%d code=%d", me.Status, me.Code)
 	}
@@ -548,7 +538,7 @@ func TestLogoutIgnoresClientSid(t *testing.T) {
 	tokenB, sidB := registerAndLogin(t, base, "bob", "password123")
 
 	// 请求体携带 bob 的 sid，但应被忽略，仍只撤销 alice（tokenA）自己的会话。
-	lo := doRequest(t, base, "POST", "/logout", map[string]any{"sid": sidB}, map[string]string{"Authorization": "Bearer " + tokenA})
+	lo := doRequest(t, base, "POST", "/api/v1/logout", map[string]any{"sid": sidB}, map[string]string{"Authorization": "Bearer " + tokenA})
 	if lo.Status != 200 || lo.Code != 0 {
 		t.Fatalf("logout with body sid: status=%d code=%d", lo.Status, lo.Code)
 	}
@@ -559,7 +549,7 @@ func TestLogoutIgnoresClientSid(t *testing.T) {
 	if sf := sessionFields(t, sidB); sf["revoked"] != "0" {
 		t.Fatalf("expected sidB not revoked, got %q", sf["revoked"])
 	}
-	meB := doRequest(t, base, "GET", "/me", nil, map[string]string{"Authorization": "Bearer " + tokenB})
+	meB := doRequest(t, base, "GET", "/api/v1/me", nil, map[string]string{"Authorization": "Bearer " + tokenB})
 	if meB.Status != 200 || meB.Code != 0 {
 		t.Fatalf("me with tokenB after logoutA: status=%d code=%d", meB.Status, meB.Code)
 	}
@@ -575,7 +565,7 @@ func TestRedisWrongTypeFailClosed(t *testing.T) {
 		t.Fatalf("set wrong type: %v", err)
 	}
 
-	me := doRequest(t, base, "GET", "/me", nil, map[string]string{"Authorization": "Bearer " + token})
+	me := doRequest(t, base, "GET", "/api/v1/me", nil, map[string]string{"Authorization": "Bearer " + token})
 	if me.Status != 401 || me.Code != 1002 {
 		t.Fatalf("me with redis error: expected fail-closed 401, got status=%d code=%d", me.Status, me.Code)
 	}
@@ -596,7 +586,7 @@ func TestSessionTTLExpiryReturns401(t *testing.T) {
 		t.Fatalf("expected session key expired (exists=0), got n=%d err=%v", n, err)
 	}
 
-	me := doRequest(t, base, "GET", "/me", nil, map[string]string{"Authorization": "Bearer " + token})
+	me := doRequest(t, base, "GET", "/api/v1/me", nil, map[string]string{"Authorization": "Bearer " + token})
 	if me.Status != 401 || me.Code != 1002 {
 		t.Fatalf("me after TTL expiry: status=%d code=%d", me.Status, me.Code)
 	}
@@ -614,7 +604,7 @@ func TestConcurrentLogoutSameToken(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			res, err := request(base, "POST", "/logout", nil, map[string]string{"Authorization": "Bearer " + token})
+			res, err := request(base, "POST", "/api/v1/logout", nil, map[string]string{"Authorization": "Bearer " + token})
 			if err != nil {
 				res = result{Code: -1}
 			}

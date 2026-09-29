@@ -4,7 +4,7 @@ import "github.com/gogf/gf/v2/frame/g"
 
 // RegisterReq 用户注册请求。
 type RegisterReq struct {
-	g.Meta   `path:"/register" method:"post" tags:"IAM" summary:"注册新用户"`
+	g.Meta   `path:"/api/v1/register" method:"post" tags:"IAM" summary:"注册新用户"`
 	Username string `json:"username" dc:"用户名，3~24 位大小写字母或数字"`
 	Password string `json:"password" dc:"密码，8~24 位"`
 }
@@ -17,7 +17,7 @@ type RegisterRes struct {
 
 // LoginReq 用户登录请求。
 type LoginReq struct {
-	g.Meta   `path:"/login" method:"post" tags:"IAM" summary:"用户名密码登录"`
+	g.Meta   `path:"/api/v1/login" method:"post" tags:"IAM" summary:"用户名密码登录"`
 	Username string `json:"username" dc:"用户名"`
 	Password string `json:"password" dc:"密码"`
 }
@@ -31,7 +31,7 @@ type LoginRes struct {
 
 // MeReq 获取当前登录用户请求。
 type MeReq struct {
-	g.Meta `path:"/me" method:"get" tags:"IAM" summary:"获取当前登录用户"`
+	g.Meta `path:"/api/v1/me" method:"get" tags:"IAM" summary:"获取当前登录用户"`
 }
 
 // MeRes 获取当前登录用户响应。
@@ -42,7 +42,7 @@ type MeRes struct {
 
 // LogoutReq 登出当前会话请求。sid 来自当前 token，不接受客户端指定。
 type LogoutReq struct {
-	g.Meta `path:"/logout" method:"post" tags:"IAM" summary:"登出当前会话"`
+	g.Meta `path:"/api/v1/logout" method:"post" tags:"IAM" summary:"登出当前会话"`
 }
 
 // LogoutRes 登出当前会话响应（无业务字段，成功时 data 为 null）。
