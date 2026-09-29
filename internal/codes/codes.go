@@ -27,6 +27,16 @@ const (
 	CodeUsernameExists     Code = 2001 // 用户名已存在 → 409
 	CodeInvalidCredentials Code = 2002 // 用户名或密码错误 → 401
 
+	// 后台管理员身份与 RBAC（IAM 段扩展）。
+	CodeAdminNotFound          Code = 2003 // 管理员不存在 → 404
+	CodeAdminUsernameExists    Code = 2004 // 管理员用户名已存在 → 409
+	CodeSuperAdminProtected    Code = 2005 // 超级管理员受保护 → 403
+	CodeSelfOperationForbidden Code = 2006 // 不能操作自身 → 403
+	CodeRoleNotFound           Code = 2007 // 角色不存在 → 404
+	CodeRoleNameExists         Code = 2008 // 角色名已存在 → 409
+	CodePermissionNotFound     Code = 2009 // 权限不存在 → 404
+	CodePermissionCodeExists   Code = 2010 // 权限 code 已存在 → 409
+
 	// 商品分类域（Category）3000-3999。
 	CodeCategoryNotFound      Code = 3001 // 分类不存在 → 404
 	CodeCategoryNameExists    Code = 3002 // 同级重名 → 409
@@ -41,19 +51,27 @@ type codeInfo struct {
 }
 
 var codeTable = map[Code]codeInfo{
-	CodeOK:                    {http.StatusOK, "OK"},
-	CodeInternalError:         {http.StatusInternalServerError, "内部错误"},
-	CodeInvalidArgument:       {http.StatusBadRequest, "参数错误"},
-	CodeUnauthorized:          {http.StatusUnauthorized, "未授权"},
-	CodeForbidden:             {http.StatusForbidden, "禁止访问"},
-	CodeNotFound:              {http.StatusNotFound, "未找到"},
-	CodeServiceUnavailable:    {http.StatusServiceUnavailable, "服务不可用"},
-	CodeUsernameExists:        {http.StatusConflict, "用户名已存在"},
-	CodeInvalidCredentials:    {http.StatusUnauthorized, "用户名或密码错误"},
-	CodeCategoryNotFound:      {http.StatusNotFound, "分类不存在"},
-	CodeCategoryNameExists:    {http.StatusConflict, "同级重名"},
-	CodeCategoryHasChildren:   {http.StatusConflict, "有子分类不能删除"},
-	CodeCategoryInvalidParent: {http.StatusBadRequest, "父分类非法"},
+	CodeOK:                     {http.StatusOK, "OK"},
+	CodeInternalError:          {http.StatusInternalServerError, "内部错误"},
+	CodeInvalidArgument:        {http.StatusBadRequest, "参数错误"},
+	CodeUnauthorized:           {http.StatusUnauthorized, "未授权"},
+	CodeForbidden:              {http.StatusForbidden, "禁止访问"},
+	CodeNotFound:               {http.StatusNotFound, "未找到"},
+	CodeServiceUnavailable:     {http.StatusServiceUnavailable, "服务不可用"},
+	CodeUsernameExists:         {http.StatusConflict, "用户名已存在"},
+	CodeInvalidCredentials:     {http.StatusUnauthorized, "用户名或密码错误"},
+	CodeAdminNotFound:          {http.StatusNotFound, "管理员不存在"},
+	CodeAdminUsernameExists:    {http.StatusConflict, "管理员用户名已存在"},
+	CodeSuperAdminProtected:    {http.StatusForbidden, "超级管理员受保护"},
+	CodeSelfOperationForbidden: {http.StatusForbidden, "不能操作自身"},
+	CodeRoleNotFound:           {http.StatusNotFound, "角色不存在"},
+	CodeRoleNameExists:         {http.StatusConflict, "角色名已存在"},
+	CodePermissionNotFound:     {http.StatusNotFound, "权限不存在"},
+	CodePermissionCodeExists:   {http.StatusConflict, "权限 code 已存在"},
+	CodeCategoryNotFound:       {http.StatusNotFound, "分类不存在"},
+	CodeCategoryNameExists:     {http.StatusConflict, "同级重名"},
+	CodeCategoryHasChildren:    {http.StatusConflict, "有子分类不能删除"},
+	CodeCategoryInvalidParent:  {http.StatusBadRequest, "父分类非法"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。

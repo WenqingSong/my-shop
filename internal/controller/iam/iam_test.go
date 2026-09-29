@@ -24,7 +24,10 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 )
 
-const testJWTSecret = "test-secret-0123456789-0123456789-0123456789" // >= 32 bytes
+const (
+	testJWTSecret     = "test-secret-0123456789-0123456789-0123456789" // >= 32 bytes
+	testAdminPassword = "test-admin-password-123"
+)
 
 type result struct {
 	Status  int
@@ -165,6 +168,8 @@ func sessionTTL(t *testing.T, sid string) int64 {
 func setupIAMServer(t *testing.T) string {
 	t.Helper()
 	t.Setenv("AUTH_JWT_SECRET", testJWTSecret)
+	// Bootstrap 会执行超级管理员 seed：提供测试密码，避免「未配置密码」触发启动 fail-fast。
+	t.Setenv("ADMIN_SUPER_PASSWORD", testAdminPassword)
 
 	ctx := context.Background()
 	if err := boot.Bootstrap(ctx); err != nil {
