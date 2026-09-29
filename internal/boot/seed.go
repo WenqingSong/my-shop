@@ -18,6 +18,51 @@ const (
 	adminStatusEnabled = 1
 )
 
+// permissionSeed 是权限 code 与展示名的清单（细粒度「资源:动作」）。
+type permissionSeed struct {
+	Code string
+	Name string
+}
+
+// seedPermissionList 是启动时幂等写入的 16 个标准权限（按 code 唯一）。
+var seedPermissionList = []permissionSeed{
+	{Code: "category:create", Name: "创建分类"},
+	{Code: "category:update", Name: "更新分类"},
+	{Code: "category:delete", Name: "删除分类"},
+	{Code: "admin:create", Name: "创建管理员"},
+	{Code: "admin:disable", Name: "禁用管理员"},
+	{Code: "admin:delete", Name: "删除管理员"},
+	{Code: "admin:assign_role", Name: "分配管理员角色"},
+	{Code: "role:create", Name: "创建角色"},
+	{Code: "role:list", Name: "查看角色"},
+	{Code: "role:update", Name: "更新角色"},
+	{Code: "role:delete", Name: "删除角色"},
+	{Code: "role:assign_permission", Name: "分配角色权限"},
+	{Code: "permission:create", Name: "创建权限"},
+	{Code: "permission:list", Name: "查看权限"},
+	{Code: "permission:update", Name: "更新权限"},
+	{Code: "permission:delete", Name: "删除权限"},
+}
+
+// seedPermissions 幂等写入标准权限：已存在（code 唯一）则跳过。
+// 并发场景下「先查再写」存在竞争窗口，真正兜底是 permissions.code 唯一约束：
+// 并发 insert 命中 1062 视为「已被其他实例创建」，跳过。
+func seedPermissions(ctx context.Context) error {
+	for _, p := range seedPermissionList {
+		_, err := g.DB().Model("permissions").Ctx(ctx).Data(g.Map{
+			"code": p.Code, "name": p.Name,
+		}).Insert()
+		if err != nil {
+			if isDuplicateKeyError(err) {
+				continue
+			}
+			return gerror.Wrapf(err, "seed 权限 %s", p.Code)
+		}
+	}
+	glog.Info(ctx, "权限 seed 已就绪")
+	return nil
+}
+
 // seedSuperAdmin 幂等创建唯一超级管理员（is_super=1）：
 // 已存在则跳过且不覆盖密码；不存在且未配置初始密码时启动 fail-fast。
 //

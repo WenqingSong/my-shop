@@ -136,7 +136,10 @@ func Bootstrap(ctx context.Context) error {
 	if err := ensureTables(ctx); err != nil {
 		return err
 	}
-	return seedSuperAdmin(ctx)
+	if err := seedSuperAdmin(ctx); err != nil {
+		return err
+	}
+	return seedPermissions(ctx)
 }
 
 // ensureTables 幂等创建业务所需的数据表。

@@ -148,9 +148,11 @@ func createAdminSession(t *testing.T, sid string, adminID int64) {
 func grantPermission(t *testing.T, adminID int64, code string) {
 	t.Helper()
 	ctx := context.Background()
-	pid, err := g.DB().Model("permissions").Ctx(ctx).Data(g.Map{"code": code, "name": code}).InsertAndGetId()
+	// 权限可能已被启动 seed（boot.seedPermissions）幂等创建，这里「先查后插、并发冲突则复用」，
+	// 避免与并行测试包中其他 Bootstrap 的 seed 在 permissions.code 唯一约束上冲突。
+	pid, err := ensurePermissionID(t, ctx, code)
 	if err != nil {
-		t.Fatalf("insert permission: %v", err)
+		t.Fatalf("ensure permission: %v", err)
 	}
 	rid, err := g.DB().Model("roles").Ctx(ctx).Data(g.Map{"name": "role-" + code}).InsertAndGetId()
 	if err != nil {
@@ -162,6 +164,31 @@ func grantPermission(t *testing.T, adminID int64, code string) {
 	if _, err := g.DB().Model("admin_roles").Ctx(ctx).Data(g.Map{"admin_id": adminID, "role_id": rid}).Insert(); err != nil {
 		t.Fatalf("insert admin_role: %v", err)
 	}
+}
+
+// ensurePermissionID 返回指定 code 的权限 id：已存在则复用，不存在则创建。
+// 并发下创建命中唯一约束（1062）时重查复用，保证在共享数据库 + 并行测试包下幂等。
+func ensurePermissionID(t *testing.T, ctx context.Context, code string) (int64, error) {
+	t.Helper()
+	if v, err := g.DB().Model("permissions").Ctx(ctx).Where("code", code).Value("id"); err != nil {
+		return 0, err
+	} else if v != nil && !v.IsEmpty() {
+		return v.Int64(), nil
+	}
+
+	pid, err := g.DB().Model("permissions").Ctx(ctx).Data(g.Map{"code": code, "name": code}).InsertAndGetId()
+	if err == nil {
+		return pid, nil
+	}
+	// 并发下被其他包的 seed 抢先创建，重查复用。
+	v, err2 := g.DB().Model("permissions").Ctx(ctx).Where("code", code).Value("id")
+	if err2 != nil {
+		return 0, err2
+	}
+	if v == nil || v.IsEmpty() {
+		return 0, err
+	}
+	return v.Int64(), nil
 }
 
 func authHeader(token string) map[string]string {
