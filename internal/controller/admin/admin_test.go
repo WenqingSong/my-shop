@@ -102,6 +102,11 @@ func setupAdminServer(t *testing.T) (base, superToken string) {
 	t.Setenv("ADMIN_SUPER_PASSWORD", testAdminPassword)
 
 	ctx := context.Background()
+	// 先 Bootstrap 一次确保 RBAC 表存在（幂等建表），再清空以测试密码重建超级管理员。
+	// 避免在全新数据库（每日重置）上「先删后建」因表不存在而报 1146。
+	if err := boot.Bootstrap(ctx); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
 	// 清空全部 RBAC 表，保证超级管理员由 Bootstrap 以测试密码重新创建（幂等，不覆盖已有密码）。
 	for _, table := range []string{"admin_roles", "role_permissions", "roles", "permissions", "admins"} {
 		if _, err := g.DB().Exec(ctx, "DELETE FROM "+table); err != nil {

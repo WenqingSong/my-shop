@@ -40,13 +40,11 @@ var (
 				group.GET("/categories", categoriesCtrl.List)
 				group.GET("/categories/:id", categoriesCtrl.Detail)
 
-				// 受保护接口：/me 与分类写操作需要 Bearer Token 认证 + 会话有效性校验。
+				// 受保护接口：/me 需要 Bearer Token 认证 + 会话有效性校验（前台用户侧）。
+				// 分类写操作已迁移到后台管理（AdminAuth + RequirePermission），见 RegisterAdminRoutes。
 				group.Group("/", func(protected *ghttp.RouterGroup) {
 					protected.Middleware(middleware.Auth)
 					protected.GET("/me", iamCtrl.Me)
-					protected.POST("/categories", categoriesCtrl.Create)
-					protected.PUT("/categories/:id", categoriesCtrl.Update)
-					protected.DELETE("/categories/:id", categoriesCtrl.Delete)
 				})
 
 				// 受保护接口：/logout 仅验签（幂等撤销，即使 session 已撤销/缺失也能到达 handler）。
@@ -65,7 +63,8 @@ var (
 
 // RegisterAdminRoutes 挂载后台管理员身份与 RBAC 路由：/admin/login（公开）、
 // /admin/logout（仅验签）以及 /admin/me 与 admins/roles/permissions 管理接口
-// （AdminAuth + RequirePermission 双层保护）。
+// （AdminAuth + RequirePermission 双层保护）；同时承载分类写接口的迁移挂载
+// （/categories POST/PUT/DELETE，由前台 Auth 迁至 AdminAuth + RequirePermission）。
 //
 // 抽为独立函数供生产入口与集成测试复用，避免安全路由在生产与测试两处维护出现漂移。
 //
@@ -74,6 +73,7 @@ var (
 // /admin/admin/... 之类的重复前缀。
 func RegisterAdminRoutes(group *ghttp.RouterGroup) {
 	adminCtrl := adminController.NewV1()
+	categoriesCtrl := categories.NewV1()
 	// 公开接口：管理员登录（无需 token）。不存在任何公开注册入口。
 	group.POST("/admin/login", adminCtrl.Login)
 
@@ -115,5 +115,10 @@ func RegisterAdminRoutes(group *ghttp.RouterGroup) {
 		require("permission:list").GET("/admin/permissions", adminCtrl.ListPermission)
 		require("permission:update").PUT("/admin/permissions/:id", adminCtrl.UpdatePermission)
 		require("permission:delete").DELETE("/admin/permissions/:id", adminCtrl.DeletePermission)
+
+		// 分类写接口迁移：由前台 Auth（仅登录）迁至 AdminAuth + RequirePermission。
+		require("category:create").POST("/categories", categoriesCtrl.Create)
+		require("category:update").PUT("/categories/:id", categoriesCtrl.Update)
+		require("category:delete").DELETE("/categories/:id", categoriesCtrl.Delete)
 	})
 }

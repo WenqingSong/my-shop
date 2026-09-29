@@ -18,13 +18,17 @@ import (
 
 	"cnb.cool/go-cloud-devops/my-shop/internal/auth"
 	"cnb.cool/go-cloud-devops/my-shop/internal/boot"
+	"cnb.cool/go-cloud-devops/my-shop/internal/cmd"
 	categoriesController "cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
-	iamController "cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 )
 
-const testJWTSecret = "test-secret-0123456789-0123456789-0123456789" // >= 32 bytes
+const (
+	testJWTSecret     = "test-secret-0123456789-0123456789-0123456789" // >= 32 bytes
+	testAdminPassword = "test-admin-password-123"
+	testSuperUsername = "admin"
+)
 
 type apiResult struct {
 	Status  int
@@ -111,14 +115,28 @@ func assertOK(t *testing.T, res apiResult, op string) {
 	}
 }
 
-// setupCategoriesServer 配置数据库、幂等建表、清空 categories 并启动带中间件与路由的测试服务器。
+// setupCategoriesServer 清空 RBAC 表后 Bootstrap（以测试密码重建超级管理员）、清空 categories，
+// 挂载真实后台路由（复用 cmd.RegisterAdminRoutes，含 /admin/login 与分类写接口迁移挂载），
+// 返回 base 与超级管理员 token。分类写接口现由 AdminAuth + RequirePermission 保护，
+// 因此用超级管理员 token（IsSuper 放行）驱动写操作。
 func setupCategoriesServer(t *testing.T) (base, token string) {
 	t.Helper()
 	t.Setenv("AUTH_JWT_SECRET", testJWTSecret)
+	t.Setenv("ADMIN_SUPER_PASSWORD", testAdminPassword)
 
 	ctx := context.Background()
+	// 先 Bootstrap 一次确保 RBAC 表存在（幂等建表），再清空以测试密码重建超级管理员。
 	if err := boot.Bootstrap(ctx); err != nil {
 		t.Fatalf("bootstrap: %v", err)
+	}
+	// 清空全部 RBAC 表，保证超级管理员由 Bootstrap 以测试密码重新创建（幂等，不覆盖已有密码）。
+	for _, table := range []string{"admin_roles", "role_permissions", "roles", "permissions", "admins"} {
+		if _, err := g.DB().Exec(ctx, "DELETE FROM "+table); err != nil {
+			t.Fatalf("clean %s: %v", table, err)
+		}
+	}
+	if err := boot.Bootstrap(ctx); err != nil {
+		t.Fatalf("rebootstrap: %v", err)
 	}
 	if _, err := g.DB().Exec(ctx, "DELETE FROM categories"); err != nil {
 		t.Fatalf("clean categories: %v", err)
@@ -129,19 +147,12 @@ func setupCategoriesServer(t *testing.T) (base, token string) {
 	s.SetAddr(":0")
 	s.Group("/", func(group *ghttp.RouterGroup) {
 		group.Middleware(middleware.Response)
-		iamCtrl := iamController.NewV1()
-		group.POST("/register", iamCtrl.Register)
-		group.POST("/login", iamCtrl.Login)
-
 		catCtrl := categoriesController.NewV1()
+		// 公开接口：分类树形列表与详情（无需 token）。
 		group.GET("/categories", catCtrl.List)
 		group.GET("/categories/:id", catCtrl.Detail)
-		group.Group("/", func(protected *ghttp.RouterGroup) {
-			protected.Middleware(middleware.Auth)
-			protected.POST("/categories", catCtrl.Create)
-			protected.PUT("/categories/:id", catCtrl.Update)
-			protected.DELETE("/categories/:id", catCtrl.Delete)
-		})
+		// 后台路由：/admin/login、管理接口与分类写接口迁移挂载。
+		cmd.RegisterAdminRoutes(group)
 	})
 	s.SetDumpRouterMap(false)
 	s.Start()
@@ -149,11 +160,42 @@ func setupCategoriesServer(t *testing.T) (base, token string) {
 
 	time.Sleep(100 * time.Millisecond)
 
-	tok, err := auth.GenerateWithSecret([]byte(testJWTSecret), 1)
-	if err != nil {
-		t.Fatalf("generate token: %v", err)
+	base = fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort())
+	token = loginAdmin(t, base, testSuperUsername, testAdminPassword)
+	return base, token
+}
+
+// loginAdmin 经 /admin/login 登录取管理员 token。
+func loginAdmin(t *testing.T, base, username, password string) string {
+	t.Helper()
+	res := doRequest(t, base, "POST", "/admin/login", map[string]any{"username": username, "password": password}, nil)
+	if res.Status != 200 || res.Code != 0 {
+		t.Fatalf("login %s: status=%d code=%d msg=%q", username, res.Status, res.Code, res.Message)
 	}
-	return fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort()), tok
+	var d struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.Unmarshal(res.Data, &d); err != nil {
+		t.Fatalf("unmarshal login res: %v", err)
+	}
+	if d.AccessToken == "" {
+		t.Fatalf("login %s: empty access_token", username)
+	}
+	return d.AccessToken
+}
+
+// createAdmin 经 /admin/admins 创建普通管理员，返回其 id。
+func createAdmin(t *testing.T, base, token, username, password string) int64 {
+	t.Helper()
+	res := doRequest(t, base, "POST", "/admin/admins", map[string]any{"username": username, "password": password}, map[string]string{"Authorization": "Bearer " + token})
+	assertOK(t, res, "create admin "+username)
+	var d struct {
+		Id int64 `json:"id"`
+	}
+	if err := json.Unmarshal(res.Data, &d); err != nil {
+		t.Fatalf("unmarshal create admin res: %v", err)
+	}
+	return d.Id
 }
 
 func dbCount(t *testing.T, where map[string]any) int {
@@ -426,4 +468,44 @@ func TestConcurrentCreateSameName(t *testing.T) {
 	if c := dbCount(t, map[string]any{"parent_id": 0, "name": name}); c != 1 {
 		t.Fatalf("expected 1 row for %q, got %d", name, c)
 	}
+}
+
+// TestCategoryWriteAuthorization 覆盖分类写接口迁移后的授权边界（INV-004/005）：
+// 无 token → 401；前台用户 token → 403（type 隔离）；无 category 权限的普通管理员 → 403 且无写入；
+// 超级管理员 → 成功（IsSuper 放行）。用于锁定「AdminAuth + RequirePermission」已真正挂载到分类写接口。
+func TestCategoryWriteAuthorization(t *testing.T) {
+	base, superToken := setupCategoriesServer(t)
+	superH := map[string]string{"Authorization": "Bearer " + superToken}
+
+	// 无 token 写 → 401。
+	res := doRequest(t, base, "POST", "/categories", map[string]any{"name": "x"}, nil)
+	if res.Status != 401 || res.Code != 1002 {
+		t.Fatalf("no token: status=%d code=%d", res.Status, res.Code)
+	}
+
+	// 前台用户 token 写 → 403（type=user 被 AdminAuth 拒绝）。
+	userToken, err := auth.GenerateWithSecret([]byte(testJWTSecret), auth.TypeUser, 1, "deadbeefdeadbeefdeadbeefdeadbeef")
+	if err != nil {
+		t.Fatalf("generate user token: %v", err)
+	}
+	res = doRequest(t, base, "POST", "/categories", map[string]any{"name": "x"}, map[string]string{"Authorization": "Bearer " + userToken})
+	if res.Status != 403 || res.Code != 1003 {
+		t.Fatalf("user token: status=%d code=%d", res.Status, res.Code)
+	}
+
+	// 无 category 权限的普通管理员写 → 403 且无写入。
+	createAdmin(t, base, superToken, "catwriter", "catwriterpass123")
+	writerToken := loginAdmin(t, base, "catwriter", "catwriterpass123")
+	before := dbCount(t, nil)
+	res = doRequest(t, base, "POST", "/categories", map[string]any{"parent_id": 0, "name": "越权分类"}, map[string]string{"Authorization": "Bearer " + writerToken})
+	if res.Status != 403 || res.Code != 1003 {
+		t.Fatalf("no-perm admin: status=%d code=%d", res.Status, res.Code)
+	}
+	if after := dbCount(t, nil); after != before {
+		t.Fatalf("no write expected on 403, categories %d -> %d", before, after)
+	}
+
+	// 超级管理员写 → 成功。
+	res = doRequest(t, base, "POST", "/categories", map[string]any{"parent_id": 0, "name": "手机"}, superH)
+	assertOK(t, res, "super create category")
 }
