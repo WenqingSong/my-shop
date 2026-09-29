@@ -2,6 +2,7 @@ package boot
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	_ "github.com/gogf/gf/contrib/drivers/mysql/v2"
@@ -97,5 +98,34 @@ func TestSeedSuperAdminMissingPasswordFails(t *testing.T) {
 	}
 	if n := superAdminCount(t, ctx); n != 0 {
 		t.Fatalf("expected no super admin created on failure, got %d", n)
+	}
+}
+
+// TestSeedSuperAdminConcurrent 覆盖 INV-001/AC-001：并发 seed（模拟多实例同时启动）仅创建一个超级管理员，
+// 其余并发写命中唯一约束后按幂等跳过，不返回错误、不产生重复行。
+func TestSeedSuperAdminConcurrent(t *testing.T) {
+	t.Setenv("ADMIN_SUPER_PASSWORD", testSuperPassword)
+	ctx := setupAdminSeed(t)
+
+	const n = 8
+	errs := make(chan error, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- seedSuperAdmin(ctx)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent seed should be idempotent, got error: %v", err)
+		}
+	}
+	if got := superAdminCount(t, ctx); got != 1 {
+		t.Fatalf("expected exactly 1 super admin after concurrent seed, got %d", got)
 	}
 }

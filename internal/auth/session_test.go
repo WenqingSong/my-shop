@@ -40,6 +40,12 @@ func TestSessionKey(t *testing.T) {
 	}
 }
 
+func TestAdminSessionKey(t *testing.T) {
+	if got := AdminSessionKey("abc"); got != "iam:admin:session:abc" {
+		t.Fatalf("expected iam:admin:session:abc, got %q", got)
+	}
+}
+
 func TestSessionTTLDefault(t *testing.T) {
 	ttl, err := SessionTTL(context.Background())
 	if err != nil {

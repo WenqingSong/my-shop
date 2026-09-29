@@ -112,7 +112,7 @@ func (s *sIam) Login(ctx context.Context, req *v1.LoginReq) (*v1.LoginRes, error
 		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("写入会话: %w", err))
 	}
 
-	token, err := auth.Generate(ctx, user.ID, sid)
+	token, err := auth.Generate(ctx, auth.TypeUser, user.ID, sid)
 	if err != nil {
 		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("签发 access token: %w", err))
 	}

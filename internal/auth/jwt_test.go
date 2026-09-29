@@ -13,7 +13,7 @@ func testSecret() []byte {
 }
 
 func TestGenerateClaims(t *testing.T) {
-	token, err := GenerateWithSecret(testSecret(), 42, "sid-abc123")
+	token, err := GenerateWithSecret(testSecret(), TypeUser, 42, "sid-abc123")
 	if err != nil {
 		t.Fatalf("GenerateWithSecret: %v", err)
 	}
@@ -23,6 +23,9 @@ func TestGenerateClaims(t *testing.T) {
 	}
 	if claims.Subject != "42" {
 		t.Fatalf("expected sub %q, got %q", "42", claims.Subject)
+	}
+	if claims.Type != TypeUser {
+		t.Fatalf("expected type %q, got %q", TypeUser, claims.Type)
 	}
 	if claims.Sid != "sid-abc123" {
 		t.Fatalf("expected sid %q, got %q", "sid-abc123", claims.Sid)
@@ -38,8 +41,25 @@ func TestGenerateClaims(t *testing.T) {
 	}
 }
 
+func TestGenerateTypeAdmin(t *testing.T) {
+	token, err := GenerateWithSecret(testSecret(), TypeAdmin, 7, "sid-admin")
+	if err != nil {
+		t.Fatalf("GenerateWithSecret: %v", err)
+	}
+	claims, err := ParseWithSecret(testSecret(), token)
+	if err != nil {
+		t.Fatalf("ParseWithSecret: %v", err)
+	}
+	if claims.Type != TypeAdmin {
+		t.Fatalf("expected type %q, got %q", TypeAdmin, claims.Type)
+	}
+	if claims.Subject != "7" {
+		t.Fatalf("expected sub %q, got %q", "7", claims.Subject)
+	}
+}
+
 func TestParseRejectsWrongSecret(t *testing.T) {
-	token, err := GenerateWithSecret(testSecret(), 1, "sid-1")
+	token, err := GenerateWithSecret(testSecret(), TypeUser, 1, "sid-1")
 	if err != nil {
 		t.Fatalf("GenerateWithSecret: %v", err)
 	}

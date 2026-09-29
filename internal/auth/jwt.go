@@ -19,6 +19,11 @@ const (
 	ExpiresIn = 3600
 	// minSecretLength 是 JWT 签名密钥的最小长度（字节）。
 	minSecretLength = 32
+
+	// TypeUser 是前台用户 token 的类型标识。
+	TypeUser = "user"
+	// TypeAdmin 是后台管理员 token 的类型标识。
+	TypeAdmin = "admin"
 )
 
 // Claims 是 IAM 签发的 JWT 声明。
@@ -26,6 +31,8 @@ type Claims struct {
 	gojwt.RegisteredClaims
 	// Sid 是本次登录会话的唯一标识，作为 JWT 与 Redis session 之间的桥梁。
 	Sid string `json:"sid,omitempty"`
+	// Type 是 token 类型："user"（前台用户）或 "admin"（后台管理员）。
+	Type string `json:"type,omitempty"`
 }
 
 // Secret 读取并校验 JWT 签名密钥（auth.jwt.secret / AUTH_JWT_SECRET）。
@@ -45,22 +52,23 @@ func Secret(ctx context.Context) ([]byte, error) {
 	return []byte(secret), nil
 }
 
-// Generate 为指定用户签发含 sid 的 access token（密钥来自配置）。
-func Generate(ctx context.Context, userID int64, sid string) (string, error) {
+// Generate 为指定主体（用户或管理员，由 typ 区分）签发含 sid 的 access token（密钥来自配置）。
+func Generate(ctx context.Context, typ string, id int64, sid string) (string, error) {
 	secret, err := Secret(ctx)
 	if err != nil {
 		return "", err
 	}
-	return GenerateWithSecret(secret, userID, sid)
+	return GenerateWithSecret(secret, typ, id, sid)
 }
 
 // GenerateWithSecret 使用给定密钥签发含 sid 的 access token，便于单元测试。
-func GenerateWithSecret(secret []byte, userID int64, sid string) (string, error) {
+func GenerateWithSecret(secret []byte, typ string, id int64, sid string) (string, error) {
 	now := time.Now()
 	claims := Claims{
-		Sid: sid,
+		Sid:  sid,
+		Type: typ,
 		RegisteredClaims: gojwt.RegisteredClaims{
-			Subject:   strconv.FormatInt(userID, 10),
+			Subject:   strconv.FormatInt(id, 10),
 			Issuer:    Issuer,
 			IssuedAt:  gojwt.NewNumericDate(now),
 			ExpiresAt: gojwt.NewNumericDate(now.Add(ExpiresIn * time.Second)),

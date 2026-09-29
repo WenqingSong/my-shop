@@ -101,12 +101,15 @@ func userCount(t *testing.T, username string) int {
 
 func signToken(t *testing.T, secret, sub, iss string, iat, exp time.Time) string {
 	t.Helper()
-	claims := auth.Claims{RegisteredClaims: gojwt.RegisteredClaims{
-		Subject:   sub,
-		Issuer:    iss,
-		IssuedAt:  gojwt.NewNumericDate(iat),
-		ExpiresAt: gojwt.NewNumericDate(exp),
-	}}
+	claims := auth.Claims{
+		Type: auth.TypeUser,
+		RegisteredClaims: gojwt.RegisteredClaims{
+			Subject:   sub,
+			Issuer:    iss,
+			IssuedAt:  gojwt.NewNumericDate(iat),
+			ExpiresAt: gojwt.NewNumericDate(exp),
+		},
+	}
 	tok, err := gojwt.NewWithClaims(gojwt.SigningMethodHS256, claims).SignedString([]byte(secret))
 	if err != nil {
 		t.Fatalf("sign token: %v", err)
@@ -119,7 +122,8 @@ func signTokenWithSid(t *testing.T, secret, sub, sid string) string {
 	t.Helper()
 	now := time.Now()
 	claims := auth.Claims{
-		Sid: sid,
+		Sid:  sid,
+		Type: auth.TypeUser,
 		RegisteredClaims: gojwt.RegisteredClaims{
 			Subject:   sub,
 			Issuer:    auth.Issuer,
@@ -278,6 +282,9 @@ func TestIAMEndToEnd(t *testing.T) {
 	}
 	if claims.Subject != fmt.Sprintf("%d", aliceID) {
 		t.Fatalf("expected sub=%d, got %q", aliceID, claims.Subject)
+	}
+	if claims.Type != auth.TypeUser {
+		t.Fatalf("expected type=%q, got %q", auth.TypeUser, claims.Type)
 	}
 	if claims.Issuer != auth.Issuer {
 		t.Fatalf("expected iss=%q, got %q", auth.Issuer, claims.Issuer)
