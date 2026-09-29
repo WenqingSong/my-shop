@@ -16,6 +16,7 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/util/guid"
 
+	"cnb.cool/go-cloud-devops/my-shop/internal/auth"
 	"cnb.cool/go-cloud-devops/my-shop/internal/boot"
 	"cnb.cool/go-cloud-devops/my-shop/internal/cmd"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic"
