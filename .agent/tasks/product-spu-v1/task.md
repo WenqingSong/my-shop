@@ -11,7 +11,7 @@
 - 数据表：
   - `products`：`id`、`name`、`brand`、`category_id`、`price`、`main_image`、`detail`、`status`、`created_at`、`updated_at`；`price` 使用整数分（如 12.34 元 = 1234）。
   - `product_images`：`id`、`product_id`、`url`、`sort`、`created_at`；关系 `Product 1 — N ProductImage`。
-  - 不包含库存、SKU、销量字段。建表机制（迁移体系 vs 现有 `boot.Bootstrap` 幂等建表）见 Analyst Questions #1。
+  - 不包含库存、SKU、销量字段。建表经 `db-migration` 前置任务建立的 Migration 机制新增（不回退到 `boot.Bootstrap` 幂等建表）。
 - 商品状态机：状态固定 `draft` / `on_shelf` / `off_shelf`；创建统一为 `draft`，创建接口不能直接指定 `on_shelf`；合法迁移仅 `draft→on_shelf`、`on_shelf→off_shelf`、`off_shelf→on_shelf`；上下架必须经过独立状态迁移接口；并发迁移用条件 `UPDATE ... WHERE id=? AND status=?` + `RowsAffected` 判定，保证并发重复操作最多一次成功。
 - 后台写接口：
   - 创建（`product:create`）、更新（`product:update`）、上架（`product:on_shelf`）、下架（`product:off_shelf`）。
@@ -82,8 +82,8 @@
 - 分类模块已实现：`internal/logic/categories/categories.go` 有树形 CRUD；删除保护目前只检查“有子分类”（`CodeCategoryHasChildren` 3003），无商品关联检查；现有代码无独立“叶子分类判定”函数（只有 `maxLevel=3` 层级校验），SPU 叶子判定需新增。
 - 路由分离：`internal/cmd/routes_frontend.go`（公开路由）与 `routes_admin.go`（`AdminAuth` + `require(permission)`）在 `internal/cmd/cmd.go` 的 `s.Group("/")` 下注册，外层已挂 `middleware.Response`。商品前台路由挂 frontend、后台路由挂 admin。
 - 统一响应 `{code,message,data}`：`internal/middleware/response.go` 按业务错误码映射 HTTP 状态，客户端靠 `code` 判型。
-- 建表现状：`internal/boot/boot.go` 通过 `ensureTables` + `CREATE TABLE IF NOT EXISTS` 幂等建表（users/categories/admins/roles/permissions/admin_roles/role_permissions）。环境每日重置（CNB DinD）、数据不持久，表必须可重复创建。
-- 前置依赖声明与代码现实不一致（关键，见 Analyst Questions #1）：Owner 需求声明「`db-migration` 已完成，已建立带时间戳 Migration 机制、已移除 `boot.go` Schema 职责」，但当前代码（HEAD `2d9bb93`）中 `boot.go` 仍直接建表，全仓库搜索不到 migration 机制或文件，`.agent/tasks/` 下无 db-migration 任务，git 历史无 db-migration 提交；现有任务（categories-v1、admin-identity-rbac）均明确「沿用 `boot.Bootstrap` 幂等建表」。
+- 建表现状：`internal/boot/boot.go` 通过 `ensureTables` + `CREATE TABLE IF NOT EXISTS` 幂等建表（users/categories/admins/roles/permissions/admin_roles/role_permissions）。环境每日重置（CNB DinD）、数据不持久，表必须可重复创建。本任务不再扩展 `boot.go` 建表，改经 `db-migration` 前置任务建立的 Migration 机制（迁移文件）新增 `products`/`product_images`。
+- 建表机制（Analyst Question #1）已由 Owner 决策为方案 B：当前代码 `boot.go` 仍直接建表、全仓库无 migration 机制；Owner 于 2026-09-30 确认先由 Task Builder 新建 `db-migration` 前置任务（建立带时间戳 Migration 机制、迁移既有 7 张表），SPU 待其完成后经该机制新增 `products`/`product_images` 迁移，不回退到 `boot.go` 建表。
 
 Assumption：
 
@@ -93,7 +93,7 @@ Assumption：
 
 OPEN QUESTION（不阻塞任务创建，交 Analyst 分析、Owner 确认）：
 
-- 见下节 Analyst Questions，其中 #1（建表机制）会改变本任务 Scope 的实现基础，必须在 Coder 开始前由 Owner 决策。
+- 见下节 Analyst Questions。#1（建表机制）已由 Owner 决策为方案 B（先建 `db-migration` 前置任务），会改变本任务 Scope 的实现基础；本任务暂停，待 `db-migration` 完成后恢复。
 
 ## Verification
 
@@ -117,7 +117,7 @@ COMPLEX
 
 ## Analyst Questions
 
-1. **建表机制（阻塞项，需 Owner 决策）**：Owner 声明 `db-migration` 前置依赖已完成，但代码仍是 `boot.go` 幂等建表、无 migration 机制。本任务的数据表应 (A) 沿用现有 `boot.Bootstrap` 幂等 `CREATE TABLE IF NOT EXISTS` 建表（与 categories/admins 一致），还是 (B) 先补建带时间戳 Migration 机制再新增 `products`/`product_images` migration？方案 B 会显著扩大 Scope 并牵涉历史表迁移，需 Owner 明确。
+1. **建表机制（已决策为方案 B，阻塞项）**：Owner 于 2026-09-30 确认方案 B——先由 Task Builder 新建独立的 `db-migration` 前置任务（建立带时间戳 Migration 机制、迁移既有表），完成后 SPU 经该机制新增 `products`/`product_images` migration，不回退到 `boot.go` 建表。本任务据此暂停，待 `db-migration` 完成后恢复；届时确认迁移文件命名/机制后，更新本任务 contract 的「数据表」与「Allowed/Forbidden Changes」，重新交 Owner 确认。
 2. `status` 数据库存储映射（如 `0=draft`、`1=on_shelf`、`2=off_shelf`）与 API 出参形态（数字还是字符串）。
 3. 上下架 API 最终路径（如 `POST /admin/products/:id/on-shelf`、`POST /admin/products/:id/off-shelf`）及上下架请求/响应契约。
 4. `price` 最大允许值（整数分上限）。
@@ -137,7 +137,7 @@ Owner 已明确：本任务为 COMPLEX，contract 经 Analyst 固化并由 Owner
 
 - Base commit：`2d9bb938476bf9938c785abd72f95b7d0541b7f4`（分支 `feat/sku`，HEAD 为 `2d9bb93` 合并 MR #9）。
 - 任务开始时已有修改：无（working tree clean，`git status --short` 为空）。
-- 重叠修改的区分方式：本任务新增产物为 `.agent/tasks/product-spu-v1/`、`api/product*/`（或等价商品 API 包）、`internal/controller/product*/`、`internal/logic/product*/`、`internal/service` 商品接口、`internal/codes` 商品域扩展、`internal/boot` 建表/seed 扩展、`internal/cmd` 路由扩展及对应测试。当前工作区干净，无需要区分的既有修改。
+- 重叠修改的区分方式：本任务新增产物为 `.agent/tasks/product-spu-v1/`、`api/product*/`（或等价商品 API 包）、`internal/controller/product*/`、`internal/logic/product*/`、`internal/service` 商品接口、`internal/codes` 商品域扩展、migration 文件（`products`/`product_images`，经 db-migration 机制新增）、`internal/boot/seed.go` 权限 seed 扩展、`internal/cmd` 路由扩展及对应测试。当前工作区干净，无需要区分的既有修改。
 
 ## Initial Route
 
