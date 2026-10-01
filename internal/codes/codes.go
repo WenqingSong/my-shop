@@ -42,6 +42,16 @@ const (
 	CodeCategoryNameExists    Code = 3002 // 同级重名 → 409
 	CodeCategoryHasChildren   Code = 3003 // 有子分类不能删除 → 409
 	CodeCategoryInvalidParent Code = 3004 // 父分类非法 → 400
+	CodeCategoryHasProducts   Code = 3005 // 分类下存在商品不能删除 → 409
+
+	// 商品域（Product）4000-4999。
+	CodeProductNotFound                Code = 4001 // 商品不存在 → 404
+	CodeProductInvalidPrice            Code = 4002 // 价格非法（负数/非整数/超上限）→ 400
+	CodeProductInvalidCategory         Code = 4003 // 分类不存在或非法 → 400
+	CodeProductCategoryNotLeaf         Code = 4004 // 分类非叶子分类 → 400
+	CodeProductInvalidStatusTransition Code = 4005 // 状态迁移非法/并发冲突 → 409
+	CodeProductInvalidStatus           Code = 4006 // 未知 status 值 → 400
+	CodeProductCategoryDisabled        Code = 4007 // 分类已禁用 → 400
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -72,6 +82,15 @@ var codeTable = map[Code]codeInfo{
 	CodeCategoryNameExists:     {http.StatusConflict, "同级重名"},
 	CodeCategoryHasChildren:    {http.StatusConflict, "有子分类不能删除"},
 	CodeCategoryInvalidParent:  {http.StatusBadRequest, "父分类非法"},
+	CodeCategoryHasProducts:    {http.StatusConflict, "分类下存在商品，不能删除"},
+
+	CodeProductNotFound:                {http.StatusNotFound, "商品不存在"},
+	CodeProductInvalidPrice:            {http.StatusBadRequest, "价格非法"},
+	CodeProductInvalidCategory:         {http.StatusBadRequest, "分类非法"},
+	CodeProductCategoryNotLeaf:         {http.StatusBadRequest, "分类不是叶子分类"},
+	CodeProductInvalidStatusTransition: {http.StatusConflict, "商品状态迁移非法"},
+	CodeProductInvalidStatus:           {http.StatusBadRequest, "商品状态非法"},
+	CodeProductCategoryDisabled:        {http.StatusBadRequest, "分类已禁用"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。

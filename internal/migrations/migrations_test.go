@@ -13,9 +13,14 @@ import (
 // baselineVersion 是内嵌 baseline 迁移的版本号（14 位时间戳）。
 const baselineVersion = uint(20261001000001)
 
-// businessTables 是 migration 应建立的 7 张业务表。
+// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + products 商品表）。
+const latestMigrationVersion = uint(20261001000002)
+
+// businessTables 是 migration 应建立的 9 张业务表。
+// 注意顺序：products 通过外键引用 categories（ON DELETE RESTRICT），
+// 因此 products/product_images 必须排在 categories 之前，否则 DROP TABLE categories 会失败。
 var businessTables = []string{
-	"users", "categories", "admins", "roles", "permissions", "admin_roles", "role_permissions",
+	"users", "products", "product_images", "categories", "admins", "roles", "permissions", "admin_roles", "role_permissions",
 }
 
 // allTables 含业务表与追踪表。
@@ -131,8 +136,8 @@ func sourceWithExtra(extra map[string]string) fs.FS {
 }
 
 // TestUpCreatesSchemaAndIsIdempotent 覆盖 AC-001/AC-002（INV-001 幂等按序一次）：
-// 空库执行 Up 建立 7 张业务表 + schema_migrations；再次 Up 幂等、版本不变。
-// 说明：baseline 为无 IF NOT EXISTS 的普通 CREATE TABLE，若被重复执行会因表已存在而报错，
+// 空库执行 Up 建立 9 张业务表 + schema_migrations；再次 Up 幂等、版本不变。
+// 说明：迁移为无 IF NOT EXISTS 的普通 CREATE TABLE，若被重复执行会因表已存在而报错，
 // 因此「再次 Up 成功」本身就是「旧迁移未重跑」的直接证明。
 func TestUpCreatesSchemaAndIsIdempotent(t *testing.T) {
 	ctx := context.Background()
@@ -146,8 +151,8 @@ func TestUpCreatesSchemaAndIsIdempotent(t *testing.T) {
 			t.Errorf("expected table %s to exist after up", table)
 		}
 	}
-	if v := currentVersion(t, db); v != baselineVersion {
-		t.Errorf("expected current version %d after up, got %d", baselineVersion, v)
+	if v := currentVersion(t, db); v != latestMigrationVersion {
+		t.Errorf("expected current version %d after up, got %d", latestMigrationVersion, v)
 	}
 	if dirtyState(t, db) {
 		t.Errorf("expected dirty=false after successful up")
@@ -156,8 +161,8 @@ func TestUpCreatesSchemaAndIsIdempotent(t *testing.T) {
 	if err := Up(ctx); err != nil {
 		t.Fatalf("second up should be idempotent, got error: %v", err)
 	}
-	if v := currentVersion(t, db); v != baselineVersion {
-		t.Errorf("expected current version unchanged (%d) after second up, got %d", baselineVersion, v)
+	if v := currentVersion(t, db); v != latestMigrationVersion {
+		t.Errorf("expected current version unchanged (%d) after second up, got %d", latestMigrationVersion, v)
 	}
 }
 
@@ -174,8 +179,8 @@ func TestStatusIsReadOnly(t *testing.T) {
 	if current != 0 || dirty {
 		t.Errorf("expected current=0 dirty=false on empty db, got current=%d dirty=%t", current, dirty)
 	}
-	if latest != baselineVersion {
-		t.Errorf("expected latest=%d, got %d", baselineVersion, latest)
+	if latest != latestMigrationVersion {
+		t.Errorf("expected latest=%d, got %d", latestMigrationVersion, latest)
 	}
 	if tableExists(t, db, "schema_migrations") {
 		t.Errorf("Status must not create schema_migrations")
@@ -199,11 +204,11 @@ func TestStatusAfterUp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
-	if current != baselineVersion || dirty {
-		t.Errorf("expected current=%d dirty=false, got current=%d dirty=%t", baselineVersion, current, dirty)
+	if current != latestMigrationVersion || dirty {
+		t.Errorf("expected current=%d dirty=false, got current=%d dirty=%t", latestMigrationVersion, current, dirty)
 	}
-	if latest != baselineVersion {
-		t.Errorf("expected latest=%d, got %d", baselineVersion, latest)
+	if latest != latestMigrationVersion {
+		t.Errorf("expected latest=%d, got %d", latestMigrationVersion, latest)
 	}
 }
 
@@ -239,19 +244,19 @@ func TestUpAppliesOnlyPendingMigration(t *testing.T) {
 	if err := Up(ctx); err != nil {
 		t.Fatalf("baseline up: %v", err)
 	}
-	if v := currentVersion(t, db); v != baselineVersion {
-		t.Fatalf("expected baseline version %d, got %d", baselineVersion, v)
+	if v := currentVersion(t, db); v != latestMigrationVersion {
+		t.Fatalf("expected latest version %d, got %d", latestMigrationVersion, v)
 	}
 
 	migrationFS = sourceWithExtra(map[string]string{
-		"20261001000002_probe.up.sql": "CREATE TABLE migration_probe (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)) ENGINE=InnoDB;",
+		"20261001000003_probe.up.sql": "CREATE TABLE migration_probe (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)) ENGINE=InnoDB;",
 	})
 
 	if err := Up(ctx); err != nil {
 		t.Fatalf("incremental up: %v", err)
 	}
-	if v := currentVersion(t, db); v != uint(20261001000002) {
-		t.Errorf("expected current version %d after incremental up, got %d", uint(20261001000002), v)
+	if v := currentVersion(t, db); v != uint(20261001000003) {
+		t.Errorf("expected current version %d after incremental up, got %d", uint(20261001000003), v)
 	}
 	if !tableExists(t, db, "migration_probe") {
 		t.Errorf("expected migration_probe table created by incremental migration")
@@ -265,7 +270,7 @@ func TestUpFailsFastAndMarksDirty(t *testing.T) {
 	db := setupCleanDB(t)
 
 	migrationFS = sourceWithExtra(map[string]string{
-		"20261001000002_broken.up.sql": "THIS IS NOT VALID SQL;",
+		"20261001000003_broken.up.sql": "THIS IS NOT VALID SQL;",
 	})
 
 	if err := Up(ctx); err == nil {
@@ -281,7 +286,7 @@ func TestUpFailsFastAndMarksDirty(t *testing.T) {
 	}
 
 	// force 恢复 dirty。
-	if err := Force(ctx, uint(20261001000002)); err != nil {
+	if err := Force(ctx, uint(20261001000003)); err != nil {
 		t.Fatalf("force recover: %v", err)
 	}
 	if dirtyState(t, db) {
@@ -313,8 +318,8 @@ func TestConcurrentUp(t *testing.T) {
 			t.Fatalf("concurrent up should be safe, got error: %v", err)
 		}
 	}
-	if v := currentVersion(t, db); v != baselineVersion {
-		t.Errorf("expected current version %d after concurrent up, got %d", baselineVersion, v)
+	if v := currentVersion(t, db); v != latestMigrationVersion {
+		t.Errorf("expected current version %d after concurrent up, got %d", latestMigrationVersion, v)
 	}
 	for _, table := range businessTables {
 		if !tableExists(t, db, table) {

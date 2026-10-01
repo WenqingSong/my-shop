@@ -144,8 +144,11 @@ func setupCategoriesServer(t *testing.T) (base, token string) {
 	if err := boot.Bootstrap(ctx); err != nil {
 		t.Fatalf("rebootstrap: %v", err)
 	}
-	if _, err := g.DB().Exec(ctx, "DELETE FROM categories"); err != nil {
-		t.Fatalf("clean categories: %v", err)
+	// 商品表先于分类表清空（products 外键引用 categories），避免残留商品导致分类清理失败。
+	for _, table := range []string{"product_images", "products", "categories"} {
+		if _, err := g.DB().Exec(ctx, "DELETE FROM "+table); err != nil {
+			t.Fatalf("clean %s: %v", table, err)
+		}
 	}
 
 	s := g.Server(guid.S())

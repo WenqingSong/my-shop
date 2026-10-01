@@ -179,7 +179,8 @@ func (s *sCategory) Update(ctx context.Context, req *v1.UpdateReq) (*v1.UpdateRe
 	return &v1.UpdateRes{Category: toCategory(updated)}, nil
 }
 
-// Delete 物理删除无子分类的分类；有子分类返回 3003（409）。
+// Delete 物理删除无子分类、无商品关联的分类：
+// 有子分类返回 3003（409）；有商品关联返回 3005（409，应用层检查 + FK ON DELETE RESTRICT 兜底）。
 func (s *sCategory) Delete(ctx context.Context, id int64) error {
 	rec, err := s.findOne(ctx, id)
 	if err != nil {
@@ -197,14 +198,57 @@ func (s *sCategory) Delete(ctx context.Context, id int64) error {
 		return codes.New(codes.CodeCategoryHasChildren)
 	}
 
+	// 商品关联保护：分类下存在商品时禁止删除。
+	productCount, err := service.Product().CountByCategory(ctx, id)
+	if err != nil {
+		return err
+	}
+	if productCount > 0 {
+		return codes.New(codes.CodeCategoryHasProducts)
+	}
+
 	result, err := g.DB().Model("categories").Ctx(ctx).Where("id", id).Delete()
 	if err != nil {
+		// 并发窗口下商品已建立引用，DELETE 命中 FK 1451（ON DELETE RESTRICT）→ 同样映射为 3005。
+		if isForeignKeyError(err) {
+			return codes.New(codes.CodeCategoryHasProducts)
+		}
 		return codes.Wrap(codes.CodeInternalError, fmt.Errorf("删除分类: %w", err))
 	}
 	if n, _ := result.RowsAffected(); n == 0 {
 		return codes.New(codes.CodeCategoryNotFound)
 	}
 	return nil
+}
+
+// Exists 判断分类是否存在。
+func (s *sCategory) Exists(ctx context.Context, id int64) (bool, error) {
+	n, err := g.DB().Model("categories").Ctx(ctx).Where("id", id).Count()
+	if err != nil {
+		return false, codes.Wrap(codes.CodeInternalError, fmt.Errorf("查询分类存在性: %w", err))
+	}
+	return n > 0, nil
+}
+
+// HasChildren 判断分类是否存在子分类（即非叶子）。
+func (s *sCategory) HasChildren(ctx context.Context, id int64) (bool, error) {
+	n, err := g.DB().Model("categories").Ctx(ctx).Where("parent_id", id).Count()
+	if err != nil {
+		return false, codes.Wrap(codes.CodeInternalError, fmt.Errorf("查询分类子节点: %w", err))
+	}
+	return n > 0, nil
+}
+
+// IsEnabled 判断分类是否启用（status=1）；分类不存在返回 false。
+func (s *sCategory) IsEnabled(ctx context.Context, id int64) (bool, error) {
+	var records []*category
+	if err := g.DB().Model("categories").Ctx(ctx).Fields("status").Where("id", id).Scan(&records); err != nil {
+		return false, codes.Wrap(codes.CodeInternalError, fmt.Errorf("查询分类状态: %w", err))
+	}
+	if len(records) == 0 {
+		return false, nil
+	}
+	return records[0].Status == statusEnabled, nil
 }
 
 // loadAll 一次查询全表，按 parent_id, sort, id 排序。
@@ -453,6 +497,16 @@ func isDuplicateKeyError(err error) bool {
 	var mysqlErr *mysql.MySQLError
 	if errors.As(err, &mysqlErr) {
 		return mysqlErr.Number == 1062
+	}
+	return false
+}
+
+// isForeignKeyError 判断是否为 MySQL 外键约束失败（1451，ON DELETE RESTRICT）。
+// 分类删除的并发兜底：商品已建立引用时 DELETE 命中 1451，映射为「分类下有商品」而非 500。
+func isForeignKeyError(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	if errors.As(err, &mysqlErr) {
+		return mysqlErr.Number == 1451
 	}
 	return false
 }

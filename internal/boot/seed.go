@@ -24,11 +24,15 @@ type permissionSeed struct {
 	Name string
 }
 
-// seedPermissionList 是启动时幂等写入的 16 个标准权限（按 code 唯一）。
+// seedPermissionList 是启动时幂等写入的 20 个标准权限（按 code 唯一）。
 var seedPermissionList = []permissionSeed{
 	{Code: "category:create", Name: "创建分类"},
 	{Code: "category:update", Name: "更新分类"},
 	{Code: "category:delete", Name: "删除分类"},
+	{Code: "product:create", Name: "创建商品"},
+	{Code: "product:update", Name: "更新商品"},
+	{Code: "product:on_shelf", Name: "上架商品"},
+	{Code: "product:off_shelf", Name: "下架商品"},
 	{Code: "admin:create", Name: "创建管理员"},
 	{Code: "admin:disable", Name: "禁用管理员"},
 	{Code: "admin:delete", Name: "删除管理员"},

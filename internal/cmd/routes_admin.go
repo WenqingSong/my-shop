@@ -5,6 +5,7 @@ import (
 
 	adminController "cnb.cool/go-cloud-devops/my-shop/internal/controller/admin"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/product"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 )
 
@@ -21,6 +22,7 @@ import (
 func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 	adminCtrl := adminController.NewV1()
 	categoriesCtrl := categories.NewV1()
+	productCtrl := product.NewV1()
 
 	// 后台公开接口：管理员登录（无需 token）。
 	root.POST("/admin/login", adminCtrl.Login)
@@ -68,5 +70,15 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 		require("category:create").POST("/categories", categoriesCtrl.Create)
 		require("category:update").PUT("/categories/:id", categoriesCtrl.Update)
 		require("category:delete").DELETE("/categories/:id", categoriesCtrl.Delete)
+
+		// 商品查询（后台查询仅 AdminAuth，无读权限；查看全部状态）。
+		admin.GET("/admin/products", productCtrl.AdminList)
+		admin.GET("/admin/products/:id", productCtrl.AdminDetail)
+
+		// 商品写操作（AdminAuth + RequirePermission）。
+		require("product:create").POST("/admin/products", productCtrl.Create)
+		require("product:update").PUT("/admin/products/:id", productCtrl.Update)
+		require("product:on_shelf").POST("/admin/products/:id/on-shelf", productCtrl.OnShelf)
+		require("product:off_shelf").POST("/admin/products/:id/off-shelf", productCtrl.OffShelf)
 	})
 }

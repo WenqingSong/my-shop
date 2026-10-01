@@ -15,9 +15,12 @@ import (
 const migrationBaselineVersion = uint(20261001000001)
 
 // migrationRelatedTables 是 readiness 测试需要清空的表（含测试探针表）。
+// 注意顺序：products 通过外键引用 categories，因此 product_images/products 必须排在
+// categories 之前，否则 DROP TABLE categories 会因外键依赖失败。
 var migrationRelatedTables = []string{
 	"role_permissions", "admin_roles", "permissions", "roles",
-	"admins", "categories", "users", "schema_migrations", "migration_probe",
+	"admins", "product_images", "products", "categories", "users",
+	"schema_migrations", "migration_probe",
 }
 
 // dropAllMigrationTables 清空迁移相关表，返回错误（供 setup/cleanup 复用）。

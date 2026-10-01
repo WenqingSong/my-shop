@@ -49,6 +49,8 @@ func TestRouteTable(t *testing.T) {
 		"POST /login",
 		"GET /categories",
 		"GET /categories/:id",
+		"GET /products",
+		"GET /products/:id",
 		// 前台登录用户接口。
 		"GET /me",
 		"POST /logout",
@@ -81,6 +83,14 @@ func TestRouteTable(t *testing.T) {
 		"POST /categories",
 		"PUT /categories/:id",
 		"DELETE /categories/:id",
+		// 商品查询（后台仅 AdminAuth，查看全部状态）。
+		"GET /admin/products",
+		"GET /admin/products/:id",
+		// 商品写接口（AdminAuth + RequirePermission 保护）。
+		"POST /admin/products",
+		"PUT /admin/products/:id",
+		"POST /admin/products/:id/on-shelf",
+		"POST /admin/products/:id/off-shelf",
 	}
 	for _, w := range want {
 		if !got[w] {
@@ -99,6 +109,10 @@ func TestRouteTable(t *testing.T) {
 		"POST /api/v1/categories",
 		"PUT /api/v1/categories/:id",
 		"DELETE /api/v1/categories/:id",
+		"GET /api/v1/products",
+		"GET /api/v1/products/:id",
+		"POST /api/v1/products",
+		"PUT /api/v1/products/:id",
 		// /admin/v1/* 前缀路径不应存在。
 		"POST /admin/v1/login",
 		"POST /admin/v1/logout",
@@ -117,6 +131,12 @@ func TestRouteTable(t *testing.T) {
 		"POST /admin/v1/categories",
 		"PUT /admin/v1/categories/:id",
 		"DELETE /admin/v1/categories/:id",
+		"GET /admin/v1/products",
+		"GET /admin/v1/products/:id",
+		"POST /admin/v1/products",
+		"PUT /admin/v1/products/:id",
+		"POST /admin/v1/products/:id/on-shelf",
+		"POST /admin/v1/products/:id/off-shelf",
 		// 公开注册入口。
 		"POST /admin/register",
 		// 重复前缀。
