@@ -22,6 +22,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/cmd"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
+	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
 )
 
 const (
@@ -168,7 +169,7 @@ func sessionTTL(t *testing.T, sid string) int64 {
 	return ttl
 }
 
-// setupIAMServer 配置数据库、幂等建表并启动带中间件与路由的测试服务器，返回 base URL。
+// setupIAMServer 执行 migration 建表、Bootstrap 后启动带中间件与路由的测试服务器，返回 base URL。
 func setupIAMServer(t *testing.T) string {
 	t.Helper()
 	t.Setenv("AUTH_JWT_SECRET", testJWTSecret)
@@ -176,6 +177,9 @@ func setupIAMServer(t *testing.T) string {
 	t.Setenv("ADMIN_SUPER_PASSWORD", testAdminPassword)
 
 	ctx := context.Background()
+	if err := migrations.Up(ctx); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
 	if err := boot.Bootstrap(ctx); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}

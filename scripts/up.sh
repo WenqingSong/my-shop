@@ -11,6 +11,7 @@ log_info "等待依赖就绪..."
 wait_for_deps
 
 build_app
+migrate_app
 start_app
 
 log_info "up complete"

@@ -1,3 +1,25 @@
+$:
+  vscode:
+    - name: goland-dev
+      services:
+        - vscode
+        - docker
+
+      docker:
+        image: docker.cnb.cool/arthur-cloud-native/jetbrains/goland:5.0.1
+
+      stages:
+        - name: start-dependencies
+          script: |
+            docker compose up -d
+            bash -c 'source scripts/lib.sh; wait_for_deps'
+      
+        - name: environment-check
+          script: |
+            go version
+            git --version
+            docker version
+            docker compose version
 main:
   pull_request:
     - name: pr-check
