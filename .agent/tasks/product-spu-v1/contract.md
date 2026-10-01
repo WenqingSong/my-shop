@@ -2,9 +2,9 @@
 
 ## Decision Status
 
-WAITING_FOR_OWNER_APPROVAL
+APPROVED
 
-（CONTRACT_REVISION：Owner 于 2026-10-01 追加 3 项决定——FK 保护、keyword 转义、分类「存在 + 叶子 + enabled」校验（含上架）。本文件已据此修订，待 Owner 确认修订后的落地细节并同步 `task.md` 后转 `APPROVED`。）
+（2026-10-01 Owner 确认 CONTRACT_REVISION 落地细节：新增 `4007 PRODUCT_CATEGORY_DISABLED`、FK 1451→409 映射、keyword 转义 + 显式 ESCAPE + 参数化绑定；两个 Open Risks 暂不扩展 Scope。本 Contract 冻结，待 Task Builder 同步 `task.md` 后进入 Coder。）
 
 ## Problem
 
@@ -212,9 +212,8 @@ Owner 于 2026-09-30 确认 6 项决定：
 后续进展：
 - 2026-10-01：db-migration 前置任务完成并合入 `feat/spu`（HEAD `05c2072`，golang-migrate v4.19.0，baseline `20261001000001`），SPU 阻塞解除。Analyst 据此固化「数据表」为经 `internal/migrations/sql/` 迁移新增（单文件 `20261001000002_products.up.sql` 两表，DDL 不用 `IF NOT EXISTS`），并更新 Allowed/Forbidden Changes。决定 #2-#6 不变。
 - 2026-10-01（APPROVED）：Owner 确认 #1 落地细节——采用单文件 `20261001000002_products.up.sql` 创建 `products` 与 `product_images`，DDL 不使用 `IF NOT EXISTS`；并批准本 Contract 转为 `APPROVED`。六项决定全部落实，无遗留待决问题。
-- 2026-10-01（CONTRACT_REVISION，待确认）：Owner 追加 3 项决定，改变已 APPROVED 的 Contract：① `products.category_id` 增加 FK → `categories.id` `ON DELETE RESTRICT`（应用层 409 保留、FK 兜底并发，`categories.Delete` 将 1451 映射为 409）；② `keyword` 按普通文本转义 LIKE 的 `%`/`_`/转义字符，不暴露通配符语义；③ 商品创建、修改 `category_id`、上架时分类须同时满足「存在 + 叶子 + enabled」（新增错误码 4007 PRODUCT_CATEGORY_DISABLED），「已有商品在分类禁用后如何处置」暂不扩展、沿用现有语义。原 6 项决定与 APPROVED 记录保留；修订落地细节待 Owner 确认后转 `APPROVED`。
+- 2026-10-01（CONTRACT_REVISION，APPROVED）：Owner 确认 3 项落地细节——① 新增错误码 `4007 PRODUCT_CATEGORY_DISABLED`；② FK `ON DELETE RESTRICT` 触发的 MySQL 1451 映射为 409 + `CodeCategoryHasProducts`，不返回 500；③ `keyword` 对 `\`/`%`/`_` 做 LIKE 转义并显式声明 escape，继续参数化绑定。两个 Open Risks（分类禁用后已有商品不自动处理、叶子变非叶子后已有商品不自动处理）本次接受、暂不扩展 Scope，上架时继续执行最新分类有效性校验。原 6 项决定与 APPROVED 记录保留；本 Contract 转 `APPROVED`。
 
-待办（转 APPROVED / Coder 启动前必须完成）：
+待办（Coder 启动前必须完成）：
 - [x] Task Builder 新建 `db-migration` 前置任务并完成 migration 机制（已完成，2026-10-01 合入）。
-- [ ] Task Builder 同步更新 `product-spu-v1/task.md`：移除「SPU 暂停」与旧 `boot.go` 建表描述（改为 golang-migrate 迁移文件 `internal/migrations/sql/20261001000002_products.up.sql`）；并新增 3 项 Owner 决定对应的 Scope/AC 变更（FK 保护、keyword 转义、分类「存在+叶子+enabled」校验及上架校验），更新 Analyst Question 结论与 Review Baseline。
-- [ ] Owner 确认本 CONTRACT_REVISION 的落地细节（FK 1451→409 映射、4007 错误码、`%`/`_`/`\` 转义）后转 `APPROVED`。
+- [ ] Task Builder 同步更新 `product-spu-v1/task.md`：移除「SPU 暂停」与旧 `boot.go` 建表描述（改为 golang-migrate 迁移文件 `internal/migrations/sql/20261001000002_products.up.sql`）；并新增 3 项 Owner 决定对应的 Scope/AC 变更（FK 保护、keyword 转义、分类「存在+叶子+enabled」校验及上架校验），更新 Analyst Question 结论与 Review Baseline。完成后进入 Coder 拆分与实现。
