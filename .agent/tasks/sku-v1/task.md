@@ -2,19 +2,19 @@
 
 ## Goal
 
-交付「SKU / 商品规格」基础能力：在已实现的商品 SPU 之上建立「商品 1 — N SKU」关系，SKU 承载名称、价格、库存、状态；提供 SKU 创建、修改、删除；商品详情组合 SPU 与 SKU；SKU 写操作受 RBAC 权限保护、前后台可见性隔离。为后续订单模块预留稳定 `sku.id` 作为引用键，「禁止删除已被订单引用的 SKU」作为 deferred requirement 延后到订单模块。
+交付「SKU / 商品规格」基础能力：在已实现的商品 SPU 之上建立「商品 1 — N SKU」关系，SKU 承载名称、价格、状态；提供 SKU 创建、修改、删除；商品详情组合 SPU 与 SKU；SKU 写操作受 RBAC 权限保护、前后台可见性隔离。为后续订单模块预留稳定 `sku.id` 作为引用键，「禁止删除已被订单引用的 SKU」作为 deferred requirement 延后到订单模块。
 
 ## Scope
 
 允许完成的内容：
 
-- 数据表 `skus`：`id`（`BIGINT UNSIGNED` 自增主键，稳定引用键，不重用）、`product_id`（`BIGINT UNSIGNED NOT NULL`，FK → `products.id`）、`name`、`price`（整数分）、`stock`（非负整数）、`status`、`created_at`、`updated_at`；关系 `Product 1 — N Sku`。经既有 golang-migrate 机制新增迁移文件（如 `20261001000003_skus.up.sql`），不回退到 `boot.go` 建表。
+- 数据表 `skus`：`id`（`BIGINT UNSIGNED` 自增主键，稳定引用键，不重用）、`product_id`（`BIGINT UNSIGNED NOT NULL`，FK → `products.id`）、`name`、`price`（整数分）、`status`、`created_at`、`updated_at`；关系 `Product 1 — N Sku`。经既有 golang-migrate 机制新增迁移文件（如 `20261001000003_skus.up.sql`），不回退到 `boot.go` 建表。
 - SKU 后台写接口：创建、更新、删除；统一 `AdminAuth + RequirePermission(...)`，超级管理员沿用现有放行机制。
 - 商品详情（前台 + 后台）组合 SPU 与 SKU：详情响应包含该商品的 SKU 列表（具体形态待 Analyst 固化）。
 - RBAC：新增 `sku:create` / `sku:update` / `sku:delete` 权限，追加到 `internal/boot/seed.go` 的 `seedPermissionList`。
 - 错误码：SKU 域（新段或复用商品域，待 Analyst 固化）。
 - 为后续订单引用预留稳定 `sku.id`（自增主键、全局唯一、删除后不重用）。
-- 必要的测试：创建/更新/删除正常路径、价格与库存校验、商品存在性、一对多与归属隔离、详情组合、状态字段校验、RBAC 401/403/成功、删除不影响 SPU。
+- 必要的测试：创建/更新/删除正常路径、价格校验、商品存在性、一对多与归属隔离、详情组合、状态字段校验、RBAC 401/403/成功、删除不影响 SPU。
 
 ## Out of Scope
 
@@ -22,7 +22,7 @@
 
 - 订单模块（`orders` / `order_items`）、最小订单链路、下单、购物车。
 - 「禁止删除已被订单引用的 SKU」的实际校验逻辑（deferred，见下）。
-- 库存扣减、库存流水（`inventory_log`）、库存并发、盘点（留给 4.3 Inventory）。
+- 库存查询、库存扣减、防负库存、库存流水、并发库存控制（均属于后续 4.3 Inventory，由独立 inventory 模型基于 `sku_id` 建立）。
 - 规格项 / 规格值的笛卡尔组合自动生成 SKU（本任务只做 SKU 本身，不引入规格属性树 / attr）。
 - SPU 删除、商品删除。
 - 促销价、划线价、优惠券、`min_price` / `max_price` 派生。
@@ -36,15 +36,14 @@
 
 ## Acceptance Criteria
 
-- [ ] AC-001：管理员携带 `sku:create` 权限，提交合法 SKU（`product_id` 为存在的商品、`name` 非空且长度合规、`price` 为合法整数分、`stock` 为非负整数）调用创建接口成功，新 SKU 持久化到 `skus` 表且 `product_id` 指向正确商品。
+- [ ] AC-001：管理员携带 `sku:create` 权限，提交合法 SKU（`product_id` 为存在的商品、`name` 非空且长度合规、`price` 为合法整数分）调用创建接口成功，新 SKU 持久化到 `skus` 表且 `product_id` 指向正确商品。
 - [ ] AC-002：`price` 全程以整数分存储与出参；负数、非整数、超上限在创建与更新时均被拒绝，且不产生写入、不改变原值。
-- [ ] AC-003：`stock` 为负数或非整数时创建与更新被拒绝且无写入；合法非负整数成功。
 - [ ] AC-004：`product_id` 指向不存在商品时创建被拒绝，返回商品不存在错误，且无写入。
-- [ ] AC-005：管理员携带 `sku:update` 权限可修改 SKU 的 `name` / `price` / `stock` / `status`，修改后查询反映新值；非法值被拒且原值不变；更新不存在的 SKU 返回 404。
+- [ ] AC-005：管理员携带 `sku:update` 权限可修改 SKU 的 `name` / `price` / `status`，修改后查询反映新值；非法值被拒且原值不变；更新不存在的 SKU 返回 404。
 - [ ] AC-006：管理员携带 `sku:delete` 权限删除 SKU 后该 SKU 不再存在；删除不存在或已删除的 SKU 返回 404。
 - [ ] AC-007：删除 SKU 不影响其所属商品（SPU）及同商品其他 SKU。
 - [ ] AC-008：同一商品可拥有多个 SKU；查询某商品的 SKU 只返回该商品自己的 SKU，商品之间不串号。
-- [ ] AC-009：商品详情响应组合 SPU 与 SKU，包含该商品全部 SKU 的 `name` / `price` / `stock` / `status`；前台详情仅对可售商品返回 SKU 信息（具体可见性规则以 Analyst 固化的 contract 为准）。
+- [ ] AC-009：商品详情响应组合 SPU 与 SKU，包含该商品全部 SKU 的 `name` / `price` / `status`；前台详情仅对可售商品返回 SKU 信息（具体可见性规则以 Analyst 固化的 contract 为准）。
 - [ ] AC-010：SKU 状态可被创建/更新设置与校验，非法状态值被拒绝且无写入；具体状态枚举与「SKU 状态 × SPU 状态」联动规则以 Analyst 固化的 contract 为准。
 - [ ] AC-011：未认证访问 SKU 写接口返回 401；已认证但无对应 `sku:*` 权限返回 403 且无写入；持有对应权限（含超级管理员）成功。
 - [ ] AC-012：`skus.id` 为全局唯一自增主键，作为后续订单模块引用 SKU 的稳定键（经迁移 DDL 与查库确认，删除后不重用）。
@@ -64,7 +63,6 @@
 Assumption：
 
 - SKU 的 `price` 为独立字段（整数分），与 SPU 既有 `price`（基础展示价）暂不建立派生关系；二者关系待 Analyst/Owner 决策。
-- `stock` 为普通非负整数字段，本任务只做创建/更新时的数值校验，不做扣减、并发、流水（留给 4.3 Inventory）。
 - SKU `status` 的具体枚举与「SKU × SPU」状态联动待 Analyst 固化。
 - SKU 不引入 `sku_code` 业务编码，仅以自增 `id` 作为稳定引用键（除非 Analyst/Owner 另有决定）。
 - SKU 删除为物理删除（当前无订单引用；deferred requirement 生效后由订单模块补校验）。
@@ -76,10 +74,10 @@ OPEN QUESTION（不阻塞任务创建，交 Analyst 分析、Owner 确认）：
 ## Verification
 
 - AC-001/004 → 需可连接 MySQL：创建合法 SKU 断言 200/0 且查库确认 `skus` 行与 `product_id` 归属正确；`product_id` 不存在断言拒绝且无写入。
-- AC-002/003 → 非法 `price`（负/非整数/超上限）、非法 `stock`（负/非整数）在创建与更新断言拒绝，且查库无新行、原值不变；合法值成功。
+- AC-002 → 非法 `price`（负/非整数/超上限）在创建与更新断言拒绝，且查库无新行、原值不变；合法值成功。
 - AC-005/006 → 更新/删除集成测试：更新合法/非法字段、删除成功、重复删除 404。
 - AC-007/008 → 一对多与归属隔离：构造多商品多 SKU 场景，断言删除与查询不串号、不影响 SPU。
-- AC-009 → 详情组合：创建商品 + 多 SKU 后访问前台/后台详情，断言 SKU 列表归属与 `name`/`price`/`stock`/`status` 字段正确。
+- AC-009 → 详情组合：创建商品 + 多 SKU 后访问前台/后台详情，断言 SKU 列表归属与 `name`/`price`/`status` 字段正确。
 - AC-010 → 状态字段：非法状态值断言拒绝且无写入；具体枚举与联动按 contract 集成测试。
 - AC-011 → RBAC：无 token 401、有 token 无权限 403（查库无写入）、有权限成功、超管放行。
 - AC-012 → 迁移 DDL 核对 `skus.id` 主键 `BIGINT UNSIGNED` 自增；查库确认自增不回退。
@@ -98,7 +96,6 @@ COMPLEX
 3. 「商品详情组合 SPU 与 SKU」的 API 形态：SKU 列表内嵌进前台/后台详情响应，还是独立接口（如 `/admin/products/:id/skus`）；列表接口是否返回 SKU 数量或价格区间。
 4. SKU 标识与唯一性：是否引入 `sku_code` 业务编码；同一商品下 `name` 是否唯一。
 5. SKU 错误码段与权限 code 命名：新开 5000-5999 还是复用商品域；`sku:create`/`sku:update`/`sku:delete` 命名，以及是否新增 `sku:list` 读权限。
-6. `stock` 类型与上限（`INT UNSIGNED`？上限值），以及删除语义确认（本任务内为物理删除，是否需在 `skus` 预留软删/禁用字段以配合未来订单引用规则）。
 
 ## Review Baseline
 
@@ -108,4 +105,4 @@ COMPLEX
 
 ## Initial Route
 
-READY_FOR_ANALYST
+READY_FOR_CODER
