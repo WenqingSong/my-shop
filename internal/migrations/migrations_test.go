@@ -323,33 +323,304 @@ func TestConcurrentUp(t *testing.T) {
 	}
 }
 
-// uniqueIndexes 返回表的唯一索引名 → 列（按序）映射，用于校验结构与迁移前等价。
-func uniqueIndexes(t *testing.T, db *sql.DB, table string) map[string][]string {
+// columnSpec 描述一列的期望结构，对应 information_schema.columns 的归一化字段。
+type columnSpec struct {
+	Name     string  // COLUMN_NAME
+	Type     string  // COLUMN_TYPE（含 unsigned、长度/精度）
+	Nullable bool    // true 表示允许 NULL；7 张表全部 NOT NULL，故默认 false
+	Default  *string // 期望默认值；nil 表示无默认值（COLUMN_DEFAULT IS NULL）
+	Extra    string  // EXTRA：auto_increment / DEFAULT_GENERATED on update CURRENT_TIMESTAMP 等
+}
+
+// indexSpec 描述一个索引的期望结构（索引内字段顺序敏感）。
+type indexSpec struct {
+	Name    string
+	Unique  bool
+	Columns []string
+}
+
+// tableSpec 描述一张表的期望结构（列顺序敏感）。
+type tableSpec struct {
+	Name      string
+	Engine    string
+	Collation string
+	Columns   []columnSpec
+	Indexes   []indexSpec
+}
+
+// strPtr 便于书写字符串默认值（区分「默认空字符串」与「无默认值」）。
+func strPtr(s string) *string { return &s }
+
+// expectedSchema 是迁移前 7 张表 DDL 的精确结构快照，是 INV-003「结构严格等价」的权威基准。
+// 它独立于迁移文件硬编码，因此任何对 baseline 迁移的列/类型/空值/默认值/索引/引擎/字符集
+// 改动若不同步更新此处，等价性测试都会失败——这正是它能够识别错误实现的原因。
+var expectedSchema = []tableSpec{
+	{
+		Name:      "users",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "username", Type: "varchar(24)"},
+			{Name: "password_hash", Type: "varchar(60)"},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "uk_username", Unique: true, Columns: []string{"username"}},
+		},
+	},
+	{
+		Name:      "categories",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "parent_id", Type: "bigint unsigned", Default: strPtr("0")},
+			{Name: "name", Type: "varchar(64)"},
+			{Name: "sort", Type: "int", Default: strPtr("0")},
+			{Name: "status", Type: "tinyint", Default: strPtr("1")},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "uk_parent_name", Unique: true, Columns: []string{"parent_id", "name"}},
+		},
+	},
+	{
+		Name:      "admins",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "username", Type: "varchar(24)"},
+			{Name: "password_hash", Type: "varchar(60)"},
+			{Name: "status", Type: "tinyint", Default: strPtr("1")},
+			{Name: "is_super", Type: "tinyint", Default: strPtr("0")},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "uk_admin_username", Unique: true, Columns: []string{"username"}},
+		},
+	},
+	{
+		Name:      "roles",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "name", Type: "varchar(64)"},
+			{Name: "description", Type: "varchar(255)", Default: strPtr("")},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "uk_role_name", Unique: true, Columns: []string{"name"}},
+		},
+	},
+	{
+		Name:      "permissions",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "code", Type: "varchar(64)"},
+			{Name: "name", Type: "varchar(64)"},
+			{Name: "description", Type: "varchar(255)", Default: strPtr("")},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "uk_permission_code", Unique: true, Columns: []string{"code"}},
+		},
+	},
+	{
+		Name:      "admin_roles",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "admin_id", Type: "bigint unsigned"},
+			{Name: "role_id", Type: "bigint unsigned"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"admin_id", "role_id"}},
+		},
+	},
+	{
+		Name:      "role_permissions",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "role_id", Type: "bigint unsigned"},
+			{Name: "permission_id", Type: "bigint unsigned"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"role_id", "permission_id"}},
+		},
+	},
+}
+
+// readActualTable 从 information_schema 读取某表的实际结构，返回与 tableSpec 对齐的结构。
+func readActualTable(t *testing.T, db *sql.DB, name string) tableSpec {
 	t.Helper()
+	var out tableSpec
+	out.Name = name
+
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT ENGINE, TABLE_COLLATION FROM information_schema.tables
+		 WHERE table_schema = DATABASE() AND table_name = ?`, name).Scan(&out.Engine, &out.Collation); err != nil {
+		t.Fatalf("query table %s: %v", name, err)
+	}
+
 	rows, err := db.QueryContext(context.Background(),
-		`SELECT DISTINCT index_name, column_name, seq_in_index
-		 FROM information_schema.statistics
-		 WHERE table_schema = DATABASE() AND table_name = ? AND non_unique = 0
-		 ORDER BY index_name, seq_in_index`, table)
+		`SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, EXTRA
+		 FROM information_schema.columns
+		 WHERE table_schema = DATABASE() AND table_name = ?
+		 ORDER BY ORDINAL_POSITION`, name)
 	if err != nil {
-		t.Fatalf("query indexes of %s: %v", table, err)
+		t.Fatalf("query columns of %s: %v", name, err)
 	}
 	defer rows.Close()
-
-	indexes := map[string][]string{}
 	for rows.Next() {
-		var name, col string
-		var seq int
-		if err := rows.Scan(&name, &col, &seq); err != nil {
-			t.Fatalf("scan index row of %s: %v", table, err)
+		var colName, colType, isNullable, extra string
+		var colDefault sql.NullString
+		if err := rows.Scan(&colName, &colType, &isNullable, &colDefault, &extra); err != nil {
+			t.Fatalf("scan column of %s: %v", name, err)
 		}
-		indexes[name] = append(indexes[name], col)
+		c := columnSpec{Name: colName, Type: colType, Nullable: isNullable == "YES", Extra: extra}
+		if colDefault.Valid {
+			c.Default = &colDefault.String
+		}
+		out.Columns = append(out.Columns, c)
 	}
-	return indexes
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate columns of %s: %v", name, err)
+	}
+
+	irows, err := db.QueryContext(context.Background(),
+		`SELECT index_name, non_unique, seq_in_index, column_name
+		 FROM information_schema.statistics
+		 WHERE table_schema = DATABASE() AND table_name = ?
+		 ORDER BY index_name, seq_in_index`, name)
+	if err != nil {
+		t.Fatalf("query indexes of %s: %v", name, err)
+	}
+	defer irows.Close()
+	byName := map[string]*indexSpec{}
+	for irows.Next() {
+		var idxName, colName string
+		var nonUnique, seq int
+		if err := irows.Scan(&idxName, &nonUnique, &seq, &colName); err != nil {
+			t.Fatalf("scan index of %s: %v", name, err)
+		}
+		spec, ok := byName[idxName]
+		if !ok {
+			spec = &indexSpec{Name: idxName, Unique: nonUnique == 0}
+			byName[idxName] = spec
+		}
+		spec.Columns = append(spec.Columns, colName)
+	}
+	if err := irows.Err(); err != nil {
+		t.Fatalf("iterate indexes of %s: %v", name, err)
+	}
+	for _, idx := range byName {
+		out.Indexes = append(out.Indexes, *idx)
+	}
+	return out
+}
+
+// assertTableEquivalent 逐项比较实际结构与期望结构（列顺序、索引字段顺序均敏感）。
+func assertTableEquivalent(t *testing.T, want, actual tableSpec) {
+	t.Helper()
+	if actual.Engine != want.Engine {
+		t.Errorf("%s: ENGINE mismatch: want %q, got %q", want.Name, want.Engine, actual.Engine)
+	}
+	if actual.Collation != want.Collation {
+		t.Errorf("%s: 字符集/排序规则 mismatch: want %q, got %q", want.Name, want.Collation, actual.Collation)
+	}
+
+	if len(actual.Columns) != len(want.Columns) {
+		t.Errorf("%s: 列数量 mismatch: want %d, got %d", want.Name, len(want.Columns), len(actual.Columns))
+	}
+	for i := 0; i < len(want.Columns) && i < len(actual.Columns); i++ {
+		w, a := want.Columns[i], actual.Columns[i]
+		if a.Name != w.Name {
+			t.Errorf("%s: 第 %d 列名 mismatch: want %q, got %q", want.Name, i+1, w.Name, a.Name)
+			continue
+		}
+		if a.Type != w.Type {
+			t.Errorf("%s.%s: 类型 mismatch: want %q, got %q", want.Name, w.Name, w.Type, a.Type)
+		}
+		if a.Nullable != w.Nullable {
+			t.Errorf("%s.%s: NULL 属性 mismatch: want nullable=%t, got %t", want.Name, w.Name, w.Nullable, a.Nullable)
+		}
+		if !defaultEqual(a.Default, w.Default) {
+			t.Errorf("%s.%s: DEFAULT mismatch: want %v, got %v", want.Name, w.Name, w.Default, a.Default)
+		}
+		if a.Extra != w.Extra {
+			t.Errorf("%s.%s: EXTRA mismatch: want %q, got %q", want.Name, w.Name, w.Extra, a.Extra)
+		}
+	}
+
+	if len(actual.Indexes) != len(want.Indexes) {
+		t.Errorf("%s: 索引数量 mismatch: want %d, got %d", want.Name, len(want.Indexes), len(actual.Indexes))
+	}
+	actualIdx := map[string]indexSpec{}
+	for _, idx := range actual.Indexes {
+		actualIdx[idx.Name] = idx
+	}
+	wantIdx := map[string]indexSpec{}
+	for _, idx := range want.Indexes {
+		wantIdx[idx.Name] = idx
+	}
+	for _, w := range want.Indexes {
+		a, ok := actualIdx[w.Name]
+		if !ok {
+			t.Errorf("%s: 缺少索引 %q", want.Name, w.Name)
+			continue
+		}
+		if a.Unique != w.Unique {
+			t.Errorf("%s: 索引 %q 唯一性 mismatch: want unique=%t, got %t", want.Name, w.Name, w.Unique, a.Unique)
+		}
+		if !equalStrings(a.Columns, w.Columns) {
+			t.Errorf("%s: 索引 %q 字段/顺序 mismatch: want %v, got %v", want.Name, w.Name, w.Columns, a.Columns)
+		}
+	}
+	for _, a := range actual.Indexes {
+		if _, ok := wantIdx[a.Name]; !ok {
+			t.Errorf("%s: 出现多余索引 %q", want.Name, a.Name)
+		}
+	}
+}
+
+func defaultEqual(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // TestSchemaStructureMatchesBaseline 覆盖 INV-003（结构严格等价）：
-// 校验 7 张表的唯一索引（名称与列）与迁移前 DDL 一致，捕获索引/约束漂移。
+// 对 7 张表逐表校验表级属性（ENGINE/字符集排序规则）与逐列（名称/顺序/类型/空值/默认值/AUTO_INCREMENT），
+// 以及索引（名称/唯一性/字段及顺序），能够识别任何字段类型、默认值、空值约束、字符集或索引的漂移。
 func TestSchemaStructureMatchesBaseline(t *testing.T) {
 	ctx := context.Background()
 	db := setupCleanDB(t)
@@ -358,37 +629,8 @@ func TestSchemaStructureMatchesBaseline(t *testing.T) {
 		t.Fatalf("up: %v", err)
 	}
 
-	want := map[string]map[string][]string{
-		"users":            {"PRIMARY": {"id"}, "uk_username": {"username"}},
-		"categories":       {"PRIMARY": {"id"}, "uk_parent_name": {"parent_id", "name"}},
-		"admins":           {"PRIMARY": {"id"}, "uk_admin_username": {"username"}},
-		"roles":            {"PRIMARY": {"id"}, "uk_role_name": {"name"}},
-		"permissions":      {"PRIMARY": {"id"}, "uk_permission_code": {"code"}},
-		"admin_roles":      {"PRIMARY": {"admin_id", "role_id"}},
-		"role_permissions": {"PRIMARY": {"role_id", "permission_id"}},
-	}
-
-	for table, expected := range want {
-		got := uniqueIndexes(t, db, table)
-		if len(got) != len(expected) {
-			t.Errorf("%s: expected %d unique indexes, got %d (%v)", table, len(expected), len(got), got)
-		}
-		for name, cols := range expected {
-			gotCols, ok := got[name]
-			if !ok {
-				t.Errorf("%s: missing unique index %q", table, name)
-				continue
-			}
-			if len(gotCols) != len(cols) {
-				t.Errorf("%s: index %q columns mismatch: want %v, got %v", table, name, cols, gotCols)
-				continue
-			}
-			for i := range cols {
-				if gotCols[i] != cols[i] {
-					t.Errorf("%s: index %q column order mismatch: want %v, got %v", table, name, cols, gotCols)
-					break
-				}
-			}
-		}
+	for _, want := range expectedSchema {
+		actual := readActualTable(t, db, want.Name)
+		assertTableEquivalent(t, want, actual)
 	}
 }

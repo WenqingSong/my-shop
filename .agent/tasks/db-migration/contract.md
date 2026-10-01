@@ -138,7 +138,7 @@ DSN 从 `database.default.{host,port,user,pass,name,charset}` 配置构造，启
 - INV-001 → 真实 MySQL（`docker compose up -d`）：空库 `my-shop migrate up` 后 `SHOW TABLES` 确认 7 表 + `schema_migrations` 存在、记录数正确；再次 `up` 记录数不变、无重复执行（覆盖 AC-001/002）。
 - INV-001（增量）→ 新增 1 个合法 migration 后 `migrate up`，断言仅新增 1 条记录、旧 migration 未重跑（覆盖 AC-003）。
 - INV-002 → 构造语法错误 migration，`migrate up` 失败返回错误、`dirty=true`，再次 `up` 拒绝执行；`migrate force` 后恢复（覆盖 AC-004）。
-- INV-003 → `SHOW CREATE TABLE` / `information_schema` 逐一比对 7 表与迁移前 DDL 等价（归一化 `AUTO_INCREMENT=n` 噪声）。
+- INV-003 → 通过 `information_schema`（或归一化 `SHOW CREATE TABLE`）对 7 张表逐一比对，**必须覆盖**：表级（`ENGINE`、`CHARSET`/`COLLATION`）；列级（字段名、字段顺序、类型/长度/精度、`unsigned`、`NULL`/`NOT NULL`、`DEFAULT`、`AUTO_INCREMENT`）；索引级（主键、唯一索引、普通索引（如存在）、索引名、索引字段及字段顺序）。仅校验唯一索引不满足「结构严格等价」；等价性测试必须能识别上述任意一项的漂移（可逆 Mutation 验证，如改字段类型/默认值/空值约束应使测试失败）。
 - INV-004 → `my-shop serve` 后 `SELECT` 超管=1、权限=16；`boot.go` 代码审查确认无 `CREATE TABLE`（覆盖 AC-005）。
 - INV-005 → serve 在未执行 migrate 的空库上启动，断言 fail-fast 报错、不建表；代码审查确认 serve 路径无 DDL。
 - INV-006 → 并发集成测试：多 goroutine（或两进程）并发 `migrate up`，断言最终结构正确、`schema_migrations` 无重复版本、无报错（覆盖 AC-006，建议 `-race`）。

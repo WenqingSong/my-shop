@@ -21,6 +21,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/cmd"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
+	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
 )
 
 const (
@@ -126,7 +127,11 @@ func setupCategoriesServer(t *testing.T) (base, token string) {
 	t.Setenv("REDIS_DEFAULT_DB", "1")
 
 	ctx := context.Background()
-	// 先 Bootstrap 一次确保 RBAC 表存在（幂等建表），再清空以测试密码重建超级管理员。
+	// 先执行 migration 建立 schema（空库也可独立运行），再 Bootstrap（readiness check + seed），
+	// 随后清空 RBAC 表以测试密码重建超级管理员。
+	if err := migrations.Up(ctx); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
 	if err := boot.Bootstrap(ctx); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
@@ -158,62 +163,60 @@ func setupCategoriesServer(t *testing.T) (base, token string) {
 
 	time.Sleep(100 * time.Millisecond)
 
-time.Sleep(100 * time.Millisecond)
+	base = fmt.Sprintf(
+		"http://127.0.0.1:%d",
+		s.GetListenedPort(),
+	)
 
-base = fmt.Sprintf(
-    "http://127.0.0.1:%d",
-    s.GetListenedPort(),
-)
+	token = loginAdmin(
+		t,
+		base,
+		testSuperUsername,
+		testAdminPassword,
+	)
 
-token = loginAdmin(
-    t,
-    base,
-    testSuperUsername,
-    testAdminPassword,
-)
-
-return base, token
+	return base, token
 }
 
 // loginAdmin 经 /admin/login 登录取管理员 token。
 func loginAdmin(t *testing.T, base, username, password string) string {
-    t.Helper()
+	t.Helper()
 
-    res := doRequest(
-        t,
-        base,
-        "POST",
-        "/admin/login",
-        map[string]any{
-            "username": username,
-            "password": password,
-        },
-        nil,
-    )
+	res := doRequest(
+		t,
+		base,
+		"POST",
+		"/admin/login",
+		map[string]any{
+			"username": username,
+			"password": password,
+		},
+		nil,
+	)
 
-    if res.Status != 200 || res.Code != 0 {
-        t.Fatalf(
-            "login %s: status=%d code=%d msg=%q",
-            username,
-            res.Status,
-            res.Code,
-            res.Message,
-        )
-    }
+	if res.Status != 200 || res.Code != 0 {
+		t.Fatalf(
+			"login %s: status=%d code=%d msg=%q",
+			username,
+			res.Status,
+			res.Code,
+			res.Message,
+		)
+	}
 
-    var d struct {
-        AccessToken string `json:"access_token"`
-    }
+	var d struct {
+		AccessToken string `json:"access_token"`
+	}
 
-    if err := json.Unmarshal(res.Data, &d); err != nil {
-        t.Fatalf("unmarshal login res: %v", err)
-    }
+	if err := json.Unmarshal(res.Data, &d); err != nil {
+		t.Fatalf("unmarshal login res: %v", err)
+	}
 
-    if d.AccessToken == "" {
-        t.Fatalf("login %s: empty access_token", username)
-    }
+	if d.AccessToken == "" {
+		t.Fatalf("login %s: empty access_token", username)
+	}
 
-    return d.AccessToken
+	return d.AccessToken
 }
 
 // createAdmin 经 /admin/admins 创建普通管理员，返回其 id。

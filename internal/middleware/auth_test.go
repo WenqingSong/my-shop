@@ -18,6 +18,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/auth"
 	"cnb.cool/go-cloud-devops/my-shop/internal/boot"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
+	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
 )
 
 const (
@@ -80,6 +81,9 @@ func setupMiddlewareServer(t *testing.T) string {
 	t.Setenv("ADMIN_SUPER_PASSWORD", testAdminPassword)
 
 	ctx := context.Background()
+	if err := migrations.Up(ctx); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
 	if err := boot.Bootstrap(ctx); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
