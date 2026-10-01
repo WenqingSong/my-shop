@@ -16,8 +16,14 @@ type ICategory interface {
 	Create(ctx context.Context, req *v1.CreateReq) (*v1.CreateRes, error)
 	// Update 按提交字段更新分类。
 	Update(ctx context.Context, req *v1.UpdateReq) (*v1.UpdateRes, error)
-	// Delete 物理删除无子分类的分类。
+	// Delete 物理删除无子分类、无商品关联的分类。
 	Delete(ctx context.Context, id int64) error
+	// Exists 判断分类是否存在。
+	Exists(ctx context.Context, id int64) (bool, error)
+	// HasChildren 判断分类是否存在子分类（即非叶子）。
+	HasChildren(ctx context.Context, id int64) (bool, error)
+	// IsEnabled 判断分类是否启用（status=1）。
+	IsEnabled(ctx context.Context, id int64) (bool, error)
 }
 
 var localCategory ICategory

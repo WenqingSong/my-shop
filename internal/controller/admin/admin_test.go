@@ -20,6 +20,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/cmd"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
+	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
 )
 
 const (
@@ -102,8 +103,11 @@ func setupAdminServer(t *testing.T) (base, superToken string) {
 	t.Setenv("ADMIN_SUPER_PASSWORD", testAdminPassword)
 
 	ctx := context.Background()
-	// 先 Bootstrap 一次确保 RBAC 表存在（幂等建表），再清空以测试密码重建超级管理员。
-	// 避免在全新数据库（每日重置）上「先删后建」因表不存在而报 1146。
+	// 先执行 migration 建立 schema（空库也可独立运行），再 Bootstrap（readiness check + seed），
+	// 随后清空 RBAC 表以测试密码重建超级管理员。
+	if err := migrations.Up(ctx); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
 	if err := boot.Bootstrap(ctx); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}

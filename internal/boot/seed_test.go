@@ -9,19 +9,21 @@ import (
 
 	"github.com/gogf/gf/v2/frame/g"
 	"golang.org/x/crypto/bcrypt"
+
+	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
 )
 
 const testSuperPassword = "super-secret-123"
 
-// setupAdminSeed 配置数据库、幂等建表并清空 admins，返回 context。
+// setupAdminSeed 配置数据库、执行 migration 建表并清空 admins，返回 context。
 func setupAdminSeed(t *testing.T) context.Context {
 	t.Helper()
 	ctx := context.Background()
 	if err := applyDatabaseConfig(ctx); err != nil {
 		t.Fatalf("apply database config: %v", err)
 	}
-	if err := ensureTables(ctx); err != nil {
-		t.Fatalf("ensure tables: %v", err)
+	if err := migrations.Up(ctx); err != nil {
+		t.Fatalf("migrate up: %v", err)
 	}
 	if _, err := g.DB().Exec(ctx, "DELETE FROM admins"); err != nil {
 		t.Fatalf("clean admins: %v", err)

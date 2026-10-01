@@ -22,6 +22,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/auth"
 	"cnb.cool/go-cloud-devops/my-shop/internal/boot"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
+	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
 	// 触发各 logic 包的 init()，注册 service.Iam / service.Admin。
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic"
 )
@@ -94,10 +95,13 @@ func setupIsolationServer(t *testing.T) string {
 	t.Setenv("ADMIN_SUPER_PASSWORD", isoAdminPassword)
 
 	ctx := context.Background()
+	if err := migrations.Up(ctx); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
 	if err := boot.Bootstrap(ctx); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
-	// 先 Bootstrap 确保表存在，再清空身份相关表，随后二次 Bootstrap 以测试密码重建超级管理员。
+	// 先迁移建表 + Bootstrap 确保 seed 就绪，再清空身份相关表，随后二次 Bootstrap 以测试密码重建超级管理员。
 	for _, table := range []string{"users", "admin_roles", "role_permissions", "roles", "permissions", "admins"} {
 		if _, err := g.DB().Exec(ctx, "DELETE FROM "+table); err != nil {
 			t.Fatalf("clean %s: %v", table, err)

@@ -150,6 +150,13 @@ build_app() {
   log_info "已构建 ${APP_BIN}"
 }
 
+# 执行数据库迁移（显式 my-shop migrate up），成功后才允许 serve 启动。
+migrate_app() {
+  log_info "执行数据库迁移..."
+  ( cd "${ROOT_DIR}" && "${APP_BIN}" migrate up )
+  log_info "数据库迁移完成"
+}
+
 start_app() {
   if is_app_running; then
     log_info "应用已在运行（pid $(cat "${APP_PID_FILE}")）"
@@ -157,7 +164,7 @@ start_app() {
   fi
   mkdir -p "${TMP_DIR}"
   log_info "启动应用..."
-  nohup "${APP_BIN}" >>"${APP_LOG_FILE}" 2>&1 &
+  nohup "${APP_BIN}" serve >>"${APP_LOG_FILE}" 2>&1 &
   echo "$!" > "${APP_PID_FILE}"
   wait_for_app
 }
