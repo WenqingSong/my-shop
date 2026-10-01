@@ -91,6 +91,11 @@ func TestRouteTable(t *testing.T) {
 		"PUT /admin/products/:id",
 		"POST /admin/products/:id/on-shelf",
 		"POST /admin/products/:id/off-shelf",
+		// 库存查询与写操作（后台 AdminAuth；写操作额外 RequirePermission）。
+		"GET /admin/inventories/:sku_id",
+		"GET /admin/inventories/:sku_id/logs",
+		"POST /admin/inventories/:sku_id/increase",
+		"POST /admin/inventories/:sku_id/deduct",
 	}
 	for _, w := range want {
 		if !got[w] {

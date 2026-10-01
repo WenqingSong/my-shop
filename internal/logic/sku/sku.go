@@ -138,8 +138,8 @@ func (s *sSku) Update(ctx context.Context, req *v1.UpdateReq) (*v1.UpdateRes, er
 	return s.loadUpdateRes(ctx, req.Id)
 }
 
-// Delete 物理删除 SKU：不存在/已删除返回 5001（404）；核对 RowsAffected 兜底并发删除。
-// 删除不级联、不影响所属商品与同商品其他 SKU。
+// Delete 物理删除 SKU：不存在/已删除返回 5001（404）；存在库存记录/流水时返回 5005（409，
+// 由 FK ON DELETE RESTRICT 兜底）；核对 RowsAffected 兜底并发删除。删除不级联、不影响所属商品与同商品其他 SKU。
 func (s *sSku) Delete(ctx context.Context, id int64) error {
 	rec, err := s.findOne(ctx, id)
 	if err != nil {
@@ -151,12 +151,24 @@ func (s *sSku) Delete(ctx context.Context, id int64) error {
 
 	result, err := g.DB().Model("skus").Ctx(ctx).Where("id", id).Delete()
 	if err != nil {
+		if isForeignKeyError(err) {
+			return codes.New(codes.CodeSkuHasInventory)
+		}
 		return codes.Wrap(codes.CodeInternalError, fmt.Errorf("删除 SKU: %w", err))
 	}
 	if n, _ := result.RowsAffected(); n == 0 {
 		return codes.New(codes.CodeSkuNotFound)
 	}
 	return nil
+}
+
+// Exists 判断 SKU 是否存在（供库存校验 sku_id 存在性）。
+func (s *sSku) Exists(ctx context.Context, id int64) (bool, error) {
+	n, err := g.DB().Model("skus").Ctx(ctx).Where("id", id).Count()
+	if err != nil {
+		return false, codes.Wrap(codes.CodeInternalError, fmt.Errorf("查询 SKU 存在性: %w", err))
+	}
+	return n > 0, nil
 }
 
 // ListByProduct 按商品查询 SKU（供商品详情组合），按 id 升序；
@@ -274,4 +286,11 @@ func validateName(name string) (string, error) {
 func isDuplicateKeyError(err error) bool {
 	var mysqlErr *mysql.MySQLError
 	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
+}
+
+// isForeignKeyError 判断是否为 MySQL 外键约束失败（1451，ON DELETE RESTRICT）。
+// SKU 删除的兜底：已存在库存记录/流水时 DELETE 命中 1451，映射为「SKU 有库存」而非 500。
+func isForeignKeyError(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1451
 }

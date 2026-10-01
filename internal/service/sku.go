@@ -16,6 +16,8 @@ type ISku interface {
 	Delete(ctx context.Context, id int64) error
 	// ListByProduct 按商品查询 SKU（供商品详情组合），onlyEnabled=true 时仅返回 enabled，按 id 升序。
 	ListByProduct(ctx context.Context, productID int64, onlyEnabled bool) ([]*v1.Sku, error)
+	// Exists 判断 SKU 是否存在（供库存校验 sku_id 存在性）。
+	Exists(ctx context.Context, id int64) (bool, error)
 }
 
 var localSku ISku

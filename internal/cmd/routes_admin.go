@@ -5,6 +5,7 @@ import (
 
 	adminController "cnb.cool/go-cloud-devops/my-shop/internal/controller/admin"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/inventory"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/product"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/sku"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
@@ -25,6 +26,7 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 	categoriesCtrl := categories.NewV1()
 	productCtrl := product.NewV1()
 	skuCtrl := sku.NewV1()
+	inventoryCtrl := inventory.NewV1()
 
 	// 后台公开接口：管理员登录（无需 token）。
 	root.POST("/admin/login", adminCtrl.Login)
@@ -87,5 +89,13 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 		require("sku:create").POST("/admin/skus", skuCtrl.Create)
 		require("sku:update").PUT("/admin/skus/:id", skuCtrl.Update)
 		require("sku:delete").DELETE("/admin/skus/:id", skuCtrl.Delete)
+
+		// 库存查询（后台仅 AdminAuth，无读权限）。
+		admin.GET("/admin/inventories/:sku_id", inventoryCtrl.Get)
+		admin.GET("/admin/inventories/:sku_id/logs", inventoryCtrl.ListLogs)
+
+		// 库存写操作（AdminAuth + RequirePermission）。
+		require("inventory:increase").POST("/admin/inventories/:sku_id/increase", inventoryCtrl.Increase)
+		require("inventory:deduct").POST("/admin/inventories/:sku_id/deduct", inventoryCtrl.Deduct)
 	})
 }
