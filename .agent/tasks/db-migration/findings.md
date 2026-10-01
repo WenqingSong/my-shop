@@ -3,8 +3,8 @@
 ## Review Target
 
 - Base commit：`14d2e7b921b23be045bd9f8e2d18b7ebe2a52486`（分支 `feat/spu`）
-- 当前 HEAD：`eeddc32f53967434b43864359ab94423ca7f3195`（分支 `feat/db-migration`）
-- 工作区状态：`git status --short` 为空（clean）
+- 当前 HEAD：`2ba1c4c4548d93c778ec6d53ec5abcde9fd2dd5c`（分支 `feat/db-migration`），即修复提交 `2ba1c4c test(migrations): 补全结构等价性校验并修复测试顺序依赖`
+- 复审对象：基线 `eeddc32` + 修复提交 `2ba1c4c`（含 `internal/controller/admin|categories|iam`、`internal/middleware/auth_test.go` 的 CLEAN-001 修复，`internal/migrations/migrations_test.go` 的 CLEAN-002 修复，`contract.md` INV-003 验证要求细化）
 - 实现提交：`eeddc32 feat(db): 引入 golang-migrate 管理数据库迁移`
 - 其余提交：`5066933`（contract/task 改 golang-migrate 方案）、`d6fe301`（.cnb.yml 加 start-dependencies）、`8d7cd29`/`fc67cf5`（任务文档）、`14d2e7b` 为基线
 - 关键配置/版本：golang-migrate `v4.19.0`；baseline 迁移版本 `20261001000001`；7 张业务表 + `schema_migrations` 追踪表
@@ -12,7 +12,9 @@
 
 ## Result
 
-CHANGES_REQUIRED
+CLEAN
+
+（复审后：CLEAN-001 / CLEAN-002 均已修复并经独立验证，无开放 P0/P1/P2。）
 
 ## Acceptance Criteria
 
@@ -36,15 +38,17 @@ CHANGES_REQUIRED
 | 手动 `migrate up` 空库 | PASS | 8 表创建，version=baseline，dirty=false |
 | 手动 `migrate version` / `migrate force`（缺参/非法/合法） | PASS | 错误提示与成功路径均符合契约 |
 | 手动 `serve` 空库 | PASS | fail-fast，未建表（exit=1） |
-| 隔离运行 `go test ./internal/controller/admin/`（空库） | FAIL | 见 CLEAN-001 |
+| 隔离运行 `go test ./internal/controller/admin/`（空库） | PASS（复审） | 修复后空库隔离运行 admin/categories/iam/middleware 四包均通过（见 CLEAN-001 复审） |
+| 结构等价 Mutation（复审） | PASS | 将 `categories.sort` 由 `INT` 改为 `BIGINT` 后 `TestSchemaStructureMatchesBaseline` 报 `类型 mismatch` 失败；还原后恢复通过（见 CLEAN-002 复审） |
 
 ## Findings
 
 ### CLEAN-001：4 个既有测试包在独立运行时失败，依赖跨包执行顺序
 
 - Severity：P2
-- Status：OPEN
+- Status：CLOSED
 - Location：`internal/controller/admin/admin_test.go:107`、`internal/controller/categories/categories_test.go:130`、`internal/controller/iam/iam_test.go:179`、`internal/middleware/auth_test.go:83`
+- 复审验证：4 个测试 setup 均已在首次 `boot.Bootstrap` 前新增 `migrations.Up(ctx)`，过时注释同步修正；空库下分别隔离运行 4 包（`go test -count=1 ./internal/controller/admin|categories|iam/ ./internal/middleware/`）全部通过，原触发条件已消除。
 - AC / Invariant：AC-005（serve 只读 readiness）、任务「受影响的测试需随之调整」
 - Trigger：空库上直接运行任一上述包（如 `go test ./internal/controller/admin/`），其 setup 调用 `boot.Bootstrap(ctx)`。
 - Actual：`Bootstrap` 已不再建表，改为 `checkSchemaReady` 只读校验；空库上 `current=0 < latest` 直接返回错误「数据库 schema 未就绪」，测试 setup 在 `t.Fatalf("bootstrap: %v")` 处失败。
@@ -56,8 +60,9 @@ CHANGES_REQUIRED
 ### CLEAN-002：结构等价性测试只校验唯一索引，未校验字段/类型/空值/默认值/引擎/字符集
 
 - Severity：P2
-- Status：OPEN
-- Location：`internal/migrations/migrations_test.go:351` `TestSchemaStructureMatchesBaseline`
+- Status：CLOSED
+- Location：`internal/migrations/migrations_test.go:621` `TestSchemaStructureMatchesBaseline`
+- 复审验证：测试已重写为读取 `information_schema.tables`（ENGINE/TABLE_COLLATION）+ `information_schema.columns`（COLUMN_NAME/COLUMN_TYPE/IS_NULLABLE/COLUMN_DEFAULT/EXTRA，按 ORDINAL_POSITION）+ `information_schema.statistics`（索引名/唯一性/字段顺序），并与硬编码的 `expectedSchema` 权威快照逐项比对；覆盖表级/列级/索引级全部维度。Mutation 验证：将 `categories.sort` 由 `INT` 改为 `BIGINT` 后测试报 `categories.sort: 类型 mismatch: want "int", got "bigint"` 失败，还原后通过——确认能识别列类型漂移。
 - AC / Invariant：INV-003（迁移后 7 张表字段/类型/空值/默认值/主键/唯一索引/引擎/字符集与迁移前严格等价）；Contract Verification Requirements 要求 `SHOW CREATE TABLE` / `information_schema` 逐一比对。
 - Trigger：未来修改 baseline（或新增 ALTER 迁移）导致某列类型/长度/非空约束/默认值/引擎/字符集漂移时，运行测试。
 - Actual：测试仅查询 `information_schema.statistics WHERE non_unique=0` 校验主键与唯一索引的「名称+列」，未读取 `information_schema.columns` / `SHOW CREATE TABLE`，因此列名、列类型、长度、`NOT NULL`、`DEFAULT`、`ENGINE`、`CHARSET/COLLATE` 均不在断言范围内。
