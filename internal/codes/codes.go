@@ -58,6 +58,11 @@ const (
 	CodeSkuInvalidPrice  Code = 5002 // 价格非法（负数/非整数/超上限）→ 400
 	CodeSkuInvalidStatus Code = 5003 // 未知 status 值 → 400
 	CodeSkuNameExists    Code = 5004 // 同商品下 name 已存在 → 409
+	CodeSkuHasInventory  Code = 5005 // SKU 存在库存记录，不能删除 → 409
+
+	// 库存域（Inventory）6000-6999。
+	CodeInventoryInsufficient    Code = 6001 // 库存不足 → 409
+	CodeInventoryInvalidQuantity Code = 6002 // 库存数量非正整数 → 400
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -102,6 +107,10 @@ var codeTable = map[Code]codeInfo{
 	CodeSkuInvalidPrice:  {http.StatusBadRequest, "价格非法"},
 	CodeSkuInvalidStatus: {http.StatusBadRequest, "SKU 状态非法"},
 	CodeSkuNameExists:    {http.StatusConflict, "SKU 名称已存在"},
+	CodeSkuHasInventory:  {http.StatusConflict, "SKU 存在库存记录，不能删除"},
+
+	CodeInventoryInsufficient:    {http.StatusConflict, "库存不足"},
+	CodeInventoryInvalidQuantity: {http.StatusBadRequest, "库存数量非法"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。
