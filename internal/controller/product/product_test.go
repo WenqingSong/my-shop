@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -206,6 +208,45 @@ func createCategory(t *testing.T, base, token string, parentID int64, name strin
 func createProduct(t *testing.T, base, token string, body map[string]any) apiResult {
 	t.Helper()
 	return doRequest(t, base, "POST", "/admin/products", body, authHeader(token))
+}
+
+func createAdmin(t *testing.T, base, token, username, password string) int64 {
+	t.Helper()
+	res := doRequest(t, base, "POST", "/admin/admins", map[string]any{"username": username, "password": password}, authHeader(token))
+	assertOK(t, res, "create admin "+username)
+	var d struct {
+		Id int64 `json:"id"`
+	}
+	if err := json.Unmarshal(res.Data, &d); err != nil {
+		t.Fatalf("unmarshal create admin res: %v", err)
+	}
+	return d.Id
+}
+
+func createRole(t *testing.T, base, token, name string) int64 {
+	t.Helper()
+	res := doRequest(t, base, "POST", "/admin/roles", map[string]any{"name": name}, authHeader(token))
+	assertOK(t, res, "create role "+name)
+	var d struct {
+		Id int64 `json:"id"`
+	}
+	if err := json.Unmarshal(res.Data, &d); err != nil {
+		t.Fatalf("unmarshal create role res: %v", err)
+	}
+	return d.Id
+}
+
+// permissionID 返回 seed 标准权限 code 对应的 id（产品权限已由 Bootstrap seed，直接查库）。
+func permissionID(t *testing.T, code string) int64 {
+	t.Helper()
+	v, err := g.DB().Model("permissions").Ctx(context.Background()).Where("code", code).Value("id")
+	if err != nil {
+		t.Fatalf("query permission %s: %v", code, err)
+	}
+	if v == nil || v.IsEmpty() {
+		t.Fatalf("permission %s not seeded", code)
+	}
+	return v.Int64()
 }
 
 func getProductID(t *testing.T, res apiResult) int64 {
@@ -630,10 +671,11 @@ func TestProductKeywordEscaping(t *testing.T) {
 	pctID := mk("纯棉100%上衣") // 含字面 %
 	otherID := mk("纯棉100元上衣")
 	underID := mk("a_b_c")
+	slashID := mk("a\\b") // 含字面反斜杠
 	_ = otherID
 
 	// 上架。
-	for _, id := range []int64{pctID, otherID, underID} {
+	for _, id := range []int64{pctID, otherID, underID, slashID} {
 		assertOK(t, doRequest(t, base, "POST", fmt.Sprintf("/admin/products/%d/on-shelf", id), nil, authHeader(token)), "on-shelf")
 	}
 
@@ -652,6 +694,16 @@ func TestProductKeywordEscaping(t *testing.T) {
 	_ = json.Unmarshal(res.Data, &list)
 	if list.Total != 1 || list.Items[0].Id != underID {
 		t.Fatalf("literal _ should only match %d, got total=%d items=%+v", underID, list.Total, list.Items)
+	}
+
+	// 字面 \：搜索 "a\b" 应仅命中含字面反斜杠的 "a\b"，不命中 "ab"（反斜杠不得吞掉后续字符）。
+	q := url.Values{}
+	q.Set("keyword", `a\b`)
+	res = doRequest(t, base, "GET", "/products?"+q.Encode(), nil, nil)
+	assertOK(t, res, "keyword literal backslash")
+	_ = json.Unmarshal(res.Data, &list)
+	if list.Total != 1 || list.Items[0].Id != slashID {
+		t.Fatalf("literal backslash should only match %d, got total=%d items=%+v", slashID, list.Total, list.Items)
 	}
 }
 
@@ -722,6 +774,151 @@ func TestCategoryDeleteProtection(t *testing.T) {
 	if r.Status != 404 || r.Code != 3001 {
 		t.Fatalf("deleted category should be 404, got status=%d code=%d", r.Status, r.Code)
 	}
+}
+
+// TestProductUpdate 覆盖 AC-002/003/004/018 的 update 侧与 INV-005/007/008：
+// 合法字段更新、非法价格/分类拒绝且无写入、images 全量替换/省略保留、图片写入失败事务回滚。
+func TestProductUpdate(t *testing.T) {
+	base, token := setupProductServer(t)
+
+	leafA := createCategory(t, base, token, 0, "手机", nil)
+	leafB := createCategory(t, base, token, 0, "电脑", nil)
+	parentID := createCategory(t, base, token, 0, "数码", nil)
+	createCategory(t, base, token, parentID, "数码子类", nil) // 使 parentID 非叶子
+	disabledID := createCategory(t, base, token, 0, "停用", intPtr(0))
+
+	id := getProductID(t, createProduct(t, base, token, map[string]any{
+		"name": "旧名", "brand": "旧品牌", "category_id": leafA,
+		"price": 100, "main_image": "https://a/main.jpg", "images": []string{"https://a/1.jpg", "https://a/2.jpg"},
+	}))
+
+	// 合法字段更新：name/brand/category_id/price/main_image/images 全部生效。
+	res := doRequest(t, base, "PUT", fmt.Sprintf("/admin/products/%d", id), map[string]any{
+		"name": "新名", "brand": "新品牌", "category_id": leafB,
+		"price": 200, "main_image": "https://b/main.jpg", "images": []string{"https://b/1.jpg"},
+	}, authHeader(token))
+	assertOK(t, res, "update all fields")
+	d := getAdminProductDetail(t, base, token, id)
+	if d.Name != "新名" || d.Brand != "新品牌" || d.CategoryId != leafB || d.Price != 200 || d.MainImage != "https://b/main.jpg" {
+		t.Fatalf("unexpected updated product: %+v", d)
+	}
+	if len(d.Images) != 1 || d.Images[0] != "https://b/1.jpg" {
+		t.Fatalf("images should be fully replaced, got %v", d.Images)
+	}
+
+	// images 未提供时保留现有图片。
+	res = doRequest(t, base, "PUT", fmt.Sprintf("/admin/products/%d", id), map[string]any{"name": "改名"}, authHeader(token))
+	assertOK(t, res, "update name only")
+	d = getAdminProductDetail(t, base, token, id)
+	if d.Name != "改名" {
+		t.Fatalf("name should update, got %+v", d)
+	}
+	if len(d.Images) != 1 || d.Images[0] != "https://b/1.jpg" {
+		t.Fatalf("images should be preserved when omitted, got %v", d.Images)
+	}
+
+	// 非法价格（负/非整数/超上限）拒绝且不改变价格。
+	before := getAdminProductDetail(t, base, token, id)
+	for _, p := range []any{-1, 12.5, 100000000} {
+		r := doRequest(t, base, "PUT", fmt.Sprintf("/admin/products/%d", id), map[string]any{"price": p}, authHeader(token))
+		if r.Status != 400 || r.Code != 4002 {
+			t.Fatalf("update invalid price %v: status=%d code=%d", p, r.Status, r.Code)
+		}
+	}
+	after := getAdminProductDetail(t, base, token, id)
+	if after.Price != before.Price {
+		t.Fatalf("price should not change on invalid price update: %d -> %d", before.Price, after.Price)
+	}
+
+	// 非法分类（不存在 4003 / 非叶子 4004 / 禁用 4007）拒绝且不改变分类。
+	for _, tc := range []struct {
+		categoryID int64
+		code       int
+	}{
+		{999999, 4003},
+		{parentID, 4004},
+		{disabledID, 4007},
+	} {
+		r := doRequest(t, base, "PUT", fmt.Sprintf("/admin/products/%d", id), map[string]any{"category_id": tc.categoryID}, authHeader(token))
+		if r.Status != 400 || r.Code != tc.code {
+			t.Fatalf("update invalid category %d: status=%d code=%d (want %d)", tc.categoryID, r.Status, r.Code, tc.code)
+		}
+	}
+	after = getAdminProductDetail(t, base, token, id)
+	if after.CategoryId != before.CategoryId {
+		t.Fatalf("category_id should not change on invalid category update: %d -> %d", before.CategoryId, after.CategoryId)
+	}
+
+	// 模拟图片写入失败（URL 超 VARCHAR(512)）→ 事务回滚，商品名与图片均保持原值，无半成品。
+	tooLong := strings.Repeat("a", 600)
+	r := doRequest(t, base, "PUT", fmt.Sprintf("/admin/products/%d", id), map[string]any{
+		"name": "不应生效", "images": []string{tooLong},
+	}, authHeader(token))
+	if r.Status != 500 || r.Code != 1000 {
+		t.Fatalf("image too long should be 500/1000, got status=%d code=%d", r.Status, r.Code)
+	}
+	d = getAdminProductDetail(t, base, token, id)
+	if d.Name == "不应生效" {
+		t.Fatalf("product name should rollback on image failure")
+	}
+	if len(d.Images) != 1 || d.Images[0] != "https://b/1.jpg" {
+		t.Fatalf("images should rollback on failure, got %v", d.Images)
+	}
+}
+
+// TestProductOnShelfCategoryRevalidation 覆盖 INV-005 上架分支与 Contract Open Risks：
+// 商品已绑定分类，分类被禁用（4007）或变为非叶子（4004）后再次上架被拒且状态不变。
+func TestProductOnShelfCategoryRevalidation(t *testing.T) {
+	base, token := setupProductServer(t)
+
+	leafID := createCategory(t, base, token, 0, "手机", nil)
+	id := getProductID(t, createProduct(t, base, token, map[string]any{
+		"name": "iPhone", "category_id": leafID, "price": 100,
+	}))
+
+	// 上架 → 下架，回到 off_shelf，为「再次上架」做准备。
+	assertOK(t, doRequest(t, base, "POST", fmt.Sprintf("/admin/products/%d/on-shelf", id), nil, authHeader(token)), "on-shelf")
+	assertOK(t, doRequest(t, base, "POST", fmt.Sprintf("/admin/products/%d/off-shelf", id), nil, authHeader(token)), "off-shelf")
+
+	// 禁用分类 → 再次上架被拒 4007，状态保持 off_shelf。
+	assertOK(t, doRequest(t, base, "PUT", fmt.Sprintf("/categories/%d", leafID), map[string]any{"status": 0}, authHeader(token)), "disable category")
+	res := doRequest(t, base, "POST", fmt.Sprintf("/admin/products/%d/on-shelf", id), nil, authHeader(token))
+	if res.Status != 400 || res.Code != 4007 {
+		t.Fatalf("on-shelf with disabled category: status=%d code=%d", res.Status, res.Code)
+	}
+	if dbProductStatus(t, id) != 2 {
+		t.Fatalf("status should remain off_shelf(2), got %d", dbProductStatus(t, id))
+	}
+
+	// 恢复启用后使其变为非叶子 → 再次上架被拒 4004。
+	assertOK(t, doRequest(t, base, "PUT", fmt.Sprintf("/categories/%d", leafID), map[string]any{"status": 1}, authHeader(token)), "enable category")
+	createCategory(t, base, token, leafID, "手机子类", nil)
+	res = doRequest(t, base, "POST", fmt.Sprintf("/admin/products/%d/on-shelf", id), nil, authHeader(token))
+	if res.Status != 400 || res.Code != 4004 {
+		t.Fatalf("on-shelf with non-leaf category: status=%d code=%d", res.Status, res.Code)
+	}
+	if dbProductStatus(t, id) != 2 {
+		t.Fatalf("status should remain off_shelf(2), got %d", dbProductStatus(t, id))
+	}
+}
+
+// TestProductCreateWithGrantedPermission 覆盖 AC-021：非超管管理员经角色授予 product:create 后创建成功，
+// 与 AC-020 的「无权限 403」形成对照，锁定 seed 权限 code 与路由 require(...) 一致。
+func TestProductCreateWithGrantedPermission(t *testing.T) {
+	base, superToken := setupProductServer(t)
+	leafID := createCategory(t, base, superToken, 0, "手机", nil)
+
+	// 建角色 → 授 product:create → 建普通管理员 → 分配角色。
+	roleID := createRole(t, base, superToken, "商品管理员")
+	permID := permissionID(t, "product:create")
+	assertOK(t, doRequest(t, base, "POST", fmt.Sprintf("/admin/roles/%d/permissions", roleID), map[string]any{"permission_id": permID}, authHeader(superToken)), "assign permission")
+	adminID := createAdmin(t, base, superToken, "productmgr", "productmgrpass123")
+	assertOK(t, doRequest(t, base, "POST", fmt.Sprintf("/admin/admins/%d/roles", adminID), map[string]any{"role_id": roleID}, authHeader(superToken)), "assign role")
+
+	// 该普通管理员登录后创建商品成功。
+	mgrToken := loginAdmin(t, base, "productmgr", "productmgrpass123")
+	res := createProduct(t, base, mgrToken, map[string]any{"name": "授权商品", "category_id": leafID, "price": 1})
+	assertOK(t, res, "create product with granted product:create")
 }
 
 func intPtr(v int) *int {
