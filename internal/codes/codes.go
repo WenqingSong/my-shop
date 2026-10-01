@@ -52,6 +52,12 @@ const (
 	CodeProductInvalidStatusTransition Code = 4005 // 状态迁移非法/并发冲突 → 409
 	CodeProductInvalidStatus           Code = 4006 // 未知 status 值 → 400
 	CodeProductCategoryDisabled        Code = 4007 // 分类已禁用 → 400
+
+	// SKU 域（Sku）5000-5999。
+	CodeSkuNotFound      Code = 5001 // SKU 不存在 → 404
+	CodeSkuInvalidPrice  Code = 5002 // 价格非法（负数/非整数/超上限）→ 400
+	CodeSkuInvalidStatus Code = 5003 // 未知 status 值 → 400
+	CodeSkuNameExists    Code = 5004 // 同商品下 name 已存在 → 409
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -91,6 +97,11 @@ var codeTable = map[Code]codeInfo{
 	CodeProductInvalidStatusTransition: {http.StatusConflict, "商品状态迁移非法"},
 	CodeProductInvalidStatus:           {http.StatusBadRequest, "商品状态非法"},
 	CodeProductCategoryDisabled:        {http.StatusBadRequest, "分类已禁用"},
+
+	CodeSkuNotFound:      {http.StatusNotFound, "SKU 不存在"},
+	CodeSkuInvalidPrice:  {http.StatusBadRequest, "价格非法"},
+	CodeSkuInvalidStatus: {http.StatusBadRequest, "SKU 状态非法"},
+	CodeSkuNameExists:    {http.StatusConflict, "SKU 名称已存在"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。

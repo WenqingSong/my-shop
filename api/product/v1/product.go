@@ -5,6 +5,8 @@ import (
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+
+	skuv1 "cnb.cool/go-cloud-devops/my-shop/api/sku/v1"
 )
 
 // 商品状态枚举（API 出参为字符串枚举；DB 存 TINYINT 0/1/2）。
@@ -54,9 +56,10 @@ type DetailReq struct {
 	Id     int64 `json:"id" in:"path" v:"required" dc:"商品 id"`
 }
 
-// DetailRes 前台商品详情响应。
+// DetailRes 前台商品详情响应（组合 SPU 与 SKU，仅返回 enabled SKU）。
 type DetailRes struct {
 	Product
+	Skus []*skuv1.Sku `json:"skus" dc:"SKU 列表（前台仅 enabled）"`
 }
 
 // AdminListReq 后台商品列表请求（全部状态）。
@@ -84,9 +87,10 @@ type AdminDetailReq struct {
 	Id     int64 `json:"id" in:"path" v:"required" dc:"商品 id"`
 }
 
-// AdminDetailRes 后台商品详情响应。
+// AdminDetailRes 后台商品详情响应（组合 SPU 与 SKU，返回全部状态 SKU）。
 type AdminDetailRes struct {
 	Product
+	Skus []*skuv1.Sku `json:"skus" dc:"SKU 列表（全部状态）"`
 }
 
 // CreateReq 创建商品请求（status 强制 draft，不接受客户端指定）。

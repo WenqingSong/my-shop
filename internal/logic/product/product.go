@@ -94,22 +94,30 @@ func (s *sProduct) AdminList(ctx context.Context, req *v1.AdminListReq) (*v1.Adm
 	return &v1.AdminListRes{Items: res.Items, Total: res.Total, Page: res.Page, Size: res.Size}, nil
 }
 
-// Detail 前台详情：仅 on_shelf 可见。
+// Detail 前台详情：仅 on_shelf 可见，并组合该商品的 enabled SKU。
 func (s *sProduct) Detail(ctx context.Context, id int64) (*v1.DetailRes, error) {
 	p, err := s.load(ctx, id, true)
 	if err != nil {
 		return nil, err
 	}
-	return &v1.DetailRes{Product: *p}, nil
+	skus, err := service.Sku().ListByProduct(ctx, id, true)
+	if err != nil {
+		return nil, err
+	}
+	return &v1.DetailRes{Product: *p, Skus: skus}, nil
 }
 
-// AdminDetail 后台详情：全部状态。
+// AdminDetail 后台详情：全部状态，并组合该商品的全部状态 SKU。
 func (s *sProduct) AdminDetail(ctx context.Context, id int64) (*v1.AdminDetailRes, error) {
 	p, err := s.load(ctx, id, false)
 	if err != nil {
 		return nil, err
 	}
-	return &v1.AdminDetailRes{Product: *p}, nil
+	skus, err := service.Sku().ListByProduct(ctx, id, false)
+	if err != nil {
+		return nil, err
+	}
+	return &v1.AdminDetailRes{Product: *p, Skus: skus}, nil
 }
 
 // Create 创建商品：校验后事务写入 products 与 product_images，status 强制 draft。
@@ -288,6 +296,15 @@ func (s *sProduct) CountByCategory(ctx context.Context, categoryID int64) (int64
 		return 0, codes.Wrap(codes.CodeInternalError, fmt.Errorf("统计分类下商品: %w", err))
 	}
 	return int64(n), nil
+}
+
+// Exists 判断商品是否存在（供 SKU 校验 product_id 存在性）。
+func (s *sProduct) Exists(ctx context.Context, id int64) (bool, error) {
+	n, err := g.DB().Model("products").Ctx(ctx).Where("id", id).Count()
+	if err != nil {
+		return false, codes.Wrap(codes.CodeInternalError, fmt.Errorf("查询商品存在性: %w", err))
+	}
+	return n > 0, nil
 }
 
 // transition 执行状态迁移：先 SELECT 判定存在（404），再条件 UPDATE + RowsAffected 判定（409），

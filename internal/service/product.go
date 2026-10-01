@@ -26,6 +26,8 @@ type IProduct interface {
 	OffShelf(ctx context.Context, id int64) (*v1.OffShelfRes, error)
 	// CountByCategory 统计分类下商品数量（供分类删除保护调用）。
 	CountByCategory(ctx context.Context, categoryID int64) (int64, error)
+	// Exists 判断商品是否存在（供 SKU 校验 product_id 存在性）。
+	Exists(ctx context.Context, id int64) (bool, error)
 }
 
 var localProduct IProduct
