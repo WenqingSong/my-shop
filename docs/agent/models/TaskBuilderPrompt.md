@@ -178,6 +178,10 @@ AC-002：增加 IsAdmin 判断。
 
 `NEW/UPDATE` 时必须在 `task.md` 声明目标 Design Artifact 并纳入 Scope / Deliverables / AC；`NONE` 不要求 Design，也不因任务为 `COMPLEX` 就机械要求 `NEW`。判定边界有歧义时，由 Analyst 在 Contract 中校正；校正改变 Scope 时回 Owner/Task Builder。
 
+## 全局资源预留
+
+任务需要占用项目级全局唯一资源（错误码域、migration version）时，只声明**资源类型与语义需求**，例如「本任务新增一个错误码域（语义：XX）」「新增 1 个 migration」，**不写任何具体域号或 version 号**（废止「建议 7000-7999」这类写法）。具体分配由 Analyst 读 `.agent/registry/*` 派生并写入 Contract，Coder 不得自行推断编号。
+
 ## Git 基线
 
 记录任务开始时的 Commit 和已有暂存、未暂存、新增文件。已有修改可能与任务重叠时，应保留足以区分新旧工作的证据；不能擅自 stash、丢弃或覆盖。

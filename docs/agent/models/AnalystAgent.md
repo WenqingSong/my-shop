@@ -157,6 +157,14 @@ RECOMMENDATION：……
 
 并发目标必须落到可验证结果，例如订单数、库存、唯一性和最终数据状态，不能只写“支持高并发”。
 
+## 全局资源预留
+
+任务需要全局唯一资源（错误码域、migration version）时：
+
+- 读 `.agent/registry/*`，按规则派生：错误码域 `next = max(已记录域上限) + 1000`（大小固定 1000，域内编号逐个列出）；migration version `next = max(所有已记录 version, 含 RELEASED) + 1`。
+- 将派生结果写入 Contract 的全局资源清单，并在 Registry 新增对应 `RESERVED` 条目（通过独立 Registry 变更进入 `develop`，不在 Feature Branch 内私留）。
+- 不得凭空自选编号；`RESERVED → ACTIVE` 由 feature 合并进 `develop` 时同步，`RESERVED → RELEASED` 在 Task 取消时标记（migration version 一经分配永不复用，错误码域仅纯 `RESERVED` 阶段可复用）。
+
 ## Owner 确认
 
 `analysis` 完成后保持 `WAITING_FOR_OWNER_APPROVAL`，向 Owner 只说明推荐、关键取舍、风险和需要决定的问题，然后停止。

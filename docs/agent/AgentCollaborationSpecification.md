@@ -154,3 +154,52 @@ Coder 为关键行为编写可长期保留的测试，并在交接中指出最�
 没有 Owner 明确授权时，Agent 不执行 Push、Force Push、改写历史、生产部署或其他高影响外部操作。
 
 Owner 决定关键业务规则、Contract、是否接受 P3、是否启动 Deliverer，以及最终接受、Commit、Merge、Push 和 Deploy。
+
+## 11. 跨任务全局资源预留
+
+### 11.1 定义与分类
+
+「全局资源」指多个并行 Task 可能同时申请、重复会导致冲突或语义错误的项目级命名资源：
+
+| 类别 | 判定标准 | 治理 | 示例 |
+| --- | --- | --- | --- |
+| A 强全局唯一 | 重复导致构建/迁移/运行或语义冲突 | 纳入 Registry（强治理） | migration version、错误码域/编号 |
+| B namespace | 通常靠命名空间避免，重复有潜在静默冲突 | 只分类、不纳入 | permission code、Redis key 前缀、config key、route prefix、MQ topic |
+| C 局部命名 | 单任务内部、无跨任务冲突 | 禁止注册 | 局部变量、模块内函数、内部 struct、普通测试 fixture、临时命名 |
+
+C 类**不得以任何形式要求注册**；新增资源类型进入治理须有明确判定标准且经 Owner 确认，不得默认「任何名字都要注册」。
+
+### 11.2 共享事实源
+
+`.agent/registry/`（`develop` 上）是全局资源**分配状态**的权威事实源，含 `error-codes.md`（错误码域）与 `migrations.md`（migration version）。
+
+Reservation 生效 = 一个**只改 Registry 文件的 commit 落在 `develop`**。Feature Branch 在 Coder 开始前 `rebase/merge develop`（或取回最新 Registry）以读到其他并行 Task 的 `RESERVED`。仅在 Feature Branch 内自行声明 Reservation 不视为有效预留。
+
+与 `docs/design/*` 的关系：Registry 记录「分配状态」，`docs/design/<module>.md` 的「错误码域」章节与 `docs/design/migration.md` 的迁移清单记录「合并后模块语义归属与内容」，二者互补、不复制，避免双事实源。
+
+### 11.3 分配规则
+
+- 错误码域：按千位划分、大小固定 1000；`next = max(已记录域上限) + 1000`；域内具体编号由 Analyst 在 Contract 逐个列出。
+- migration version：保留 `YYYYMMDD + 序号` 格式；`next = max(所有已记录 version, 含 RELEASED) + 1`。
+
+### 11.4 生命周期
+
+状态三态：`RESERVED`（已申请、尚未合并）、`ACTIVE`（已合并生效，终态）、`RELEASED`（取消释放，记录保留）。
+
+转换：`RESERVED → ACTIVE`（feature 合并进 `develop` 时由合并任务同步）；`RESERVED → RELEASED`（Task 取消时由 Analyst/Owner 标记）。
+
+复用规则按资源类型区分：
+- migration version：一旦分配即永久 tombstone、**不得复用**（`next` 仍计入 RELEASED 的 `max`）。
+- 错误码域：仅纯 `RESERVED` 阶段可 `RELEASE` 后复用；已实现/已合并即不可复用。
+
+### 11.5 并行竞争防护
+
+无外部锁、无独立服务。以 Git 提交顺序 + 冲突检测串行化：先提交到 `develop` 者胜，后提交者在 rebase/合并时看到 Registry 已占用，必须重新申请不同值。结果至多一个 Task 合法持有同一资源。
+
+### 11.6 一致性与检测
+
+Coder 实现中出现的每个全局资源都必须已存在于 APPROVED Contract 的全局资源清单（禁止自行 `max+1` 占号）。实现阶段新增全局资源需求 → 走既有 `CONTRACT_REVISION` 流程。
+
+Cleaner 做三边一致性检查：Registry ↔ Contract ↔ 实现（`internal/codes/codes.go`、`internal/migrations/sql/*`、`migrations_test.go`），任一漂移 → `CHANGES_REQUIRED`。
+
+`scripts/check-registry.sh` 提供最小只读机械校验（域/version 重复 + Registry ↔ 实现明显漂移），不分配、不改 Registry、不替代语义判断。

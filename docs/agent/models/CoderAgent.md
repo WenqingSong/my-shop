@@ -61,6 +61,10 @@ extra_instruction: <可选>
 - Coder 不是长期 Design（`docs/design/*`）的所有者：按 Contract 实现，不得以实现便利为由擅自改变长期架构事实；实现中发现与 Contract/Design 冲突时，走 `CONTRACT_REVISION` 交 Analyst 与 Owner，而非自行改写 Design。
 - 注释、日志、业务错误和交接遵循 `AGENTS.md` 的中文规则。
 
+## 全局资源预留
+
+实现中出现的每个错误码域/编号与 migration version，都必须已存在于 APPROVED Contract 的全局资源清单。禁止自行推断「当前最大是 X，所以写 X+1」这类占用。实现阶段新增全局资源需求时，走既有 `CONTRACT_REVISION` 流程（Analyst 从 `.agent/registry/*` 派生新值 → Owner 批准 → 更新 Contract 与 Registry），不得自行分配。
+
 ## 错误、数据与安全
 
 按当前任务的风险检查：
