@@ -448,6 +448,16 @@ func TestCartAddValidation(t *testing.T) {
 		t.Fatalf("disabled sku: status=%d code=%d", res.Status, res.Code)
 	}
 
+	// 缺失/非法 sku_id → 400/1001（参数错误），不得 500 或非业务码。
+	res = doRequest(t, base, "POST", "/cart/items", map[string]any{"quantity": 1}, authHeader(userToken))
+	if res.Status != 400 || res.Code != 1001 {
+		t.Fatalf("missing sku_id: status=%d code=%d", res.Status, res.Code)
+	}
+	res = addCart(t, base, userToken, 0, 1)
+	if res.Status != 400 || res.Code != 1001 {
+		t.Fatalf("sku_id=0: status=%d code=%d", res.Status, res.Code)
+	}
+
 	if n := dbCartCount(t, userID); n != 0 {
 		t.Fatalf("expected no cart writes on validation failure, got %d", n)
 	}
@@ -552,6 +562,38 @@ func TestCartSelected(t *testing.T) {
 	assertOK(t, res, "select")
 	if it := addCartItem(t, res); !it.Selected {
 		t.Fatal("expected selected=true after select")
+	}
+}
+
+// TestCartSameValueUpdateIdempotent 覆盖 CLEAN-001 回归：对「存在且归属本人」的条目
+// 设置与当前完全相同的 quantity/selected 应幂等成功，仅真正未命中（不存在/属他人）才 404。
+func TestCartSameValueUpdateIdempotent(t *testing.T) {
+	base, adminToken := setupCartServer(t)
+	userToken, userID := registerLoginUser(t, base, "alice", "password123")
+	skuID, _ := newAddableSku(t, base, adminToken)
+
+	assertOK(t, addCart(t, base, userToken, skuID, 5), "add")
+	items := listCart(t, base, userToken)
+	itemID := items[0].Id
+
+	// 相同数量（5）→ 幂等成功，而非 404。
+	res := doRequest(t, base, "PUT", fmt.Sprintf("/cart/items/%d", itemID), map[string]any{"quantity": 5}, authHeader(userToken))
+	if res.Status != 200 || res.Code != 0 {
+		t.Fatalf("same quantity: status=%d code=%d msg=%q", res.Status, res.Code, res.Message)
+	}
+	// 相同勾选状态（默认 true）→ 幂等成功，而非 404。
+	res = doRequest(t, base, "PUT", fmt.Sprintf("/cart/items/%d/selected", itemID), map[string]any{"selected": true}, authHeader(userToken))
+	if res.Status != 200 || res.Code != 0 {
+		t.Fatalf("same selected: status=%d code=%d msg=%q", res.Status, res.Code, res.Message)
+	}
+
+	// 条目仍存在且数量/勾选不变。
+	if qty, _ := dbCartRow(t, userID, skuID); qty != 5 {
+		t.Fatalf("quantity should remain 5, got %d", qty)
+	}
+	items = listCart(t, base, userToken)
+	if len(items) != 1 || !items[0].Selected {
+		t.Fatalf("item should remain selected=true, got %+v", items)
 	}
 }
 

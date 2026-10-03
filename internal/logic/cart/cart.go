@@ -78,6 +78,11 @@ func (s *sCart) List(ctx context.Context, userID int64) (*v1.ListRes, error) {
 // Add 添加 SKU：校验数量（1..999）与 SKU 可购（存在/enabled/商品 on_shelf），
 // 取 skus.price 快照后原子写入：重复添加在数据库层原子累加，累加后超上限拒绝。
 func (s *sCart) Add(ctx context.Context, userID int64, req *v1.AddReq) (*v1.AddRes, error) {
+	// sku_id 为必填正向引用，缺失/非法（≤0）返回稳定 400 参数错误，避免 gvalid 的
+	// 非业务 gcode（51）被透出为 500。
+	if req.SkuId <= 0 {
+		return nil, codes.New(codes.CodeInvalidArgument)
+	}
 	qty, err := normalizeAddQuantity(req.Quantity)
 	if err != nil {
 		return nil, err
@@ -103,7 +108,9 @@ func (s *sCart) Add(ctx context.Context, userID int64, req *v1.AddReq) (*v1.AddR
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		// 原子 upsert：首次插入建新条目，重复则累加数量。单语句完成，避免无锁「先查再写」丢更新。
 		if _, e := tx.Ctx(ctx).Exec(
-			"INSERT INTO cart_items (user_id, sku_id, quantity, price_snapshot, selected) VALUES (?, ?, ?, ?, 1) ON DUPLICATE KEY UPDATE quantity = quantity + VALUES(quantity)",
+			// 行别名 new 替代已弃用的 VALUES() 语法（MySQL 8.0.20 起 VALUES() 被弃用）；
+			// 左侧现有量用表名限定，避免与 new.quantity 产生歧义。
+			"INSERT INTO cart_items (user_id, sku_id, quantity, price_snapshot, selected) VALUES (?, ?, ?, ?, 1) AS new ON DUPLICATE KEY UPDATE cart_items.quantity = cart_items.quantity + new.quantity",
 			userID, req.SkuId, qty, sku.Price,
 		); e != nil {
 			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("写入购物车条目: %w", e))
@@ -150,7 +157,15 @@ func (s *sCart) UpdateQuantity(ctx context.Context, userID, itemID, quantity int
 		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("修改购物车数量: %w", err))
 	}
 	if n, _ := result.RowsAffected(); n == 0 {
-		return nil, codes.New(codes.CodeCartItemNotFound)
+		// MySQL 对「值未变化」的 UPDATE 返回 0 受影响行；回查区分「命中但值未变」与「未命中」，
+		// 只有真正未命中（不存在/已删除/属他人）才返回 404。
+		exists, err := s.itemExists(ctx, userID, itemID)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, codes.New(codes.CodeCartItemNotFound)
+		}
 	}
 	item, err := s.findItemByID(ctx, userID, itemID)
 	if err != nil {
@@ -174,7 +189,14 @@ func (s *sCart) UpdateSelected(ctx context.Context, userID, itemID int64, select
 		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("修改购物车勾选状态: %w", err))
 	}
 	if n, _ := result.RowsAffected(); n == 0 {
-		return nil, codes.New(codes.CodeCartItemNotFound)
+		// 同上：值未变化不视为未命中，回查存在则幂等成功。
+		exists, err := s.itemExists(ctx, userID, itemID)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, codes.New(codes.CodeCartItemNotFound)
+		}
 	}
 	item, err := s.findItemByID(ctx, userID, itemID)
 	if err != nil {
@@ -196,6 +218,18 @@ func (s *sCart) Delete(ctx context.Context, userID, itemID int64) error {
 		return codes.New(codes.CodeCartItemNotFound)
 	}
 	return nil
+}
+
+// itemExists 判断条目是否命中 id AND user_id（用于区分「值未变化」与「未命中」）。
+func (s *sCart) itemExists(ctx context.Context, userID, itemID int64) (bool, error) {
+	n, err := g.DB().Model("cart_items").Ctx(ctx).
+		Where("id", itemID).
+		Where("user_id", userID).
+		Count()
+	if err != nil {
+		return false, codes.Wrap(codes.CodeInternalError, fmt.Errorf("查询购物车条目存在性: %w", err))
+	}
+	return n > 0, nil
 }
 
 // cartItemQuery 构造购物车条目联查（LEFT JOIN skus/products/inventories），

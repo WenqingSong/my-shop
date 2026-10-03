@@ -43,7 +43,7 @@ type ListRes struct {
 // AddReq 添加 SKU 到购物车请求（重复添加同 SKU 累加数量）。
 type AddReq struct {
 	g.Meta   `path:"/cart/items" method:"post" tags:"购物车" summary:"添加 SKU 到购物车"`
-	SkuId    int64        `json:"sku_id" v:"required" dc:"SKU id"`
+	SkuId    int64        `json:"sku_id" dc:"SKU id（必填；缺失或 ≤0 由 service 显式校验返回 400）"`
 	Quantity *json.Number `json:"quantity" dc:"数量（正整数，默认 1，上限 999）"`
 }
 
