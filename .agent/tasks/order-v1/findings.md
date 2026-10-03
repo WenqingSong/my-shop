@@ -4,14 +4,16 @@
 
 - 任务：`order-v1`（订单核心闭环 V1），Design Impact = NEW，Artifact `docs/design/order.md`。
 - 任务基线（Task 声明）：`f197bc20f41a8a545cef3d5b7b8d8f1e3435aa6b`（分支 `feat/order`，任务开始时 working tree clean）。
-- 当前审查对象（复审）：HEAD = `38a5a645d6e077d573224d3a57f6ef67967da76b`（`test: 补充订单表结构校验与错误码 RESERVED 域检查`）。
-- 完整相关变更范围：`f197bc2..HEAD`，含三个 commit：
+- 当前审查对象（复审）：HEAD = `11161f428328e1b45495b37e308a6fa0d878d1e4`（`docs(order): 更新 delivery 阻塞状态与复审链路`）。
+- 完整相关变更范围：`f197bc2..HEAD`，含六个 commit：
   - `11b8607`（docs：Contract、Design、Registry、task 等 8 文件）
   - `e65f1e2`（实现 + 测试：18 文件）
   - `38a5a64`（复审修复：`migrations_test.go` 补订单表结构快照、`check-registry.sh` 补 RESERVED 域判断）
-- 工作区状态：clean（`git status --short` 为空），即审查对象已全部提交，无未提交修改需要区分。
-- 新增未跟踪文件已全部纳入 commit，不存在仅靠 `git diff` 会遗漏的新增文件。
-- 复审范围：仅 `38a5a64` 引入的两个文件改动（测试 + 脚本），生产代码与订单实现无变化。
+  - `4cf1b04`（docs：更新复审结论文档）
+  - `f0ffc6d`（test：补充并发退款只补偿一次回归测试 `TestOrderRefundRestoresInventoryOnce`）
+  - `11161f4`（docs：更新 delivery 阻塞状态与复审链路）
+- 工作区状态：clean（`git status --short` 为空），审查对象已全部提交，无未提交修改需要区分。
+- 本次复审范围：上轮 CLEAN（`38a5a64`）之后的增量 = `f0ffc6d` 新增的并发退款回归测试 + `4cf1b04`/`11161f4` 两份 docs；生产代码与订单实现无变化。
 
 ## Result
 
@@ -35,7 +37,7 @@ CLEAN
 | AC-012 管理员发货/退款权限 | PASS | `TestOrderAdminShipRefundPermission`（无权限管理员 403/1003、普通用户 token 403、超管退款成功）。 |
 | AC-013 越权无副作用 | PASS | `TestOrderUserIsolation` + `TestOrderAdminShipRefundPermission`（越权后状态/库存均不变）。 |
 | AC-014 并发不超卖 | PASS | `TestOrderConcurrentNoOversell`（并发 20 单、库存 5，仅 5 成功，库存=0）；`DeductInTx` 条件扣减 `WHERE quantity >= N` + RowsAffected。已用 `-race` 运行通过。 |
-| AC-015 取消只补偿一次 | PASS | `TestOrderCancelRestoresInventoryOnce`（并发取消库存仅恢复一次）；`cancelInTx` 条件状态更新 + RowsAffected 原子闸门。已用 `-race` 运行通过。 |
+| AC-015 取消/退款只补偿一次 | PASS | `TestOrderCancelRestoresInventoryOnce`（并发 8 取消仅 1 次成功、库存恢复一次）+ `TestOrderRefundRestoresInventoryOnce`（并发 8 退款仅 1 次 paid→refunded、库存恢复一次、终态 70）；`cancelInTx`/`Refund` 条件状态更新 + RowsAffected 原子闸门。已用 `-race` 运行通过。 |
 
 ## Verification
 
@@ -45,8 +47,10 @@ CLEAN
 | `go vet ./...` | PASS | exit 0，无静态检查问题。 |
 | `gofmt -l`（变更文件） | PASS | 无输出，格式一致。 |
 | `go test -p 1 -count=1 ./...` | PASS | 全部包 ok，含 migrations/boot/cmd/controller/*。 |
-| `go test -race -count=1 -run TestOrder ./internal/cmd/` | PASS | ok（39.4s），覆盖并发不超卖/取消只补偿一次等 AC。 |
+| `go test -race -count=1 -run TestOrder ./internal/cmd/` | PASS | ok（41.6s），覆盖并发不超卖/取消/退款只补偿一次等 AC。 |
 | `scripts/check-registry.sh` | PASS | 复审后 exit 0：9001-9006 落在 RESERVED 域仅提示 `[INFO]`，结尾「校验通过」（CLEAN-001 已修复）。 |
+| `go test -race -count=1 -run TestOrderRefundRestoresInventoryOnce ./internal/cmd/` | PASS | ok（5.5s），新增并发退款回归测试通过。 |
+| Mutation 验证（测试可信度·退款） | PASS | 临时删除 `Refund` 的 RowsAffected 核对后，`TestOrderRefundRestoresInventoryOnce` 失败（`exactly one refund should succeed, got 8`），确认能识别「只补偿一次」被破坏的实现；恢复后通过、工作区 clean。 |
 | Registry ↔ Contract ↔ 实现 三边一致性（语义） | PASS | 错误码域 9000-9999、migration 20261001000007 在 Registry(RESERVED)/Contract/实现三方一致；权限 code `order:ship`/`order:refund` 已 seed。 |
 | Task ↔ APPROVED Contract ↔ docs/design/order.md ↔ 实现 四者一致 | PASS | 数据模型、状态机、不变量、错误码、权限、路由、配置契约均一致。 |
 
@@ -77,4 +81,10 @@ CLEAN
 
 ## 结论说明
 
-复审结论：无开放 Finding。CLEAN-001、CLEAN-002 两项 P3 已由 Coder 修复并经复审验证关闭，未引入新风险。全部 15 项 AC 有可信集成测试（真实 `RegisterFrontendRoutes`/`RegisterAdminRoutes` + `middleware.Auth`/`AdminAuth`/`RequirePermission` + 真实 MySQL/Redis）与必要运行证据支持 PASS。复审仅涉及测试与脚本，生产代码与订单实现无变化。
+二次复审结论：无开放 Finding。本轮针对上轮 CLEAN（`38a5a64`）之后新增的 `f0ffc6d`（并发退款只补偿一次回归测试）复审：
+
+- `TestOrderRefundRestoresInventoryOnce` 完整覆盖 Owner 对 CL-002 的待办——paid 订单并发 8 次 refund、恰好一次成功完成 paid→refunded（`okCount==1` + 终态 `status==70`）、库存只恢复一次（`stock==5`）、其余请求不再补偿；结构与被接受的 `TestOrderCancelRestoresInventoryOnce` 一致，走真实 `/admin/orders/:id/refund` 路由 + 超管 token + 真实 MySQL。
+- 测试可信：临时删除 `Refund` 的 `RowsAffected` 核对后测试失败（`got 8`），能区分「只补偿一次」被破坏的实现（已恢复，工作区 clean）。
+- 生产代码与订单实现本轮无变化；`go build`/`go vet`/全量测试/`-race`/`check-registry.sh` 全部通过。
+
+CLEAN-001、CLEAN-002 两项 P3（上一轮）仍 CLOSED。另见「验证卡 Mutation 修正」说明：core-logic.md 的 CL-001/CL-002「可选 Mutation」原指向「删条件」，实测不会使并发测试失败（详见 core-logic.md 已同步修正为「删 RowsAffected 核对」），属文档准确性修正、非实现缺陷。
