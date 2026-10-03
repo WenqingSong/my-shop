@@ -2,7 +2,7 @@
 
 ## Decision Status
 
-WAITING_FOR_OWNER_APPROVAL
+APPROVED
 
 ## Problem
 
@@ -70,7 +70,17 @@ RECOMMENDATION：**4 个核心 Design 由 Analyst 直接产出；Category 建独
 
 ## Selected Design
 
-等待 Owner 确认。
+Owner 已确认（2026-10-04）并冻结：
+
+1. **「谁写 Design」**：由 Analyst 直接产出长期 Design，不采用「Coder 起草」方案。遵循已落地的 Design Governance：Analyst 维护长期设计事实，Coder 不作为 Design Owner，Cleaner 负责一致性校验。本任务交付物为 6 个 Design Artifact，无生产代码/测试，Coder 不承担成稿职责。
+
+2. **Category 归属**：建立独立 `docs/design/category.md`，不并入 `product.md`。因 Category 历史任务为 NORMAL、无 APPROVED Contract，仅依据可验证的 `categories-v1/task.md`、最终实现、测试及其他已 APPROVED Contract 中明确引用的 Category 事实回填，禁止借 Backfill 新增设计决策。
+
+3. **Admin/RBAC 归属**：建立独立 `docs/design/rbac.md`。`docs/design/iam.md` 保持现状、不回溯重写；IAM 负责 Authentication，RBAC 文档负责 Authorization（角色、权限、绑定关系、超级管理员、权限边界等已落地事实）。
+
+4. **Task 同步**：同步修正 `task.md` 中「Coder 起草 Design」的过时 Assumption，使 Task 与治理规范、Contract 一致（已执行）。
+
+其余机制（事实来源优先级、Historical Drift 检测、统一 Design 章节结构、跨模块口径表、业务不变量）按 Recommendation 冻结。
 
 ## Interfaces and Data
 
@@ -155,4 +165,12 @@ RECOMMENDATION：**4 个核心 Design 由 Analyst 直接产出；Category 建独
 
 ## Owner Decision Record
 
-等待 Owner 确认。
+- 2026-10-04（APPROVED）：Owner 确认全部待决问题并冻结 Contract：
+  1. **「谁写 Design」**：Analyst 直接产出，不采用「Coder 起草」；遵循 Design Governance（Analyst 维护长期设计事实，Coder 非 Design Owner，Cleaner 一致性校验）。
+  2. **Category**：独立 `docs/design/category.md`；因 NORMAL 无 Contract，仅依可验证 task/实现/测试/其他 APPROVED Contract 引用事实回填，不新增设计决策。
+  3. **Admin/RBAC**：独立 `docs/design/rbac.md`；`iam.md` 不回溯重写，IAM=Authentication、RBAC=Authorization。
+  4. **Task 同步**：先修正 `task.md` 的过时 Assumption（「Coder 起草 Design」），再转 `APPROVED`。
+
+  与 Recommendation 的差异：无实质差异。Recommendation 三项归属建议（Analyst 直写、独立 `category.md`、独立 `rbac.md`）均被 Owner 采纳；Owner 额外要求先同步修正 `task.md` 的过时 Assumption 再转 `APPROVED`，已执行。
+
+  适用范围：`design-debt-backfill` 本任务。Contract 与 Task 兼容（Task 已同步修正 Assumption），无需变更 Scope/AC；Design Artifact 由 4 个核心 + `category.md` + `rbac.md` 共 6 个。

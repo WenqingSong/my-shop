@@ -31,7 +31,7 @@
 ## Design Impact
 
 Design Impact: NEW
-Design Artifact: `docs/design/migration.md`、`docs/design/product.md`、`docs/design/sku.md`、`docs/design/inventory.md`（Category / Admin(RBAC) 的 Design 归属由 Analyst 提案、Owner 决定后补入）
+Design Artifact: `docs/design/migration.md`、`docs/design/product.md`、`docs/design/sku.md`、`docs/design/inventory.md`、`docs/design/category.md`、`docs/design/rbac.md`
 
 > 这里的 `NEW` 指：为「已存在但缺少长期 Design 的模块」新增 Design Artifact，而非重新设计业务模块。
 
@@ -67,12 +67,12 @@ Design Artifact: `docs/design/migration.md`、`docs/design/product.md`、`docs/d
 
 ### Assumption
 
-- 本任务 Backfill 的分工为「Analyst 固化事实来源/Design Scope/文档结构 → Owner APPROVE → Coder 依据 APPROVED Scope 提炼事实成稿 → Cleaner 跨模块一致性审查」；其中「Coder 起草 Design 文件」与治理规范「Analyst 主责 Design、Coder 不写 Design」的职责边界如何在本 Backfill 场景下精确落地，由 Analyst 在 Contract 中厘清（见 Analyst Questions）。
-- `docs/design/*` 的最终章节结构（WHY / WHAT / MODEL / INVARIANTS / LIFECYCLE / CONSISTENCY / SECURITY / CROSS-MODULE / DEFERRED）由 Analyst 固化。
+- 本任务 Backfill 的分工为「Analyst 固化事实来源/Design Scope/文档结构 → Owner APPROVE → Analyst 依据 APPROVED Contract 直接产出 Design Artifact → Cleaner 跨模块一致性审查」；不采用「Coder 起草 Design」方案（Owner 已确认，遵循已落地的 Design Governance：Analyst 维护长期设计事实，Coder 不作为 Design Owner，Cleaner 负责一致性校验）。该职责边界已在 `contract.md` 中厘清并获 Owner 批准。
+- `docs/design/*` 的最终章节结构由 Analyst 固化（见 `contract.md`「Interfaces and Data」）。
 
 ### OPEN QUESTION
 
-- Category 与 Admin(RBAC) 是否纳入本次 Scope 产生独立 Design，取决于 Analyst 的证据判断与 Owner 决定（不阻塞 4 个核心 Artifact 的推进）。
+- Category 与 Admin(RBAC) 已由 Owner 决定纳入本次 Scope：分别建立独立 `docs/design/category.md` 与 `docs/design/rbac.md`。
 
 ## Verification
 
@@ -92,17 +92,17 @@ Design Artifact: `docs/design/migration.md`、`docs/design/product.md`、`docs/d
 
 COMPLEX
 
-原因：涉及 4 个已交付模块、多份历史 Contract（含 Revision）与最终实现事实；需要固化事实来源优先级、检测 Historical Drift、定义统一 Design 结构、处理跨模块关系（Product↔SKU↔Inventory 及 Migration 作为建表基础）、拆分多个 Coder 子任务并做跨模块一致性审查；且「谁写 Design」「Category/RBAC 是否纳入」存在真实归属分歧，会产生不同治理结果。需 Analyst 固化方案并由 Owner 确认后再交 Coder。
+原因：涉及 6 个 Design Artifact、多份历史 Contract（含 Revision）与最终实现事实；需要固化事实来源优先级、检测 Historical Drift、定义统一 Design 结构、处理跨模块关系（Product↔SKU↔Inventory 及 Migration 作为建表基础）与跨模块一致性审查；「谁写 Design」「Category/RBAC 是否纳入」存在真实归属分歧，会产生不同治理结果。已由 Analyst 固化方案并经 Owner 确认。
 
 ## Analyst Questions
 
 1. **事实来源优先级固化**：Backfill 的事实来源优先级（最终 APPROVED Contract > Revision 的 Owner Decision > 最终实现 > Cleaner findings/core-logic/delivery > task.md）如何具体落地？当 Contract 与实现不一致时，如何区分「Historical Drift 需阻塞/另立 Revision」与「可记录的描述性差异」，判定标准与处理路径是什么。
-2. **Backfill 中「谁写 Design」的职责边界**：Owner 本任务指令为「Coder 依据 Analyst APPROVED 的 Design Scope 起草 Design」，而治理规范为「Analyst 主责 Design、Coder 不写 Design」。请厘清本 Backfill 场景下 Analyst 与 Coder 的精确分工与产出顺序，保证既不违背治理规范、又不让 Coder 变相「重新设计」。
+2. **Backfill 中「谁写 Design」的职责边界**（已解决）：Owner 确认由 Analyst 直接产出长期 Design，不采用「Coder 起草」方案；Coder 不作为 Design Owner，Cleaner 负责一致性校验。
 3. **Design 文档结构与粒度**：统一每个 `docs/design/*` 的章节结构（WHY/WHAT/MODEL/INVARIANTS/LIFECYCLE/CONSISTENCY/SECURITY/CROSS-MODULE/DEFERRED），以及如何避免退化为 Contract 的机械全文复制；文件按模块一文件（`migration.md`/`product.md`/`sku.md`/`inventory.md`）的命名与边界。
 4. **Category 的 Design 归属**：`categories-v1` 为 NORMAL 无 Contract 任务，但其树形结构、`maxLevel=3`、`(parent_id,name)` 唯一、`status` 软下线、删除保护（有子分类 + 有商品）等已是长期事实。判断是否建立独立 `category.md`，还是并入 `product.md`，或维持不建（附证据）。
 5. **Admin(RBAC) 的 Design 归属**：`admin-identity-rbac` 有 APPROVED Contract，`iam.md` 已覆盖 AdminAuth/RequirePermission/身份域隔离。判断 RBAC 是否需要独立 Design（`rbac.md`/`admin.md`）、扩充 `iam.md`、还是维持 `iam.md` 现状不重写；给出边界判断，不机械扩 Scope。
 6. **Historical Drift 检测清单**：对每个模块，确定必须逐项对比的关键事实点（状态机映射、表字段/约束/FK、错误码、权限、并发/一致性语义、CLI），以及漂移的登记格式与升级路径。
-7. **Coder 子任务拆分与并行**：是否按 `migration.md`/`product.md`/`sku.md`/`inventory.md` 拆分为多个独立 Coder Task；能否并行（文件依赖）；`Product↔SKU↔Inventory` 交叉引用的统一口径与一致性要求如何保证；Cleaner 跨模块一致性审查的范围。
+7. **产出顺序与跨模块一致性**（已解决）：由 Analyst 依次产出 6 个 Design（`migration.md` → `product.md` → `sku.md` → `inventory.md` → `category.md` → `rbac.md`）；`Product↔SKU↔Inventory` 交叉引用按 Contract 冻结的跨模块口径表统一，Cleaner 做四者一致跨模块审查。
 
 ## Review Baseline
 
