@@ -73,6 +73,14 @@ const (
 	CodeCartItemNotFound    Code = 8001 // 条目不存在或不属于当前用户 → 404
 	CodeCartInvalidQuantity Code = 8002 // 数量非正整数或超上限 → 400
 	CodeCartSkuUnavailable  Code = 8003 // 商品下架或 SKU 禁用，不可加购 → 409
+
+	// 订单域（Order）9000-9999。
+	CodeOrderNotFound                Code = 9001 // 订单不存在或不属于当前用户 → 404（防枚举）
+	CodeOrderInvalidStatusTransition Code = 9002 // 非法状态迁移 → 409
+	CodeOrderSkuUnavailable          Code = 9003 // 下单时 SKU 禁用或商品下架 → 409
+	CodeOrderCartEmpty               Code = 9004 // 从购物车下单无勾选项 → 400
+	CodeOrderInvalidQuantity         Code = 9005 // 直接购买数量非法 → 400
+	CodeOrderIdempotencyConflict     Code = 9006 // 同幂等键不同请求内容 → 409
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -129,6 +137,13 @@ var codeTable = map[Code]codeInfo{
 	CodeCartItemNotFound:    {http.StatusNotFound, "购物车条目不存在"},
 	CodeCartInvalidQuantity: {http.StatusBadRequest, "数量非法"},
 	CodeCartSkuUnavailable:  {http.StatusConflict, "商品不可加购"},
+
+	CodeOrderNotFound:                {http.StatusNotFound, "订单不存在"},
+	CodeOrderInvalidStatusTransition: {http.StatusConflict, "订单状态迁移非法"},
+	CodeOrderSkuUnavailable:          {http.StatusConflict, "商品不可购买"},
+	CodeOrderCartEmpty:               {http.StatusBadRequest, "购物车无勾选商品"},
+	CodeOrderInvalidQuantity:         {http.StatusBadRequest, "购买数量非法"},
+	CodeOrderIdempotencyConflict:     {http.StatusConflict, "幂等键冲突"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。

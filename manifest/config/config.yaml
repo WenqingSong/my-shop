@@ -48,6 +48,14 @@ admin:
     # 生产/开发均通过环境变量 ADMIN_SUPER_PASSWORD 注入。
     password: ""
 
+# 订单配置（以下均为开发默认值，可通过环境变量覆盖）
+# 对应环境变量：ORDER_PAY_TIMEOUT / ORDER_CANCEL_SCAN_INTERVAL
+order:
+  # 支付超时时长（秒），下单后超过此时长未支付将被自动取消。
+  pay_timeout: 900
+  # 超时未支付订单的后台扫描周期（秒）。
+  cancel_scan_interval: 60
+
 # 启动配置（以下均为开发默认值，可通过环境变量覆盖）
 # 对应环境变量：STARTUP_DEPENDENCY_TIMEOUT
 startup:
