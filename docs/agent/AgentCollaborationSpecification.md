@@ -179,7 +179,7 @@ Reservation 生效 = 一个**只改 Registry 文件的 commit 落在 `develop`**
 
 ### 11.3 分配规则
 
-- 错误码域：按千位划分、大小固定 1000；`next = max(已记录域上限) + 1000`；域内具体编号由 Analyst 在 Contract 逐个列出。
+- 错误码域：固定大小 1000、按 1000 对齐；域序 `domain_seq = code / 1000`，域区间 `[domain_seq × 1000, domain_seq × 1000 + 999]`；下一空闲域 `domain_seq_next = max(已记录域序) + 1`（域序为正整数、不受四位数宽度限制）；域内具体编号由 Analyst 在 Contract 逐个列出。
 - migration version：保留 `YYYYMMDD + 序号` 格式；`next = max(所有已记录 version, 含 RELEASED) + 1`。
 
 ### 11.4 生命周期
