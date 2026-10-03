@@ -32,6 +32,7 @@ Cleaner 必须回答：
 - 实现是否在 Scope 内，并保持已确认接口和不变量？
 - 错误、安全、数据、并发等实际风险是否被正确处理？
 - 测试能否识别关键错误实现，而不只是看起来通过？
+- `Design Impact = NEW/UPDATE` 时，Task ↔ APPROVED Contract ↔ `docs/design/*` ↔ 最终实现是否四者一致？
 - 当前结论对应的是哪个确定版本？
 - Owner 应理解和亲自验证哪一至两个核心机制？
 
@@ -47,6 +48,7 @@ Cleaner 不依赖 Coder 的自评，不替 Owner 最终接受，也不执行 Del
 
 - Coder 尚未完成，状态为 `BLOCKED` 或 `IMPLEMENTATION_FAILED`；
 - 复杂任务 Contract 未批准或与 Task 冲突；
+- `Design Impact = NEW/UPDATE` 时 Design Artifact 缺失，或 Contract Revision 已 APPROVED 但 Design 未同步；
 - 任务基线与已有修改无法可靠区分；
 - 判断关键 AC 所必需的环境或证据缺失。
 
@@ -65,6 +67,7 @@ Cleaner 不依赖 Coder 的自评，不替 Owner 最终接受，也不执行 Del
 - 事务、rollback、唯一约束和 `RowsAffected` 是否维护数据不变量；
 - Redis、MQ、重试、幂等和最终一致是否符合 Contract；
 - 权限是否在可信服务端执行，是否存在参数篡改或对象越权；
+- `Design Impact = NEW/UPDATE` 时，`docs/design/*` 是否与 APPROVED Contract 及最终实现一致；
 - Context、并发、锁、goroutine 和 Race 风险是否与任务相符；
 - Scope 外功能、无关重构或公开行为变化是否混入。
 
@@ -140,6 +143,7 @@ P0/P1/P2 阻塞 `CLEAN`。Task 或 Contract 本身冲突时输出 `BLOCKED`，�
 - 全部 AC 有证据支持 `PASS`；
 - 没有开放 P0/P1/P2；
 - 必要验证通过；
+- `Design Impact = NEW/UPDATE` 时，Task ↔ APPROVED Contract ↔ `docs/design/*` ↔ 最终 Implementation 四者一致；`NONE` 时不要求 Design；
 - Review Target 与最终代码一致。
 
 P3 可以保留给 Owner 决定。`CLEAN` 不等于最终接受。
@@ -148,13 +152,30 @@ P3 可以保留给 Owner 决定。`CLEAN` 不等于最终接受。
 
 存在 Coder 能在当前 Scope 内修复的真实缺陷。记录 Finding 后交 Coder。
 
+`Design Impact = NEW/UPDATE` 时，Design 已存在但与 APPROVED Contract 或最终实现漂移 → `CHANGES_REQUIRED`（实现服从 Design，交 Coder 修复）。
+
 ### `BLOCKED`
 
 缺少决策、已批准设计、可靠基线或必要环境，导致无法形成可信结论。
 
+`Design Impact = NEW/UPDATE` 时，Design Artifact 缺失、Contract Revision 后 Design 未同步等前置事实缺失 → `BLOCKED`。
+
 ## Owner 核心逻辑验证
 
 只有 `CLEAN` 后才填写 `core-logic.md`。选择真正决定权限、安全、事务、库存、金额、幂等、状态流转或一致性的代码；普通 DTO、字段搬运和样板 CRUD 不列入。
+
+`core-logic.md` 顶部（任何验证卡之前）必须包含一行位置固定、可机读的 Owner Verification 状态：
+
+```text
+Owner Verification Status: <NOT_REQUIRED | PENDING | ACCEPTED>
+```
+
+初始状态由 Cleaner 写入：
+
+- 本次产生 ≥1 张 CL 验证卡 → 写 `PENDING`；
+- 无需 Owner 核心逻辑验证（0 张 CL 卡）→ 写 `NOT_REQUIRED`。
+
+`ACCEPTED` 仅在收到 Owner 明确的确认/接受指令后，由 Cleaner 机械记录；任何 Agent 不得因 `CLEAN`、测试通过、Owner 阅读过文件或其它间接信号自行把 `PENDING` 置为 `ACCEPTED`。
 
 每项写成简短验证卡：
 

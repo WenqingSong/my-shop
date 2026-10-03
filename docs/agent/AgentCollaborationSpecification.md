@@ -14,7 +14,7 @@ Agent 用来扩大实现、测试和审查能力；Owner 决定需求、关键�
 
 1. Owner 当前明确指令；
 2. 当前任务的 Goal、Scope、Out of Scope 和 Acceptance Criteria；
-3. Owner 已确认的 `contract.md` 或设计；
+3. Owner 已确认的 `contract.md` 与 `docs/design/*` 中的项目级长期设计；
 4. `AGENTS.md`；
 5. 本规范、职责边界和角色 Prompt。
 
@@ -22,9 +22,11 @@ Agent 用来扩大实现、测试和审查能力；Owner 决定需求、关键�
 
 任何优先级都不能授权泄漏凭据、绕过认证授权、吞掉关键错误，或用降低测试标准制造成功。
 
-## 3. 任务文件
+## 3. 任务文件与长期 Design
 
-每个独立任务使用：
+任务级 Artifact 记录「本任务的临时事实与决策过程」，随任务结束而定稿。项目级长期 Design（`docs/design/*`）记录「跨越单个任务、长期稳定的项目级事实」。
+
+每个独立任务使用以下任务级 Artifact：
 
 ```text
 .agent/tasks/<task-slug>/
@@ -44,6 +46,21 @@ Agent 用来扩大实现、测试和审查能力；Owner 决定需求、关键�
 | `delivery.md`   | 里程碑运行验收                     | Deliverer                   |
 
 Coder 负责生产代码和测试，不为展示过程而重复维护上述文档。
+
+### 项目级长期 Design（`docs/design/*`）
+
+任务级 Artifact（上表五类文件）记录单次任务的临时事实：`task.md` 定义目标与验收，`contract.md` 记录本任务的决策过程与 Owner 决定，`findings.md` / `core-logic.md` / `delivery.md` 记录审查与验收过程。它们不承担跨任务、跨版本的长期事实沉淀。
+
+项目级长期事实沉淀在 `docs/design/*`（长期 Design），按业务模块或设计域一文件组织、kebab-case 命名，例如 `iam.md`、`product.md`、`migration.md`。Design Artifact 只记录长期稳定的结构事实：架构与组件、数据模型（表/实体/关系）、状态机与合法迁移、模块边界与跨模块不变量、一致性模型与失败语义、安全/权限边界、错误码域与公开协议、配置契约。Design 是「结论」（面向接手者），`contract.md` 是「过程」（本任务决策记录），二者不互相机械复制。
+
+生命周期与维护者：
+
+| 类别 | 落点 | 用途 | 默认维护者 |
+| ---- | ---- | ---- | ---------- |
+| 任务级 Artifact | `.agent/tasks/<task-slug>/` | 单任务目标、决策与验收过程 | Task Builder / Analyst / Cleaner / Deliverer |
+| 长期 Design | `docs/design/*` | 项目级长期设计事实，供后续任务与接手者查阅 | Analyst（仅限 Owner `APPROVED` 后新增/更新）；Cleaner 校验一致性；Coder、Deliverer 不写 Design |
+
+任务是否改变项目级长期事实由 `Design Impact`（`NONE` / `UPDATE` / `NEW`）判定。`NEW`/`UPDATE` 时必须在 `task.md` 声明目标 Design Artifact 并纳入 Scope/AC；`NONE` 时不要求 Design。判定清单见 `TaskBuilderPrompt.md`，职责见 `Five-AgentResponsibilityBoundary.md`。
 
 ## 4. 默认路由
 
@@ -73,13 +90,13 @@ Cleaner CLEAN → Owner 核心验证 → Deliverer → Owner 最终决定
 | ------------ | ------------------------------------- | ------------------------------------------------ |
 | Task Builder | 任务可执行、可验收                    | `READY_FOR_CODER` / `READY_FOR_ANALYST`          |
 | Analyst      | 推荐方案和待确认事项已写入 Contract   | `WAITING_FOR_OWNER_APPROVAL`                     |
-| Analyst      | Owner 的决定已准确记录                | `APPROVED`                                       |
+| Analyst      | Owner 的决定已准确记录；`Design Impact = NEW/UPDATE` 时 Design Artifact 已按 APPROVED Contract 写入/更新 | `APPROVED`                                       |
 | Coder        | 实现、必要测试和自验完成              | `READY_FOR_CLEANER`                              |
 | Cleaner      | 需要修复                              | `CHANGES_REQUIRED`                               |
-| Cleaner      | 所有 AC 有充分证据，且无开放 P0/P1/P2 | `CLEAN`                                          |
+| Cleaner      | 所有 AC 有充分证据，且无开放 P0/P1/P2；`Design Impact = NEW/UPDATE` 时 Task ↔ APPROVED Contract ↔ `docs/design/*` ↔ Implementation 四者一致 | `CLEAN`                                          |
 | Deliverer    | 里程碑运行验收完成或无法继续          | `PASS` / `CONDITIONAL_PASS` / `FAIL` / `BLOCKED` |
 
-复杂任务的 Contract 未获 Owner 确认时，Coder 不开始依赖该决定的实现。`CLEAN` 和 `PASS` 都不能替代 Owner 的最终接受。
+复杂任务的 Contract 未获 Owner 确认时，Coder 不开始依赖该决定的实现。`Design Impact = NEW/UPDATE` 时，Design Artifact 就绪前 Coder 不开始依赖该设计的实现；Design 缺失或与 APPROVED Contract/实现不一致时，Cleaner 不得给出 `CLEAN`。`CLEAN` 和 `PASS` 都不能替代 Owner 的最终接受。
 
 无法安全继续时输出 `BLOCKED`，同时给出：阻塞事实、已有证据、需要谁决定什么。
 
@@ -119,6 +136,8 @@ Owner 不需要逐行 Review 全部代码。交付应帮助 Owner 理解：
 Coder 为关键行为编写可长期保留的测试，并在交接中指出最重要的测试入口。Cleaner 审查测试可信度，在 `core-logic.md` 中整理一至两个高价值的 Owner 验证卡。
 
 验证卡可以包含可逆 Mutation：先确认测试通过，临时破坏一条不变量，确认指定测试失败，再恢复代码并重新通过。Mutation 只用于理解和检验测试，执行后必须恢复正确实现并确认工作区状态。
+
+`core-logic.md` 顶部维护一行可机读的 `Owner Verification Status`（`NOT_REQUIRED` / `PENDING` / `ACCEPTED`）。`PENDING` / `NOT_REQUIRED` 由 Cleaner 生成 `core-logic.md` 时按「是否产生 CL 验证卡」初始写入；`ACCEPTED` 仅在 Owner 明确确认/接受指令驱动下由 Cleaner 机械记录。任何 Agent 不得因 `CLEAN`、测试通过、Owner 阅读过文件或其它间接信号自行把 `PENDING` 置为 `ACCEPTED`。
 
 ## 9. 中文与交接表达
 

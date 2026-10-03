@@ -26,6 +26,7 @@ const (
 	// 认证/用户域（IAM）2000-2999。
 	CodeUsernameExists     Code = 2001 // 用户名已存在 → 409
 	CodeInvalidCredentials Code = 2002 // 用户名或密码错误 → 401
+	CodeSessionNotFound    Code = 2011 // 会话不存在或不属于当前用户 → 404
 
 	// 后台管理员身份与 RBAC（IAM 段扩展）。
 	CodeAdminNotFound          Code = 2003 // 管理员不存在 → 404
@@ -63,6 +64,15 @@ const (
 	// 库存域（Inventory）6000-6999。
 	CodeInventoryInsufficient    Code = 6001 // 库存不足 → 409
 	CodeInventoryInvalidQuantity Code = 6002 // 库存数量非正整数 → 400
+
+	// 收货地址域（Address）7000-7999。
+	CodeAddressNotFound        Code = 7001 // 地址不存在或非本人（统一不泄露）→ 404
+	CodeAddressDefaultConflict Code = 7002 // 并发设置默认地址唯一冲突 → 409
+
+	// 购物车域（Cart）8000-8999。
+	CodeCartItemNotFound    Code = 8001 // 条目不存在或不属于当前用户 → 404
+	CodeCartInvalidQuantity Code = 8002 // 数量非正整数或超上限 → 400
+	CodeCartSkuUnavailable  Code = 8003 // 商品下架或 SKU 禁用，不可加购 → 409
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -81,6 +91,7 @@ var codeTable = map[Code]codeInfo{
 	CodeServiceUnavailable:     {http.StatusServiceUnavailable, "服务不可用"},
 	CodeUsernameExists:         {http.StatusConflict, "用户名已存在"},
 	CodeInvalidCredentials:     {http.StatusUnauthorized, "用户名或密码错误"},
+	CodeSessionNotFound:        {http.StatusNotFound, "会话不存在"},
 	CodeAdminNotFound:          {http.StatusNotFound, "管理员不存在"},
 	CodeAdminUsernameExists:    {http.StatusConflict, "管理员用户名已存在"},
 	CodeSuperAdminProtected:    {http.StatusForbidden, "超级管理员受保护"},
@@ -111,6 +122,13 @@ var codeTable = map[Code]codeInfo{
 
 	CodeInventoryInsufficient:    {http.StatusConflict, "库存不足"},
 	CodeInventoryInvalidQuantity: {http.StatusBadRequest, "库存数量非法"},
+
+	CodeAddressNotFound:        {http.StatusNotFound, "地址不存在"},
+	CodeAddressDefaultConflict: {http.StatusConflict, "默认地址冲突"},
+
+	CodeCartItemNotFound:    {http.StatusNotFound, "购物车条目不存在"},
+	CodeCartInvalidQuantity: {http.StatusBadRequest, "数量非法"},
+	CodeCartSkuUnavailable:  {http.StatusConflict, "商品不可加购"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。

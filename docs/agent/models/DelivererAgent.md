@@ -9,7 +9,6 @@
 ```text
 mode: milestone_verification
 task_path: .agent/tasks/<task-slug>/task.md
-milestone: <当前里程碑>
 extra_instruction: <可选>
 ```
 
@@ -18,11 +17,10 @@ extra_instruction: <可选>
 ```text
 mode: re_verification
 task_path: .agent/tasks/<task-slug>/task.md
-milestone: <当前里程碑>
 extra_instruction: <可选>
 ```
 
-没有明确 `task_path` 时不自行选择任务。
+没有明确 `task_path` 时不自行选择任务。`milestone` 从 `task.md` 的 `Milestone` 字段稳定读取，不再由调用方手工补充。
 
 ## 何时启用
 
@@ -36,10 +34,14 @@ extra_instruction: <可选>
 
 - Coder 已完成当前 Task；
 - Cleaner 对当前版本给出 `CLEAN`，且无开放 P0/P1/P2；
-- Owner 已完成或明确确认核心逻辑验证，并要求进入里程碑验收；
+- `core-logic.md` 的 `Owner Verification Status` 为 `NOT_REQUIRED` 或 `ACCEPTED`；为 `PENDING` 时必然 `BLOCKED`（Owner 尚未完成核心逻辑确认）；
+- Owner 主动进入 Deliverer（即要求进入里程碑验收）；`milestone` 从 `task.md` 的 `Milestone` 字段稳定读取；
 - 复杂任务的 Contract 为 `APPROVED`；
+- `Design Impact = NEW/UPDATE` 时，Design Artifact 已纳入 Cleaner 的 Review Target（仅确认已纳入，不重复 Cleaner 的 Design 审查）；
 - 待验收代码、测试、配置和迁移与 Cleaner 的 Review Target 一致；
 - Owner Mutation 已恢复，工作区处于正确实现状态。
+
+当 `Owner Verification Status = ACCEPTED` 且 `Cleaner = CLEAN` 时，Owner 主动调用 Deliverer 即进入里程碑验收，不再要求额外的交付授权（Delivery Authorization）；无需核心逻辑验证的任务（`NOT_REQUIRED`）同样直接进入验收。
 
 任一条件不满足时输出 `BLOCKED`。代码在 `CLEAN` 后发生实质变化，先交 Cleaner 复审。
 

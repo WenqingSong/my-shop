@@ -54,6 +54,17 @@ func TestRouteTable(t *testing.T) {
 		// 前台登录用户接口。
 		"GET /me",
 		"POST /logout",
+		// 收货地址（前台用户自有资源 CRUD，Auth 保护）。
+		"POST /addresses",
+		"GET /addresses",
+		"GET /addresses/:id",
+		"PUT /addresses/:id",
+		"DELETE /addresses/:id",
+		// 前台会话管理接口（IAM V3）。
+		"GET /sessions",
+		"DELETE /sessions/:sid",
+		"POST /sessions/revoke-others",
+		"POST /sessions/revoke-all",
 		// 健康检查。
 		"GET /health",
 		// 后台公开接口。

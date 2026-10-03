@@ -298,6 +298,22 @@ func (s *sProduct) CountByCategory(ctx context.Context, categoryID int64) (int64
 	return int64(n), nil
 }
 
+// GetByID 按 id 查询单个商品全字段（含任意 status 与图片），不存在返回 nil。
+func (s *sProduct) GetByID(ctx context.Context, id int64) (*v1.Product, error) {
+	rec, err := s.findOne(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if rec == nil {
+		return nil, nil
+	}
+	images, err := s.loadImages(ctx, []int64{id})
+	if err != nil {
+		return nil, err
+	}
+	return s.toProduct(rec, images[id]), nil
+}
+
 // Exists 判断商品是否存在（供 SKU 校验 product_id 存在性）。
 func (s *sProduct) Exists(ctx context.Context, id int64) (bool, error) {
 	n, err := g.DB().Model("products").Ctx(ctx).Where("id", id).Count()
