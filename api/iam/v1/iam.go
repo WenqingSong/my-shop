@@ -47,3 +47,47 @@ type LogoutReq struct {
 
 // LogoutRes 登出当前会话响应（无业务字段，成功时 data 为 null）。
 type LogoutRes struct{}
+
+// Session 会话条目（会话列表项）。
+type Session struct {
+	Sid       string `json:"sid" dc:"会话标识"`
+	LoginAt   int64  `json:"login_at" dc:"登录时间（unix 秒）"`
+	UserAgent string `json:"user_agent" dc:"客户端 User-Agent"`
+	IP        string `json:"ip" dc:"客户端 IP"`
+	Current   bool   `json:"current" dc:"是否为当前会话"`
+}
+
+// ListSessionsReq 会话列表请求。
+type ListSessionsReq struct {
+	g.Meta `path:"/sessions" method:"get" tags:"IAM" summary:"会话列表"`
+}
+
+// ListSessionsRes 会话列表响应。
+type ListSessionsRes struct {
+	Items []*Session `json:"items" dc:"会话列表"`
+}
+
+// RevokeSessionReq 撤销指定会话请求。目标 sid 来自 URL 路径，不接受请求体指定。
+type RevokeSessionReq struct {
+	g.Meta `path:"/sessions/:sid" method:"delete" tags:"IAM" summary:"撤销指定会话"`
+	Sid    string `json:"sid" in:"path" dc:"目标会话标识"`
+}
+
+// RevokeSessionRes 撤销指定会话响应（无业务字段，成功时 data 为 null）。
+type RevokeSessionRes struct{}
+
+// RevokeOthersReq 撤销其他会话请求。
+type RevokeOthersReq struct {
+	g.Meta `path:"/sessions/revoke-others" method:"post" tags:"IAM" summary:"撤销其他会话"`
+}
+
+// RevokeOthersRes 撤销其他会话响应（无业务字段，成功时 data 为 null）。
+type RevokeOthersRes struct{}
+
+// RevokeAllReq 全部退出请求。
+type RevokeAllReq struct {
+	g.Meta `path:"/sessions/revoke-all" method:"post" tags:"IAM" summary:"全部退出"`
+}
+
+// RevokeAllRes 全部退出响应（无业务字段，成功时 data 为 null）。
+type RevokeAllRes struct{}

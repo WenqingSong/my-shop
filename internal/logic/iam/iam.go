@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
+	"time"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/glog"
 	"golang.org/x/crypto/bcrypt"
 
 	v1 "cnb.cool/go-cloud-devops/my-shop/api/iam/v1"
@@ -75,10 +78,10 @@ func (s *sIam) Register(ctx context.Context, req *v1.RegisterReq) (*v1.RegisterR
 	return &v1.RegisterRes{Id: id, Username: req.Username}, nil
 }
 
-// Login 按 username 查找用户 → 校验 bcrypt 哈希 → 生成 sid 写 Redis session → 签发含 sid 的 JWT。
+// Login 按 username 查找用户 → 校验 bcrypt 哈希 → 生成 sid 写 Redis session（含元数据与索引）→ 签发含 sid 的 JWT。
 // 不存在用户与密码错误统一返回 INVALID_CREDENTIALS，并对不存在用户做假哈希比对对齐耗时。
-// 写 session 失败视为登录失败（返回 500，不签发 token），保证「返回的 token 必有有效 session」。
-func (s *sIam) Login(ctx context.Context, req *v1.LoginReq) (*v1.LoginRes, error) {
+// 写 session/索引失败视为登录失败（返回 500，不签发 token），保证「返回的 token 必有有效 session」。
+func (s *sIam) Login(ctx context.Context, req *v1.LoginReq, userAgent, ip string) (*v1.LoginRes, error) {
 	if err := validateUsername(req.Username); err != nil {
 		return nil, err
 	}
@@ -108,7 +111,11 @@ func (s *sIam) Login(ctx context.Context, req *v1.LoginReq) (*v1.LoginRes, error
 	if err != nil {
 		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("读取会话 TTL: %w", err))
 	}
-	if err := auth.CreateSession(ctx, sid, user.ID, ttl); err != nil {
+	if err := auth.CreateSession(ctx, sid, user.ID, ttl, auth.SessionMeta{
+		LoginAt:   time.Now().Unix(),
+		UserAgent: userAgent,
+		IP:        ip,
+	}); err != nil {
 		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("写入会话: %w", err))
 	}
 
@@ -143,6 +150,82 @@ func (s *sIam) Me(ctx context.Context, userID int64) (*v1.MeRes, error) {
 		return nil, codes.New(codes.CodeUnauthorized)
 	}
 	return &v1.MeRes{Id: user.ID, Username: user.Username}, nil
+}
+
+// ListSessions 返回 userID 的全部有效会话（按登录时间升序），并标识 currentSid 为当前会话。
+// 以索引枚举后逐条校验 Session Hash（权威事实）：存在、未撤销且 user_id == 当前用户，
+// 逐条过滤不返回任何他人/已撤销/已过期会话；ZSET 中 Hash 已过期/不存在的 sid 视为 stale member 并清理。
+// Redis 枚举/读取失败 → 500，绝不返回空列表（防 fail-open）。
+func (s *sIam) ListSessions(ctx context.Context, userID int64, currentSid string) (*v1.ListSessionsRes, error) {
+	sids, err := auth.ListSessionIndex(ctx, userID)
+	if err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("读取会话索引: %w", err))
+	}
+
+	items := make([]*v1.Session, 0, len(sids))
+	for _, sid := range sids {
+		info, err := auth.GetSession(ctx, sid)
+		if err != nil {
+			return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("查询会话: %w", err))
+		}
+		if info == nil {
+			// 索引残留（对应 Hash 已过期/不存在），视为 stale member 并清理；清理失败不影响列表正确性。
+			if err := auth.RemoveSessionFromIndex(ctx, userID, sid); err != nil {
+				glog.Warningf(ctx, "清理会话索引残留成员失败: %v", err)
+			}
+			continue
+		}
+		if info.Revoked {
+			continue // 已撤销会话不返回。
+		}
+		if info.UserID != userID {
+			continue // 防御：不属于当前用户的会话绝不返回（INV-001）。
+		}
+		items = append(items, &v1.Session{
+			Sid:       sid,
+			LoginAt:   info.LoginAt,
+			UserAgent: info.UserAgent,
+			IP:        info.IP,
+			Current:   sid == currentSid,
+		})
+	}
+
+	// 按登录时间升序（索引本身按 score 升序，此处以权威 Hash 的 login_at 对齐）。
+	sort.Slice(items, func(i, j int) bool { return items[i].LoginAt < items[j].LoginAt })
+	return &v1.ListSessionsRes{Items: items}, nil
+}
+
+// RevokeSessionByID 撤销 userID 名下指定的一个会话。
+// 写前校验归属（Session Hash user_id == 当前用户）；本人 active/已 revoked → 幂等 200；
+// 不存在或非本人 → 404/2011，无任何写入，不泄露会话存在性与归属。
+func (s *sIam) RevokeSessionByID(ctx context.Context, userID int64, targetSid string) error {
+	belongs, err := auth.SessionBelongsTo(ctx, targetSid, userID)
+	if err != nil {
+		return codes.Wrap(codes.CodeInternalError, fmt.Errorf("校验目标会话归属: %w", err))
+	}
+	if !belongs {
+		return codes.New(codes.CodeSessionNotFound)
+	}
+	if err := auth.RevokeSession(ctx, targetSid); err != nil {
+		return codes.Wrap(codes.CodeInternalError, fmt.Errorf("撤销会话: %w", err))
+	}
+	return nil
+}
+
+// RevokeOtherSessions 撤销 userID 除 currentSid 外的全部会话（原子，Lua）。
+func (s *sIam) RevokeOtherSessions(ctx context.Context, userID int64, currentSid string) error {
+	if err := auth.RevokeOtherSessions(ctx, userID, currentSid); err != nil {
+		return codes.Wrap(codes.CodeInternalError, fmt.Errorf("撤销其他会话: %w", err))
+	}
+	return nil
+}
+
+// RevokeAllSessions 撤销 userID 的全部会话（含当前，原子，Lua）。
+func (s *sIam) RevokeAllSessions(ctx context.Context, userID int64) error {
+	if err := auth.RevokeAllSessions(ctx, userID); err != nil {
+		return codes.Wrap(codes.CodeInternalError, fmt.Errorf("撤销全部会话: %w", err))
+	}
+	return nil
 }
 
 func validateUsername(username string) error {

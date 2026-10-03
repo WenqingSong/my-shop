@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -61,6 +62,8 @@ func request(base, method, path string, body any, headers map[string]string) (re
 		r, err = c.Get(context.Background(), base+path)
 	case "POST":
 		r, err = c.ContentJson().Post(context.Background(), base+path, body)
+	case "DELETE":
+		r, err = c.Delete(context.Background(), base+path)
 	default:
 		return result{}, fmt.Errorf("unsupported method %s", method)
 	}
@@ -137,6 +140,20 @@ func signTokenWithSid(t *testing.T, secret, sub, sid string) string {
 		t.Fatalf("sign token with sid: %v", err)
 	}
 	return tok
+}
+
+// tokenUserID 解码 token 返回其 sub 声明（用户 id）。
+func tokenUserID(t *testing.T, token string) int64 {
+	t.Helper()
+	claims, err := auth.ParseWithSecret([]byte(testJWTSecret), token)
+	if err != nil {
+		t.Fatalf("parse token: %v", err)
+	}
+	id, err := strconv.ParseInt(claims.Subject, 10, 64)
+	if err != nil {
+		t.Fatalf("parse subject: %v", err)
+	}
+	return id
 }
 
 // tokenSid 解码 token 返回其 sid 声明。
@@ -412,6 +429,43 @@ func registerAndLogin(t *testing.T, base, username, password string) (string, st
 	return token, tokenSid(t, token)
 }
 
+// loginOnly 仅登录（用户须已注册），返回 (access_token, sid)。
+func loginOnly(t *testing.T, base, username, password string) (string, string) {
+	t.Helper()
+	login := doRequest(t, base, "POST", "/login", map[string]any{"username": username, "password": password}, nil)
+	if login.Status != 200 || login.Code != 0 {
+		t.Fatalf("login %s: status=%d code=%d", username, login.Status, login.Code)
+	}
+	token, _ := login.Data["access_token"].(string)
+	if token == "" {
+		t.Fatalf("login %s: empty access_token", username)
+	}
+	return token, tokenSid(t, token)
+}
+
+// authHeader 构造 Bearer 认证头。
+func authHeader(token string) map[string]string {
+	return map[string]string{"Authorization": "Bearer " + token}
+}
+
+// listSessions 请求会话列表并返回 items（[]map[string]any）。
+func listSessions(t *testing.T, base, token string) []map[string]any {
+	t.Helper()
+	res := doRequest(t, base, "GET", "/sessions", nil, authHeader(token))
+	if res.Status != 200 || res.Code != 0 {
+		t.Fatalf("list sessions: status=%d code=%d msg=%q", res.Status, res.Code, res.Message)
+	}
+	raw, ok := res.Data["items"].([]any)
+	if !ok {
+		t.Fatalf("list sessions: unexpected items type %T", res.Data["items"])
+	}
+	items := make([]map[string]any, 0, len(raw))
+	for _, it := range raw {
+		items = append(items, it.(map[string]any))
+	}
+	return items
+}
+
 // TestLogoutRevokesSessionThenMe401 覆盖 AC-003/INV-003：登出后 session 标记 revoked，token 立即失效且 key 保留。
 func TestLogoutRevokesSessionThenMe401(t *testing.T) {
 	base := setupIAMServer(t)
@@ -625,5 +679,250 @@ func TestConcurrentLogoutSameToken(t *testing.T) {
 	}
 	if sf := sessionFields(t, sid); sf["revoked"] != "1" {
 		t.Fatalf("expected revoked=1 after concurrent logout, got %q", sf["revoked"])
+	}
+}
+
+// TestListSessionsMultiDevice 覆盖 AC-001/AC-002/INV-001：
+// 同一用户多次登录产生多个可区分会话，列表返回全部且 current 唯一正确，绝不返回他人会话。
+func TestListSessionsMultiDevice(t *testing.T) {
+	base := setupIAMServer(t)
+
+	_, sidA1 := registerAndLogin(t, base, "alice", "password123")
+	tokenA2, sidA2 := loginOnly(t, base, "alice", "password123")
+	tokenB, _ := registerAndLogin(t, base, "bob", "password123")
+
+	if sidA1 == sidA2 {
+		t.Fatal("expected distinct sids for multiple logins")
+	}
+
+	items := listSessions(t, base, tokenA2)
+	if len(items) != 2 {
+		t.Fatalf("expected 2 sessions for alice, got %d", len(items))
+	}
+	var currentCount int
+	for _, it := range items {
+		sid, _ := it["sid"].(string)
+		if sid != sidA1 && sid != sidA2 {
+			t.Fatalf("unexpected sid in alice list: %q", sid)
+		}
+		if loginAt := int64(it["login_at"].(float64)); loginAt <= 0 {
+			t.Fatalf("expected login_at > 0, got %v", it["login_at"])
+		}
+		if cur, _ := it["current"].(bool); cur {
+			currentCount++
+			if sid != sidA2 {
+				t.Fatalf("expected current session to be sidA2, got %q", sid)
+			}
+		}
+	}
+	if currentCount != 1 {
+		t.Fatalf("expected exactly 1 current session, got %d", currentCount)
+	}
+
+	// 换 B 的 token：列表不含 alice 的任何会话。
+	bItems := listSessions(t, base, tokenB)
+	if len(bItems) != 1 {
+		t.Fatalf("expected 1 session for bob, got %d", len(bItems))
+	}
+	for _, it := range bItems {
+		sid, _ := it["sid"].(string)
+		if sid == sidA1 || sid == sidA2 {
+			t.Fatalf("bob list must not contain alice sessions, got %q", sid)
+		}
+	}
+}
+
+// TestRevokeSessionById 覆盖 AC-003/INV-003：
+// 撤销自己名下指定会话后其 token 立即 401，其他会话与其它用户不受影响；撤销为逻辑标记且保留 key/TTL。
+func TestRevokeSessionById(t *testing.T) {
+	base := setupIAMServer(t)
+
+	tokenA1, sidA1 := registerAndLogin(t, base, "alice", "password123")
+	tokenA2, sidA2 := loginOnly(t, base, "alice", "password123")
+	tokenB, _ := registerAndLogin(t, base, "bob", "password123")
+
+	// 用 A2 撤销 A1。
+	del := doRequest(t, base, "DELETE", "/sessions/"+sidA1, nil, authHeader(tokenA2))
+	if del.Status != 200 || del.Code != 0 {
+		t.Fatalf("revoke A1: status=%d code=%d", del.Status, del.Code)
+	}
+	if del.Data != nil {
+		t.Fatalf("revoke should return data=null, got %v", del.Data)
+	}
+
+	// A1 逻辑撤销：revoked=1、key/TTL 保留。
+	sf := sessionFields(t, sidA1)
+	if sf["revoked"] != "1" {
+		t.Fatalf("expected A1 revoked=1, got %q", sf["revoked"])
+	}
+	if ttl := sessionTTL(t, sidA1); ttl <= 0 {
+		t.Fatalf("expected A1 session key retained with TTL>0, got %d", ttl)
+	}
+
+	// A1 token → 401；A2 token → 200；B token → 200（不受影响）。
+	meA1 := doRequest(t, base, "GET", "/me", nil, authHeader(tokenA1))
+	if meA1.Status != 401 || meA1.Code != 1002 {
+		t.Fatalf("me with revoked A1: status=%d code=%d", meA1.Status, meA1.Code)
+	}
+	meA2 := doRequest(t, base, "GET", "/me", nil, authHeader(tokenA2))
+	if meA2.Status != 200 || meA2.Code != 0 {
+		t.Fatalf("me with A2 after revoke A1: status=%d code=%d", meA2.Status, meA2.Code)
+	}
+	meB := doRequest(t, base, "GET", "/me", nil, authHeader(tokenB))
+	if meB.Status != 200 || meB.Code != 0 {
+		t.Fatalf("me with B after revoke A1: status=%d code=%d", meB.Status, meB.Code)
+	}
+
+	// 列表应只剩 A2。
+	items := listSessions(t, base, tokenA2)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 session after revoke A1, got %d", len(items))
+	}
+	if sid, _ := items[0]["sid"].(string); sid != sidA2 {
+		t.Fatalf("expected remaining session to be sidA2, got %q", sid)
+	}
+}
+
+// TestRevokeOthers 覆盖 AC-004：撤销其他会话后其它 token 401，当前会话保持有效。
+func TestRevokeOthers(t *testing.T) {
+	base := setupIAMServer(t)
+
+	tokenA1, sidA1 := registerAndLogin(t, base, "alice", "password123")
+	tokenA2, sidA2 := loginOnly(t, base, "alice", "password123")
+	tokenA3, sidA3 := loginOnly(t, base, "alice", "password123")
+
+	res := doRequest(t, base, "POST", "/sessions/revoke-others", nil, authHeader(tokenA1))
+	if res.Status != 200 || res.Code != 0 {
+		t.Fatalf("revoke-others: status=%d code=%d", res.Status, res.Code)
+	}
+
+	meA1 := doRequest(t, base, "GET", "/me", nil, authHeader(tokenA1))
+	if meA1.Status != 200 || meA1.Code != 0 {
+		t.Fatalf("me with A1 after revoke-others: status=%d code=%d", meA1.Status, meA1.Code)
+	}
+	for _, tk := range []string{tokenA2, tokenA3} {
+		me := doRequest(t, base, "GET", "/me", nil, authHeader(tk))
+		if me.Status != 401 || me.Code != 1002 {
+			t.Fatalf("me with revoked token after revoke-others: status=%d code=%d", me.Status, me.Code)
+		}
+	}
+	if sf := sessionFields(t, sidA1); sf["revoked"] != "0" {
+		t.Fatalf("expected A1 not revoked, got %q", sf["revoked"])
+	}
+	for _, sid := range []string{sidA2, sidA3} {
+		if sf := sessionFields(t, sid); sf["revoked"] != "1" {
+			t.Fatalf("expected %s revoked=1, got %q", sid, sf["revoked"])
+		}
+	}
+}
+
+// TestRevokeAll 覆盖 AC-005：全部退出后所有旧 token（含当前）均 401。
+func TestRevokeAll(t *testing.T) {
+	base := setupIAMServer(t)
+
+	tokenA1, sidA1 := registerAndLogin(t, base, "alice", "password123")
+	tokenA2, sidA2 := loginOnly(t, base, "alice", "password123")
+
+	res := doRequest(t, base, "POST", "/sessions/revoke-all", nil, authHeader(tokenA1))
+	if res.Status != 200 || res.Code != 0 {
+		t.Fatalf("revoke-all: status=%d code=%d", res.Status, res.Code)
+	}
+
+	for _, tk := range []string{tokenA1, tokenA2} {
+		me := doRequest(t, base, "GET", "/me", nil, authHeader(tk))
+		if me.Status != 401 || me.Code != 1002 {
+			t.Fatalf("me after revoke-all: status=%d code=%d", me.Status, me.Code)
+		}
+	}
+	for _, sid := range []string{sidA1, sidA2} {
+		if sf := sessionFields(t, sid); sf["revoked"] != "1" {
+			t.Fatalf("expected %s revoked=1, got %q", sid, sf["revoked"])
+		}
+	}
+}
+
+// TestRevokeNonOwnedSession 覆盖 AC-006/INV-002：
+// 撤销非本人/不存在的会话统一 404/2011，且不产生任何撤销、不泄露存在性与归属。
+func TestRevokeNonOwnedSession(t *testing.T) {
+	base := setupIAMServer(t)
+
+	tokenA, _ := registerAndLogin(t, base, "alice", "password123")
+	tokenB, sidB := registerAndLogin(t, base, "bob", "password123")
+
+	// 用户 A 撤销 B 的会话 → 404/2011，B 无变化。
+	res := doRequest(t, base, "DELETE", "/sessions/"+sidB, nil, authHeader(tokenA))
+	if res.Status != 404 || res.Code != 2011 {
+		t.Fatalf("revoke non-owned: status=%d code=%d", res.Status, res.Code)
+	}
+	if sf := sessionFields(t, sidB); sf["revoked"] != "0" {
+		t.Fatalf("non-owned revoke must not modify B session, got %q", sf["revoked"])
+	}
+	meB := doRequest(t, base, "GET", "/me", nil, authHeader(tokenB))
+	if meB.Status != 200 || meB.Code != 0 {
+		t.Fatalf("me with B after non-owned revoke attempt: status=%d code=%d", meB.Status, meB.Code)
+	}
+
+	// 不存在的会话 → 404/2011。
+	res = doRequest(t, base, "DELETE", "/sessions/deadbeefdeadbeefdeadbeefdeadbeef", nil, authHeader(tokenA))
+	if res.Status != 404 || res.Code != 2011 {
+		t.Fatalf("revoke non-existent: status=%d code=%d", res.Status, res.Code)
+	}
+}
+
+// TestRevokeSessionIdempotent 覆盖 AC-007/INV-003：重复撤销本人会话幂等 200。
+func TestRevokeSessionIdempotent(t *testing.T) {
+	base := setupIAMServer(t)
+
+	_, sidA1 := registerAndLogin(t, base, "alice", "password123")
+	tokenA2, _ := loginOnly(t, base, "alice", "password123")
+
+	for i := 0; i < 2; i++ {
+		res := doRequest(t, base, "DELETE", "/sessions/"+sidA1, nil, authHeader(tokenA2))
+		if res.Status != 200 || res.Code != 0 {
+			t.Fatalf("revoke A1 #%d: status=%d code=%d", i+1, res.Status, res.Code)
+		}
+	}
+}
+
+// TestListSessionsFiltersStaleMember 覆盖 INV-006：
+// 索引中残留的已过期（Hash 不存在）会话不得作为有效会话返回。
+func TestListSessionsFiltersStaleMember(t *testing.T) {
+	base := setupIAMServer(t)
+
+	_, sidA1 := registerAndLogin(t, base, "alice", "password123")
+	tokenA2, sidA2 := loginOnly(t, base, "alice", "password123")
+
+	// 删除 A1 的 session Hash（模拟 TTL 到期），保留索引中的残留成员。
+	if _, err := g.Redis().Del(context.Background(), auth.SessionKey(sidA1)); err != nil {
+		t.Fatalf("del session A1: %v", err)
+	}
+
+	// 用 A2 查看列表：只返回 A2，不含已过期的 A1。
+	items := listSessions(t, base, tokenA2)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 session after A1 expiry, got %d", len(items))
+	}
+	if sid, _ := items[0]["sid"].(string); sid != sidA2 {
+		t.Fatalf("expected remaining session to be sidA2, got %q", sid)
+	}
+}
+
+// TestListSessionsRedisErrorReturns500 覆盖 INV-005/AC-008：
+// 会话列表枚举（索引读取）失败时不返回虚假空列表，返回 500/1000（不 fail-open）。
+func TestListSessionsRedisErrorReturns500(t *testing.T) {
+	base := setupIAMServer(t)
+	token, _ := registerAndLogin(t, base, "alice", "password123")
+
+	// 将用户会话索引 key 改成 string 类型，使 ZRANGE 返回 WRONGTYPE，模拟 Redis 查询失败。
+	if _, err := g.Redis().Do(context.Background(), "SET", auth.SessionIndexKey(tokenUserID(t, token)), "not-a-zset"); err != nil {
+		t.Fatalf("corrupt index key: %v", err)
+	}
+
+	res := doRequest(t, base, "GET", "/sessions", nil, authHeader(token))
+	if res.Status != 500 || res.Code != 1000 {
+		t.Fatalf("list with redis error: expected 500/1000, got status=%d code=%d", res.Status, res.Code)
+	}
+	if res.Data != nil {
+		t.Fatalf("list with redis error: expected data=null, got %v", res.Data)
 	}
 }
