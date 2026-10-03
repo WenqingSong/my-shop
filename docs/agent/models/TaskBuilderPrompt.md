@@ -78,6 +78,13 @@ extra_instruction: <可选>
 ## Out of Scope
 - 本次明确不做、容易被顺手扩张的内容。
 
+## Milestone
+涉及 Deliverer 交付验收的任务必填（无需 Deliverer 时可省略本节）：
+
+Milestone: <本任务交付验收对应里程碑的唯一标识>
+
+Deliverer 从本节稳定读取 `milestone`，不再由调用方手工补充里程碑占位符。
+
 ## Design Impact
 仅 `NEW` / `UPDATE` 时声明（`NONE` 时省略本节）：
 

@@ -164,6 +164,19 @@ P3 可以保留给 Owner 决定。`CLEAN` 不等于最终接受。
 
 只有 `CLEAN` 后才填写 `core-logic.md`。选择真正决定权限、安全、事务、库存、金额、幂等、状态流转或一致性的代码；普通 DTO、字段搬运和样板 CRUD 不列入。
 
+`core-logic.md` 顶部（任何验证卡之前）必须包含一行位置固定、可机读的 Owner Verification 状态：
+
+```text
+Owner Verification Status: <NOT_REQUIRED | PENDING | ACCEPTED>
+```
+
+初始状态由 Cleaner 写入：
+
+- 本次产生 ≥1 张 CL 验证卡 → 写 `PENDING`；
+- 无需 Owner 核心逻辑验证（0 张 CL 卡）→ 写 `NOT_REQUIRED`。
+
+`ACCEPTED` 仅在收到 Owner 明确的确认/接受指令后，由 Cleaner 机械记录；任何 Agent 不得因 `CLEAN`、测试通过、Owner 阅读过文件或其它间接信号自行把 `PENDING` 置为 `ACCEPTED`。
+
 每项写成简短验证卡：
 
 ```markdown

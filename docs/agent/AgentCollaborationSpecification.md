@@ -137,6 +137,8 @@ Coder 为关键行为编写可长期保留的测试，并在交接中指出最�
 
 验证卡可以包含可逆 Mutation：先确认测试通过，临时破坏一条不变量，确认指定测试失败，再恢复代码并重新通过。Mutation 只用于理解和检验测试，执行后必须恢复正确实现并确认工作区状态。
 
+`core-logic.md` 顶部维护一行可机读的 `Owner Verification Status`（`NOT_REQUIRED` / `PENDING` / `ACCEPTED`）。`PENDING` / `NOT_REQUIRED` 由 Cleaner 生成 `core-logic.md` 时按「是否产生 CL 验证卡」初始写入；`ACCEPTED` 仅在 Owner 明确确认/接受指令驱动下由 Cleaner 机械记录。任何 Agent 不得因 `CLEAN`、测试通过、Owner 阅读过文件或其它间接信号自行把 `PENDING` 置为 `ACCEPTED`。
+
 ## 9. 中文与交接表达
 
 - Agent 面向 Owner 的分析、说明、文档和最终输出默认使用中文。
