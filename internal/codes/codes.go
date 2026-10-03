@@ -63,6 +63,10 @@ const (
 	// 库存域（Inventory）6000-6999。
 	CodeInventoryInsufficient    Code = 6001 // 库存不足 → 409
 	CodeInventoryInvalidQuantity Code = 6002 // 库存数量非正整数 → 400
+
+	// 收货地址域（Address）7000-7999。
+	CodeAddressNotFound        Code = 7001 // 地址不存在或非本人（统一不泄露）→ 404
+	CodeAddressDefaultConflict Code = 7002 // 并发设置默认地址唯一冲突 → 409
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -111,6 +115,9 @@ var codeTable = map[Code]codeInfo{
 
 	CodeInventoryInsufficient:    {http.StatusConflict, "库存不足"},
 	CodeInventoryInvalidQuantity: {http.StatusBadRequest, "库存数量非法"},
+
+	CodeAddressNotFound:        {http.StatusNotFound, "地址不存在"},
+	CodeAddressDefaultConflict: {http.StatusConflict, "默认地址冲突"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。

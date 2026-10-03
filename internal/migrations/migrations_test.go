@@ -13,16 +13,16 @@ import (
 // baselineVersion 是内嵌 baseline 迁移的版本号（14 位时间戳）。
 const baselineVersion = uint(20261001000001)
 
-// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + products + skus + inventory）。
-const latestMigrationVersion = uint(20261001000004)
+// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + products + skus + inventory + addresses）。
+const latestMigrationVersion = uint(20261001000005)
 
-// businessTables 是 migration 应建立的 12 张业务表。
-// 注意顺序：inventories/inventory_logs 通过外键引用 skus，skus 通过外键引用 products，
-// products 通过外键引用 categories（均 ON DELETE RESTRICT），因此被引用方必须排在引用方之后，
-// 即 inventories/inventory_logs 排在 skus 之前、skus 排在 products 之前、products 排在 categories 之前，
-// 否则 DROP TABLE 会因外键依赖失败。
+// businessTables 是 migration 应建立的 13 张业务表。
+// 注意顺序：DROP TABLE 依赖外键被引用方须先于引用方被删除，否则会因外键依赖失败。
+// addresses 通过外键引用 users（ON DELETE CASCADE），故 addresses 排在 users 之前；
+// inventories/inventory_logs 通过外键引用 skus，skus 通过外键引用 products，
+// products 通过外键引用 categories（均 ON DELETE RESTRICT），因此被引用方必须排在引用方之后。
 var businessTables = []string{
-	"users", "inventory_logs", "inventories", "skus", "products", "product_images", "categories", "admins", "roles", "permissions", "admin_roles", "role_permissions",
+	"addresses", "users", "inventory_logs", "inventories", "skus", "products", "product_images", "categories", "admins", "roles", "permissions", "admin_roles", "role_permissions",
 }
 
 // allTables 含业务表与追踪表。
@@ -251,14 +251,14 @@ func TestUpAppliesOnlyPendingMigration(t *testing.T) {
 	}
 
 	migrationFS = sourceWithExtra(map[string]string{
-		"20261001000005_probe.up.sql": "CREATE TABLE migration_probe (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)) ENGINE=InnoDB;",
+		"20261001000006_probe.up.sql": "CREATE TABLE migration_probe (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)) ENGINE=InnoDB;",
 	})
 
 	if err := Up(ctx); err != nil {
 		t.Fatalf("incremental up: %v", err)
 	}
-	if v := currentVersion(t, db); v != uint(20261001000005) {
-		t.Errorf("expected current version %d after incremental up, got %d", uint(20261001000005), v)
+	if v := currentVersion(t, db); v != uint(20261001000006) {
+		t.Errorf("expected current version %d after incremental up, got %d", uint(20261001000006), v)
 	}
 	if !tableExists(t, db, "migration_probe") {
 		t.Errorf("expected migration_probe table created by incremental migration")
@@ -272,7 +272,7 @@ func TestUpFailsFastAndMarksDirty(t *testing.T) {
 	db := setupCleanDB(t)
 
 	migrationFS = sourceWithExtra(map[string]string{
-		"20261001000005_broken.up.sql": "THIS IS NOT VALID SQL;",
+		"20261001000006_broken.up.sql": "THIS IS NOT VALID SQL;",
 	})
 
 	if err := Up(ctx); err == nil {
@@ -288,7 +288,7 @@ func TestUpFailsFastAndMarksDirty(t *testing.T) {
 	}
 
 	// force 恢复 dirty。
-	if err := Force(ctx, uint(20261001000005)); err != nil {
+	if err := Force(ctx, uint(20261001000006)); err != nil {
 		t.Fatalf("force recover: %v", err)
 	}
 	if dirtyState(t, db) {

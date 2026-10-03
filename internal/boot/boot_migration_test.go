@@ -15,12 +15,13 @@ import (
 const migrationBaselineVersion = uint(20261001000001)
 
 // migrationRelatedTables 是 readiness 测试需要清空的表（含测试探针表）。
-// 注意顺序：inventories/inventory_logs 通过外键引用 skus，skus 通过外键引用 products，
-// products 通过外键引用 categories，因此被引用方必须排在引用方之后，
-// 否则 DROP TABLE 会因外键依赖失败。
+// 注意顺序：DROP TABLE 依赖外键被引用方须先于引用方被删除，否则会因外键依赖失败。
+// addresses 通过外键引用 users（ON DELETE CASCADE），故 addresses 排在 users 之前；
+// inventories/inventory_logs 通过外键引用 skus，skus 通过外键引用 products，
+// products 通过外键引用 categories，因此被引用方必须排在引用方之后。
 var migrationRelatedTables = []string{
 	"role_permissions", "admin_roles", "permissions", "roles",
-	"admins", "inventory_logs", "inventories", "skus", "product_images", "products", "categories", "users",
+	"admins", "inventory_logs", "inventories", "skus", "product_images", "products", "categories", "addresses", "users",
 	"schema_migrations", "migration_probe",
 }
 

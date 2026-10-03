@@ -3,6 +3,7 @@ package cmd
 import (
 	"github.com/gogf/gf/v2/net/ghttp"
 
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/address"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/product"
@@ -21,6 +22,7 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	iamCtrl := iam.NewV1()
 	categoriesCtrl := categories.NewV1()
 	productCtrl := product.NewV1()
+	addressCtrl := address.NewV1()
 
 	// 前台公开接口：注册、登录、分类查询、商品查询（无需 token）。
 	root.POST("/register", iamCtrl.Register)
@@ -30,10 +32,15 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	root.GET("/products", productCtrl.List)
 	root.GET("/products/:id", productCtrl.Detail)
 
-	// 前台登录用户接口：/me 需要认证 + 会话有效性校验。
+	// 前台登录用户接口：/me、/addresses 需要认证 + 会话有效性校验。
 	root.Group("/", func(user *ghttp.RouterGroup) {
 		user.Middleware(middleware.Auth)
 		user.GET("/me", iamCtrl.Me)
+		user.POST("/addresses", addressCtrl.Create)
+		user.GET("/addresses", addressCtrl.List)
+		user.GET("/addresses/:id", addressCtrl.Detail)
+		user.PUT("/addresses/:id", addressCtrl.Update)
+		user.DELETE("/addresses/:id", addressCtrl.Delete)
 	})
 
 	// 前台登出：仅验签（幂等撤销，即使 session 已撤销/缺失也能到达 handler）。

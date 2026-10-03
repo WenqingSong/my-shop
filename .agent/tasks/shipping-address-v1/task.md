@@ -86,7 +86,7 @@ COMPLEX
 
 ## Review Baseline
 
-- Base commit：`5f160ab632e719d1fce2167bf6cada2541c74ae1`（分支 `feat/address`）。
+- Base commit：`1db733d454ae967702bc87f080a03195123cdc02`（分支 `develop`）。
 - 任务开始时已有修改：无（working tree clean，`git status --short` 为空）。
 - 重叠修改的区分方式：本任务新增产物为 `.agent/tasks/shipping-address-v1/`、`api/address*/`（或等价地址 API 包）、`internal/controller/address*/`、`internal/logic/address*/`、`internal/service` 的 `IAddress` 接口、`internal/codes` 地址域扩展、migration 文件（`addresses`，经既有机制新增）、`internal/cmd/routes_frontend.go` 路由扩展及对应测试。当前工作区干净，无既有未提交修改。
 
