@@ -1,4 +1,4 @@
-Owner Verification Status: PENDING
+Owner Verification Status: ACCEPTED
 
 # Owner 核心逻辑验证
 
@@ -13,13 +13,15 @@ Owner Verification Status: PENDING
 - 可选 Mutation：把 `handleRefreshNotRotated` 改为无条件 `revokeAllByUser` + 返回 `codes.CodeRefreshTokenReuse`（退化回「统一按 reuse」）。
 - 预期失败：`TestHandleRefreshNotRotatedExpired` 失败——过期 token 被返回 2014（期望 2013），且有效 token B 被误撤销（`revoked_at IS NULL` 计数不为 1）。
 - 恢复确认：还原 `handleRefreshNotRotated` 为重读 + `respondRefreshRow`，再次 `go test -p 1 ./internal/logic/iam/` 全绿。
+- Owner 结论：ACCEPTED。
 
 ## CL-002：reuse 全量撤销 family + 全部会话
 
-- Owner 需要理解：已轮换 token 被重放（被盗场景）必须撤销该用户**全部** refresh families 与**全部** access sessions，使合法新 token 也随之失效、攻击者无法再用旧 token 换新 access；若只撤销旧 token 而不撤销整个 family，重放后家族内最新后代仍有效，被盗凭据继续可被滥用。
+- Owner 需要理解：已轮换 token 被重放（被盗场景）时，MySQL 中该用户**全部** refresh families 的撤销是必须成功的权威安全边界（失败则 reuse 处理失败并返回 500）；access session 仅尝试立即全量撤销（best-effort）。Redis 撤销失败时，已有 access token 最长可能继续有效至 session TTL；但即使如此，因全部 refresh families 已在 MySQL 撤销，任何旧 refresh token 或其后代都无法再换取新的 access token。若只撤销旧 token 而不撤销整个 family，重放后家族内最新后代仍有效，被盗凭据继续可被滥用。
 - 生产代码：`internal/logic/iam/refresh.go` `respondRefreshRow` reuse 分支（137-143 行）+ `revokeAllByUser`（211-219 行，MySQL 撤销 family 为权威、Redis 撤销会话 best-effort）+ `revokeAllFamiliesByUser`（273-282 行）。
 - 关键测试：`internal/controller/iam/refresh_test.go` `TestRefreshReuseRevokesFamily`（204-244 行）。
 - 基线验证：`go test -p 1 -run 'TestRefreshReuseRevokesFamily' ./internal/controller/iam/` 通过。
 - 可选 Mutation：把 `revokeAllFamiliesByUser` 改为 `return nil`（不执行 UPDATE）。
 - 预期失败：`TestRefreshReuseRevokesFamily` 失败——`activeFamilyCount` 期望 0 实际 1（family 未被撤销）。
 - 恢复确认：还原 `revokeAllFamiliesByUser` 的 UPDATE，再次运行该测试全绿。
+- Owner 结论：ACCEPTED（含 Redis session 撤销 best-effort 的安全降级边界）。
