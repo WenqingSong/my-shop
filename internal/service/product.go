@@ -28,6 +28,8 @@ type IProduct interface {
 	CountByCategory(ctx context.Context, categoryID int64) (int64, error)
 	// Exists 判断商品是否存在（供 SKU 校验 product_id 存在性）。
 	Exists(ctx context.Context, id int64) (bool, error)
+	// GetByID 按 id 查询单个商品全字段（含任意 status），不存在返回 nil（供购物车读取下架商品状态）。
+	GetByID(ctx context.Context, id int64) (*v1.Product, error)
 }
 
 var localProduct IProduct

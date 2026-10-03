@@ -68,6 +68,11 @@ const (
 	// 收货地址域（Address）7000-7999。
 	CodeAddressNotFound        Code = 7001 // 地址不存在或非本人（统一不泄露）→ 404
 	CodeAddressDefaultConflict Code = 7002 // 并发设置默认地址唯一冲突 → 409
+
+	// 购物车域（Cart）8000-8999。
+	CodeCartItemNotFound    Code = 8001 // 条目不存在或不属于当前用户 → 404
+	CodeCartInvalidQuantity Code = 8002 // 数量非正整数或超上限 → 400
+	CodeCartSkuUnavailable  Code = 8003 // 商品下架或 SKU 禁用，不可加购 → 409
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -120,6 +125,10 @@ var codeTable = map[Code]codeInfo{
 
 	CodeAddressNotFound:        {http.StatusNotFound, "地址不存在"},
 	CodeAddressDefaultConflict: {http.StatusConflict, "默认地址冲突"},
+
+	CodeCartItemNotFound:    {http.StatusNotFound, "购物车条目不存在"},
+	CodeCartInvalidQuantity: {http.StatusBadRequest, "数量非法"},
+	CodeCartSkuUnavailable:  {http.StatusConflict, "商品不可加购"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。

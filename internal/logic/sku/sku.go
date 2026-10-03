@@ -162,6 +162,18 @@ func (s *sSku) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
+// GetByID 按 id 查询单个 SKU 全字段（含 status），不存在返回 nil。
+func (s *sSku) GetByID(ctx context.Context, id int64) (*v1.Sku, error) {
+	rec, err := s.findOne(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if rec == nil {
+		return nil, nil
+	}
+	return toSku(rec), nil
+}
+
 // Exists 判断 SKU 是否存在（供库存校验 sku_id 存在性）。
 func (s *sSku) Exists(ctx context.Context, id int64) (bool, error) {
 	n, err := g.DB().Model("skus").Ctx(ctx).Where("id", id).Count()
