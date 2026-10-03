@@ -26,6 +26,7 @@ const (
 	// 认证/用户域（IAM）2000-2999。
 	CodeUsernameExists     Code = 2001 // 用户名已存在 → 409
 	CodeInvalidCredentials Code = 2002 // 用户名或密码错误 → 401
+	CodeSessionNotFound    Code = 2011 // 会话不存在或不属于当前用户 → 404
 
 	// 后台管理员身份与 RBAC（IAM 段扩展）。
 	CodeAdminNotFound          Code = 2003 // 管理员不存在 → 404
@@ -85,6 +86,7 @@ var codeTable = map[Code]codeInfo{
 	CodeServiceUnavailable:     {http.StatusServiceUnavailable, "服务不可用"},
 	CodeUsernameExists:         {http.StatusConflict, "用户名已存在"},
 	CodeInvalidCredentials:     {http.StatusUnauthorized, "用户名或密码错误"},
+	CodeSessionNotFound:        {http.StatusNotFound, "会话不存在"},
 	CodeAdminNotFound:          {http.StatusNotFound, "管理员不存在"},
 	CodeAdminUsernameExists:    {http.StatusConflict, "管理员用户名已存在"},
 	CodeSuperAdminProtected:    {http.StatusForbidden, "超级管理员受保护"},

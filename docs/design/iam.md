@@ -10,7 +10,7 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 - **Redis 会话**：以 `sid` 为桥，在 Redis 中维护会话状态（存在性 + 撤销标记 + 用户绑定）。受保护接口在验签与校验 `exp` 之后，还必须通过 Redis 会话有效性校验才放行。
 - **登出**：通过将对应会话逻辑标记为 `revoked` 实现 token 可撤销，session 记录保留至 TTL 自然过期，不物理删除。
 
-单 access token，无 refresh token、无滑动续期、无会话列表/登出全部设备/强制下线。
+单 access token，无 refresh token、无滑动续期、无 `token_version`、无标准 `jti`。前台用户域已支持会话列表与主动撤销（撤销指定/撤销其他/全部退出）；后台管理员域无会话列表/批量撤销；管理员跨用户强制下线未提供。
 
 本系统存在两个互相隔离的身份域：**前台用户**（`users` + `type=user` + `iam:session:{sid}` + `Auth`）与**后台管理员**（`admins` + `type=admin` + `iam:admin:session:{sid}` + `AdminAuth`）。两者使用独立凭据表、独立 token 类型、独立 Session Key 前缀与独立认证中间件，后端始终独立验证身份域（详见「5. 安全边界」）。
 
@@ -26,8 +26,14 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
   ├─ GET /me         （受保护，Auth 中间件）
   │     验签+exp → 校验 Redis session（存在/未撤销/user_id 匹配）→ 注入 Principal
   │
-  └─ POST /logout    （受保护，AuthSignatureOnly 中间件）
-        仅验签+exp → 取 Principal.Sid → 原子撤销 session（幂等）
+  ├─ POST /logout    （受保护，AuthSignatureOnly 中间件）
+  │     仅验签+exp → 取 Principal.Sid → 原子撤销 session（幂等）
+  │
+  ├─ GET  /sessions               （受保护，Auth）
+  ├─ DELETE /sessions/{sid}       （受保护，Auth）
+  ├─ POST /sessions/revoke-others （受保护，Auth）
+  └─ POST /sessions/revoke-all    （受保护，Auth）
+        会话列表 / 撤销指定会话 / 撤销其他会话 / 全部退出
 ```
 
 后台管理员域（独立于前台用户域）：
@@ -49,7 +55,8 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 | --- | --- |
 | MySQL `users` | 前台用户身份事实来源（id/username/password_hash） |
 | MySQL `admins` | 后台管理员身份事实来源（id/username/password_hash/status/is_super） |
-| Redis `iam:session:{sid}` | 前台会话状态事实来源（存在性 + revoked + user_id 绑定） |
+| Redis `iam:session:{sid}` | 前台会话状态事实来源（存在性 + revoked + user_id 绑定 + 元数据） |
+| Redis `iam:user:{id}:sessions` | 前台会话枚举索引（ZSET，非权威，见 3.5） |
 | Redis `iam:admin:session:{sid}` | 后台管理员会话状态事实来源（存在性 + revoked + admin_id 绑定） |
 | JWT | `sub + type + sid + exp` 的签名凭证，不是事实来源 |
 
@@ -73,10 +80,12 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 
 ### 3.3 Redis 会话
 
-- **Key**：`iam:session:{sid}`（单 key，无 user 维度索引）。
+- **Key**：`iam:session:{sid}`。
 - **Value**：Hash，字段：
   - `user_id`：用户 id 的十进制字符串（用于与 JWT `sub` 交叉校验，纵深防御）。
   - `revoked`：`"0"`（未撤销）/ `"1"`（已撤销）。
+  - `login_at`：登录时间（unix 秒），用于会话列表展示与排序。
+  - `user_agent` / `ip`：设备信息（登录时从请求采集，用于区分设备）。
 - **TTL**：`auth.session.ttl` 秒，默认 3600，必须 > 0，可经 `AUTH_SESSION_TTL` 覆盖。
 - **有效访问窗口** = `min(JWT exp, session TTL)`；任一到期访问受保护接口均返回 401。正常流程 session 在 `iat` 之后写入，Redis 过期略晚于 JWT exp，JWT exp 为主导失效点。
 
@@ -90,6 +99,15 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
   - `revoked`：`"0"`（未撤销）/ `"1"`（已撤销）。
 - **TTL**：复用 `auth.session.ttl`，默认 3600。
 - 管理员鉴权除校验会话外，还每请求查询 `admins.status`（禁用/不存在→401），实现禁用即时失效。
+
+### 3.5 前台会话索引
+
+前台用户会话新增枚举索引，用于会话列表与批量撤销：
+
+- **Key**：`iam:user:{userID}:sessions`（ZSET）。
+- **Member**：sid；**Score**：登录 unix 秒（登录时间）。
+- **性质**：仅为枚举优化，**Session Hash 才是归属与撤销状态的权威事实**。索引允许短暂存在 stale member（对应 Hash 已过期/不存在），读取时以 Hash 为准过滤，并可清理 stale member；索引 key 每次登录写入后 `EXPIRE` 至 `auth.session.ttl`，随最后一次会话到期自愈。
+- 后台管理员域**不建立**对称索引（本版本仅前台用户域）。
 
 ## 4. 鉴权与登出流程
 
@@ -123,12 +141,22 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 2. 原子撤销（Lua）：仅当 key 存在时 `HSET revoked=1`，保持剩余 TTL，不创建新 key；key 不存在视为已登出。
 3. 成功/重复登出/已撤销/缺失均返回 200/0（`data` 为 null）。
 
+### 4.4 会话列表与主动撤销（前台用户域）
+
+全部挂载 `Auth` 中间件（完整会话校验），当前 sid 取自 `Principal.Sid`，撤销目标 sid 取自 URL 路径，绝不信任请求体身份：
+
+- `GET /sessions`：返回当前用户全部有效会话（按登录时间排序），每项含 `sid`、`login_at`、`user_agent`、`ip`、`current`（`sid == Principal.Sid`）。按索引枚举后逐条校验 Hash 存在、未撤销且 `user_id == 当前用户`；ZSET 中 Hash 已过期/不存在的 sid 视为 stale member 并清理，不返回。
+- `DELETE /sessions/{sid}`：撤销指定会话。写前校验归属（Hash `user_id == 当前用户`）；本人 active → 置 `revoked=1` 返回 200/0；本人已撤销 → 幂等 200/0；不存在或非本人 → 404/2011，无写入、不泄露存在性。
+- `POST /sessions/revoke-others`：撤销除当前 sid 外的全部会话（Lua 原子：读索引 → 逐个 `revoked=1` → 清理索引），当前 sid 不受影响。
+- `POST /sessions/revoke-all`：撤销全部会话（含当前 sid），本次请求正常返回 200/0，后续请求鉴权失败。
+
 ## 5. 安全边界
 
 - **fail-closed**：鉴权中间件查询 Redis 失败（不可用/超时/类型错误）一律返回 401（`1002`），绝不放行可能已撤销的 token；底层错误仅记录服务端日志，不对外暴露内部状态。
 - **错误码复用**：已撤销/缺失 session 复用 `1002 UNAUTHORIZED`（401），不新增独立错误码（客户端无法仅凭 code 区分「被登出」与「token 过期」，当前范围内撤销仅由客户端自身登出触发，区分价值低，属可接受取舍）。
 - **密钥与凭据**：不硬编码 Redis 地址 / JWT 密钥；密码 bcrypt 存储；Token/密钥不进日志或错误响应。
 - **身份信任**：服务端验证身份，不信任客户端提交的 `sid` 或用户身份；`Principal` 是唯一身份来源。
+- **会话撤销防护**：撤销指定会话前必须校验目标 session Hash 的 `user_id` 归属；非本人/不存在统一返回 404/2011，不泄露会话存在性与归属，且无任何写入。
 
 ### 5.1 身份域隔离
 
@@ -152,12 +180,15 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 | token 缺失/非法/签名无效/过期/sid 缺失/会话缺失/已撤销/Redis 故障 | 1002 | 401 |
 | 凭据错误（登录） | 2002 | 401 |
 | 用户名已存在（注册） | 2001 | 409 |
+| 撤销会话目标不存在或不属于当前用户 | 2011 | 404 |
 
 ## 7. 失败与一致性语义
 
 - 登录：写 Redis 失败 → 500，不返回 token；「Redis 已写、JWT 未签」的极窄窗口产生孤儿 session，由 TTL 到期自愈，无安全影响。
 - 鉴权：JWT 无效/过期 → 401（不触达 Redis）；JWT 有效但 session 缺失/撤销/`user_id` 不匹配 → 401；Redis 错误 → 401（fail-closed）+ 服务端日志。
 - logout：幂等；同一 token 并发登出为原子操作（Lua），结果一致；不同会话互不影响。
+- 会话列表：Redis 枚举/读取失败 → 500 + 日志（不返回空列表，防 fail-open）；ZSET stale member 以 Hash 为准过滤并清理。
+- 撤销：逻辑标记 `revoked=1` 并保留 key 与 TTL；`revoke-others`/`revoke-all` 经 Lua 原子批量撤销；Redis 写失败 → 500 + 日志（不吞错误伪报成功）；重复撤销幂等，非本人/不存在 → 404 无写入。
 - 无 MQ、无异步、无跨系统事务。
 
 ## 8. 配置
@@ -172,11 +203,11 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 | 模块 | 路径 |
 | --- | --- |
 | JWT 签发/校验（含 `type` 声明） | `internal/auth/jwt.go` |
-| 会话管理（前台/管理员 sid 生成/TTL/建会话/校验/撤销） | `internal/auth/session.go` |
+| 会话管理（前台/管理员 sid 生成/TTL/建会话/校验/撤销/索引） | `internal/auth/session.go` |
 | 前台鉴权中间件 | `internal/middleware/auth.go`（`Auth` / `AuthSignatureOnly`） |
 | 后台鉴权中间件 | `internal/middleware/auth.go`（`AdminAuth` / `AdminAuthSignatureOnly` / `RequirePermission`） |
 | 身份注入 | `internal/middleware/principal.go` |
-| 前台登录/登出业务 | `internal/logic/iam/iam.go` |
+| 前台登录/登出/会话列表/撤销业务 | `internal/logic/iam/iam.go` |
 | 后台登录/登出与 RBAC 业务 | `internal/logic/admin/admin.go` |
 | 前台路由 | `internal/cmd/routes_frontend.go` |
 | 后台路由 | `internal/cmd/routes_admin.go` |

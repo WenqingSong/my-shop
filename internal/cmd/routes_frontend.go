@@ -32,7 +32,7 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	root.GET("/products", productCtrl.List)
 	root.GET("/products/:id", productCtrl.Detail)
 
-	// 前台登录用户接口：/me、/addresses 需要认证 + 会话有效性校验。
+	// 前台登录用户接口：/me、收货地址与会话管理均需要认证 + 会话有效性校验。
 	root.Group("/", func(user *ghttp.RouterGroup) {
 		user.Middleware(middleware.Auth)
 		user.GET("/me", iamCtrl.Me)
@@ -41,6 +41,10 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 		user.GET("/addresses/:id", addressCtrl.Detail)
 		user.PUT("/addresses/:id", addressCtrl.Update)
 		user.DELETE("/addresses/:id", addressCtrl.Delete)
+		user.GET("/sessions", iamCtrl.ListSessions)
+		user.DELETE("/sessions/:sid", iamCtrl.RevokeSession)
+		user.POST("/sessions/revoke-others", iamCtrl.RevokeOthers)
+		user.POST("/sessions/revoke-all", iamCtrl.RevokeAll)
 	})
 
 	// 前台登出：仅验签（幂等撤销，即使 session 已撤销/缺失也能到达 handler）。
