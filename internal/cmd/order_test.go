@@ -558,6 +558,68 @@ func TestOrderCancelRestoresInventoryOnce(t *testing.T) {
 	}
 }
 
+// TestOrderRefundRestoresInventoryOnce 覆盖 AC-008/AC-015/INV-007：退款恢复库存，并发退款只补偿一次。
+func TestOrderRefundRestoresInventoryOnce(t *testing.T) {
+	base := setupOrderServer(t)
+	skuID, _ := setupSellable(t, "SKU-REFUND", 1000, 5)
+
+	isoInsertUser(t, "buyer13", "buyerpass123")
+	token, _ := isoFrontendLogin(t, base, "buyer13", "buyerpass123")
+	claims := isoClaims(t, token)
+	userID, _ := parseUserID(t, claims.Subject)
+	addressID := orderInsertAddress(t, userID)
+
+	created := orderCall(t, base, "POST", "/orders", token, map[string]any{
+		"source": "direct", "address_id": addressID, "idempotency_key": "key-refund",
+		"sku_id": skuID, "quantity": 2,
+	})
+	if created.Status != 200 || created.Code != 0 {
+		t.Fatalf("create: status=%d code=%d", created.Status, created.Code)
+	}
+	if got := orderStock(t, skuID); got != 3 {
+		t.Fatalf("after create stock=%d want 3", got)
+	}
+
+	// 支付到已支付，才能退款。
+	if p := orderCall(t, base, "POST", fmt.Sprintf("/orders/%d/pay", created.Data.Id), token, nil); p.Status != 200 || p.Code != 0 {
+		t.Fatalf("pay: status=%d code=%d", p.Status, p.Code)
+	}
+	if st := orderStatus(t, created.Data.Id); st != 20 {
+		t.Fatalf("after pay status=%d want 20", st)
+	}
+
+	// 并发退款：只应有一个成功完成 paid → refunded，库存只恢复一次，其余请求不得再次补偿。
+	adminToken, _ := isoAdminLogin(t, base, isoSuperUsername, isoAdminPassword)
+	const n = 8
+	var wg sync.WaitGroup
+	success := make(chan bool, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			res := orderCall(t, base, "POST", fmt.Sprintf("/admin/orders/%d/refund", created.Data.Id), adminToken, map[string]any{})
+			success <- (res.Status == 200 && res.Code == 0)
+		}()
+	}
+	wg.Wait()
+	close(success)
+	okCount := 0
+	for ok := range success {
+		if ok {
+			okCount++
+		}
+	}
+	if okCount != 1 {
+		t.Fatalf("exactly one refund should succeed, got %d", okCount)
+	}
+	if got := orderStock(t, skuID); got != 5 {
+		t.Fatalf("inventory should be restored exactly once, got %d want 5", got)
+	}
+	if st := orderStatus(t, created.Data.Id); st != 70 {
+		t.Fatalf("order status=%d want 70", st)
+	}
+}
+
 // TestOrderPayIdempotent 覆盖 AC-010/INV-010：重复支付不重复改状态。
 func TestOrderPayIdempotent(t *testing.T) {
 	base := setupOrderServer(t)
