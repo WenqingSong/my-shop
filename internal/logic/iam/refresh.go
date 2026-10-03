@@ -24,7 +24,7 @@ const (
 )
 
 // errRefreshNotRotated 是事务内条件 UPDATE 影响 0 行（并发后到者/已过期/已撤销）的内部信号，
-// 调用方据此按 reuse 处理，不将其视为底层技术错误。
+// 调用方据此重读该行并按真实状态判定，不将其视为底层技术错误。
 var errRefreshNotRotated = errors.New("refresh token 未被轮换（条件更新影响 0 行）")
 
 // refreshTokenRow 是 refresh_tokens 表的一行。
@@ -59,19 +59,8 @@ func (s *sIam) Refresh(ctx context.Context, req *v1.RefreshReq, userAgent, ip st
 		// 未知/无效 token：统一 INVALID，不泄露存在性。
 		return nil, codes.New(codes.CodeRefreshTokenInvalid)
 	}
-	if row.RevokedReason != nil && *row.RevokedReason == revokedReasonRotated {
-		// 已轮换 token 再次提交 → reuse：撤销该用户全部 families + 全部 sessions，不产生新 token。
-		if err := s.revokeAllByUser(ctx, row.UserID); err != nil {
-			return nil, err
-		}
-		return nil, codes.New(codes.CodeRefreshTokenReuse)
-	}
-	if row.RevokedAt != nil {
-		// 主动撤销（reason='revoked'）→ 统一 INVALID。
-		return nil, codes.New(codes.CodeRefreshTokenInvalid)
-	}
-	if row.ExpiresAt == nil || row.ExpiresAt.Before(gtime.Now()) {
-		return nil, codes.New(codes.CodeRefreshTokenExpired)
+	if err := s.respondRefreshRow(ctx, row); err != nil {
+		return nil, err
 	}
 
 	// 有效 → session upsert（先于轮换；失败 500 且未轮换，重试安全）。
@@ -108,11 +97,9 @@ func (s *sIam) Refresh(ctx context.Context, req *v1.RefreshReq, userAgent, ip st
 		return nil, err
 	}
 	if !rotated {
-		// 并发后到者：条件 UPDATE 影响 0 行 → reuse（全量撤销）。
-		if err := s.revokeAllByUser(ctx, row.UserID); err != nil {
-			return nil, err
-		}
-		return nil, codes.New(codes.CodeRefreshTokenReuse)
+		// 条件 UPDATE 影响 0 行：并发后到者（reuse）、恰逢过期或已被撤销，
+		// 重读并按真实状态判定，不得统一按 reuse 处理。
+		return nil, s.handleRefreshNotRotated(ctx, tokenHash)
 	}
 
 	// 签新 access token（复用同 sid，恒为 type=user，不信任请求体身份）。
@@ -127,6 +114,54 @@ func (s *sIam) Refresh(ctx context.Context, req *v1.RefreshReq, userAgent, ip st
 		TokenType:    "Bearer",
 		ExpiresIn:    auth.ExpiresIn,
 	}, nil
+}
+
+// classifyRefreshRow 返回 refresh 判定结果对应的业务错误码（无副作用）：
+// reason='rotated' → REUSE；revoked_at 非空 → INVALID；已过期 → EXPIRED；否则 OK（可继续轮换）。
+// 初始读取与「事务内条件 UPDATE 影响 0 行后的重读」共用，保证两条路径判定一致。
+func classifyRefreshRow(row *refreshTokenRow) codes.Code {
+	if row.RevokedReason != nil && *row.RevokedReason == revokedReasonRotated {
+		return codes.CodeRefreshTokenReuse
+	}
+	if row.RevokedAt != nil {
+		return codes.CodeRefreshTokenInvalid
+	}
+	if row.ExpiresAt == nil || row.ExpiresAt.Before(gtime.Now()) {
+		return codes.CodeRefreshTokenExpired
+	}
+	return codes.CodeOK
+}
+
+// respondRefreshRow 按分类结果执行副作用并返回终端错误；分类为 OK 时返回 nil（可继续轮换）。
+func (s *sIam) respondRefreshRow(ctx context.Context, row *refreshTokenRow) error {
+	switch classifyRefreshRow(row) {
+	case codes.CodeRefreshTokenReuse:
+		// 已轮换 token 再次提交 → reuse：撤销该用户全部 families + 全部 sessions，不产生新 token。
+		if err := s.revokeAllByUser(ctx, row.UserID); err != nil {
+			return err
+		}
+		return codes.New(codes.CodeRefreshTokenReuse)
+	case codes.CodeRefreshTokenInvalid:
+		return codes.New(codes.CodeRefreshTokenInvalid)
+	case codes.CodeRefreshTokenExpired:
+		return codes.New(codes.CodeRefreshTokenExpired)
+	default:
+		return nil
+	}
+}
+
+// handleRefreshNotRotated 处理事务内条件 UPDATE 影响 0 行：重读该行并按真实状态判定，
+// 即并发后到者（reuse）/ 恰逢过期（expired）/ 已被撤销（invalid），不得统一按 reuse 处理。
+func (s *sIam) handleRefreshNotRotated(ctx context.Context, tokenHash string) error {
+	current, err := findRefreshByHash(ctx, tokenHash)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		// 理论不出现（refresh_tokens 行不被物理删除）；防御性按 INVALID 处理。
+		return codes.New(codes.CodeRefreshTokenInvalid)
+	}
+	return s.respondRefreshRow(ctx, current)
 }
 
 // rotateRefresh 在事务内将旧 token 置 rotated 并 INSERT 新后代。

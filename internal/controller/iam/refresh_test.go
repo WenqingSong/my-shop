@@ -403,15 +403,31 @@ func TestRefreshRevokeSessionRevokesFamily(t *testing.T) {
 // TestRefreshAccessExpiryIndependent 覆盖 AC-008：access 过期但 refresh 有效，仍可换新 access 继续访问。
 func TestRefreshAccessExpiryIndependent(t *testing.T) {
 	base := setupIAMServer(t)
-	_, refresh, _, _ := loginWithRefresh(t, base, "alice", "password123")
+	_, refresh, sid, _ := loginWithRefresh(t, base, "alice", "password123")
 
-	// 模拟 access token 过期：直接删除对应 session（refresh 会按同 sid upsert 重建）。
-	// 这里验证 refresh 独立于 access token 生命周期：即使 session 过期，refresh 仍能重建并签新 access。
+	// 模拟 access token 过期：直接删除对应 session（refresh 会按同 sid 重建，不新增会话索引条目）。
+	if _, err := g.Redis().Del(context.Background(), auth.SessionKey(sid)); err != nil {
+		t.Fatalf("del session: %v", err)
+	}
+
 	res := doRequest(t, base, "POST", "/refresh", map[string]any{"refresh_token": refresh}, nil)
 	if res.Status != 200 || res.Code != 0 {
 		t.Fatalf("refresh: status=%d code=%d", res.Status, res.Code)
 	}
 	newAccess, _ := res.Data["access_token"].(string)
+	if newAccess == "" {
+		t.Fatal("expected non-empty access_token after refresh")
+	}
+	// 新 access token 复用同 sid（session 已重建，不换新 sid）。
+	if got := tokenSid(t, newAccess); got != sid {
+		t.Fatalf("expected same sid %q after session rebuild, got %q", sid, got)
+	}
+	// session 以同 sid 重建：Hash 存在、未撤销、user_id 与新 token sub 一致。
+	sf := sessionFields(t, sid)
+	if sf["revoked"] != "0" || sf["user_id"] != fmt.Sprintf("%d", tokenUserID(t, newAccess)) {
+		t.Fatalf("expected session rebuilt (revoked=0, user_id matched), got %v", sf)
+	}
+	// 新 access token 可访问受保护接口（AC-008 核心场景）。
 	me := doRequest(t, base, "GET", "/me", nil, authHeader(newAccess))
 	if me.Status != 200 || me.Code != 0 {
 		t.Fatalf("me with refreshed access: status=%d code=%d", me.Status, me.Code)
