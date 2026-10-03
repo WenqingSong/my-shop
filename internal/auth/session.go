@@ -129,6 +129,18 @@ type SessionMeta struct {
 // 随后将会话 sid 写入用户会话索引（ZSET），索引为提交点。
 // 任一步写失败返回 error，调用方应视为登录失败（保证「返回的 token 必有有效 session」）。
 func CreateSession(ctx context.Context, sid string, userID int64, ttl int64, meta SessionMeta) error {
+	if err := createSessionHash(ctx, sid, userID, ttl, meta); err != nil {
+		return err
+	}
+	if err := AddSessionToIndex(ctx, userID, sid, meta.LoginAt, ttl); err != nil {
+		return err
+	}
+	return nil
+}
+
+// createSessionHash 写入会话 Hash（user_id、revoked=0、登录元数据）并设置 TTL，不写会话索引。
+// 供 CreateSession 与 refresh 的 session 重建复用。
+func createSessionHash(ctx context.Context, sid string, userID int64, ttl int64, meta SessionMeta) error {
 	key := SessionKey(sid)
 	if _, err := g.Redis().HSet(ctx, key, map[string]any{
 		sessionFieldUserID:    strconv.FormatInt(userID, 10),
@@ -141,9 +153,6 @@ func CreateSession(ctx context.Context, sid string, userID int64, ttl int64, met
 	}
 	if _, err := g.Redis().Expire(ctx, key, ttl); err != nil {
 		return fmt.Errorf("设置会话 TTL: %w", err)
-	}
-	if err := AddSessionToIndex(ctx, userID, sid, meta.LoginAt, ttl); err != nil {
-		return err
 	}
 	return nil
 }
@@ -238,6 +247,48 @@ func SessionBelongsTo(ctx context.Context, sid string, userID int64) (bool, erro
 		return false, nil
 	}
 	return fields[sessionFieldUserID] == strconv.FormatInt(userID, 10), nil
+}
+
+// SessionUpsertResult 表示 refresh 前确保 access session 存活的 upsert 结果。
+type SessionUpsertResult int
+
+const (
+	// SessionUpsertRevoked 表示 session 存在但已撤销（防御性拒绝，理论不出现）。
+	SessionUpsertRevoked SessionUpsertResult = iota
+	// SessionUpsertRenewed 表示 session 存在且未撤销，仅续期 TTL（保留 login_at/UA/IP）。
+	SessionUpsertRenewed
+	// SessionUpsertRecreated 表示 session 已过期/不存在，以同 sid 重建（不新增会话索引条目）。
+	SessionUpsertRecreated
+)
+
+// UpsertSessionAlive 确保 sid 对应的 access session 存活（refresh 复用同 sid）：
+//   - 存在且未撤销 → 续期 TTL 至 ttl，返回 Renewed；
+//   - 不存在（已过期/被清理）→ 以同 sid 重建（login_at 用 meta.LoginAt），不新增索引条目，返回 Recreated；
+//   - 存在但已撤销 / user_id 不匹配（防御性）→ 不写入，返回 Revoked。
+//
+// Redis 查询/写失败返回 error，调用方必须 fail-closed。
+func UpsertSessionAlive(ctx context.Context, sid string, userID int64, ttl int64, meta SessionMeta) (SessionUpsertResult, error) {
+	fields, err := SessionFields(ctx, sid)
+	if err != nil {
+		return SessionUpsertRevoked, err
+	}
+	if len(fields) > 0 {
+		if fields[sessionFieldRevoked] == "1" {
+			return SessionUpsertRevoked, nil
+		}
+		// 防御：sid 被绑定到其它 user_id（理论不出现）视为不可用，拒绝续期。
+		if fields[sessionFieldUserID] != strconv.FormatInt(userID, 10) {
+			return SessionUpsertRevoked, nil
+		}
+		if _, err := g.Redis().Expire(ctx, SessionKey(sid), ttl); err != nil {
+			return SessionUpsertRevoked, fmt.Errorf("续期会话: %w", err)
+		}
+		return SessionUpsertRenewed, nil
+	}
+	if err := createSessionHash(ctx, sid, userID, ttl, meta); err != nil {
+		return SessionUpsertRevoked, err
+	}
+	return SessionUpsertRecreated, nil
 }
 
 // SessionInfo 是会话 Hash 的解析结果（用于会话列表展示与过滤）。

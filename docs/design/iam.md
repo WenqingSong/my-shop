@@ -10,7 +10,7 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 - **Redis 会话**：以 `sid` 为桥，在 Redis 中维护会话状态（存在性 + 撤销标记 + 用户绑定）。受保护接口在验签与校验 `exp` 之后，还必须通过 Redis 会话有效性校验才放行。
 - **登出**：通过将对应会话逻辑标记为 `revoked` 实现 token 可撤销，session 记录保留至 TTL 自然过期，不物理删除。
 
-单 access token，无 refresh token、无滑动续期、无 `token_version`、无标准 `jti`。前台用户域已支持会话列表与主动撤销（撤销指定/撤销其他/全部退出）；后台管理员域无会话列表/批量撤销；管理员跨用户强制下线未提供。
+单 access token，无滑动续期、无 `token_version`、无标准 `jti`；长期凭证为 refresh token（仅前台用户域），支持轮换（rotation）、Token Family 血缘与重放（reuse）检测，refresh token 仅以 SHA-256 哈希落 MySQL。前台用户域已支持会话列表与主动撤销（撤销指定/撤销其他/全部退出）；后台管理员域无会话列表/批量撤销；管理员跨用户强制下线未提供。
 
 本系统存在两个互相隔离的身份域：**前台用户**（`users` + `type=user` + `iam:session:{sid}` + `Auth`）与**后台管理员**（`admins` + `type=admin` + `iam:admin:session:{sid}` + `AdminAuth`）。两者使用独立凭据表、独立 token 类型、独立 Session Key 前缀与独立认证中间件，后端始终独立验证身份域（详见「5. 安全边界」）。
 
@@ -21,19 +21,25 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
   │
   ├─ POST /register  （公开）
   ├─ POST /login     （公开）
-  │     校验凭据 → 生成 sid → 写 Redis session → 签发含 sid 的 JWT → 返回 token
+  │     校验凭据 → 生成 sid → 写 Redis session → 签发含 sid 的 JWT
+  │     → 生成 refresh token（仅 SHA-256 哈希落 MySQL，family 根）→ 返回双 token
+  │
+  ├─ POST /refresh   （公开，无 Auth）
+  │     校验 refresh token 哈希 → 判定（无效/过期/reuse）→ 轮换 refresh family
+  │     → 复用同 sid 签发新 access token → 返回新双 token
   │
   ├─ GET /me         （受保护，Auth 中间件）
   │     验签+exp → 校验 Redis session（存在/未撤销/user_id 匹配）→ 注入 Principal
   │
   ├─ POST /logout    （受保护，AuthSignatureOnly 中间件）
-  │     仅验签+exp → 取 Principal.Sid → 原子撤销 session（幂等）
+  │     仅验签+exp → 取 Principal.Sid → 原子撤销 session + 撤销对应 refresh family（幂等）
   │
   ├─ GET  /sessions               （受保护，Auth）
   ├─ DELETE /sessions/{sid}       （受保护，Auth）
   ├─ POST /sessions/revoke-others （受保护，Auth）
   └─ POST /sessions/revoke-all    （受保护，Auth）
         会话列表 / 撤销指定会话 / 撤销其他会话 / 全部退出
+        （各撤销入口同时联动撤销被撤销 session 对应的 refresh family）
 ```
 
 后台管理员域（独立于前台用户域）：
@@ -55,6 +61,7 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 | --- | --- |
 | MySQL `users` | 前台用户身份事实来源（id/username/password_hash） |
 | MySQL `admins` | 后台管理员身份事实来源（id/username/password_hash/status/is_super） |
+| MySQL `refresh_tokens` | 前台 refresh token 事实来源（token_hash、family 血缘、revoked/过期状态，见 3.6） |
 | Redis `iam:session:{sid}` | 前台会话状态事实来源（存在性 + revoked + user_id 绑定 + 元数据） |
 | Redis `iam:user:{id}:sessions` | 前台会话枚举索引（ZSET，非权威，见 3.5） |
 | Redis `iam:admin:session:{sid}` | 后台管理员会话状态事实来源（存在性 + revoked + admin_id 绑定） |
@@ -109,6 +116,35 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 - **性质**：仅为枚举优化，**Session Hash 才是归属与撤销状态的权威事实**。索引允许短暂存在 stale member（对应 Hash 已过期/不存在），读取时以 Hash 为准过滤，并可清理 stale member；索引 key 每次登录写入后 `EXPIRE` 至 `auth.session.ttl`，随最后一次会话到期自愈。
 - 后台管理员域**不建立**对称索引（本版本仅前台用户域）。
 
+### 3.6 Refresh Token 与 Token Family（仅前台用户域）
+
+长期凭证为 refresh token，仅以哈希落 MySQL `refresh_tokens`，仅前台用户域；管理员域不纳入。核心模型为「一次登录 = 一个 sid 会话 + 一个 refresh family」：
+
+- **refresh token 明文**：`crypto/rand` 32 字节 → hex 64 字符；仅签发响应出现一次，不进日志/错误/持久介质。
+- **落库哈希**：`token_hash = SHA-256(明文)` hex 64 字符（高熵随机串用快速哈希，不用 bcrypt）。
+- **family 血缘**：`family_id`（登录时 16 字节 hex 32 字符，登录生命周期内不变）+ `parent_id`（自引用，根为 NULL）+ `generation`（根=0，每次轮换 +1）。
+- **session 关联**：`sid` 字段记录本次登录绑定的 access session sid，family 内所有行同值；是「当前 session → 对应 refresh family」的追踪键。
+- **有效期**：`expires_at = 签发时刻 + auth.refresh.ttl`（默认 30 天），绝对过期、不滑动。
+- **撤销标记**：`revoked_at` + `revoked_reason`（`rotated`=被轮换 / `revoked`=被主动撤销），NULL=有效。
+
+表结构：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | BIGINT UNSIGNED | 主键自增 |
+| `token_hash` | CHAR(64) | SHA-256 hex，`uk_token_hash` 唯一 |
+| `family_id` | VARCHAR(32) | family 标识，同 family 共享 |
+| `user_id` | BIGINT UNSIGNED | 前台用户 id |
+| `parent_id` | BIGINT UNSIGNED NULL | 父 token id，根为 NULL |
+| `generation` | INT NOT NULL DEFAULT 0 | 代际计数 |
+| `sid` | VARCHAR(32) | 绑定的 access session sid |
+| `expires_at` | DATETIME NOT NULL | 绝对过期时间 |
+| `revoked_at` | DATETIME NULL | 撤销/轮换时间 |
+| `revoked_reason` | VARCHAR(16) NULL | `rotated` / `revoked` |
+| `created_at`/`updated_at` | DATETIME | 默认 CURRENT_TIMESTAMP |
+
+索引：`uk_token_hash(token_hash)`、`idx_family(family_id)`、`idx_user(user_id)`、`idx_sid(sid)`。
+
 ## 4. 鉴权与登出流程
 
 ### 4.1 登录（同步）
@@ -118,10 +154,11 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
   → 生成 sid
   → 写 Redis session（HSet user_id + revoked=0，Expire TTL）
   → 签发含 sid 的 JWT
-  → 返回 {access_token, token_type:"Bearer", expires_in:3600}
+  → 生成 refresh token（明文仅本次返回；SHA-256 哈希 + family_id 落 refresh_tokens 根，绑 sid）
+  → 返回 {access_token, refresh_token, token_type:"Bearer", expires_in:3600}
 ```
 
-写 Redis session 失败 → 登录失败，返回 500（`1000 INTERNAL_ERROR`），不签发 token，保证「返回的 token 必有有效 session」。
+写 Redis session 失败 → 登录失败，返回 500（`1000 INTERNAL_ERROR`），不签发 token，保证「返回的 token 必有有效 session」。写 refresh_tokens 失败 → 登录失败（500），不返回 refresh token（access token 与 refresh token 作为同一登录产物，任一失败即整体失败）。
 
 ### 4.2 鉴权（同步，每请求）
 
@@ -139,16 +176,36 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 
 1. 从 `Principal.Sid` 取 sid（**不接受**请求体/参数中的 sid）。
 2. 原子撤销（Lua）：仅当 key 存在时 `HSET revoked=1`，保持剩余 TTL，不创建新 key；key 不存在视为已登出。
-3. 成功/重复登出/已撤销/缺失均返回 200/0（`data` 为 null）。
+3. 联动撤销 refresh family：按 sid 反查 `refresh_tokens` 取 `family_id`，将该 family 全部未撤销成员置 `revoked_reason='revoked'`（幂等），不影响其它设备的 session/family。
+4. 成功/重复登出/已撤销/缺失均返回 200/0（`data` 为 null）。
 
 ### 4.4 会话列表与主动撤销（前台用户域）
 
 全部挂载 `Auth` 中间件（完整会话校验），当前 sid 取自 `Principal.Sid`，撤销目标 sid 取自 URL 路径，绝不信任请求体身份：
 
 - `GET /sessions`：返回当前用户全部有效会话（按登录时间排序），每项含 `sid`、`login_at`、`user_agent`、`ip`、`current`（`sid == Principal.Sid`）。按索引枚举后逐条校验 Hash 存在、未撤销且 `user_id == 当前用户`；ZSET 中 Hash 已过期/不存在的 sid 视为 stale member 并清理，不返回。
-- `DELETE /sessions/{sid}`：撤销指定会话。写前校验归属（Hash `user_id == 当前用户`）；本人 active → 置 `revoked=1` 返回 200/0；本人已撤销 → 幂等 200/0；不存在或非本人 → 404/2011，无写入、不泄露存在性。
-- `POST /sessions/revoke-others`：撤销除当前 sid 外的全部会话（Lua 原子：读索引 → 逐个 `revoked=1` → 清理索引），当前 sid 不受影响。
-- `POST /sessions/revoke-all`：撤销全部会话（含当前 sid），本次请求正常返回 200/0，后续请求鉴权失败。
+- `DELETE /sessions/{sid}`：撤销指定会话。写前校验归属（Hash `user_id == 当前用户`）；本人 active → 置 `revoked=1` 返回 200/0；本人已撤销 → 幂等 200/0；不存在或非本人 → 404/2011，无写入、不泄露存在性。撤销会话的同时联动撤销该 sid 对应 refresh family。
+- `POST /sessions/revoke-others`：撤销除当前 sid 外的全部会话（Lua 原子：读索引 → 逐个 `revoked=1` → 清理索引），当前 sid 不受影响；同时联动撤销各被撤销 sid 对应的 refresh family。
+- `POST /sessions/revoke-all`：撤销全部会话（含当前 sid），本次请求正常返回 200/0，后续请求鉴权失败；同时联动撤销该用户全部 refresh families。
+
+### 4.5 Refresh（同步，复用 sid）
+
+`POST /refresh` 为公开接口（无 Auth 中间件），refresh token 自身即凭证。处理顺序：
+
+1. 按 `token_hash = SHA-256(refresh_token)` 查 `refresh_tokens`，判定：
+   - 不存在 → `2012 REFRESH_TOKEN_INVALID`（401，不泄露存在性）；
+   - `revoked_reason='rotated'` → `2014 REFRESH_TOKEN_REUSE`（401，触发全量撤销，见下）；
+   - `revoked_at` 非空（`reason='revoked'`）→ `2012 REFRESH_TOKEN_INVALID`（401）；
+   - `expires_at < NOW()` → `2013 REFRESH_TOKEN_EXPIRED`（401）；
+   - 否则有效。
+2. session upsert：按 sid 确保 access session 存活——存在且未撤销 → 续期 TTL 至 `auth.session.ttl`（保留 login_at/UA/IP）；不存在（已过期）→ 以同 sid 重建（login_at=当前时间）；已撤销（防御性）→ 拒绝（2012）。不新增会话列表条目（sid 不变）。
+3. 事务内轮换：条件 `UPDATE refresh_tokens SET revoked_at=NOW(), revoked_reason='rotated' WHERE token_hash=? AND revoked_at IS NULL AND expires_at > NOW()`；`RowsAffected==0` 则回滚并按第 1 步重判（并发后到者 → reuse）；否则 INSERT 新后代（同 sid、同 family_id、parent_id=旧 id、generation+1、expires_at=now+30d）。
+4. 签发新 access token（复用同一 sid，`type=user`）。
+5. 返回 `{access_token, refresh_token, token_type:"Bearer", expires_in:3600}`。
+
+并发语义：InnoDB 行锁串行化同一 `token_hash` 的条件 UPDATE，仅一个事务成功轮换；后到者重判为 reuse（INV-002/INV-003）。
+
+**reuse 全量撤销**：`reason='rotated'` 的 token 再次提交即视为重放，撤销该用户全部 refresh families（全部未撤销成员置 `revoked_reason='revoked'`）+ 撤销该用户全部 access sessions（`RevokeAllSessions`），强制重新认证，不产生任何新 token。
 
 ## 5. 安全边界
 
@@ -181,15 +238,20 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 | 凭据错误（登录） | 2002 | 401 |
 | 用户名已存在（注册） | 2001 | 409 |
 | 撤销会话目标不存在或不属于当前用户 | 2011 | 404 |
+| refresh token 无效/未知/篡改/已撤销（不泄露存在性） | 2012 | 401 |
+| refresh token 过期 | 2013 | 401 |
+| refresh token 重放（已轮换 token 再次提交） | 2014 | 401 |
 
 ## 7. 失败与一致性语义
 
-- 登录：写 Redis 失败 → 500，不返回 token；「Redis 已写、JWT 未签」的极窄窗口产生孤儿 session，由 TTL 到期自愈，无安全影响。
+- 登录：写 Redis 失败 → 500，不返回 token；「Redis 已写、JWT 未签」的极窄窗口产生孤儿 session，由 TTL 到期自愈，无安全影响。写 refresh_tokens 失败 → 500，不返回 refresh token。
 - 鉴权：JWT 无效/过期 → 401（不触达 Redis）；JWT 有效但 session 缺失/撤销/`user_id` 不匹配 → 401；Redis 错误 → 401（fail-closed）+ 服务端日志。
-- logout：幂等；同一 token 并发登出为原子操作（Lua），结果一致；不同会话互不影响。
+- logout：幂等；同一 token 并发登出为原子操作（Lua），结果一致；不同会话互不影响；联动撤销 refresh family（MySQL 更新，幂等）。
+- refresh：轮换的「旧 token 置 rotated + 新后代 INSERT」在同一 MySQL 事务内，失败即回滚（旧 token 不失效，可重试）；session upsert 先于轮换，失败则 500 且未轮换（重试安全）；并发后到者重判为 reuse（全量撤销）。
 - 会话列表：Redis 枚举/读取失败 → 500 + 日志（不返回空列表，防 fail-open）；ZSET stale member 以 Hash 为准过滤并清理。
-- 撤销：逻辑标记 `revoked=1` 并保留 key 与 TTL；`revoke-others`/`revoke-all` 经 Lua 原子批量撤销；Redis 写失败 → 500 + 日志（不吞错误伪报成功）；重复撤销幂等，非本人/不存在 → 404 无写入。
-- 无 MQ、无异步、无跨系统事务。
+- 撤销：逻辑标记 `revoked=1` 并保留 key 与 TTL；`revoke-others`/`revoke-all` 经 Lua 原子批量撤销，并联动撤销对应 refresh family；Redis 写失败 → 500 + 日志（不吞错误伪报成功）；重复撤销幂等，非本人/不存在 → 404 无写入。
+- reuse：撤销该用户全部 refresh families + 全部 access sessions，为 MySQL 更新 + Redis Lua 撤销，非跨系统事务（Redis 失败时 family 已撤销、session 由 TTL/后续校验兜底）。
+- 无 MQ、无异步；MySQL 与 Redis 间为顺序写，无跨系统事务。
 
 ## 8. 配置
 
@@ -197,6 +259,7 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 | --- | --- | --- | --- |
 | `auth.jwt.secret` | `AUTH_JWT_SECRET` | dev 默认值（见 config.yaml） | HS256 密钥，≥32 字节 |
 | `auth.session.ttl` | `AUTH_SESSION_TTL` | `3600` | 会话 TTL（秒），必须 > 0 |
+| `auth.refresh.ttl` | `AUTH_REFRESH_TTL` | `2592000` | refresh token 绝对有效期（秒，30 天），必须 > 0 |
 
 ## 9. 代码位置
 
@@ -204,10 +267,12 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 | --- | --- |
 | JWT 签发/校验（含 `type` 声明） | `internal/auth/jwt.go` |
 | 会话管理（前台/管理员 sid 生成/TTL/建会话/校验/撤销/索引） | `internal/auth/session.go` |
+| refresh token 生成、SHA-256 哈希、family 血缘工具 | `internal/auth/refresh.go`（refresh 域，仅前台） |
+| refresh token 持久化访问 | `internal/logic/iam/refresh.go`（refresh_tokens DAO） |
 | 前台鉴权中间件 | `internal/middleware/auth.go`（`Auth` / `AuthSignatureOnly`） |
 | 后台鉴权中间件 | `internal/middleware/auth.go`（`AdminAuth` / `AdminAuthSignatureOnly` / `RequirePermission`） |
 | 身份注入 | `internal/middleware/principal.go` |
-| 前台登录/登出/会话列表/撤销业务 | `internal/logic/iam/iam.go` |
+| 前台登录/登出/刷新/会话列表/撤销业务 | `internal/logic/iam/iam.go` |
 | 后台登录/登出与 RBAC 业务 | `internal/logic/admin/admin.go` |
 | 前台路由 | `internal/cmd/routes_frontend.go` |
 | 后台路由 | `internal/cmd/routes_admin.go` |

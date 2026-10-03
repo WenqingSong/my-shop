@@ -28,6 +28,11 @@ const (
 	CodeInvalidCredentials Code = 2002 // 用户名或密码错误 → 401
 	CodeSessionNotFound    Code = 2011 // 会话不存在或不属于当前用户 → 404
 
+	// refresh token（IAM 段扩展，仅前台用户域）。
+	CodeRefreshTokenInvalid Code = 2012 // refresh token 无效/未知/篡改/已撤销（不泄露存在性）→ 401
+	CodeRefreshTokenExpired Code = 2013 // refresh token 已过期 → 401
+	CodeRefreshTokenReuse   Code = 2014 // refresh token 被重放（已轮换 token 再次提交）→ 401
+
 	// 后台管理员身份与 RBAC（IAM 段扩展）。
 	CodeAdminNotFound          Code = 2003 // 管理员不存在 → 404
 	CodeAdminUsernameExists    Code = 2004 // 管理员用户名已存在 → 409
@@ -100,6 +105,9 @@ var codeTable = map[Code]codeInfo{
 	CodeUsernameExists:         {http.StatusConflict, "用户名已存在"},
 	CodeInvalidCredentials:     {http.StatusUnauthorized, "用户名或密码错误"},
 	CodeSessionNotFound:        {http.StatusNotFound, "会话不存在"},
+	CodeRefreshTokenInvalid:    {http.StatusUnauthorized, "refresh token 无效"},
+	CodeRefreshTokenExpired:    {http.StatusUnauthorized, "refresh token 已过期"},
+	CodeRefreshTokenReuse:      {http.StatusUnauthorized, "refresh token 已失效，请重新登录"},
 	CodeAdminNotFound:          {http.StatusNotFound, "管理员不存在"},
 	CodeAdminUsernameExists:    {http.StatusConflict, "管理员用户名已存在"},
 	CodeSuperAdminProtected:    {http.StatusForbidden, "超级管理员受保护"},

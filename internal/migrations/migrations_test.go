@@ -13,18 +13,18 @@ import (
 // baselineVersion 是内嵌 baseline 迁移的版本号（14 位时间戳）。
 const baselineVersion = uint(20261001000001)
 
-// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + products + skus + inventory + addresses + cart_items + orders）。
-const latestMigrationVersion = uint(20261001000007)
+// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + products + skus + inventory + addresses + cart_items + orders + refresh_tokens）。
+const latestMigrationVersion = uint(20261001000008)
 
-// businessTables 是 migration 应建立的 16 张业务表。
+// businessTables 是 migration 应建立的 17 张业务表。
 // 注意顺序：order_items 通过外键引用 orders（ON DELETE CASCADE），故 order_items 排在 orders 之前；
-// cart_items 无外键、置前；addresses 通过外键引用 users（ON DELETE CASCADE），
+// refresh_tokens/cart_items 无外键、置前；addresses 通过外键引用 users（ON DELETE CASCADE），
 // 故 addresses 排在 users 之前；inventories/inventory_logs 通过外键引用 skus，skus 通过外键引用
 // products，products 通过外键引用 categories（均 ON DELETE RESTRICT），因此被引用方必须排在引用方之后，
 // 即 inventories/inventory_logs 排在 skus 之前、skus 排在 products 之前、products 排在 categories 之前，
 // 否则 DROP TABLE 会因外键依赖失败。
 var businessTables = []string{
-	"order_items", "orders", "cart_items", "addresses", "users", "inventory_logs", "inventories", "skus", "products", "product_images", "categories", "admins", "roles", "permissions", "admin_roles", "role_permissions",
+	"order_items", "orders", "refresh_tokens", "cart_items", "addresses", "users", "inventory_logs", "inventories", "skus", "products", "product_images", "categories", "admins", "roles", "permissions", "admin_roles", "role_permissions",
 }
 
 // allTables 含业务表与追踪表。
