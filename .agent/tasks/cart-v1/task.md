@@ -17,6 +17,7 @@
 - 用户隔离：所有读写在 `Principal.UserID` 维度过滤，用户只能操作自己的购物车。
 - 错误码：新增购物车域（建议 7000-7999，具体编号由 Analyst 固化）。
 - 必要的测试：列表、添加（含重复）、改数量、删除、勾选、异常状态（下架/价格/库存）、用户隔离的正常与拒绝路径。
+- 长期设计：新增 `docs/design/cart.md`（Design Impact = NEW），沉淀购物车数据模型、异常状态语义、用户隔离边界与错误码域。
 
 ## Out of Scope
 
@@ -27,6 +28,11 @@
 - 购物车上限、批量操作、购物车与订单的合并/失效策略（如登录后合并匿名购物车）。
 - 前端页面改造（`frotend_web` / `frotend_manage` 为未接入本后端的模板工程，购物车 UI 另议）。
 - 修改既有 IAM/商品/SKU/库存/分类模块行为（除购物车引用所需的最小只读查询）。
+
+## Design Impact
+
+Design Impact: NEW
+Design Artifact: docs/design/cart.md
 
 ## Acceptance Criteria
 

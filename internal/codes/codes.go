@@ -63,6 +63,11 @@ const (
 	// 库存域（Inventory）6000-6999。
 	CodeInventoryInsufficient    Code = 6001 // 库存不足 → 409
 	CodeInventoryInvalidQuantity Code = 6002 // 库存数量非正整数 → 400
+
+	// 购物车域（Cart）7000-7999。
+	CodeCartItemNotFound    Code = 7001 // 条目不存在或不属于当前用户 → 404
+	CodeCartInvalidQuantity Code = 7002 // 数量非正整数或超上限 → 400
+	CodeCartSkuUnavailable  Code = 7003 // 商品下架或 SKU 禁用，不可加购 → 409
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -111,6 +116,10 @@ var codeTable = map[Code]codeInfo{
 
 	CodeInventoryInsufficient:    {http.StatusConflict, "库存不足"},
 	CodeInventoryInvalidQuantity: {http.StatusBadRequest, "库存数量非法"},
+
+	CodeCartItemNotFound:    {http.StatusNotFound, "购物车条目不存在"},
+	CodeCartInvalidQuantity: {http.StatusBadRequest, "数量非法"},
+	CodeCartSkuUnavailable:  {http.StatusConflict, "商品不可加购"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。
