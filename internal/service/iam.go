@@ -10,9 +10,12 @@ import (
 type IIam interface {
 	// Register 校验并持久化新用户。
 	Register(ctx context.Context, req *v1.RegisterReq) (*v1.RegisterRes, error)
-	// Login 校验凭据，写入 Redis 会话（含元数据）并签发含 sid 的 access token。
+	// Login 校验凭据，写入 Redis 会话（含元数据）并签发含 sid 的 access token 与 refresh token。
 	// userAgent/ip 由 Controller 从 HTTP 请求提取后传入，用于会话列表区分设备。
 	Login(ctx context.Context, req *v1.LoginReq, userAgent, ip string) (*v1.LoginRes, error)
+	// Refresh 凭有效 refresh token 换取新 access token 与新 refresh token（轮换，复用同 sid）。
+	// userAgent/ip 由 Controller 从 HTTP 请求提取后传入，用于 session upsert 重建时写入设备元数据。
+	Refresh(ctx context.Context, req *v1.RefreshReq, userAgent, ip string) (*v1.RefreshRes, error)
 	// Me 返回 userID（已完成认证）对应的用户。
 	Me(ctx context.Context, userID int64) (*v1.MeRes, error)
 	// Logout 撤销 sid 对应的会话（幂等）。

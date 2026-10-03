@@ -124,17 +124,39 @@ func (s *sIam) Login(ctx context.Context, req *v1.LoginReq, userAgent, ip string
 		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("签发 access token: %w", err))
 	}
 
+	// 生成 refresh token（明文仅本次返回；SHA-256 哈希 + family_id 落库，绑 sid）。
+	refreshPlaintext, err := auth.NewRefreshToken()
+	if err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("生成 refresh token: %w", err))
+	}
+	familyID, err := auth.NewFamilyID()
+	if err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("生成 family_id: %w", err))
+	}
+	refreshTTL, err := auth.RefreshTTL(ctx)
+	if err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("读取 refresh TTL: %w", err))
+	}
+	if err := insertRefreshRoot(ctx, auth.HashRefreshToken(refreshPlaintext), familyID, user.ID, sid, refreshTTL); err != nil {
+		return nil, err
+	}
+
 	return &v1.LoginRes{
-		AccessToken: token,
-		TokenType:   "Bearer",
-		ExpiresIn:   auth.ExpiresIn,
+		AccessToken:  token,
+		RefreshToken: refreshPlaintext,
+		TokenType:    "Bearer",
+		ExpiresIn:    auth.ExpiresIn,
 	}, nil
 }
 
-// Logout 撤销 sid 对应的会话（幂等）。Redis 错误返回 500，不吞掉后返回成功。
+// Logout 撤销 sid 对应的会话（幂等），并联动撤销该 sid 对应 refresh family。
+// Redis/MySQL 错误返回 500，不吞掉后返回成功。
 func (s *sIam) Logout(ctx context.Context, sid string) (*v1.LogoutRes, error) {
 	if err := auth.RevokeSession(ctx, sid); err != nil {
 		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("撤销会话: %w", err))
+	}
+	if err := revokeFamilyBySid(ctx, sid); err != nil {
+		return nil, err
 	}
 	return &v1.LogoutRes{}, nil
 }
@@ -209,21 +231,31 @@ func (s *sIam) RevokeSessionByID(ctx context.Context, userID int64, targetSid st
 	if err := auth.RevokeSession(ctx, targetSid); err != nil {
 		return codes.Wrap(codes.CodeInternalError, fmt.Errorf("撤销会话: %w", err))
 	}
-	return nil
-}
-
-// RevokeOtherSessions 撤销 userID 除 currentSid 外的全部会话（原子，Lua）。
-func (s *sIam) RevokeOtherSessions(ctx context.Context, userID int64, currentSid string) error {
-	if err := auth.RevokeOtherSessions(ctx, userID, currentSid); err != nil {
-		return codes.Wrap(codes.CodeInternalError, fmt.Errorf("撤销其他会话: %w", err))
+	// 联动撤销该 sid 对应 refresh family。
+	if err := revokeFamilyBySid(ctx, targetSid); err != nil {
+		return err
 	}
 	return nil
 }
 
-// RevokeAllSessions 撤销 userID 的全部会话（含当前，原子，Lua）。
+// RevokeOtherSessions 撤销 userID 除 currentSid 外的全部会话（原子，Lua），并联动撤销各被撤销 sid 的 refresh family。
+func (s *sIam) RevokeOtherSessions(ctx context.Context, userID int64, currentSid string) error {
+	if err := auth.RevokeOtherSessions(ctx, userID, currentSid); err != nil {
+		return codes.Wrap(codes.CodeInternalError, fmt.Errorf("撤销其他会话: %w", err))
+	}
+	if err := revokeFamiliesExceptSid(ctx, userID, currentSid); err != nil {
+		return err
+	}
+	return nil
+}
+
+// RevokeAllSessions 撤销 userID 的全部会话（含当前，原子，Lua），并联动撤销该用户全部 refresh family。
 func (s *sIam) RevokeAllSessions(ctx context.Context, userID int64) error {
 	if err := auth.RevokeAllSessions(ctx, userID); err != nil {
 		return codes.Wrap(codes.CodeInternalError, fmt.Errorf("撤销全部会话: %w", err))
+	}
+	if err := revokeAllFamiliesByUser(ctx, userID); err != nil {
+		return err
 	}
 	return nil
 }
