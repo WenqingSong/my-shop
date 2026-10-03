@@ -1,6 +1,6 @@
 # Core Logic
 
-Owner Verification Status: PENDING
+Owner Verification Status: ACCEPTED
 
 ## CL-001：全局资源一致性校验器（`scripts/check-registry.sh`）
 
