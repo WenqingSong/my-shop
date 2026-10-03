@@ -38,6 +38,7 @@ extra_instruction: <可选>
 - Cleaner 对当前版本给出 `CLEAN`，且无开放 P0/P1/P2；
 - Owner 已完成或明确确认核心逻辑验证，并要求进入里程碑验收；
 - 复杂任务的 Contract 为 `APPROVED`；
+- `Design Impact = NEW/UPDATE` 时，Design Artifact 已纳入 Cleaner 的 Review Target（仅确认已纳入，不重复 Cleaner 的 Design 审查）；
 - 待验收代码、测试、配置和迁移与 Cleaner 的 Review Target 一致；
 - Owner Mutation 已恢复，工作区处于正确实现状态。
 

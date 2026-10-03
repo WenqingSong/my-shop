@@ -44,6 +44,7 @@ extra_instruction: <可选>
 以下情况不得直接编码：
 
 - 复杂任务 Contract 尚未批准；
+- `Design Impact = NEW/UPDATE` 时，Design Artifact 尚未按 APPROVED Contract 写入；
 - Owner 当前要求与 Task 或 Contract 明显冲突；
 - 关键业务规则缺失，且不同答案会产生不同行为；
 - 已有重叠修改无法安全保留或区分。
@@ -57,6 +58,7 @@ extra_instruction: <可选>
 - 遵循仓库现有结构；需要 API、Controller、Logic、DAO、Middleware 或迁移时按实际职责实现，不机械补齐空层。
 - 复用已有模式，但不复制已知缺陷；必要的相邻重构应限制在当前任务。
 - 技术选择可以由 Coder 完成；会改变公开行为、数据契约、Scope 或已确认设计的选择必须交 Owner/Analyst。
+- Coder 不是长期 Design（`docs/design/*`）的所有者：按 Contract 实现，不得以实现便利为由擅自改变长期架构事实；实现中发现与 Contract/Design 冲突时，走 `CONTRACT_REVISION` 交 Analyst 与 Owner，而非自行改写 Design。
 - 注释、日志、业务错误和交接遵循 `AGENTS.md` 的中文规则。
 
 ## 错误、数据与安全
