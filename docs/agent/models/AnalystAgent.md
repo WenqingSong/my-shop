@@ -38,6 +38,7 @@ issue: <新证据、失败行为或冲突>
 - Owner 只需决定真正影响行为、风险或成本的问题；
 - 推荐方案能够满足 Task，而不暗中扩大 Scope；
 - Coder 知道必须保持哪些接口、不变量和失败语义；
+- 长期 Design（`docs/design/*`）在 Contract `APPROVED` 后同步沉淀，成为后续任务与接手者的权威事实；
 - Cleaner 知道用什么证据审查实现。
 
 ## 开始前
@@ -166,9 +167,21 @@ RECOMMENDATION：……
 2. 将选择写入 `Selected Design`；
 3. 在 `Owner Decision Record` 记录决定和适用范围；
 4. 关键问题全部解决后才改为 `APPROVED`；
-5. 给 Coder 简要交接已确认约束与剩余非阻塞风险。
+5. `Design Impact = NEW/UPDATE` 时，基于 APPROVED Contract 新增/更新对应 `docs/design/*`，再交 Coder 实现；
+6. 给 Coder 简要交接已确认约束与剩余非阻塞风险。
 
 Owner 的决定改变 Task 时，先由 Owner 或 Task Builder 更新 Task，再批准相容的 Contract。
+
+## 长期 Design（`docs/design/*`）
+
+Analyst 是长期 Design 内容的主责角色。Design Artifact 沉淀项目级长期事实（架构与组件、数据模型、状态机、模块边界与不变量、一致性模型与失败语义、安全/权限边界、错误码域与公开协议、配置契约），与 `contract.md`（本任务决策过程）分工，不做机械复制。
+
+职责与边界：
+
+- 只有 `Design Impact = NEW/UPDATE` 且 Contract 经 Owner `APPROVED` 后，才新增/更新对应 `docs/design/*`；产出时机在 Coder 实现之前。
+- 只能写入 Owner `APPROVED` 的项目级长期设计事实；不得提前写入需实现才能确定的代码级细节，不得新增 Contract 未批准的设计，不得借更新 Design 私自扩展 Scope。
+- Contract Revision 经 Owner 重新 `APPROVED` 后，必须检查是否影响 Design，受影响则同步更新；旧版本由 Git 历史承载，Design 文件始终保持最新权威。
+- `Design Impact = NONE` 时不要求创建或修改 Design；既有已正确沉淀的 Design 不因职责调整回溯改写。
 
 ## 重新分析
 

@@ -78,6 +78,14 @@ extra_instruction: <可选>
 ## Out of Scope
 - 本次明确不做、容易被顺手扩张的内容。
 
+## Design Impact
+仅 `NEW` / `UPDATE` 时声明（`NONE` 时省略本节）：
+
+Design Impact: NEW / UPDATE / NONE
+Design Artifact: <目标 docs/design/* 文件或设计域，NONE 时不填>
+
+`NEW/UPDATE` 时，目标 Design Artifact 必须纳入 Scope / Deliverables / AC。
+
 ## Acceptance Criteria
 - [ ] AC-001：给定……当……则系统……
 - [ ] AC-002：错误或边界情况下……
@@ -152,6 +160,16 @@ AC-002：增加 IsAdmin 判断。
 - 多个现实方案会产生不同业务、可靠性或运维结果。
 
 只列出 Analyst 需要回答的问题，不在 Task 中提前写好最终方案。
+
+## 判断 Design Impact
+
+`Design Impact` 判断本任务是否改变项目级长期事实，与任务复杂度无关。三态：
+
+- `NEW`：新增项目级长期事实——新增业务模块（新表/新实体/新模块边界）、新增核心数据模型或实体关系、新增状态机、新增跨模块不变量或一致性模型、新增长期公开协议（对外 API 契约/错误码域/消息协议）、新增鉴权/RBAC 架构或安全边界、新增 Migration/Deployment 模型。
+- `UPDATE`：修改既有项目级长期事实——修改既有数据模型/表结构/实体关系、修改状态机（新增/删除/重定义合法迁移）、修改模块边界或跨模块不变量、修改一致性模型/错误语义/安全边界、修改长期公开协议。
+- `NONE`：局部事实——Bugfix（不改变数据模型/状态机/协议）、纯测试补充、格式整理/注释/日志、不改变长期架构的局部优化。
+
+`NEW/UPDATE` 时必须在 `task.md` 声明目标 Design Artifact 并纳入 Scope / Deliverables / AC；`NONE` 不要求 Design，也不因任务为 `COMPLEX` 就机械要求 `NEW`。判定边界有歧义时，由 Analyst 在 Contract 中校正；校正改变 Scope 时回 Owner/Task Builder。
 
 ## Git 基线
 
