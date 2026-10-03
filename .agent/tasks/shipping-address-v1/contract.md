@@ -44,11 +44,12 @@ RECOMMENDATION：采用「自由文本地区 + DB 生成的唯一键保证默认
 | `district` | VARCHAR(32) | 非空，区（自由文本） |
 | `detail` | VARCHAR(255) | 非空，详细地址，trim 后 1~255 字符 |
 | `is_default` | TINYINT | 非空默认 0（`1=默认`、`0=非默认`） |
-| `default_key` | BIGINT UNSIGNED | STORED 生成列 `IF(is_default=1, user_id, NULL)`，`uk_user_default` 唯一 |
+| `default_key` | BIGINT UNSIGNED | VIRTUAL 生成列 `IF(is_default=1, user_id, NULL)`，`uk_user_default` 唯一 |
 | `created_at`/`updated_at` | DATETIME | 默认 `CURRENT_TIMESTAMP` |
 
 - 地区采用**自由文本**（省/市/区三个 VARCHAR 字段），不引入区划码表、不建 region 表——码表数据与选择器在 Out of Scope，自由文本满足「稳定可读供未来快照」，且避免扩大 Scope。
 - 默认地址唯一性由**生成列 + 唯一索引**在 DB 层保证：`default_key` 仅在 `is_default=1` 时等于 `user_id`（非空），否则为 NULL；MySQL 唯一索引允许多个 NULL，因此「每用户最多一条 `is_default=1`」被数据库强约束，并发亦成立。
+- `default_key` 采用 **VIRTUAL**（非 STORED）生成列：MySQL 8.0 不允许 STORED 生成列引用「同时作为外键列」的 `user_id`（报 `1215 Cannot add foreign key constraint`）；改用 VIRTUAL 后保留 FK 且唯一索引 `uk_user_default` 语义不变。
 - `user_id` 为数据归属锚点，加 `idx_user_id` 支撑按用户列表查询；FK `ON DELETE CASCADE` 为防御性（当前无用户删除接口，见 iam.md）。
 
 ### 接口形态
@@ -105,7 +106,7 @@ RECOMMENDATION：采用「自由文本地区 + DB 生成的唯一键保证默认
 - 新增 `internal/service` 的 `IAddress` 接口 + `RegisterAddress`；`internal/logic/address`（`init()` 注册）；`internal/controller/address`。
 - 新增 `internal/logic/logic.go` 的 blank import。
 - 新增迁移 `internal/migrations/sql/20261001000005_addresses.up.sql`（version 接 `20261001000004` 之后，不使用 `IF NOT EXISTS`）。
-- `addresses` 表字段与约束见上文数据模型；`default_key` 为 STORED 生成列，仅可读，插入/更新不得写入该列。
+- `addresses` 表字段与约束见上文数据模型；`default_key` 为 VIRTUAL 生成列，仅可读，插入/更新不得写入该列。
 - 公开字段名稳定英文：`id`、`recipient_name`、`phone`、`province`、`city`、`district`、`detail`、`is_default`、`created_at`、`updated_at`。
 
 ## Business Invariants
@@ -164,3 +165,9 @@ Owner 于 2026-10-04 确认以下决定（均与 Task 兼容，不改变 Goal/Sc
 6. 他人地址与不存在地址统一返回 404，不泄露资源存在性。
 
 另由 Task Builder 修正 `task.md` 过时的 Review Baseline；Contract `APPROVED` 后，按 Design Governance 先产出 `docs/design/address.md`，再进入 Coder。
+
+### CONTRACT_REVISION（2026-10-04，Owner 已确认）
+
+Cleaner 审查（`CHANGES_REQUIRED`，CLEAN-001）发现：Contract 与 `docs/design/address.md` 将 `default_key` 描述为 **STORED** 生成列，而最终迁移实现为 **VIRTUAL**（`20261001000005_addresses.up.sql`）。经核实（MySQL 8.0 实测）：STORED 生成列引用「同时作为外键列」的 `user_id` 报 `1215 Cannot add foreign key constraint`；改用 VIRTUAL 后保留 FK 且唯一索引 `uk_user_default` 语义不变。实现正确，故本次修订将 Contract 中 `default_key` 的「STORED」更正为「VIRTUAL」，并补注取舍原因；不改动接口、不变量（INV-001~004）、错误码与一致性语义。原 6 项 Owner 决定保持不变。状态恢复为 `WAITING_FOR_OWNER_APPROVAL`，待 Owner 确认。
+
+Owner 于 2026-10-04 确认本次 CONTRACT_REVISION：将 `default_key` 生成列类型由 STORED 修订为 VIRTUAL。确认依据：STORED 引用外键列在 MySQL 8.0 报 1215；VIRTUAL 保留 FK 与 `uk_user_default` 唯一约束；业务语义、接口、不变量、错误码均不变；当前实现已是 VIRTUAL 且 build/test/race 通过，不修改生产代码。Contract 状态恢复为 `APPROVED`。

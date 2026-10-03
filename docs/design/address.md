@@ -23,12 +23,13 @@
 | `district` | VARCHAR(32) | 非空，区（自由文本） |
 | `detail` | VARCHAR(255) | 非空，详细地址，trim 后 1~255 字符 |
 | `is_default` | TINYINT | 非空默认 0（`1=默认`、`0=非默认`） |
-| `default_key` | BIGINT UNSIGNED | STORED 生成列 `IF(is_default=1, user_id, NULL)`，`uk_user_default` 唯一 |
+| `default_key` | BIGINT UNSIGNED | VIRTUAL 生成列 `IF(is_default=1, user_id, NULL)`，`uk_user_default` 唯一 |
 | `created_at`/`updated_at` | DATETIME | 默认 `CURRENT_TIMESTAMP` |
 
 - 地区为**自由文本**（省/市/区三个 VARCHAR），不建 region 表、不存 region code；结构化地区留待未来独立演进。
 - 默认地址唯一性由**生成列 + 唯一索引**在 DB 层保证：`default_key` 仅在 `is_default=1` 时等于 `user_id`（非空），否则为 NULL；MySQL 唯一索引允许多个 NULL，故「每用户最多一条 `is_default=1`」被数据库强约束，并发亦成立。
-- `default_key` 为 STORED 生成列，**只读**，插入/更新不得写入该列。
+- `default_key` 为 VIRTUAL 生成列，**只读**，插入/更新不得写入该列。
+- 技术取舍：采用 VIRTUAL（非 STORED）——MySQL 8.0 不允许 STORED 生成列引用「同时作为外键列」的 `user_id`（报 `1215 Cannot add foreign key constraint`）；VIRTUAL 保留 FK 与 `uk_user_default` 唯一约束，默认唯一语义不变。
 - `user_id` 为归属锚点，`idx_user_id` 支撑按用户列表查询；FK `ON DELETE CASCADE` 为防御性（当前无用户删除接口，见 `iam.md`）。
 
 建表经 golang-migrate（`20261001000005_addresses.up.sql`），见 `migration.md`。
