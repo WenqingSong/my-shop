@@ -26,7 +26,8 @@ Owner 负责：
 - 在目标或验收发生变化时更新任务定义；
 - 阅读核心逻辑说明，按需执行少量 Owner 验证卡；
 - 决定 P3、里程碑验收和最终接受；
-- 决定 Commit、Merge、Push 和 Deploy。
+- 决定 Commit、Merge、Push 和 Deploy；
+- 接受 / 拒绝 Reservation 方案（不手工查号、编号或编排区间）。
 
 Owner 不必逐行代替 Cleaner Review，也不因 Agent 给出 `CLEAN` 或 `PASS` 自动接受任务。
 
@@ -40,7 +41,8 @@ Task Builder 回答：本次究竟交付什么，怎样判断完成？
 - 明确 Scope、Out of Scope、AC、验证要求和 Git 基线；
 - 区分事实、合理假设和需要 Owner 决定的问题；
 - 判断 Design Impact（`NONE` / `UPDATE` / `NEW`）；当为 `NEW/UPDATE` 时在 `task.md` 声明目标 Design Artifact，并纳入 Scope、Deliverables 与 AC；
-- 判断任务直接交 Coder，还是先交 Analyst。
+- 判断任务直接交 Coder，还是先交 Analyst；
+- 声明全局资源需求（类型 + 语义），不写具体域号 / version 号。
 
 不负责：写生产代码、替 Analyst完成复杂设计、Review 实现，或替 Owner 创造关键业务规则。
 
@@ -59,7 +61,8 @@ Analyst 回答：复杂问题有哪些约束，可行方案是什么，哪些性
 - 明确业务不变量、错误语义和验证方法；
 - 起草 `contract.md`；
 - Owner 确认后，准确记录最终决定；
-- 作为长期 Design（`docs/design/*`）内容的主责：`Design Impact = NEW/UPDATE` 时，在 Contract 经 Owner `APPROVED` 后、Coder 实现前新增/更新对应 Design Artifact；Contract Revision 经 Owner 重新 `APPROVED` 后，检查并同步受影响的 Design。
+- 作为长期 Design（`docs/design/*`）内容的主责：`Design Impact = NEW/UPDATE` 时，在 Contract 经 Owner `APPROVED` 后、Coder 实现前新增/更新对应 Design Artifact；Contract Revision 经 Owner 重新 `APPROVED` 后，检查并同步受影响的 Design；
+- 读 `.agent/registry/*` 派生 next、把 `RESERVED` 条目写入 Registry 与 Contract；不得凭空自选编号。
 
 不负责：修改生产代码、测试或任务目标；不能批准自己的推荐方案；也只能沉淀 Owner `APPROVED` 的设计，不得借更新 Design 私自新增未批准设计。
 
@@ -76,7 +79,8 @@ Coder 回答：怎样在已确定的范围和约束内完成实现？
 - 对关键不变量提供至少一个能区分正确与错误实现的测试；
 - 运行适用的格式化、测试、静态检查和构建；
 - 检查本次完整变更，清理调试内容和无关修改；
-- 修复 Cleaner 指定的 Finding 并提供回归证据。
+- 修复 Cleaner 指定的 Finding 并提供回归证据；
+- 只使用 APPROVED Contract 中的已分配全局资源；新增需求走 `CONTRACT_REVISION`，不得自行推断编号（含 `max+1`）。
 
 不负责：自行改变 Task 或已确认 Contract，修改 Finding 状态，或宣布自己的实现已经 `CLEAN`。
 
@@ -106,7 +110,8 @@ Cleaner 回答：完整相关变更是否满足任务，测试是否真的能发
 - 独立运行必要验证；
 - 为真实缺陷建立稳定 Finding，并复审修复；
 - 审查测试是否验证了结果，而不是只验证 Mock 或调用次数；
-- 通过后填写 `core-logic.md`，为 Owner 整理核心逻辑和少量验证卡。
+- 通过后填写 `core-logic.md`，为 Owner 整理核心逻辑和少量验证卡；
+- 三边一致性检查 Registry ↔ Contract ↔ 实现，任一漂移 → `CHANGES_REQUIRED`；不得自行改编号或放行漂移。
 
 默认不修改生产代码或测试；发现问题交 Coder 修复。Cleaner 不改变任务标准，也不替 Owner 最终接受。
 
