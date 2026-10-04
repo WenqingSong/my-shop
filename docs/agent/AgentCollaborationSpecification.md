@@ -31,6 +31,7 @@ Agent 用来扩大实现、测试和审查能力；Owner 决定需求、关键�
 ```text
 .agent/tasks/<task-slug>/
 ├── task.md
+├── state.yaml        # 机器事实源（当前状态唯一权威）
 ├── findings.md
 ├── core-logic.md
 ├── delivery.md
@@ -40,6 +41,7 @@ Agent 用来扩大实现、测试和审查能力；Owner 决定需求、关键�
 | 文件            | 用途                               | 默认维护者                  |
 | --------------- | ---------------------------------- | --------------------------- |
 | `task.md`       | 目标、范围、AC、验证要求和任务基线 | Task Builder；Owner 可修改  |
+| `state.yaml`    | 当前状态的唯一机器权威源（`phase` + 子事实） | 各角色按 Transition Authority 机械持久化 |
 | `contract.md`   | 已确认的关键设计、不变量和错误语义 | Analyst 根据 Owner 决定维护 |
 | `findings.md`   | Review Finding 与复审结论          | Cleaner                     |
 | `core-logic.md` | Owner 应理解的核心逻辑和验证卡     | Cleaner                     |
@@ -91,10 +93,12 @@ Cleaner CLEAN → Owner 核心验证 → Deliverer → Owner 最终决定
 | Task Builder | 任务可执行、可验收                    | `READY_FOR_CODER` / `READY_FOR_ANALYST`          |
 | Analyst      | 推荐方案和待确认事项已写入 Contract   | `WAITING_FOR_OWNER_APPROVAL`                     |
 | Analyst      | Owner 的决定已准确记录；`Design Impact = NEW/UPDATE` 时 Design Artifact 已按 APPROVED Contract 写入/更新 | `APPROVED`                                       |
-| Coder        | 实现、必要测试和自验完成              | `READY_FOR_CLEANER`                              |
+| Coder        | 实现、必要测试和自验完成              | `READY_FOR_REVIEW`                               |
 | Cleaner      | 需要修复                              | `CHANGES_REQUIRED`                               |
-| Cleaner      | 所有 AC 有充分证据，且无开放 P0/P1/P2；`Design Impact = NEW/UPDATE` 时 Task ↔ APPROVED Contract ↔ `docs/design/*` ↔ Implementation 四者一致 | `CLEAN`                                          |
-| Deliverer    | 里程碑运行验收完成或无法继续          | `PASS` / `CONDITIONAL_PASS` / `FAIL` / `BLOCKED` |
+| Cleaner      | 所有 AC 有充分证据，且无开放 P0/P1/P2；`Design Impact = NEW/UPDATE` 时 Task ↔ APPROVED Contract ↔ `docs/design/*` ↔ Implementation 四者一致 | `review.status=CLEAN`（并转 `WAITING_FOR_OWNER_ACCEPTANCE`） |
+| Deliverer    | 里程碑运行验收完成或无法继续          | `PASS` / `CONDITIONAL_PASS` / `FAIL`；无法继续时 `blocked.is_blocked=true` |
+
+上述结果对应的 13 值 `phase`、正交子事实（`review.status` / `owner_verification.status` / `delivery.status` / `blocked`）、每条转换的 Transition Authority（Decision Authority 与 File Writer 分离）见 `docs/design/agent-workflow.md`。`state.yaml` 是唯一机器事实源，本表不再重复状态定义。
 
 复杂任务的 Contract 未获 Owner 确认时，Coder 不开始依赖该决定的实现。`Design Impact = NEW/UPDATE` 时，Design Artifact 就绪前 Coder 不开始依赖该设计的实现；Design 缺失或与 APPROVED Contract/实现不一致时，Cleaner 不得给出 `CLEAN`。`CLEAN` 和 `PASS` 都不能替代 Owner 的最终接受。
 
@@ -138,6 +142,8 @@ Coder 为关键行为编写可长期保留的测试，并在交接中指出最�
 验证卡可以包含可逆 Mutation：先确认测试通过，临时破坏一条不变量，确认指定测试失败，再恢复代码并重新通过。Mutation 只用于理解和检验测试，执行后必须恢复正确实现并确认工作区状态。
 
 `core-logic.md` 顶部维护一行可机读的 `Owner Verification Status`（`NOT_REQUIRED` / `PENDING` / `ACCEPTED`）。`PENDING` / `NOT_REQUIRED` 由 Cleaner 生成 `core-logic.md` 时按「是否产生 CL 验证卡」初始写入；`ACCEPTED` 仅在 Owner 明确确认/接受指令驱动下由 Cleaner 机械记录。任何 Agent 不得因 `CLEAN`、测试通过、Owner 阅读过文件或其它间接信号自行把 `PENDING` 置为 `ACCEPTED`。
+
+Owner 是 `ACCEPTED / REJECTED`（Contract 与 Core Logic 两处）的唯一 Decision Authority；Agent 只能在收到 Owner 明确指令后机械持久化该决定，不得通过测试通过、Cleaner `CLEAN` 或读取聊天上下文自行推断 Owner 已接受。Deliverer 不得要求 Owner 手工编辑 Markdown。
 
 ## 9. 中文与交接表达
 
@@ -184,7 +190,7 @@ Reservation 生效 = 一个**只改 Registry 文件的 commit 落在 `develop`**
 
 ### 11.4 生命周期
 
-状态三态：`RESERVED`（已申请、尚未合并）、`ACTIVE`（已合并生效，终态）、`RELEASED`（取消释放，记录保留）。
+状态三态：`RESERVED`（Reservation 已通过「只改 Registry 的 commit」落到共享 `develop` 生效、Feature 尚未合并进 `develop`）、`ACTIVE`（已合并生效，终态）、`RELEASED`（取消释放，记录保留）。
 
 转换：`RESERVED → ACTIVE`（feature 合并进 `develop` 时由合并任务同步）；`RESERVED → RELEASED`（Task 取消时由 Analyst/Owner 标记）。
 
@@ -203,3 +209,5 @@ Coder 实现中出现的每个全局资源都必须已存在于 APPROVED Contrac
 Cleaner 做三边一致性检查：Registry ↔ Contract ↔ 实现（`internal/codes/codes.go`、`internal/migrations/sql/*`、`migrations_test.go`），任一漂移 → `CHANGES_REQUIRED`。
 
 `scripts/check-registry.sh` 提供最小只读机械校验（域/version 重复 + Registry ↔ 实现明显漂移），不分配、不改 Registry、不替代语义判断。
+
+`cmd/workflow-check` 在 Task 进入/越过 `IMPLEMENTING` 且声明了全局资源时，以 shared `develop` Registry 为权威机械验证 Reservation（version/owner task/status 一致）；`state.yaml.required_resources` 只记录「需要什么」、不自证满足，Feature Branch 私留 `RESERVED` 或写 `SATISFIED` 均不构成有效 Reservation。

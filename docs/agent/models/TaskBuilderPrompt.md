@@ -57,12 +57,15 @@ extra_instruction: <可选>
 ```text
 .agent/tasks/<task-slug>/
 ├── task.md
+├── state.yaml
 ├── findings.md
 ├── core-logic.md
 └── delivery.md
 ```
 
 `<task-slug>` 使用简短英文 kebab-case。目录已存在时不覆盖；相同目标走更新模式，不同目标使用新名称。复杂任务的 `contract.md` 由 Analyst 创建。
+
+`state.yaml` 是任务当前状态的唯一机器权威源，其 `phase` + 子事实 schema 见 `docs/design/agent-workflow.md`。创建任务时按 `Initial Route` 写入初始 `phase`（`READY_FOR_CODER` 或 `READY_FOR_ANALYST`），子事实初始化为 `review.status=NONE`、`owner_verification.status=PENDING`、`delivery.status=NONE`、`blocked.is_blocked=false`；`required_resources` 仅在需要全局资源时声明（只声明类型与语义，不写具体编号）。
 
 ## `task.md` 内容
 

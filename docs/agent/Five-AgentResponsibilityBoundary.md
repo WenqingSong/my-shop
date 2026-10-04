@@ -15,6 +15,8 @@ Owner：做决定并最终接受
 
 共享流程、状态和文件规则见 `docs/agent/AgentCollaborationSpecification.md`。各角色 Prompt 只说明本角色怎样工作，不重复整套工程制度。
 
+Task 状态机（13 值 `phase` + 正交子事实、每条转换的 Transition Authority、Review Target/CLEAN/STALE 语义、Global Registry 状态机）见 `docs/design/agent-workflow.md`；当前状态唯一机器权威源是 `.agent/tasks/<task-slug>/state.yaml`，各角色按被授权的转换机械持久化，文件写入者 ≠ Decision Authority。
+
 ## 2. Owner
 
 Owner 回答：我要什么、哪些重要方案可以接受、哪些核心逻辑必须掌握、是否最终接受？
@@ -96,7 +98,7 @@ Coder 回答：怎样在已确定的范围和约束内完成实现？
 
 不重复完整 Task，不罗列所有普通文件，不替 Cleaner预先写审查结论。
 
-完成结果：`READY_FOR_CLEANER`、`BLOCKED` 或 `IMPLEMENTATION_FAILED`。
+完成结果：`READY_FOR_CLEANER`（对应状态机 phase `READY_FOR_REVIEW`）、`BLOCKED` 或 `IMPLEMENTATION_FAILED`。
 
 ## 6. Cleaner
 

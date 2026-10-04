@@ -6,7 +6,7 @@
 
 ## 状态与生命周期
 
-- `RESERVED`：已申请、尚未合并进 `develop`（Coder 进行中）。
+- `RESERVED`：Reservation 已通过「只改 Registry 的 commit」落到共享 `develop` 生效，但拥有该资源的 Feature 尚未合并进 `develop`。
 - `ACTIVE`：已合并进 `develop`，资源在 `develop` 实际生效（终态）。
 - `RELEASED`：Task 取消释放（记录保留）。
 
