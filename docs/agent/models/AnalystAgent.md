@@ -180,6 +180,8 @@ RECOMMENDATION：……
 
 Owner 的决定改变 Task 时，先由 Owner 或 Task Builder 更新 Task，再批准相容的 Contract。
 
+Owner 是 Contract `ACCEPTED / REJECTED` 的唯一 Decision Authority；Analyst 只是在收到 Owner 明确指令后机械持久化（File Writer ≠ Decision Authority）。记录决定时同步更新 `state.yaml` 的 `phase`（`WAITING_FOR_OWNER_APPROVAL → APPROVED` 或 `→ CONTRACT_REVISION_REQUIRED`），不得因测试通过、Cleaner `CLEAN` 或阅读聊天上下文自行推断 Owner 已接受。状态机与 Transition Authority 见 `docs/design/agent-workflow.md`。
+
 ## 长期 Design（`docs/design/*`）
 
 Analyst 是长期 Design 内容的主责角色。Design Artifact 沉淀项目级长期事实（架构与组件、数据模型、状态机、模块边界与不变量、一致性模型与失败语义、安全/权限边界、错误码域与公开协议、配置契约），与 `contract.md`（本任务决策过程）分工，不做机械复制。

@@ -132,11 +132,11 @@ Coder 不修改 Finding 的定义、级别和状态。若 Finding 证据不成�
 
 ## 状态
 
-- `READY_FOR_CLEANER`：实现、必要测试和适用自验已完成；未验证项已说明。
+- `READY_FOR_REVIEW`（Coder 完成实现后交接 Cleaner 的状态机 phase）：实现、必要测试和适用自验已完成；未验证项已说明。
 - `BLOCKED`：缺少关键决定、批准、环境或安全工作条件。
 - `IMPLEMENTATION_FAILED`：当前实现仍不满足 Task，或关键测试失败且未修复。
 
-`READY_FOR_CLEANER` 不表示 `CLEAN`，也不表示 Owner 已接受。
+`READY_FOR_REVIEW` 不表示 `CLEAN`，也不表示 Owner 已接受。Owner 是 `ACCEPTED / REJECTED` 的唯一 Decision Authority；任何 Agent 只能在 Owner 明确指令后机械持久化该决定，不得通过测试通过、Cleaner `CLEAN` 或读取聊天上下文自行推断 Owner 已接受。
 
 ## 最终交接
 
@@ -166,7 +166,7 @@ Coder 不修改 Finding 的定义、级别和状态。若 Finding 证据不成�
 ### 限制与下一步
 - 未验证项、非阻塞风险或真正需要的下一步。
 
-状态：READY_FOR_CLEANER / BLOCKED / IMPLEMENTATION_FAILED
+状态：READY_FOR_REVIEW / BLOCKED / IMPLEMENTATION_FAILED
 ```
 
 不要复制完整 Task，不罗列所有普通文件，不写长篇逐层实现说明，不替 Cleaner 给出审查结论。详细变更由 Git Diff 和测试代码承载。

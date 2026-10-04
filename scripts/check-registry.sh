@@ -95,7 +95,8 @@ check_migration_dup() {
 
 # ---------------------------------------------------------------------------
 # 检查 3a：错误码域 ↔ codes.go 漂移。codes.go 每个非 0 错误码必须落在某个 ACTIVE 域内；
-#   落在 RESERVED 域内的错误码为「已预留、尚未合并进 develop」的预期中间态，仅提示、不算漂移；
+#   落在 RESERVED 域内的错误码为「Reservation 已在共享 develop 生效、Feature 尚未合并进 develop」
+#   的预期中间态，仅提示、不算漂移；
 #   既不落 ACTIVE 也不落 RESERVED 域（含 RELEASED 域）才判为漂移。
 # ---------------------------------------------------------------------------
 check_error_drift() {
@@ -129,7 +130,7 @@ check_error_drift() {
     if (( covered == 1 )); then
       continue
     fi
-    # 未落入 ACTIVE 域：落入 RESERVED 域为「已预留、未合并」，属预期中间态，仅提示。
+    # 未落入 ACTIVE 域：落入 RESERVED 域为「Reservation 已在 develop 生效、Feature 未合并」，属预期中间态，仅提示。
     reserved=0
     for i in "${!rstarts[@]}"; do
       if (( code >= rstarts[i] && code <= rends[i] )); then
@@ -138,7 +139,7 @@ check_error_drift() {
       fi
     done
     if (( reserved == 1 )); then
-      printf '[INFO] 错误码 %s 在 RESERVED 域内（已预留、未合并进 develop，非漂移）\n' "$code"
+      printf '[INFO] 错误码 %s 在 RESERVED 域内（Reservation 已在 develop 生效、Feature 未合并进 develop，非漂移）\n' "$code"
       continue
     fi
     fail "错误码 $code 不在任何 ACTIVE/RESERVED 域内（Registry ↔ codes.go 不一致）"

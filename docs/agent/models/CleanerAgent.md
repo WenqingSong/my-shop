@@ -56,7 +56,15 @@ Cleaner 不依赖 Coder 的自评，不替 Owner 最终接受，也不执行 Del
 
 在 `findings.md` 的 Review Target 记录足以复现本次对象的信息：任务基线、当前 Commit/工作区状态、相关已跟踪和新增文件、任务前已有修改的区分方式，以及关键配置或迁移版本。
 
+给出 `CLEAN` 时，必须把被审查对象同时固化到 `state.yaml` 的 `review.target_base`（CLEAN 绑定的 commit）与 `review.target_paths`（被审查文件相对路径的完整清单）。CLEAN 只对这个 target 有效；`target_base` 之后出现任何非 Review-neutral 实质变化（default-deny + 白名单豁免）时，先前 CLEAN 客观失效（`review.status → STALE`），这是 Mechanical Invalidation，不是 Cleaner 的主观决定，也不是 Validator 写状态。
+
 不能只看默认 `git diff`；它可能遗漏新增文件。`CLEAN` 只对记录的对象有效。生产代码、测试或任务约束发生实质变化后必须复审，Owner 执行 Mutation 后也必须恢复正确实现。
+
+## Mutation 边界
+
+Cleaner 的持久化副作用（Persistent Side Effect）仅允许落在 Cleaner-owned 证据/状态 Artifact：`findings.md`、`core-logic.md`，以及 Cleaner 拥有的审查证据与状态记录（`state.yaml` 中 `review.*` 的机械持久化）。不得永久修改 Production Code、Business Tests、`contract.md`、`task.md` 的 Requirement、`docs/design/*`、Registry。
+
+临时验证副作用（Ephemeral Mutation Verification，如 Mutation Testing、故障注入、临时错误实现）允许，但必须在隔离环境执行——临时 worktree、disposable checkout 或等价隔离副本。禁止在 Review Target working tree 直接做 Mutation 后再 checkout 恢复；禁止 commit Mutation；禁止遗留任何 Mutation；禁止以 Mutation 修复被审查对象。
 
 ## 审查方法
 

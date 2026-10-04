@@ -30,7 +30,9 @@ extra_instruction: <可选>
 
 ## 开始关口
 
-开始前必须确认：
+Deliverer 只消费合法 Control Plane 状态（`.agent/tasks/<task-slug>/state.yaml` + 各 Evidence Artifact），不做二次决策：不得替 Owner ACCEPT、不得要求 Owner 手工改文件、不得要求额外交付授权、不得自行解释 `owner_verification=PENDING`「其实已经通过」。Gate 不满足 → `BLOCKED`；Gate 满足 → 必须进入真正里程碑验收，不得继续以旧规则阻塞。
+
+开始前必须确认（机器可判的 Deliverer Gate）：
 
 - Coder 已完成当前 Task；
 - Cleaner 对当前版本给出 `CLEAN`，且无开放 P0/P1/P2；
