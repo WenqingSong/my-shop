@@ -70,6 +70,8 @@ blocked:
 
 每条 phase 转换有且仅有一个 **Decision Authority**；文件写入者 ≠ Decision Authority（Owner 的 ACCEPT/REJECT 由 Agent 在明确指令下机械持久化）。
 
+Transition Authority 与合法 Transition Table 是 State Machine V1 的**规范性协议事实**（`Normative Transition Rule`），约束各角色 Prompt 与交接行为。V1 Validator **不**在运行时校验历史 transition sequence，也不凭当前快照证明实际执行者身份（见 §8）。`Normative Transition Rule != V1 Runtime Transition Enforcement`。
+
 ### 4.1 phase 转换
 
 | # | 转换 | Decision Authority | File Writer | Gate / 说明 |
@@ -151,9 +153,19 @@ blocked:
 
 - 独立轻量 Go CLI **`cmd/workflow-check`**，与业务运行二进制 `my-shop` 分离，使用 `gopkg.in/yaml.v3` 结构化解析。
 - 只读：不修改 `state.yaml`、Registry 或任何 Workflow Artifact；不承担 Orchestrator 职责；不做角色派发。
-- 校验内容：`state.yaml` schema、`phase` 合法值、子字段合法性、Gate、无效状态组合、phase 转换是否在允许表内、review validity（`expected STALE, actual CLEAN`）。
+- **校验内容（V1，仅当前状态与 Gate）**：
+  - `state.yaml` schema 合法、`phase` 属 13 值、子字段枚举合法；
+  - 当前 phase 与正交子字段组合合法（INV-001～INV-010）；
+  - 当前 Gate 满足（Resource Gate、Deliverer Gate）；
+  - Review Validity：CLEAN 是否因 Review Target 后实质变化而客观 STALE（`expected STALE, actual CLEAN`）；
+  - Resource Authority：Reservation 是否由 shared `develop` Registry 真实授权；
+  - 非法当前状态：`DELIVERING + owner_verification=PENDING`、`DONE + delivery.status != PASS`（有 Deliverer 路径时）等；
+  - Transition Authority 表作为 Workflow Protocol 的规范一致性（存在、每条唯一 Decision Authority、`Decision Authority != File Writer`）。
+- **不负责（V1）**：不证明历史上每一次 phase transition 实际按合法顺序发生，也不根据当前状态快照证明实际执行者身份；仅凭当前 `state.yaml` 无法形成可信 Transition History / Actor Authenticity。
 - exit code：`0` = 全部合法；`1` = 无效状态 / 不变量 / Gate 不满足 / review validity 失效；`2` = 运行错误，失败原因可定位。
 - 对无 `state.yaml` 的 Legacy Task 跳过（不判违规）。
+
+**规范与执行的边界**：Transition Authority 与合法 Transition Table 是 State Machine V1 的**规范事实**；V1 Validator 校验当前状态与 Gate 的合法性。对状态变化请求进行真正的 runtime transition enforcement，属于未来唯一状态写入口 / `agentctl` Orchestrator 的职责，不在本任务 Scope。
 
 ## 9. Cutover Rule
 
@@ -164,7 +176,7 @@ blocked:
 ## 10. 业务不变量
 
 - INV-001：`state.yaml.phase` 是 Task 阶段判定的唯一权威；无 Markdown 首行 / Git HEAD 唯一来源路径。
-- INV-002：每条 phase 转换有且仅有一个 Decision Authority；文件写入者 ≠ Decision Authority。
+- INV-002：每条 phase 转换有且仅有一个 Decision Authority；文件写入者 ≠ Decision Authority。（规范性规则——由各角色 Prompt 遵守，非 V1 Validator 的 runtime transition enforcement）
 - INV-003：`ACCEPTED`（Contract 与 Core Logic）只能由 Owner 明确 ACCEPT/REJECT 指令驱动 Agent 机械持久化。
 - INV-004：`review.status=CLEAN` 绑定唯一 `review.target`；Cleaner 更新 `findings.md`/`core-logic.md` 不使 CLEAN 失效。
 - INV-005：`review.target` 实质变化触发 Mechanical Invalidation（`CLEAN→STALE` + `phase→READY_FOR_REVIEW` + 旧 `ACCEPTED`/`delivery` 失效）；仅 Cleaner 可 `STALE→CLEAN`；无死循环。
@@ -180,6 +192,7 @@ blocked:
 - 事实来源：`state.yaml` 是「当前状态」唯一事实源；Git 是持久化与审计层。
 - 转换成功 = `state.yaml` 更新 + Validator 通过；「部分完成」不构成转换。
 - 无效状态由 Validator 拒绝；`STALE` 由 `git diff` 机械推导（default-deny 白名单）+ 只读检测 `expected STALE, actual CLEAN`。
+- 历史转换：V1 Validator 不校验历史 transition sequence / actor authenticity，仅校验当前状态与 Gate；乱序写入若各子字段组合合法且 Gate 满足，无法凭快照识别（由 Transition Authority 规范约束、未来 `agentctl` runtime 强制）。
 - 阻塞：`blocked.is_blocked=true` 时禁止除「解除阻塞」外的 phase 转换。
 - 资源权威：Task 状态只记录「需要什么」，Registry（`develop`）授权「是否满足」，不同源杜绝自证。
 - 冲突：并行任务按 task-slug 隔离各自 `state.yaml`；全局资源竞争由 Registry（Git 提交顺序 + 冲突检测）串行化。
@@ -187,5 +200,6 @@ blocked:
 ## 12. Deferred / 已知留白
 
 - 不实现完整 `agentctl` Orchestrator、不自动派发角色；`state.yaml` + 各角色交接自检 + Validator 已足够形成确定性事实。
+- **Future Extension（本任务不实现）**：未来可引入 `agentctl / controlled transition writer`，接收（current state、requested transition、actor / authority、transition table）并真正执行 allow / deny，构成可信 Transition History 与 runtime transition enforcement。本任务不实现 `agentctl`、Event Log、Orchestrator 或自动 Transition Writer。
 - Legacy 历史任务的 `state.yaml` 回填另立独立 Task。
 - `state.yaml` 若未来需要嵌套之外的复杂约束，再评估扩展，不在 V1 引入。

@@ -4,6 +4,8 @@
 
 APPROVED
 
+> 第三轮 Contract Revision（响应 Cleaner CLEAN-001 / CLEAN-002）已获 Owner APPROVED：V1 Validator 能力边界收敛为「仅校验当前状态与 Gate」、`Normative Transition Rule != V1 Runtime Transition Enforcement`、不新增 `previous_phase`、Future Extension 仅记录不实现、统一 `READY_FOR_REVIEW` 术语。
+
 ## Problem
 
 现有多 Agent Workflow 的「当前阶段」由各 Agent 自行推断：真实状态散落在 `task.md`、`contract.md`、`findings.md`、`core-logic.md`、`delivery.md`、`.agent/registry/*`、Git HEAD 与聊天决策中，没有唯一可机读的事实源，也没有「谁有权触发哪个转换」的权威。结果是阶段判定依赖 Prompt 文本，文件写入者与 Decision Authority 混同，CLEAN 无绑定 review_target，Registry 的 `RESERVED` 语义错误，进入实现前没有资源 Reservation 的硬 Gate。
@@ -86,6 +88,8 @@ DONE                       Owner 最终接受（终态）
 
 特殊点：(a) `review.status: CLEAN → STALE` 是 Mechanical Invalidation（确定性单向降级），非角色决策、非 Validator 写状态；(b) `ACCEPTED`（Contract 与 Core Logic 两处）Decision Authority 都是 Owner，File Writer 分别是 Analyst（Contract）与 Cleaner（Core Logic）。
 
+**规范与执行分离**：S2 的 Transition Authority 与合法转换表是 State Machine V1 的**规范性协议事实**（`Normative Transition Rule`），约束各角色 Prompt 与交接行为；V1 Validator **不**在运行时校验历史 transition sequence，也不凭当前快照证明实际执行者身份（能力边界见 S7）。
+
 ### S3. `state.yaml` schema（嵌套 YAML，结构化解析）
 
 ```yaml
@@ -151,10 +155,22 @@ blocked:
 
 - 实现为独立轻量 Go CLI **`cmd/workflow-check`**（与业务运行二进制 `my-shop` 分离），使用 `gopkg.in/yaml.v3` 结构化解析。
 - 职责边界：只读；不修改 `state.yaml`、Registry 或任何 Workflow Artifact；不承担 Orchestrator 职责；不做角色派发。
-- 校验内容：`state.yaml` schema、`phase` 合法值、子字段合法性、Gate（资源权威、Deliverer 关口）、无效状态组合、phase 转换是否在允许表内、review validity（`expected STALE, actual CLEAN`）。
+- **校验内容（V1，仅当前状态与 Gate）**：
+  - `state.yaml` schema 合法、`phase` 属 13 值、子字段枚举合法；
+  - 当前 phase 与正交子字段组合合法（INV-001～INV-010）；
+  - 当前 Gate 满足（资源权威 Gate、Deliverer Gate）；
+  - review validity：CLEAN 是否因 Review Target 后实质变化而客观 STALE（`expected STALE, actual CLEAN`）；
+  - Resource Reservation 是否由 shared `develop` Registry 真实授权；
+  - 非法当前状态：`DELIVERING + owner_verification=PENDING`、`DONE + delivery.status != PASS`（有 Deliverer 路径时）等；
+  - Transition Authority 表作为 Workflow Protocol 的规范一致性（存在、每条唯一 Decision Authority、`Decision Authority != File Writer`）。
+- **不负责（V1）**：不证明历史上每一次 phase transition 实际按合法顺序发生，也不根据当前状态快照证明实际执行者身份；仅凭当前 `state.yaml` 无法证明历史 Transition Sequence / Actor Authenticity。
 - exit code：`0` = 全部合法；`1` = 无效状态 / 不变量 / Gate 不满足 / review validity 失效；`2` = 运行错误（缺文件 / 解析失败），且失败原因可定位。
 - 至少拒绝（AC-011）：`DELIVERING` + `owner_verification=PENDING`；`IMPLEMENTING` + `required_resources.migrations` 非空但 Registry 无对应有效 `RESERVED/ACTIVE`；`review.status=CLEAN` 但 review.target 实质变更（expected STALE）；`DONE` 但 `delivery.status` 非 PASS（有 Deliverer 路径时）。
 - 不得把后续 Agent Orchestration 能力堆入业务 `my-shop` 运行二进制。
+
+**规范与执行的边界**：Transition Authority 与合法 Transition Table 是 State Machine V1 的**规范事实**；V1 Validator 校验当前状态与 Gate 的合法性。对状态变化请求进行真正的 runtime transition enforcement，属于未来唯一状态写入口 / `agentctl` Orchestrator 的职责，不在本任务 Scope。
+
+**Future Extension（本任务不实现）**：未来可引入 `agentctl / controlled transition writer`，接收（current state、requested transition、actor / authority、transition table）并真正执行 allow / deny。本任务不得因此实现 `agentctl`、Event Log 或 Orchestrator。
 
 ### S8. Design Artifact 落点
 
@@ -179,7 +195,7 @@ blocked:
 ## Business Invariants
 
 - INV-001：`state.yaml.phase` 是 Task 阶段判定的唯一权威；不存在以 Markdown 第一行或 Git HEAD 作为唯一状态来源的判定路径。（AC-001）
-- INV-002：每条 phase 转换有且仅有一个 Decision Authority；任何角色只能触发被授权转换；文件写入者 ≠ Decision Authority。（AC-003）
+- INV-002：每条 phase 转换有且仅有一个 Decision Authority；任何角色只能触发被授权转换；文件写入者 ≠ Decision Authority。（AC-003，规范性规则——由各角色 Prompt 遵守，非 V1 Validator 的 runtime transition enforcement）
 - INV-003：Contract Approval 与 Core Logic Acceptance 的 `ACCEPTED` 只能由 Owner 明确 ACCEPT/REJECT 指令驱动 Agent 机械持久化；任何 Agent 不得因 CLEAN、测试通过、阅读文件等间接信号自行置 `ACCEPTED`。（AC-004）
 - INV-004：`review.status=CLEAN` 绑定唯一 `review.target`；Cleaner 更新 `findings.md`/`core-logic.md` 不使 CLEAN 失效。（AC-005）
 - INV-005：`review.target` 实质变化（default-deny + 白名单豁免）触发 Mechanical Invalidation——`review.status: CLEAN → STALE` 且 `phase → READY_FOR_REVIEW`，旧 `ACCEPTED` 与 `delivery.status` 同被失效；仅 Cleaner 复审可 `STALE → CLEAN`；无死循环。（AC-006 + Decision 2/3）
@@ -198,7 +214,7 @@ blocked:
 - 转换成功 = `state.yaml` 更新 + Validator 通过；「部分完成」（如写了 evidence Artifact 但未更新 `state.yaml`）不构成转换，状态保持原值。
 - 无效状态由 Validator 拒绝：非法 `phase`、非法子字段组合、Gate 不满足、review validity 失效均判 fail，Gate 不放开。
 - `STALE` 是机械推导 + 降级持久化：由 `git diff` 检测 review.target 实质变更（default-deny 白名单）；Validator 只读检测 `expected STALE, actual CLEAN`；任何角色发现的客观失效可机械持久化降级，仅降级不升级。
-- 重复/乱序：转换表是单向有向图，Validator 校验 `phase` 属 13 值且转换在允许表内；乱序写入被拒。
+- 重复/乱序：Validator 校验当前 `phase` 属 13 值且当前状态/Gate 合法；**不校验**历史 transition sequence 或 actor authenticity——乱序写入若各子字段组合合法且 Gate 满足，V1 Validator 无法凭当前快照识别；历史转换合法性由 Transition Authority（规范）约束、由未来唯一状态写入口 / `agentctl`（runtime）强制。
 - 阻塞：`blocked.is_blocked=true` 时禁止除「解除阻塞」外的 phase 转换；阻塞是正交事实，不改 phase。
 - 资源权威：Task 状态只记录「需要什么」，Registry（`develop` 上）授权「是否满足」；二者不同源，杜绝自证。
 - 冲突：并行任务各自写各自 `state.yaml`（按 task-slug 隔离）；全局资源竞争由 Registry（Git 提交顺序 + 冲突检测）串行化。
@@ -261,3 +277,19 @@ Owner 对修订版总体 APPROVED，并追加两项裁决、其余全部确认�
 10. 其余 Revision 决策全部确认（13 值 phase + 正交子事实、default-deny 白名单、`state.yaml` 权威源、Owner Decision 与机械落盘分离、Registry 授权源、`RESERVED` 语义修正、Cutover Rule、不实现 Orchestrator/`agentctl`）。
 
 适用范围：`agent-workflow-state-machine-v1` 本任务，`Design Impact = NEW`。Contract 标记 `APPROVED`，Analyst 据此完成 `docs/design/agent-workflow.md` Design Sync 后交 Coder 实现。Design 落地若需改变上述状态语义、Transition Authority 或 Gate，不得自行调整，须进入 `CONTRACT_REVISION_REQUIRED`。
+
+### 第三轮（2026-10-04，CONTRACT_REVISION_REQUIRED → APPROVED）
+
+Cleaner CLEAN-001 / CLEAN-002 成立，Owner 指示做最小 Contract Revision（不扩 Scope）：
+
+1. **不新增 `previous_phase`**：`previous_phase` 与 `phase` 可被同一次文件修改共同伪造，不构成可信 Transition History；真正证明历史转换合法需 Event Log / Git Transition History / 唯一状态写入口（未来 `agentctl`），超出 State Machine V1 范围。
+2. **明确 V1 Validator 能力边界**：只校验当前 `state.yaml` schema、当前 phase/正交子状态组合、当前 Gate、INV-001～INV-010、CLEAN 客观 STALE、Resource 由 shared `develop` Registry 真实授权、`DELIVERING+PENDING` / `DONE+delivery!=PASS` 等非法当前状态、Transition Authority 表作为 Workflow Protocol 的规范一致性；**不**证明历史每次 phase transition 合法顺序、不凭当前快照证明实际执行者身份。
+3. **Transition Authority 不删除**：保留唯一 Decision Authority、合法 phase transition 表、`Decision Authority != File Writer`、Agent Prompt 必须遵守；仅明确 `Normative Transition Rule != V1 Runtime Transition Enforcement`。
+4. **Future Extension 留边界**：Design 可记录非本任务实现的 `agentctl / controlled transition writer`（接收 current state / requested transition / actor / transition table，执行 allow/deny）；本任务不实现 `agentctl`、Event Log、Orchestrator。
+5. **CLEAN-002 收敛**：统一 phase 词为 `READY_FOR_REVIEW`，清除 `docs/agent/*` 中 `READY_FOR_CLEANER` 残留（交 Coder 最小调整），不得双词并存。
+
+修订后状态回 `WAITING_FOR_OWNER_APPROVAL`。Owner APPROVE 后由 Analyst 同步 `docs/design/agent-workflow.md`，再交 Coder 做最小实现/文档调整，Cleaner 对新 Review Target 复审。
+
+**Owner APPROVAL（2026-10-04）**：Owner 对本轮 Contract Revision APPROVED，确认：① V1 Validator 能力边界收敛为「校验当前 `state.yaml` schema / 当前 phase 与正交子状态组合 / 当前 Gate 与 Invariant / Review Validity / Resource Authority，不证明历史 transition sequence，不证明实际 actor authenticity」；② `Normative Transition Rule != V1 Runtime Transition Enforcement`，Transition Authority 与合法 Transition Table 作为规范事实保留，V1 Validator 不承担历史转换执行证明；③ 不新增 `previous_phase` 等伪历史字段，runtime transition enforcement 留给未来受控状态写入口（如 `agentctl / controlled transition writer`）；④ Future Extension 仅作长期方向记录，不实现 `agentctl` / Event Log / Orchestrator / 自动 Transition Writer；⑤ 统一权威 phase 术语为 `READY_FOR_REVIEW`，从 Workflow Specification / Agent Docs / Prompt / 示例清除 `READY_FOR_CLEANER`。
+
+下一步：Analyst 同步 `docs/design/agent-workflow.md` → 交 Coder 做最小实现/文档收敛 → Cleaner 对新 Review Target re-review。

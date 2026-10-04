@@ -98,7 +98,7 @@ Coder 回答：怎样在已确定的范围和约束内完成实现？
 
 不重复完整 Task，不罗列所有普通文件，不替 Cleaner预先写审查结论。
 
-完成结果：`READY_FOR_CLEANER`（对应状态机 phase `READY_FOR_REVIEW`）、`BLOCKED` 或 `IMPLEMENTATION_FAILED`。
+完成结果：`READY_FOR_REVIEW`、`BLOCKED` 或 `IMPLEMENTATION_FAILED`。
 
 ## 6. Cleaner
 
