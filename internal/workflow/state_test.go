@@ -51,7 +51,7 @@ func TestPathClassification(t *testing.T) {
 		name        string
 		path        string
 		neutral     bool
-		mustTrigger bool
+		substantial bool
 	}{
 		{"findings 白名单", ".agent/tasks/demo/findings.md", true, false},
 		{"core-logic 白名单", ".agent/tasks/demo/core-logic.md", true, false},
@@ -67,7 +67,8 @@ func TestPathClassification(t *testing.T) {
 		{"migration SQL", "internal/migrations/sql/20261001000009_x.up.sql", false, true},
 		{"runtime config", "manifest/config/app.yaml", false, true},
 		{"Registry", ".agent/registry/migrations.md", false, true},
-		{"README 普通文档", "README.md", false, false},
+		{"README（default-deny 也触发）", "README.md", false, true},
+		{"docs/agent（default-deny 也触发）", "docs/agent/coder.md", false, true},
 	}
 
 	for _, tt := range tests {
@@ -75,8 +76,8 @@ func TestPathClassification(t *testing.T) {
 			if got := isReviewNeutral(tt.path); got != tt.neutral {
 				t.Fatalf("isReviewNeutral(%s) = %v, 期望 %v", tt.path, got, tt.neutral)
 			}
-			if got := isMustTrigger(tt.path); got != tt.mustTrigger {
-				t.Fatalf("isMustTrigger(%s) = %v, 期望 %v", tt.path, got, tt.mustTrigger)
+			if got := isSubstantialChange(tt.path); got != tt.substantial {
+				t.Fatalf("isSubstantialChange(%s) = %v, 期望 %v", tt.path, got, tt.substantial)
 			}
 		})
 	}

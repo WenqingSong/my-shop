@@ -63,9 +63,18 @@ func (r *testRepo) validator(cutover string) *Validator {
 	return &Validator{
 		Root:       r.dir,
 		Git:        &ExecGit{Root: r.dir},
-		DevelopRef: "develop",
+		DevelopRef: "origin/develop",
 		Cutover:    cutover,
 	}
+}
+
+// syncOriginDevelop 把当前 HEAD 标记为 shared 远端引用 origin/develop。
+// 模拟「只改 Registry 的 commit 已落到 shared develop」。
+func (r *testRepo) syncOriginDevelop() string {
+	r.t.Helper()
+	head := r.git("rev-parse", "HEAD")
+	r.git("update-ref", "refs/remotes/origin/develop", head)
+	return head
 }
 
 const cleanStateYAML = `task: demo-task
@@ -221,6 +230,7 @@ func TestResourceAuthorityFeatureBranchReservedInvalid(t *testing.T) {
 	r.write(".agent/registry/migrations.md", migrationsBase)
 	r.write(".agent/registry/error-codes.md", errorDomainsBase)
 	r.commit("develop registry baseline")
+	r.syncOriginDevelop()
 
 	// feature 分支：私留 RESERVED 并声明资源。
 	r.git("checkout", "-q", "-b", "feature")
@@ -259,9 +269,10 @@ func TestResourceAuthorityDevelopReservedValid(t *testing.T) {
 	r.write(".agent/registry/error-codes.md", errorDomainsBase)
 	r.commit("develop registry baseline")
 
-	// develop 上落 RESERVED。
+	// develop 上落 RESERVED，并同步到 shared origin/develop。
 	r.write(".agent/registry/migrations.md", migrationsBase+"| 20261001000009 | foo | demo-task | RESERVED | 已落 develop |\n")
 	r.commit("develop reserved")
+	r.syncOriginDevelop()
 
 	// feature 分支声明同一资源。
 	r.git("checkout", "-q", "-b", "feature")
@@ -298,6 +309,7 @@ func TestMissingMigrationForbiddenImplementing(t *testing.T) {
 	r.write(".agent/registry/migrations.md", migrationsBase)
 	r.write(".agent/registry/error-codes.md", errorDomainsBase)
 	r.commit("develop registry")
+	r.syncOriginDevelop()
 
 	r.write(".agent/tasks/demo-task/state.yaml", `task: demo-task
 phase: IMPLEMENTING
@@ -322,6 +334,47 @@ blocked:
 	}
 	if res.Status != StatusFail || !issueCheck(t, res.Issues, "Resource Authority") {
 		t.Fatalf("缺 migration Reservation 应 FAIL，实际 %s issues=%v", res.Status, res.Issues)
+	}
+}
+
+// TestResourceAuthorityLocalDevelopReservedInvalid 覆盖 CLEAN-004：
+// local develop 分支私留 RESERVED，但 shared origin/develop 无记录 → FAIL。
+// 验证 Validator 以 shared origin/develop 为权威，而不是本地 develop 分支。
+func TestResourceAuthorityLocalDevelopReservedInvalid(t *testing.T) {
+	r := newTestRepo(t)
+	r.write(".agent/registry/migrations.md", migrationsBase)
+	r.write(".agent/registry/error-codes.md", errorDomainsBase)
+	r.commit("develop registry baseline")
+	r.syncOriginDevelop() // origin/develop 停在 baseline（无 RESERVED）
+
+	// 仅本地 develop 私留 RESERVED，不同步到 origin/develop。
+	r.write(".agent/registry/migrations.md", migrationsBase+"| 20261001000009 | foo | demo-task | RESERVED | 本地 develop 私留 |\n")
+	r.commit("local develop reserved")
+
+	r.git("checkout", "-q", "-b", "feature")
+	r.write(".agent/tasks/demo-task/state.yaml", `task: demo-task
+phase: IMPLEMENTING
+review:
+  status: NONE
+owner_verification:
+  status: PENDING
+delivery:
+  status: NONE
+required_resources:
+  migrations:
+    - "20261001000009"
+blocked:
+  is_blocked: false
+  reason: ""
+`)
+	r.commit("feature state")
+
+	res, err := r.validator("").ValidateTask(".agent/tasks/demo-task")
+	if err != nil {
+		t.Fatalf("不应返回运行错误: %v", err)
+	}
+	if res.Status != StatusFail || !issueCheck(t, res.Issues, "Resource Authority") {
+		t.Fatalf("local develop 私留 RESERVED 应 FAIL（以 origin/develop 为权威），实际 %s issues=%v", res.Status, res.Issues)
 	}
 }
 

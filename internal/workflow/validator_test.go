@@ -178,8 +178,8 @@ delivery:
 		{"业务测试变化", []string{"internal/foo_test.go"}, true},
 		{"Contract 变化", []string{".agent/tasks/demo-task/contract.md"}, true},
 		{"Design 变化", []string{"docs/design/foo.md"}, true},
-		{"target_paths 之外的无关文件变化", []string{"docs/agent/coder.md"}, false},
-		{"无关 README 变化", []string{"README.md"}, false},
+		{"target_paths 之外的非白名单文件（default-deny 触发）", []string{"docs/agent/coder.md"}, true},
+		{"无关 README（default-deny 触发）", []string{"README.md"}, true},
 	}
 
 	for _, tt := range tests {

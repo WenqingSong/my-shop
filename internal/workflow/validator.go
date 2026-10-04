@@ -30,7 +30,7 @@ type TaskResult struct {
 type Validator struct {
 	Root       string // 仓库根目录，用于文件系统访问（state.yaml 读取）
 	Git        Git    // 只读 git 操作（应与 Root 指向同一仓库）
-	DevelopRef string // shared develop 引用（如 develop / origin/develop），资源权威来源
+	DevelopRef string // shared develop 远端引用（如 origin/develop），资源权威来源；本地 develop 分支不是权威
 	Cutover    string // State Machine V1 生效 commit，用于 Cutover Rule
 }
 
@@ -221,7 +221,7 @@ func checkReviewValidity(task string, s State, changed []string) []Issue {
 	}
 	var issues []Issue
 	for _, p := range changed {
-		if isSubstantialChange(p, s.Review.TargetPaths) {
+		if isSubstantialChange(p) {
 			issues = append(issues, Issue{
 				Task:     task,
 				Check:    "Review Validity (INV-005/INV-011)",

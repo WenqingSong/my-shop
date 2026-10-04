@@ -4,7 +4,7 @@
 
 APPROVED
 
-> 第三轮 Contract Revision（响应 Cleaner CLEAN-001 / CLEAN-002）已获 Owner APPROVED：V1 Validator 能力边界收敛为「仅校验当前状态与 Gate」、`Normative Transition Rule != V1 Runtime Transition Enforcement`、不新增 `previous_phase`、Future Extension 仅记录不实现、统一 `READY_FOR_REVIEW` 术语。
+> 第四轮 Contract Revision（响应 Cleaner CLEAN-003）已获 Owner APPROVED：Review Validity 为真正的 default-deny，`review.target_paths` 仅作为 Review Evidence / Audit Record（非 STALE 边界/允许列表/隐式白名单），非白名单实质变化默认使旧 CLEAN 失效；白名单显式有限；CLEAN-004 属 Implementation Drift（Contract 已明确 shared develop Registry 权威，无需修订）。
 
 ## Problem
 
@@ -112,20 +112,21 @@ blocked:
 ```
 
 - `phase`：唯一生命周期阶段权威；流程判定只读此字段。
-- `review.target_base` + `review.target_paths`：Cleaner 记录 `CLEAN` 绑定的可复核版本，是 STALE 判定的输入。
+- `review.target_base`：Cleaner 记录 `CLEAN` 绑定的可复核版本，是 **STALE 判定的基准**。
+- `review.target_paths`：Cleaner 对本轮审查范围的 **Evidence / 审计记录**（审查了什么），**不是**未来 STALE 判定的允许列表，也不得成为 default-deny 的隐式白名单。
 - `required_resources`：仅**声明**任务需要的全局资源；**不记录「已满足/SATISFIED」自证状态**（见 S6）。
 - Evidence Artifact（`findings.md` / `core-logic.md` / `delivery.md` / `contract.md`）是「为什么」，`state.yaml` 是「是什么」，Artifact 不承担阶段权威。
 
 ### S4. CLEAN / STALE：Mechanical Invalidation（default-deny + 白名单）
 
-- `review.status=CLEAN` 仅在「`review.target` 未发生实质变化」时成立。
-- **实质变化判定（default-deny）**：`review.target_paths` 内出现任何非白名单变化即视为实质变化。
-- **白名单（Review-neutral，唯一豁免）**：`findings.md`、`core-logic.md`、`delivery.md`、`state.yaml` 中由合法 Transition 产生的机械状态持久化、其他 Contract 明确列出的纯 Workflow Evidence。
-- **必须触发的最小集合（保证下限，非穷举）**：Production Code（`internal/`、`api/`、`main.go`）、Business Tests（`*_test.go`）、`contract.md`、`task.md` 的 Scope/AC/Requirement、`docs/design/*`、migration SQL、runtime config、与本 Task 相关的 Registry 语义变化。
+- `review.status=CLEAN` 仅在「自 `review.target_base` 起，未出现任何非 Review-neutral 白名单的实质变化」时成立。
+- **实质变化判定（真 default-deny）**：以 `review.target_base` 为基准检查后续变化——明确属于 Review-neutral 白名单 → 不使 CLEAN 失效；其余**非白名单**变化 → 默认使旧 CLEAN 失效并进入 STALE。判定**不以 `review.target_paths` 为界**，也不依赖「must-trigger 清单」。
+- **`review.target_paths` 定位**：是 Cleaner 对本轮审查范围的 **Evidence / 审计记录**，**不是**未来 STALE 判定的允许列表，也不得成为 default-deny 的隐式白名单；**「不在 `target_paths`」≠「变化可忽略」**。
+- **白名单（Review-neutral，唯一豁免，显式有限）**：`findings.md`、`core-logic.md`、`delivery.md`、`state.yaml` 中由合法 Transition 产生的机械状态持久化、Contract 明确批准的其他纯 Workflow Evidence。未明确进入白名单的变化**默认不得自动豁免**。
 
 **Mechanical Invalidation（`CLEAN → STALE`）** 是确定性、单向的 Mechanical Downgrade，不是 Cleaner 的主观审查决定，也不是 Validator 有权执行的写转换：
 
-1. 触发：`review.status` 仍为 `CLEAN` 时，`review.target` 出现非白名单实质变化 → 先前 CLEAN 客观失效。
+1. 触发：`review.status` 仍为 `CLEAN` 时，自 `review.target_base` 起出现非白名单实质变化（不限于 `review.target_paths` 内）→ 先前 CLEAN 客观失效。
 2. 效果（一致的状态变化，降级包）：
    - `review.status: CLEAN → STALE`；
    - `phase → READY_FOR_REVIEW`；
@@ -198,7 +199,7 @@ blocked:
 - INV-002：每条 phase 转换有且仅有一个 Decision Authority；任何角色只能触发被授权转换；文件写入者 ≠ Decision Authority。（AC-003，规范性规则——由各角色 Prompt 遵守，非 V1 Validator 的 runtime transition enforcement）
 - INV-003：Contract Approval 与 Core Logic Acceptance 的 `ACCEPTED` 只能由 Owner 明确 ACCEPT/REJECT 指令驱动 Agent 机械持久化；任何 Agent 不得因 CLEAN、测试通过、阅读文件等间接信号自行置 `ACCEPTED`。（AC-004）
 - INV-004：`review.status=CLEAN` 绑定唯一 `review.target`；Cleaner 更新 `findings.md`/`core-logic.md` 不使 CLEAN 失效。（AC-005）
-- INV-005：`review.target` 实质变化（default-deny + 白名单豁免）触发 Mechanical Invalidation——`review.status: CLEAN → STALE` 且 `phase → READY_FOR_REVIEW`，旧 `ACCEPTED` 与 `delivery.status` 同被失效；仅 Cleaner 复审可 `STALE → CLEAN`；无死循环。（AC-006 + Decision 2/3）
+- INV-005：自 `review.target_base` 起出现非 Review-neutral 白名单的实质变化（default-deny + 白名单豁免，不限于 `target_paths` 内）触发 Mechanical Invalidation——`review.status: CLEAN → STALE` 且 `phase → READY_FOR_REVIEW`，旧 `ACCEPTED` 与 `delivery.status` 同被失效；仅 Cleaner 复审可 `STALE → CLEAN`；无死循环。（AC-006 + Decision 2/3/4）
 - INV-006：需要全局资源的 Task，进入 `IMPLEMENTING` 前必须由 Validator 机械验证 shared `develop` Registry 权威事实；`state.yaml` 资源记录不自证；Feature Branch 私留 `RESERVED` 无效。（AC-008 + Decision 6）
 - INV-007：`DELIVERING` 时 `owner_verification.status ∈ {ACCEPTED, NOT_REQUIRED}`；`DELIVERING + PENDING` 为无效状态。（AC-010/AC-011）
 - INV-008：`RESERVED` 语义 = 「Reservation 已在共享 `develop` 生效、Feature 未合并进 `develop`」。（AC-009）
@@ -243,7 +244,7 @@ blocked:
 
 - INV-001/INV-002 → 阅读 `docs/design/agent-workflow.md` 与 `docs/agent/*`：存在 `state.yaml` 模板与 13 值 phase 集；`grep` 确认无「以 Markdown 第一行 / Git HEAD 作为唯一状态来源」残留；Transition Authority 表逐条核对授权角色与「文件写入者 ≠ Decision Authority」。
 - INV-003 → 场景推演：任何 Agent 不得自行写 `ACCEPTED`；Owner 明确指令 → Analyst/Cleaner 机械持久化路径明确。
-- INV-004/INV-005/INV-011 → 合成任务推演 `CLEAN → STALE → READY_FOR_REVIEW → IN_REVIEW → CLEAN`：Cleaner 写白名单文件不失效、实质修改（default-deny）触发 Mechanical Invalidation 降级包（phase 回退 + ACCEPTED/delivery 失效）、仅 Cleaner 可 `STALE→CLEAN`、Validator 只读、无死循环。
+- INV-004/INV-005/INV-011 → 合成任务推演 `CLEAN → STALE → READY_FOR_REVIEW → IN_REVIEW → CLEAN`：Cleaner 写白名单文件不失效；`target_paths` 之内与之外的**非白名单实质变化均触发 STALE**（default-deny，`target_paths` 不是允许列表）；Mechanical Invalidation 降级包（phase 回退 + ACCEPTED/delivery 失效）；仅 Cleaner 可 `STALE→CLEAN`；Validator 只读；无死循环。
 - INV-006 → 合成任务 + Validator 运行：缺有效 `develop` Registry Reservation 时 `APPROVED → IMPLEMENTING` 被拒；Feature Branch 私留 `RESERVED` 或写 `SATISFIED` 均无效。
 - INV-007/INV-009 → 运行 `go run ./cmd/workflow-check`（或 `go test ./internal/workflow/...`）对构造的无效样本（`DELIVERING+PENDING`、`IMPLEMENTING+缺 Reservation`、`CLEAN+review_target 已改=expected STALE`、`DONE+delivery 未 PASS`）确认拒绝（exit 1），对合法样本确认通过（exit 0）。
 - INV-008 → 阅读修正后的 Registry `RESERVED` 定义，确认改为「已在共享 `develop` 生效、Feature 未合并」。
@@ -293,3 +294,18 @@ Cleaner CLEAN-001 / CLEAN-002 成立，Owner 指示做最小 Contract Revision�
 **Owner APPROVAL（2026-10-04）**：Owner 对本轮 Contract Revision APPROVED，确认：① V1 Validator 能力边界收敛为「校验当前 `state.yaml` schema / 当前 phase 与正交子状态组合 / 当前 Gate 与 Invariant / Review Validity / Resource Authority，不证明历史 transition sequence，不证明实际 actor authenticity」；② `Normative Transition Rule != V1 Runtime Transition Enforcement`，Transition Authority 与合法 Transition Table 作为规范事实保留，V1 Validator 不承担历史转换执行证明；③ 不新增 `previous_phase` 等伪历史字段，runtime transition enforcement 留给未来受控状态写入口（如 `agentctl / controlled transition writer`）；④ Future Extension 仅作长期方向记录，不实现 `agentctl` / Event Log / Orchestrator / 自动 Transition Writer；⑤ 统一权威 phase 术语为 `READY_FOR_REVIEW`，从 Workflow Specification / Agent Docs / Prompt / 示例清除 `READY_FOR_CLEANER`。
 
 下一步：Analyst 同步 `docs/design/agent-workflow.md` → 交 Coder 做最小实现/文档收敛 → Cleaner 对新 Review Target re-review。
+
+### 第四轮（2026-10-04，CONTRACT_REVISION_REQUIRED → APPROVED）
+
+Cleaner CLEAN-003 成立，Owner 指示做最小 Contract Revision（只处理 CLEAN-003 的设计/Contract 语义，不修改代码，不处理 CLEAN-004 实现）：
+
+1. **Review Validity 必须为真 default-deny**：Cleaner 给出 CLEAN 后，以 `review.target_base` 为基准检查后续变化——明确属于 Review-neutral 白名单 → 不使 CLEAN 失效；其余非白名单实质变化 → 默认使 CLEAN 失效并进入 STALE。
+2. **`review.target_paths` 定位明确**：是 Cleaner 对本轮审查范围的 Evidence / 审计记录，不是未来 STALE 判定的允许列表，也不得成为 default-deny 的隐式白名单；「不在 `target_paths`」≠「变化可忽略」。
+3. **Review-neutral 白名单保持显式、有限**：`findings.md` / `core-logic.md` / `delivery.md` / 合法 `state.yaml` 机械状态持久化 / Contract 明确批准的其他纯 Workflow Evidence；未明确进入白名单的变化默认不得自动豁免。
+4. **CLEAN-004 不需要 Contract Revision**：Contract 已明确 Resource Authority 是 shared develop Registry（S6），CLEAN-004（实现读 local develop）属 Implementation Drift；待本修订经 Owner APPROVED、Design Sync 完成后，由 Coder 与 CLEAN-003 一并修复。
+
+修订后状态回 `WAITING_FOR_OWNER_APPROVAL`。Owner APPROVE 后由 Analyst 同步 `docs/design/agent-workflow.md`，再交 Coder 修复 CLEAN-003 + CLEAN-004，Cleaner 对新 Review Target 复审。
+
+**Owner APPROVAL（2026-10-04）**：Owner 对第四轮 Contract Revision APPROVED，确认：① Review Validity 采用真 default-deny——以 `review.target_base` 之后的变化为判断对象，非白名单实质变化默认使旧 CLEAN 失效进入 STALE，不依赖 must-trigger 黑名单；② `review.target_paths` 仅作为 Cleaner 本轮审查范围的 Evidence / Audit Record，非 STALE 判定边界、非允许变化列表、非隐式白名单（「不在 target_paths」≠「可以忽略变化」）；③ Review-neutral 白名单显式有限（`findings.md` / `core-logic.md` / `delivery.md` / 合法 `state.yaml` 机械持久化 / Contract 明确批准的其他纯 Workflow Evidence），未入白名单不得自动豁免；④ CLEAN-004 无需 Contract Revision，属 Implementation Drift，由 Coder 修复（默认读 `origin/develop` 或等价 remote-tracking ref、不 fallback local `develop`、不执行 `git fetch`、remote ref 不存在/不可读时明确失败、增加 local/origin 分叉集成测试）。
+
+下一步：Analyst 同步 `docs/design/agent-workflow.md` §5 → 交 Coder 一次性修复 CLEAN-003 + CLEAN-004 → Cleaner 对新 Review Target re-review。

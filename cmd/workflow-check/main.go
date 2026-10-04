@@ -28,7 +28,7 @@ func main() {
 func run(args []string) int {
 	fs := flag.NewFlagSet("workflow-check", flag.ContinueOnError)
 	root := fs.String("root", "", "仓库根目录（默认 git rev-parse --show-toplevel）")
-	developRef := fs.String("develop-ref", "develop", "shared develop 引用，资源权威来源（如 develop / origin/develop）")
+	developRef := fs.String("develop-ref", "origin/develop", "shared develop 远端引用，资源权威来源（默认 origin/develop，不接受本地 develop 分支作为权威）")
 	cutover := fs.String("cutover", "", "State Machine V1 生效 commit，用于 Cutover Rule")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {

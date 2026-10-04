@@ -104,15 +104,15 @@ Transition Authority 与合法 Transition Table 是 State Machine V1 的**规范
 ## 5. Review Target / CLEAN / STALE 语义
 
 - `review.status=CLEAN` 绑定唯一 `review.target`（`target_base` + `target_paths`），Cleaner 在 `findings.md` 的 Review Target 同步记录可复核版本。
-- **实质变化判定（default-deny）**：`review.target_paths` 内出现任何非白名单变化即视为实质变化。
-- **白名单（Review-neutral，唯一豁免）**：`findings.md`、`core-logic.md`、`delivery.md`、`state.yaml` 中由合法 Transition 产生的机械状态持久化、其他 Contract 明确列出的纯 Workflow Evidence。
-- **必须触发的最小集合（保证下限，非穷举）**：Production Code（`internal/`、`api/`、`main.go`）、Business Tests（`*_test.go`）、`contract.md`、`task.md` 的 Scope/AC/Requirement、`docs/design/*`、migration SQL、runtime config、与本 Task 相关的 Registry 语义变化。
+- **实质变化判定（真 default-deny）**：以 `review.target_base` 为基准检查后续变化——明确属于 Review-neutral 白名单 → 不使旧 CLEAN 失效；其余**非白名单**变化 → 默认使旧 CLEAN 失效并进入 STALE。判定不以 `review.target_paths` 为界，也不依赖 must-trigger 黑名单。
+- **`review.target_paths` 定位**：仅作为 Cleaner 本轮审查范围的 **Evidence / Audit Record**；不是 STALE 判定边界、不是允许变化列表、不是隐式白名单；**「不在 `target_paths`」≠「可以忽略变化」**。
+- **白名单（Review-neutral，唯一豁免，显式有限）**：`findings.md`、`core-logic.md`、`delivery.md`、合法 `state.yaml` 机械状态持久化、Contract 明确批准的其他纯 Workflow Evidence。未明确进入白名单的变化**默认不得自动豁免**。
 
 ### Mechanical Invalidation（`CLEAN → STALE`）
 
 确定性、单向的 Mechanical Downgrade——不是 Cleaner 的主观审查决定，也不是 Validator 有权执行的写转换：
 
-1. 触发：`review.status` 仍为 `CLEAN` 时，`review.target` 出现非白名单实质变化 → 先前 CLEAN 客观失效。
+1. 触发：`review.status` 仍为 `CLEAN` 时，自 `review.target_base` 起出现非白名单实质变化（不限于 `review.target_paths` 内）→ 先前 CLEAN 客观失效。
 2. 效果（一致的状态变化，降级包）：
    - `review.status: CLEAN → STALE`；
    - `phase → READY_FOR_REVIEW`；
@@ -179,7 +179,7 @@ Transition Authority 与合法 Transition Table 是 State Machine V1 的**规范
 - INV-002：每条 phase 转换有且仅有一个 Decision Authority；文件写入者 ≠ Decision Authority。（规范性规则——由各角色 Prompt 遵守，非 V1 Validator 的 runtime transition enforcement）
 - INV-003：`ACCEPTED`（Contract 与 Core Logic）只能由 Owner 明确 ACCEPT/REJECT 指令驱动 Agent 机械持久化。
 - INV-004：`review.status=CLEAN` 绑定唯一 `review.target`；Cleaner 更新 `findings.md`/`core-logic.md` 不使 CLEAN 失效。
-- INV-005：`review.target` 实质变化触发 Mechanical Invalidation（`CLEAN→STALE` + `phase→READY_FOR_REVIEW` + 旧 `ACCEPTED`/`delivery` 失效）；仅 Cleaner 可 `STALE→CLEAN`；无死循环。
+- INV-005：自 `review.target_base` 起出现非 Review-neutral 白名单的实质变化（default-deny，不限于 `target_paths` 内）触发 Mechanical Invalidation（`CLEAN→STALE` + `phase→READY_FOR_REVIEW` + 旧 `ACCEPTED`/`delivery` 失效）；仅 Cleaner 可 `STALE→CLEAN`；无死循环。
 - INV-006：需全局资源的 Task，进 `IMPLEMENTING` 前须经 Validator 机械验证 shared `develop` Registry；`state.yaml` 不自证；Feature Branch 私留 `RESERVED` 无效。
 - INV-007：`DELIVERING` 时 `owner_verification ∈ {ACCEPTED, NOT_REQUIRED}`。
 - INV-008：`RESERVED` = 「已在共享 `develop` 生效、Feature 未合并进 `develop`」。
