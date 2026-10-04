@@ -29,5 +29,5 @@
 | 20261001000004 | inventory | db-migration | ACTIVE | 基线 |
 | 20261001000005 | addresses | db-migration | ACTIVE | 基线 |
 | 20261001000006 | cart_items | db-migration | ACTIVE | 基线 |
-| 20261001000007 | orders | order-v1 | RESERVED | orders + order_items |
-| 20261001000008 | refresh_tokens | iam-v4 | RESERVED | IAM V4 refresh token 表（前台用户域） |
+| 20261001000007 | orders | order-v1 | ACTIVE | orders + order_items |
+| 20261001000008 | refresh_tokens | iam-v4 | ACTIVE | IAM V4 refresh token 表（前台用户域） |
