@@ -34,6 +34,8 @@
 | `20261001000004` | `inventory` | `inventories` + `inventory_logs` |
 | `20261001000005` | `addresses` | `addresses`（前台收货地址，含生成列 `default_key` + `uk_user_default` 唯一索引） |
 | `20261001000006` | `cart_items` | `cart_items`（用户购物车条目，`uk_user_sku` 唯一，软引用无 FK） |
+| `20261001000007` | `orders` | `orders` + `order_items`（订单主数据 + 订单项，快照软引用，`uk_order_no`/`uk_user_idempotency` 唯一，`idx_status_expire` 支撑超时扫描） |
+| `20261001000008` | `refresh_tokens` | `refresh_tokens`（前台 refresh token，`uk_token_hash` 唯一 + `idx_family`/`idx_user`/`idx_sid`，无 FK） |
 
 ### 2.2 baseline 模型
 
@@ -75,8 +77,8 @@ migration 不新增业务错误码；失败通过 `gerror` 返回并由 CLI 进�
 
 ## 7. 跨模块关系
 
-- 所有业务表（`products`/`product_images`、`skus`、`inventories`/`inventory_logs`、`addresses`、`cart_items`）均经本机制新增迁移，serve 不建表。
-- 部署顺序为 `build → migrate up → serve`；`product.md`/`sku.md`/`inventory.md`/`category.md`/`rbac.md`/`address.md`/`cart.md` 的数据模型均以本机制建立，不再回退到 `boot.go` 建表。
+- 所有业务表（`products`/`product_images`、`skus`、`inventories`/`inventory_logs`、`addresses`、`cart_items`、`orders`/`order_items`、`refresh_tokens`）均经本机制新增迁移，serve 不建表。
+- 部署顺序为 `build → migrate up → serve`；`product.md`/`sku.md`/`inventory.md`/`category.md`/`rbac.md`/`address.md`/`cart.md`/`order.md`/`iam.md` 的数据模型均以本机制建立，不再回退到 `boot.go` 建表。
 
 ## 8. Deferred / 已知留白
 

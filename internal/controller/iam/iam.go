@@ -35,6 +35,17 @@ func (c *ControllerV1) Login(ctx context.Context, req *v1.LoginReq) (res *v1.Log
 	return service.Iam().Login(ctx, req, userAgent, ip)
 }
 
+// Refresh 用 refresh token 换取新双 token（公开接口，无 Auth）。
+// 从 HTTP 请求提取 User-Agent 与客户端 IP，用于 session upsert 重建时写入设备元数据。
+func (c *ControllerV1) Refresh(ctx context.Context, req *v1.RefreshReq) (res *v1.RefreshRes, err error) {
+	var userAgent, ip string
+	if r := ghttp.RequestFromCtx(ctx); r != nil {
+		userAgent = r.Header.Get("User-Agent")
+		ip = r.GetClientIp()
+	}
+	return service.Iam().Refresh(ctx, req, userAgent, ip)
+}
+
 // Me 返回当前登录用户。
 func (c *ControllerV1) Me(ctx context.Context, req *v1.MeReq) (res *v1.MeRes, err error) {
 	principal, ok := middleware.PrincipalFromContext(ctx)

@@ -28,6 +28,11 @@ const (
 	CodeInvalidCredentials Code = 2002 // 用户名或密码错误 → 401
 	CodeSessionNotFound    Code = 2011 // 会话不存在或不属于当前用户 → 404
 
+	// refresh token（IAM 段扩展，仅前台用户域）。
+	CodeRefreshTokenInvalid Code = 2012 // refresh token 无效/未知/篡改/已撤销（不泄露存在性）→ 401
+	CodeRefreshTokenExpired Code = 2013 // refresh token 已过期 → 401
+	CodeRefreshTokenReuse   Code = 2014 // refresh token 被重放（已轮换 token 再次提交）→ 401
+
 	// 后台管理员身份与 RBAC（IAM 段扩展）。
 	CodeAdminNotFound          Code = 2003 // 管理员不存在 → 404
 	CodeAdminUsernameExists    Code = 2004 // 管理员用户名已存在 → 409
@@ -73,6 +78,14 @@ const (
 	CodeCartItemNotFound    Code = 8001 // 条目不存在或不属于当前用户 → 404
 	CodeCartInvalidQuantity Code = 8002 // 数量非正整数或超上限 → 400
 	CodeCartSkuUnavailable  Code = 8003 // 商品下架或 SKU 禁用，不可加购 → 409
+
+	// 订单域（Order）9000-9999。
+	CodeOrderNotFound                Code = 9001 // 订单不存在或不属于当前用户 → 404（防枚举）
+	CodeOrderInvalidStatusTransition Code = 9002 // 非法状态迁移 → 409
+	CodeOrderSkuUnavailable          Code = 9003 // 下单时 SKU 禁用或商品下架 → 409
+	CodeOrderCartEmpty               Code = 9004 // 从购物车下单无勾选项 → 400
+	CodeOrderInvalidQuantity         Code = 9005 // 直接购买数量非法 → 400
+	CodeOrderIdempotencyConflict     Code = 9006 // 同幂等键不同请求内容 → 409
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -92,6 +105,9 @@ var codeTable = map[Code]codeInfo{
 	CodeUsernameExists:         {http.StatusConflict, "用户名已存在"},
 	CodeInvalidCredentials:     {http.StatusUnauthorized, "用户名或密码错误"},
 	CodeSessionNotFound:        {http.StatusNotFound, "会话不存在"},
+	CodeRefreshTokenInvalid:    {http.StatusUnauthorized, "refresh token 无效"},
+	CodeRefreshTokenExpired:    {http.StatusUnauthorized, "refresh token 已过期"},
+	CodeRefreshTokenReuse:      {http.StatusUnauthorized, "refresh token 已失效，请重新登录"},
 	CodeAdminNotFound:          {http.StatusNotFound, "管理员不存在"},
 	CodeAdminUsernameExists:    {http.StatusConflict, "管理员用户名已存在"},
 	CodeSuperAdminProtected:    {http.StatusForbidden, "超级管理员受保护"},
@@ -129,6 +145,13 @@ var codeTable = map[Code]codeInfo{
 	CodeCartItemNotFound:    {http.StatusNotFound, "购物车条目不存在"},
 	CodeCartInvalidQuantity: {http.StatusBadRequest, "数量非法"},
 	CodeCartSkuUnavailable:  {http.StatusConflict, "商品不可加购"},
+
+	CodeOrderNotFound:                {http.StatusNotFound, "订单不存在"},
+	CodeOrderInvalidStatusTransition: {http.StatusConflict, "订单状态迁移非法"},
+	CodeOrderSkuUnavailable:          {http.StatusConflict, "商品不可购买"},
+	CodeOrderCartEmpty:               {http.StatusBadRequest, "购物车无勾选商品"},
+	CodeOrderInvalidQuantity:         {http.StatusBadRequest, "购买数量非法"},
+	CodeOrderIdempotencyConflict:     {http.StatusConflict, "幂等键冲突"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。

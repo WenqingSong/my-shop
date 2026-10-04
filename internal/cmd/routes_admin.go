@@ -6,6 +6,7 @@ import (
 	adminController "cnb.cool/go-cloud-devops/my-shop/internal/controller/admin"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/inventory"
+	orderController "cnb.cool/go-cloud-devops/my-shop/internal/controller/order"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/product"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/sku"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
@@ -27,6 +28,7 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 	productCtrl := product.NewV1()
 	skuCtrl := sku.NewV1()
 	inventoryCtrl := inventory.NewV1()
+	orderAdminCtrl := orderController.NewAdminV1()
 
 	// 后台公开接口：管理员登录（无需 token）。
 	root.POST("/admin/login", adminCtrl.Login)
@@ -97,5 +99,9 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 		// 库存写操作（AdminAuth + RequirePermission）。
 		require("inventory:increase").POST("/admin/inventories/:sku_id/increase", inventoryCtrl.Increase)
 		require("inventory:deduct").POST("/admin/inventories/:sku_id/deduct", inventoryCtrl.Deduct)
+
+		// 订单后台写操作（AdminAuth + RequirePermission）。
+		require("order:ship").POST("/admin/orders/:id/ship", orderAdminCtrl.Ship)
+		require("order:refund").POST("/admin/orders/:id/refund", orderAdminCtrl.Refund)
 	})
 }

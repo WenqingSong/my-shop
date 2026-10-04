@@ -68,37 +68,14 @@ func (s *sInventory) Get(ctx context.Context, skuID int64) (*v1.Inventory, error
 	return toInventory(rec), nil
 }
 
-// Increase 增加/初始化库存：事务内原子 upsert（INSERT ... ON DUPLICATE KEY UPDATE
-// quantity = quantity + N），保证首次创建/并发 increase 不重复、不丢增量；
-// 同一事务内读回最新库存作为 after_qty，写入一条「增加」流水。
+// Increase 增加/初始化库存：自开事务后调用 IncreaseInTx，保证首次创建/并发 increase
+// 不重复、不丢增量；同一事务内读回最新库存作为 after_qty，写入一条「增加」流水。
 func (s *sInventory) Increase(ctx context.Context, skuID, qty int64, operatorID *int64) (*v1.Inventory, error) {
-	if qty < 1 {
-		return nil, codes.New(codes.CodeInventoryInvalidQuantity)
-	}
-	if err := s.ensureSkuExists(ctx, skuID); err != nil {
-		return nil, err
-	}
-
 	var inv *v1.Inventory
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		if _, e := tx.Ctx(ctx).Exec(
-			"INSERT INTO inventories (sku_id, quantity) VALUES (?, ?) ON DUPLICATE KEY UPDATE quantity = quantity + VALUES(quantity)",
-			skuID, qty,
-		); e != nil {
-			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("增加库存: %w", e))
-		}
-		rec, e := s.findOneInTx(ctx, tx, skuID)
-		if e != nil {
-			return e
-		}
-		if rec == nil {
-			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("增加库存后未找到库存记录"))
-		}
-		if e := s.insertLog(ctx, tx, skuID, changeTypeIncrease, qty, rec.Quantity-qty, rec.Quantity, operatorID); e != nil {
-			return e
-		}
-		inv = toInventory(rec)
-		return nil
+		var e error
+		inv, e = s.IncreaseInTx(ctx, tx, skuID, qty, operatorID)
+		return e
 	})
 	if err != nil {
 		return nil, err
@@ -106,45 +83,79 @@ func (s *sInventory) Increase(ctx context.Context, skuID, qty int64, operatorID 
 	return inv, nil
 }
 
-// Deduct 条件扣减库存：事务内条件更新 UPDATE ... SET quantity = quantity - N
-// WHERE sku_id = ? AND quantity >= N + 核对 RowsAffected；命中 0 行返回 6001 且不写流水。
-func (s *sInventory) Deduct(ctx context.Context, skuID, qty int64, operatorID *int64) (*v1.Inventory, error) {
+// IncreaseInTx 在既有事务内增加/初始化库存：原子 upsert（INSERT ... ON DUPLICATE KEY UPDATE
+// quantity = quantity + N）后读回最新库存并写「增加」流水。不自开事务，供订单模块复用。
+func (s *sInventory) IncreaseInTx(ctx context.Context, tx gdb.TX, skuID, qty int64, operatorID *int64) (*v1.Inventory, error) {
 	if qty < 1 {
 		return nil, codes.New(codes.CodeInventoryInvalidQuantity)
 	}
 	if err := s.ensureSkuExists(ctx, skuID); err != nil {
 		return nil, err
 	}
+	if _, e := tx.Ctx(ctx).Exec(
+		"INSERT INTO inventories (sku_id, quantity) VALUES (?, ?) ON DUPLICATE KEY UPDATE quantity = quantity + VALUES(quantity)",
+		skuID, qty,
+	); e != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("增加库存: %w", e))
+	}
+	rec, e := s.findOneInTx(ctx, tx, skuID)
+	if e != nil {
+		return nil, e
+	}
+	if rec == nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("增加库存后未找到库存记录"))
+	}
+	if e := s.insertLog(ctx, tx, skuID, changeTypeIncrease, qty, rec.Quantity-qty, rec.Quantity, operatorID); e != nil {
+		return nil, e
+	}
+	return toInventory(rec), nil
+}
 
+// Deduct 条件扣减库存：自开事务后调用 DeductInTx，命中 0 行返回 6001 且不写流水。
+func (s *sInventory) Deduct(ctx context.Context, skuID, qty int64, operatorID *int64) (*v1.Inventory, error) {
 	var inv *v1.Inventory
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		result, e := tx.Ctx(ctx).Exec(
-			"UPDATE inventories SET quantity = quantity - ? WHERE sku_id = ? AND quantity >= ?",
-			qty, skuID, qty,
-		)
-		if e != nil {
-			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("扣减库存: %w", e))
-		}
-		if affected, _ := result.RowsAffected(); affected == 0 {
-			return codes.New(codes.CodeInventoryInsufficient)
-		}
-		rec, e := s.findOneInTx(ctx, tx, skuID)
-		if e != nil {
-			return e
-		}
-		if rec == nil {
-			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("扣减库存后未找到库存记录"))
-		}
-		if e := s.insertLog(ctx, tx, skuID, changeTypeDeduct, qty, rec.Quantity+qty, rec.Quantity, operatorID); e != nil {
-			return e
-		}
-		inv = toInventory(rec)
-		return nil
+		var e error
+		inv, e = s.DeductInTx(ctx, tx, skuID, qty, operatorID)
+		return e
 	})
 	if err != nil {
 		return nil, err
 	}
 	return inv, nil
+}
+
+// DeductInTx 在既有事务内条件扣减库存：条件更新 UPDATE ... SET quantity = quantity - N
+// WHERE sku_id = ? AND quantity >= N + 核对 RowsAffected；命中 0 行返回 6001 且不写流水。
+// 不自开事务，供订单模块「创建订单 + 扣库存」同事务复用。
+func (s *sInventory) DeductInTx(ctx context.Context, tx gdb.TX, skuID, qty int64, operatorID *int64) (*v1.Inventory, error) {
+	if qty < 1 {
+		return nil, codes.New(codes.CodeInventoryInvalidQuantity)
+	}
+	if err := s.ensureSkuExists(ctx, skuID); err != nil {
+		return nil, err
+	}
+	result, e := tx.Ctx(ctx).Exec(
+		"UPDATE inventories SET quantity = quantity - ? WHERE sku_id = ? AND quantity >= ?",
+		qty, skuID, qty,
+	)
+	if e != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("扣减库存: %w", e))
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return nil, codes.New(codes.CodeInventoryInsufficient)
+	}
+	rec, e := s.findOneInTx(ctx, tx, skuID)
+	if e != nil {
+		return nil, e
+	}
+	if rec == nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("扣减库存后未找到库存记录"))
+	}
+	if e := s.insertLog(ctx, tx, skuID, changeTypeDeduct, qty, rec.Quantity+qty, rec.Quantity, operatorID); e != nil {
+		return nil, e
+	}
+	return toInventory(rec), nil
 }
 
 // ListLogs 查询指定 SKU 的库存流水（id 倒序）；SKU 不存在返回 5001（404）。

@@ -4,16 +4,19 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/os/gcmd"
+	"github.com/gogf/gf/v2/os/glog"
 
 	"cnb.cool/go-cloud-devops/my-shop/internal/boot"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/health"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
+	"cnb.cool/go-cloud-devops/my-shop/internal/service"
 )
 
 // 命令结构：my-shop [serve|migrate <up|force|version>]。
@@ -81,6 +84,9 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 		return err
 	}
 
+	// 启动后台超时取消扫描器：扫描 status=待支付 且 expire_at 已过的订单，逐单原子取消并恢复库存。
+	startOrderCancelScanner(ctx)
+
 	s := g.Server()
 	s.Group("/", func(root *ghttp.RouterGroup) {
 		root.Middleware(middleware.Response)
@@ -91,6 +97,33 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 	})
 	s.Run()
 	return nil
+}
+
+// orderCancelScanBatch 是每轮超时取消扫描处理的最大订单数。
+const orderCancelScanBatch = 100
+
+// startOrderCancelScanner 启动订单超时取消后台扫描器（goroutine + ticker）。
+// 周期由 order.cancel_scan_interval 配置（秒，默认 60）；多实例并发依赖「条件状态更新 + RowsAffected」
+// 原子闸门保证同一订单只被取消并恢复一次库存，故无需优雅停机通知。
+func startOrderCancelScanner(ctx context.Context) {
+	interval := g.Cfg().MustGet(ctx, "order.cancel_scan_interval", 60).Int()
+	if interval <= 0 {
+		interval = 60
+	}
+	go func() {
+		ticker := time.NewTicker(time.Duration(interval) * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if _, err := service.Order().CancelExpired(ctx, orderCancelScanBatch); err != nil {
+					glog.Warningf(ctx, "订单超时取消扫描失败: %v", err)
+				}
+			}
+		}
+	}()
 }
 
 // migrateUp 执行所有未应用 migration。

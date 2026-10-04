@@ -24,9 +24,24 @@ type LoginReq struct {
 
 // LoginRes 用户登录响应。
 type LoginRes struct {
-	AccessToken string `json:"access_token" dc:"签发的 JWT access token"`
-	TokenType   string `json:"token_type" dc:"token 类型，恒为 \"Bearer\""`
-	ExpiresIn   int    `json:"expires_in" dc:"token 有效期（秒），恒为 3600"`
+	AccessToken  string `json:"access_token" dc:"签发的 JWT access token"`
+	RefreshToken string `json:"refresh_token" dc:"签发的长期 refresh token（明文仅本次响应出现一次）"`
+	TokenType    string `json:"token_type" dc:"token 类型，恒为 \"Bearer\""`
+	ExpiresIn    int    `json:"expires_in" dc:"token 有效期（秒），恒为 3600"`
+}
+
+// RefreshReq 刷新 access token 请求。refresh token 自身即凭证，接口公开、无 Auth。
+type RefreshReq struct {
+	g.Meta       `path:"/refresh" method:"post" tags:"IAM" summary:"用 refresh token 换取新双 token"`
+	RefreshToken string `json:"refresh_token" dc:"refresh token 明文"`
+}
+
+// RefreshRes 刷新响应。
+type RefreshRes struct {
+	AccessToken  string `json:"access_token" dc:"新签发的 JWT access token"`
+	RefreshToken string `json:"refresh_token" dc:"新签发的 refresh token（旧 token 已失效）"`
+	TokenType    string `json:"token_type" dc:"token 类型，恒为 \"Bearer\""`
+	ExpiresIn    int    `json:"expires_in" dc:"token 有效期（秒），恒为 3600"`
 }
 
 // MeReq 获取当前登录用户请求。

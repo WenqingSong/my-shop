@@ -7,6 +7,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/cart"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/order"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/product"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 )
@@ -25,10 +26,12 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	productCtrl := product.NewV1()
 	addressCtrl := address.NewV1()
 	cartCtrl := cart.NewV1()
+	orderCtrl := order.NewV1()
 
-	// 前台公开接口：注册、登录、分类查询、商品查询（无需 token）。
+	// 前台公开接口：注册、登录、刷新、分类查询、商品查询（无需 token）。
 	root.POST("/register", iamCtrl.Register)
 	root.POST("/login", iamCtrl.Login)
+	root.POST("/refresh", iamCtrl.Refresh)
 	root.GET("/categories", categoriesCtrl.List)
 	root.GET("/categories/:id", categoriesCtrl.Detail)
 	root.GET("/products", productCtrl.List)
@@ -52,6 +55,14 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 		user.PUT("/cart/items/:id", cartCtrl.UpdateQuantity)
 		user.PUT("/cart/items/:id/selected", cartCtrl.UpdateSelected)
 		user.DELETE("/cart/items/:id", cartCtrl.Delete)
+
+		// 订单（仅登录用户，作用于本人数据）。
+		user.POST("/orders", orderCtrl.Create)
+		user.GET("/orders", orderCtrl.List)
+		user.GET("/orders/:id", orderCtrl.Detail)
+		user.POST("/orders/:id/pay", orderCtrl.Pay)
+		user.POST("/orders/:id/cancel", orderCtrl.Cancel)
+		user.POST("/orders/:id/receive", orderCtrl.Receive)
 
 		user.GET("/sessions", iamCtrl.ListSessions)
 		user.DELETE("/sessions/:sid", iamCtrl.RevokeSession)

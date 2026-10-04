@@ -60,6 +60,13 @@ func TestRouteTable(t *testing.T) {
 		"GET /addresses/:id",
 		"PUT /addresses/:id",
 		"DELETE /addresses/:id",
+		// 订单前台接口（Auth 保护）。
+		"POST /orders",
+		"GET /orders",
+		"GET /orders/:id",
+		"POST /orders/:id/pay",
+		"POST /orders/:id/cancel",
+		"POST /orders/:id/receive",
 		// 前台会话管理接口（IAM V3）。
 		"GET /sessions",
 		"DELETE /sessions/:sid",
@@ -107,6 +114,9 @@ func TestRouteTable(t *testing.T) {
 		"GET /admin/inventories/:sku_id/logs",
 		"POST /admin/inventories/:sku_id/increase",
 		"POST /admin/inventories/:sku_id/deduct",
+		// 订单后台写操作（AdminAuth + RequirePermission）。
+		"POST /admin/orders/:id/ship",
+		"POST /admin/orders/:id/refund",
 	}
 	for _, w := range want {
 		if !got[w] {

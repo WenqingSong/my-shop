@@ -36,6 +36,10 @@ auth:
     # 会话 TTL（秒），默认 3600，与 JWT exp 对齐；必须大于 0。
     # 有效访问窗口 = min(JWT exp, 会话 TTL)。
     ttl: 3600
+  refresh:
+    # refresh token 绝对有效期（秒），默认 2592000（30 天）；必须大于 0。
+    # 对应环境变量：AUTH_REFRESH_TTL。
+    ttl: 2592000
 
 # 后台管理员配置（以下均为开发默认值，可通过环境变量覆盖）
 # 对应环境变量：ADMIN_SUPER_USERNAME / ADMIN_SUPER_PASSWORD
@@ -47,6 +51,14 @@ admin:
     # ⚠️ 无开发默认值：未配置且需创建时启动失败，禁止静默用弱默认值建号。
     # 生产/开发均通过环境变量 ADMIN_SUPER_PASSWORD 注入。
     password: ""
+
+# 订单配置（以下均为开发默认值，可通过环境变量覆盖）
+# 对应环境变量：ORDER_PAY_TIMEOUT / ORDER_CANCEL_SCAN_INTERVAL
+order:
+  # 支付超时时长（秒），下单后超过此时长未支付将被自动取消。
+  pay_timeout: 900
+  # 超时未支付订单的后台扫描周期（秒）。
+  cancel_scan_interval: 60
 
 # 启动配置（以下均为开发默认值，可通过环境变量覆盖）
 # 对应环境变量：STARTUP_DEPENDENCY_TIMEOUT

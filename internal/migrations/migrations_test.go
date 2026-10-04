@@ -13,17 +13,18 @@ import (
 // baselineVersion 是内嵌 baseline 迁移的版本号（14 位时间戳）。
 const baselineVersion = uint(20261001000001)
 
-// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + products + skus + inventory + addresses + cart_items）。
-const latestMigrationVersion = uint(20261001000006)
+// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + products + skus + inventory + addresses + cart_items + orders + refresh_tokens）。
+const latestMigrationVersion = uint(20261001000008)
 
-// businessTables 是 migration 应建立的 14 张业务表。
-// 注意顺序：cart_items 无外键、置最前；addresses 通过外键引用 users（ON DELETE CASCADE），
+// businessTables 是 migration 应建立的 17 张业务表。
+// 注意顺序：order_items 通过外键引用 orders（ON DELETE CASCADE），故 order_items 排在 orders 之前；
+// refresh_tokens/cart_items 无外键、置前；addresses 通过外键引用 users（ON DELETE CASCADE），
 // 故 addresses 排在 users 之前；inventories/inventory_logs 通过外键引用 skus，skus 通过外键引用
 // products，products 通过外键引用 categories（均 ON DELETE RESTRICT），因此被引用方必须排在引用方之后，
 // 即 inventories/inventory_logs 排在 skus 之前、skus 排在 products 之前、products 排在 categories 之前，
 // 否则 DROP TABLE 会因外键依赖失败。
 var businessTables = []string{
-	"cart_items", "addresses", "users", "inventory_logs", "inventories", "skus", "products", "product_images", "categories", "admins", "roles", "permissions", "admin_roles", "role_permissions",
+	"order_items", "orders", "refresh_tokens", "cart_items", "addresses", "users", "inventory_logs", "inventories", "skus", "products", "product_images", "categories", "admins", "roles", "permissions", "admin_roles", "role_permissions",
 }
 
 // allTables 含业务表与追踪表。
@@ -139,7 +140,7 @@ func sourceWithExtra(extra map[string]string) fs.FS {
 }
 
 // TestUpCreatesSchemaAndIsIdempotent 覆盖 AC-001/AC-002（INV-001 幂等按序一次）：
-// 空库执行 Up 建立 13 张业务表 + schema_migrations；再次 Up 幂等、版本不变。
+// 空库执行 Up 建立 16 张业务表 + schema_migrations；再次 Up 幂等、版本不变。
 // 说明：迁移为无 IF NOT EXISTS 的普通 CREATE TABLE，若被重复执行会因表已存在而报错，
 // 因此「再次 Up 成功」本身就是「旧迁移未重跑」的直接证明。
 func TestUpCreatesSchemaAndIsIdempotent(t *testing.T) {
@@ -252,14 +253,14 @@ func TestUpAppliesOnlyPendingMigration(t *testing.T) {
 	}
 
 	migrationFS = sourceWithExtra(map[string]string{
-		"20261001000007_probe.up.sql": "CREATE TABLE migration_probe (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)) ENGINE=InnoDB;",
+		"20261001000009_probe.up.sql": "CREATE TABLE migration_probe (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)) ENGINE=InnoDB;",
 	})
 
 	if err := Up(ctx); err != nil {
 		t.Fatalf("incremental up: %v", err)
 	}
-	if v := currentVersion(t, db); v != uint(20261001000007) {
-		t.Errorf("expected current version %d after incremental up, got %d", uint(20261001000007), v)
+	if v := currentVersion(t, db); v != uint(20261001000009) {
+		t.Errorf("expected current version %d after incremental up, got %d", uint(20261001000009), v)
 	}
 	if !tableExists(t, db, "migration_probe") {
 		t.Errorf("expected migration_probe table created by incremental migration")
@@ -273,7 +274,7 @@ func TestUpFailsFastAndMarksDirty(t *testing.T) {
 	db := setupCleanDB(t)
 
 	migrationFS = sourceWithExtra(map[string]string{
-		"20261001000007_broken.up.sql": "THIS IS NOT VALID SQL;",
+		"20261001000009_broken.up.sql": "THIS IS NOT VALID SQL;",
 	})
 
 	if err := Up(ctx); err == nil {
@@ -289,7 +290,7 @@ func TestUpFailsFastAndMarksDirty(t *testing.T) {
 	}
 
 	// force 恢复 dirty。
-	if err := Force(ctx, uint(20261001000007)); err != nil {
+	if err := Force(ctx, uint(20261001000009)); err != nil {
 		t.Fatalf("force recover: %v", err)
 	}
 	if dirtyState(t, db) {
@@ -335,7 +336,7 @@ func TestConcurrentUp(t *testing.T) {
 type columnSpec struct {
 	Name     string  // COLUMN_NAME
 	Type     string  // COLUMN_TYPE（含 unsigned、长度/精度）
-	Nullable bool    // true 表示允许 NULL；7 张表全部 NOT NULL，故默认 false
+	Nullable bool    // true 表示允许 NULL；默认 false（仅 orders/order_items 的部分可空字段为 true）
 	Default  *string // 期望默认值；nil 表示无默认值（COLUMN_DEFAULT IS NULL）
 	Extra    string  // EXTRA：auto_increment / DEFAULT_GENERATED on update CURRENT_TIMESTAMP 等
 }
@@ -359,9 +360,10 @@ type tableSpec struct {
 // strPtr 便于书写字符串默认值（区分「默认空字符串」与「无默认值」）。
 func strPtr(s string) *string { return &s }
 
-// expectedSchema 是迁移前 7 张表 DDL 的精确结构快照，是 INV-003「结构严格等价」的权威基准。
-// 它独立于迁移文件硬编码，因此任何对 baseline 迁移的列/类型/空值/默认值/索引/引擎/字符集
-// 改动若不同步更新此处，等价性测试都会失败——这正是它能够识别错误实现的原因。
+// expectedSchema 是「7 张 baseline 表 + orders + order_items」DDL 的精确结构快照，
+// 是 INV-003「结构严格等价」的权威基准。它独立于迁移文件硬编码，因此任何对相关迁移的
+// 列/类型/空值/默认值/索引/引擎/字符集改动若不同步更新此处，等价性测试都会失败——
+// 这正是它能够识别错误实现的原因。
 var expectedSchema = []tableSpec{
 	{
 		Name:      "users",
@@ -470,6 +472,65 @@ var expectedSchema = []tableSpec{
 		},
 		Indexes: []indexSpec{
 			{Name: "PRIMARY", Unique: true, Columns: []string{"role_id", "permission_id"}},
+		},
+	},
+	{
+		Name:      "orders",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "order_no", Type: "varchar(32)"},
+			{Name: "user_id", Type: "bigint unsigned"},
+			{Name: "status", Type: "tinyint", Default: strPtr("10")},
+			{Name: "total_amount", Type: "int unsigned"},
+			{Name: "idempotency_key", Type: "varchar(64)"},
+			{Name: "request_hash", Type: "varchar(64)"},
+			{Name: "recipient_name", Type: "varchar(32)"},
+			{Name: "phone", Type: "varchar(20)"},
+			{Name: "province", Type: "varchar(32)"},
+			{Name: "city", Type: "varchar(32)"},
+			{Name: "district", Type: "varchar(32)"},
+			{Name: "detail", Type: "varchar(255)"},
+			{Name: "address_id", Type: "bigint unsigned", Nullable: true},
+			{Name: "expire_at", Type: "datetime"},
+			{Name: "cancel_reason", Type: "tinyint", Nullable: true},
+			{Name: "paid_at", Type: "datetime", Nullable: true},
+			{Name: "shipped_at", Type: "datetime", Nullable: true},
+			{Name: "received_at", Type: "datetime", Nullable: true},
+			{Name: "completed_at", Type: "datetime", Nullable: true},
+			{Name: "cancelled_at", Type: "datetime", Nullable: true},
+			{Name: "refunded_at", Type: "datetime", Nullable: true},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "uk_order_no", Unique: true, Columns: []string{"order_no"}},
+			{Name: "uk_user_idempotency", Unique: true, Columns: []string{"user_id", "idempotency_key"}},
+			{Name: "idx_user_id", Unique: false, Columns: []string{"user_id"}},
+			{Name: "idx_status_expire", Unique: false, Columns: []string{"status", "expire_at"}},
+		},
+	},
+	{
+		Name:      "order_items",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "order_id", Type: "bigint unsigned"},
+			{Name: "sku_id", Type: "bigint unsigned"},
+			{Name: "product_id", Type: "bigint unsigned"},
+			{Name: "sku_name", Type: "varchar(128)"},
+			{Name: "product_name", Type: "varchar(128)"},
+			{Name: "product_main_image", Type: "varchar(512)", Default: strPtr("")},
+			{Name: "price", Type: "int unsigned"},
+			{Name: "quantity", Type: "int unsigned"},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "idx_order_id", Unique: false, Columns: []string{"order_id"}},
 		},
 	},
 }
@@ -627,7 +688,7 @@ func equalStrings(a, b []string) bool {
 }
 
 // TestSchemaStructureMatchesBaseline 覆盖 INV-003（结构严格等价）：
-// 对 7 张表逐表校验表级属性（ENGINE/字符集排序规则）与逐列（名称/顺序/类型/空值/默认值/AUTO_INCREMENT），
+// 对 baseline 与订单相关表逐表校验表级属性（ENGINE/字符集排序规则）与逐列（名称/顺序/类型/空值/默认值/AUTO_INCREMENT），
 // 以及索引（名称/唯一性/字段及顺序），能够识别任何字段类型、默认值、空值约束、字符集或索引的漂移。
 func TestSchemaStructureMatchesBaseline(t *testing.T) {
 	ctx := context.Background()
