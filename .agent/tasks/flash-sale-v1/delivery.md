@@ -2,7 +2,7 @@
 
 ## Milestone and Target
 - Milestone：秒杀核心闭环 V1
-- Delivery Target：分支 `feat/flash-sale-v1`，Base `e0a48e9f023809d279e61fe7a0052a7cff461095` 之上的工作区变更（含未跟踪新增文件）
+- Delivery Target：分支 `feat/flash-sale-v1`，当前 HEAD `bf0818b`（Cleaner 复审产物提交，仅更新 `state.yaml`/`findings.md`，无运行时代码变化）；CLEAN target_base = `8059808`
 - Cleaner Review Target：`state.yaml` 的 `review.target_paths`（17 项，含秒杀代码/迁移/测试/design/registry/seed/routes）
 - Target Match：未核对（Deliverer Gate 未通过，未进入验收）
 

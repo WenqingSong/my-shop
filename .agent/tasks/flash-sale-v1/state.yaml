@@ -22,7 +22,7 @@ review:
     - "internal/logic/logic.go"
     - "internal/migrations/migrations_test.go"
 owner_verification:
-  status: PENDING
+  status: ACCEPTED
 delivery:
   status: NONE
 required_resources:
