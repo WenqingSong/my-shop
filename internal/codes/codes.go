@@ -86,6 +86,12 @@ const (
 	CodeOrderCartEmpty               Code = 9004 // 从购物车下单无勾选项 → 400
 	CodeOrderInvalidQuantity         Code = 9005 // 直接购买数量非法 → 400
 	CodeOrderIdempotencyConflict     Code = 9006 // 同幂等键不同请求内容 → 409
+
+	// 商品评价域（Review）10000-10999。
+	CodeReviewNotFound      Code = 10001 // 评价不存在/非本人/不可见（防枚举）→ 404
+	CodeReviewNotEligible   Code = 10002 // 未购买该商品或订单未达可评价状态 → 409
+	CodeReviewAlreadyExists Code = 10003 // 同一订单项已评价 → 409
+	CodeReviewInvalidInput  Code = 10004 // 星级越界/内容为空或超长 → 400
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -152,6 +158,11 @@ var codeTable = map[Code]codeInfo{
 	CodeOrderCartEmpty:               {http.StatusBadRequest, "购物车无勾选商品"},
 	CodeOrderInvalidQuantity:         {http.StatusBadRequest, "购买数量非法"},
 	CodeOrderIdempotencyConflict:     {http.StatusConflict, "幂等键冲突"},
+
+	CodeReviewNotFound:      {http.StatusNotFound, "评价不存在"},
+	CodeReviewNotEligible:   {http.StatusConflict, "暂不可评价"},
+	CodeReviewAlreadyExists: {http.StatusConflict, "该订单项已评价"},
+	CodeReviewInvalidInput:  {http.StatusBadRequest, "评价内容非法"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。
