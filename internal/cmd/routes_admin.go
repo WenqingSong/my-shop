@@ -5,6 +5,7 @@ import (
 
 	adminController "cnb.cool/go-cloud-devops/my-shop/internal/controller/admin"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/flashsale"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/inventory"
 	orderController "cnb.cool/go-cloud-devops/my-shop/internal/controller/order"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/product"
@@ -29,6 +30,7 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 	skuCtrl := sku.NewV1()
 	inventoryCtrl := inventory.NewV1()
 	orderAdminCtrl := orderController.NewAdminV1()
+	flashsaleAdminCtrl := flashsale.NewAdminV1()
 
 	// 后台公开接口：管理员登录（无需 token）。
 	root.POST("/admin/login", adminCtrl.Login)
@@ -103,5 +105,9 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 		// 订单后台写操作（AdminAuth + RequirePermission）。
 		require("order:ship").POST("/admin/orders/:id/ship", orderAdminCtrl.Ship)
 		require("order:refund").POST("/admin/orders/:id/refund", orderAdminCtrl.Refund)
+
+		// 秒杀活动后台写操作（AdminAuth + RequirePermission）。
+		require("flash_sale:create").POST("/admin/flash-sales", flashsaleAdminCtrl.Create)
+		require("flash_sale:update").PUT("/admin/flash-sales/:id", flashsaleAdminCtrl.Update)
 	})
 }

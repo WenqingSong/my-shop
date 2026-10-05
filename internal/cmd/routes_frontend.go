@@ -6,6 +6,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/address"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/cart"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/flashsale"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/order"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/product"
@@ -27,6 +28,7 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	addressCtrl := address.NewV1()
 	cartCtrl := cart.NewV1()
 	orderCtrl := order.NewV1()
+	flashsaleCtrl := flashsale.NewV1()
 
 	// 前台公开接口：注册、登录、刷新、分类查询、商品查询（无需 token）。
 	root.POST("/register", iamCtrl.Register)
@@ -63,6 +65,9 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 		user.POST("/orders/:id/pay", orderCtrl.Pay)
 		user.POST("/orders/:id/cancel", orderCtrl.Cancel)
 		user.POST("/orders/:id/receive", orderCtrl.Receive)
+
+		// 秒杀下单（仅登录用户，作用于本人数据）。
+		user.POST("/flash-sales/:id/orders", flashsaleCtrl.CreateOrder)
 
 		user.GET("/sessions", iamCtrl.ListSessions)
 		user.DELETE("/sessions/:sid", iamCtrl.RevokeSession)

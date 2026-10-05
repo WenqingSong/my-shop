@@ -35,3 +35,4 @@
 | 7000-7999 | address | ACTIVE | 基线 |
 | 8000-8999 | cart | ACTIVE | 基线 |
 | 9000-9999 | order | ACTIVE | order-v1 订单域（域序 9 = max(8)+1） |
+| 10000-10999 | flash-sale | RESERVED | flash-sale-v1 秒杀域（域序 10 = max(9)+1） |

@@ -53,6 +53,8 @@ var seedPermissionList = []permissionSeed{
 	{Code: "permission:delete", Name: "删除权限"},
 	{Code: "order:ship", Name: "订单发货"},
 	{Code: "order:refund", Name: "订单退款"},
+	{Code: "flash_sale:create", Name: "创建秒杀活动"},
+	{Code: "flash_sale:update", Name: "更新秒杀活动"},
 }
 
 // seedPermissions 幂等写入标准权限：已存在（code 唯一）则跳过。

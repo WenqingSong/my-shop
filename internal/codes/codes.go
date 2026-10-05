@@ -86,6 +86,15 @@ const (
 	CodeOrderCartEmpty               Code = 9004 // 从购物车下单无勾选项 → 400
 	CodeOrderInvalidQuantity         Code = 9005 // 直接购买数量非法 → 400
 	CodeOrderIdempotencyConflict     Code = 9006 // 同幂等键不同请求内容 → 409
+
+	// 秒杀域（FlashSale）10000-10999。
+	CodeFlashSaleActivityNotFound    Code = 10001 // 秒杀活动不存在或已下架 → 404
+	CodeFlashSaleNotInTimeWindow     Code = 10002 // 活动未开始或已结束 → 409
+	CodeFlashSaleStockInsufficient   Code = 10003 // 秒杀库存不足 → 409
+	CodeFlashSaleAlreadyPurchased    Code = 10004 // 一人一单，已购买 → 409
+	CodeFlashSaleIdempotencyConflict Code = 10005 // 同幂等键不同请求内容 → 409
+	CodeFlashSaleSkuUnavailable      Code = 10006 // 下单时 SKU 禁用或商品下架 → 409
+	CodeFlashSaleInvalidArgument     Code = 10007 // 活动参数非法（秒杀价/库存/时间/状态）→ 400
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -152,6 +161,14 @@ var codeTable = map[Code]codeInfo{
 	CodeOrderCartEmpty:               {http.StatusBadRequest, "购物车无勾选商品"},
 	CodeOrderInvalidQuantity:         {http.StatusBadRequest, "购买数量非法"},
 	CodeOrderIdempotencyConflict:     {http.StatusConflict, "幂等键冲突"},
+
+	CodeFlashSaleActivityNotFound:    {http.StatusNotFound, "秒杀活动不存在"},
+	CodeFlashSaleNotInTimeWindow:     {http.StatusConflict, "秒杀活动不在进行中"},
+	CodeFlashSaleStockInsufficient:   {http.StatusConflict, "秒杀库存不足"},
+	CodeFlashSaleAlreadyPurchased:    {http.StatusConflict, "已参与该秒杀"},
+	CodeFlashSaleIdempotencyConflict: {http.StatusConflict, "幂等键冲突"},
+	CodeFlashSaleSkuUnavailable:      {http.StatusConflict, "秒杀商品不可购买"},
+	CodeFlashSaleInvalidArgument:     {http.StatusBadRequest, "秒杀活动参数非法"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。
