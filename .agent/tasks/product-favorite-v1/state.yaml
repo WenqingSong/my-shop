@@ -19,7 +19,7 @@ review:
     - ".agent/registry/error-codes.md"
     - ".agent/registry/migrations.md"
 owner_verification:
-  status: PENDING
+  status: ACCEPTED
 delivery:
   status: NONE
 required_resources:
