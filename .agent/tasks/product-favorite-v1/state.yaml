@@ -21,7 +21,7 @@ review:
 owner_verification:
   status: ACCEPTED
 delivery:
-  status: NONE
+  status: PASS
 required_resources:
   error_code_domains:
     - "11000-11999"
