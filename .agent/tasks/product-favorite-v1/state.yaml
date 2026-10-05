@@ -1,9 +1,23 @@
 task: product-favorite-v1
 phase: APPROVED
 review:
-  status: NONE
-  target_base: ""
-  target_paths: []
+  status: CLEAN
+  target_base: "9b1a50f66361aea1ba9e79b21deb7405bccf7187"
+  target_paths:
+    - "api/favorite/v1/favorite.go"
+    - "internal/controller/favorite/favorite.go"
+    - "internal/logic/favorite/favorite.go"
+    - "internal/service/favorite.go"
+    - "internal/codes/codes.go"
+    - "internal/cmd/routes_frontend.go"
+    - "internal/logic/logic.go"
+    - "internal/migrations/sql/20261001000010_favorites.up.sql"
+    - "internal/cmd/favorite_test.go"
+    - "internal/migrations/migrations_test.go"
+    - "internal/boot/boot_migration_test.go"
+    - "docs/design/favorite.md"
+    - ".agent/registry/error-codes.md"
+    - ".agent/registry/migrations.md"
 owner_verification:
   status: PENDING
 delivery:

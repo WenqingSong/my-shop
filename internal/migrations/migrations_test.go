@@ -13,18 +13,18 @@ import (
 // baselineVersion 是内嵌 baseline 迁移的版本号（14 位时间戳）。
 const baselineVersion = uint(20261001000001)
 
-// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + products + skus + inventory + addresses + cart_items + orders + refresh_tokens + reviews）。
-const latestMigrationVersion = uint(20261001000009)
+// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + products + skus + inventory + addresses + cart_items + orders + refresh_tokens + reviews + favorites）。
+const latestMigrationVersion = uint(20261001000010)
 
-// businessTables 是 migration 应建立的 18 张业务表。
+// businessTables 是 migration 应建立的 19 张业务表。
 // 注意顺序：order_items 通过外键引用 orders（ON DELETE CASCADE），故 order_items 排在 orders 之前；
-// refresh_tokens/cart_items 无外键、置前；addresses 通过外键引用 users（ON DELETE CASCADE），
+// refresh_tokens/cart_items/favorites 无外键、置前；addresses 通过外键引用 users（ON DELETE CASCADE），
 // 故 addresses 排在 users 之前；inventories/inventory_logs 通过外键引用 skus，skus 通过外键引用
 // products，products 通过外键引用 categories（均 ON DELETE RESTRICT），因此被引用方必须排在引用方之后，
 // 即 inventories/inventory_logs 排在 skus 之前、skus 排在 products 之前、products 排在 categories 之前，
 // 否则 DROP TABLE 会因外键依赖失败。
 var businessTables = []string{
-	"order_items", "orders", "refresh_tokens", "cart_items", "reviews", "addresses", "users", "inventory_logs", "inventories", "skus", "products", "product_images", "categories", "admins", "roles", "permissions", "admin_roles", "role_permissions",
+	"favorites", "order_items", "orders", "refresh_tokens", "cart_items", "reviews", "addresses", "users", "inventory_logs", "inventories", "skus", "products", "product_images", "categories", "admins", "roles", "permissions", "admin_roles", "role_permissions",
 }
 
 // allTables 含业务表与追踪表。
@@ -253,14 +253,14 @@ func TestUpAppliesOnlyPendingMigration(t *testing.T) {
 	}
 
 	migrationFS = sourceWithExtra(map[string]string{
-		"20261001000010_probe.up.sql": "CREATE TABLE migration_probe (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)) ENGINE=InnoDB;",
+		"20261001000011_probe.up.sql": "CREATE TABLE migration_probe (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)) ENGINE=InnoDB;",
 	})
 
 	if err := Up(ctx); err != nil {
 		t.Fatalf("incremental up: %v", err)
 	}
-	if v := currentVersion(t, db); v != uint(20261001000010) {
-		t.Errorf("expected current version %d after incremental up, got %d", uint(20261001000010), v)
+	if v := currentVersion(t, db); v != uint(20261001000011) {
+		t.Errorf("expected current version %d after incremental up, got %d", uint(20261001000011), v)
 	}
 	if !tableExists(t, db, "migration_probe") {
 		t.Errorf("expected migration_probe table created by incremental migration")
@@ -274,7 +274,7 @@ func TestUpFailsFastAndMarksDirty(t *testing.T) {
 	db := setupCleanDB(t)
 
 	migrationFS = sourceWithExtra(map[string]string{
-		"20261001000010_broken.up.sql": "THIS IS NOT VALID SQL;",
+		"20261001000011_broken.up.sql": "THIS IS NOT VALID SQL;",
 	})
 
 	if err := Up(ctx); err == nil {
@@ -290,7 +290,7 @@ func TestUpFailsFastAndMarksDirty(t *testing.T) {
 	}
 
 	// force 恢复 dirty。
-	if err := Force(ctx, uint(20261001000010)); err != nil {
+	if err := Force(ctx, uint(20261001000011)); err != nil {
 		t.Fatalf("force recover: %v", err)
 	}
 	if dirtyState(t, db) {
@@ -555,6 +555,21 @@ var expectedSchema = []tableSpec{
 			{Name: "uk_order_item", Unique: true, Columns: []string{"order_item_id"}},
 			{Name: "idx_user_id", Unique: false, Columns: []string{"user_id"}},
 			{Name: "idx_product_status", Unique: false, Columns: []string{"product_id", "status"}},
+		},
+	},
+	{
+		Name:      "favorites",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "user_id", Type: "bigint unsigned"},
+			{Name: "product_id", Type: "bigint unsigned"},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "uk_user_product", Unique: true, Columns: []string{"user_id", "product_id"}},
 		},
 	},
 }

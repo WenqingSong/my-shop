@@ -6,6 +6,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/address"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/cart"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/favorite"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/order"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/product"
@@ -29,6 +30,7 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	cartCtrl := cart.NewV1()
 	orderCtrl := order.NewV1()
 	reviewCtrl := review.NewV1()
+	favoriteCtrl := favorite.NewV1()
 
 	// 前台公开接口：注册、登录、刷新、分类查询、商品查询（无需 token）。
 	root.POST("/register", iamCtrl.Register)
@@ -73,6 +75,12 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 		user.GET("/my/reviews", reviewCtrl.MyList)
 		user.PUT("/reviews/:id", reviewCtrl.Update)
 		user.DELETE("/reviews/:id", reviewCtrl.Delete)
+
+		// 商品收藏（仅登录用户，作用于本人数据）。
+		user.POST("/favorites", favoriteCtrl.Add)
+		user.DELETE("/favorites/:product_id", favoriteCtrl.Remove)
+		user.GET("/favorites", favoriteCtrl.List)
+		user.GET("/favorites/check", favoriteCtrl.Check)
 
 		user.GET("/sessions", iamCtrl.ListSessions)
 		user.DELETE("/sessions/:sid", iamCtrl.RevokeSession)

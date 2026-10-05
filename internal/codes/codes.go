@@ -92,6 +92,9 @@ const (
 	CodeReviewNotEligible   Code = 10002 // 未购买该商品或订单未达可评价状态 → 409
 	CodeReviewAlreadyExists Code = 10003 // 同一订单项已评价 → 409
 	CodeReviewInvalidInput  Code = 10004 // 星级越界/内容为空或超长 → 400
+
+	// 商品收藏域（Favorite）11000-11999。
+	CodeFavoriteProductUnavailable Code = 11001 // 商品不在售/不可收藏 → 409
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -163,6 +166,8 @@ var codeTable = map[Code]codeInfo{
 	CodeReviewNotEligible:   {http.StatusConflict, "暂不可评价"},
 	CodeReviewAlreadyExists: {http.StatusConflict, "该订单项已评价"},
 	CodeReviewInvalidInput:  {http.StatusBadRequest, "评价内容非法"},
+
+	CodeFavoriteProductUnavailable: {http.StatusConflict, "商品不可收藏"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。
