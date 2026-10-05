@@ -1,0 +1,33 @@
+task: product-review-v1
+phase: READY_FOR_REVIEW
+review:
+  status: STALE
+  target_base: "20046a0cc3be4bc1d5658b9b915a6649f567cf5d"
+  target_paths:
+    - "api/review/v1/review.go"
+    - "internal/controller/review/review.go"
+    - "internal/logic/review/review.go"
+    - "internal/service/review.go"
+    - "internal/cmd/review_test.go"
+    - "internal/migrations/sql/20261001000009_reviews.up.sql"
+    - "docs/design/review.md"
+    - "internal/boot/boot_migration_test.go"
+    - "internal/boot/seed.go"
+    - "internal/cmd/routes_admin.go"
+    - "internal/cmd/routes_frontend.go"
+    - "internal/cmd/routes_test.go"
+    - "internal/codes/codes.go"
+    - "internal/logic/logic.go"
+    - "internal/migrations/migrations_test.go"
+owner_verification:
+  status: PENDING
+delivery:
+  status: NONE
+required_resources:
+  error_code_domains:
+    - "10000-10999"
+  migrations:
+    - "20261001000009"
+blocked:
+  is_blocked: false
+  reason: ""
