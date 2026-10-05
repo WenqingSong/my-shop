@@ -37,3 +37,4 @@
 | 9000-9999 | order | ACTIVE | order-v1 订单域（域序 9 = max(8)+1） |
 | 10000-10999 | product-review-v1 | RESERVED | product-review-v1 评价域（域序 10 = max(9)+1） |
 | 11000-11999 | product-favorite-v1 | RESERVED | product-favorite-v1 收藏域（域序 11 = max(10)+1） |
+| 12000-12999 | flash-sale-v1 | RESERVED | flash-sale-v1 秒杀域（域序 12 = max(11)+1） |
