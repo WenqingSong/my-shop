@@ -2,7 +2,7 @@ task: product-favorite-v1
 phase: APPROVED
 review:
   status: CLEAN
-  target_base: "9b1a50f66361aea1ba9e79b21deb7405bccf7187"
+  target_base: "e90fc5ae36e2f3e487618f2b0c4be75384b6c4aa"
   target_paths:
     - "api/favorite/v1/favorite.go"
     - "internal/controller/favorite/favorite.go"

@@ -3,13 +3,12 @@
 ## Review Target
 
 - 任务基线（base commit）：`fc585493bb60b43701815e45ab8fa4f15c2dc96c`（`feature/product-favorite`），任务开始时 working tree 干净、无已有修改。
-- 当前 Commit（HEAD）：`9b1a50f66361aea1ba9e79b21deb7405bccf7187`（`docs(favorite): 新增商品收藏 v1 任务契约与设计文档`，含 Registry RESERVED、task/contract/design 工件）。
-- 工作区状态：HEAD 之上存在**未提交**的实现变更（5 个已跟踪文件修改 + 6 个新增未跟踪文件），全部属于本任务收藏实现，可明确区分于基线。
-- 已跟踪修改：`internal/boot/boot_migration_test.go`、`internal/cmd/routes_frontend.go`、`internal/codes/codes.go`、`internal/logic/logic.go`、`internal/migrations/migrations_test.go`。
-- 新增文件：`api/favorite/v1/favorite.go`、`internal/controller/favorite/favorite.go`、`internal/logic/favorite/favorite.go`、`internal/service/favorite.go`、`internal/migrations/sql/20261001000010_favorites.up.sql`、`internal/cmd/favorite_test.go`。
+- 当前 Commit（HEAD，CLEAN 绑定对象）：`e90fc5ae36e2f3e487618f2b0c4be75384b6c4aa`（`feat(favorite): 新增商品收藏接口`）。
+- 工作区状态：clean（实现已提交，无未提交变更）。
+- 实现文件（收藏模块）：`api/favorite/v1/favorite.go`、`internal/controller/favorite/favorite.go`、`internal/logic/favorite/favorite.go`、`internal/service/favorite.go`、`internal/migrations/sql/20261001000010_favorites.up.sql`、`internal/codes/codes.go`、`internal/cmd/routes_frontend.go`、`internal/logic/logic.go`。
+- 测试文件：`internal/cmd/favorite_test.go`、`internal/migrations/migrations_test.go`、`internal/boot/boot_migration_test.go`。
+- 设计/Registry（四者一致性核对对象）：`docs/design/favorite.md`、`.agent/registry/error-codes.md`、`.agent/registry/migrations.md`。
 - 关键资源：错误码域 `11000-11999`（域序 11，RESERVED）、migration `20261001000010`（favorites，RESERVED）。
-
-> 说明：Coder 尚未 commit 实现（`state.yaml.phase` 仍为 `APPROVED`）。Cleaner 对「HEAD `9b1a50f` + 上述未提交工作区变更」这一对象给出 CLEAN，`target_base` 记录为 HEAD commit；Owner 决定 Commit 前，本 CLEAN 与该未提交变更的对应关系以本清单为准。
 
 ## Result
 
