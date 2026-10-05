@@ -141,7 +141,7 @@ Coder 为关键行为编写可长期保留的测试，并在交接中指出最�
 
 验证卡可以包含可逆 Mutation：先确认测试通过，临时破坏一条不变量，确认指定测试失败，再恢复代码并重新通过。Mutation 只用于理解和检验测试，执行后必须恢复正确实现并确认工作区状态。
 
-`core-logic.md` 顶部维护一行可机读的 `Owner Verification Status`（`NOT_REQUIRED` / `PENDING` / `ACCEPTED`）。`PENDING` / `NOT_REQUIRED` 由 Cleaner 生成 `core-logic.md` 时按「是否产生 CL 验证卡」初始写入；`ACCEPTED` 仅在 Owner 明确确认/接受指令驱动下由 Cleaner 机械记录。任何 Agent 不得因 `CLEAN`、测试通过、Owner 阅读过文件或其它间接信号自行把 `PENDING` 置为 `ACCEPTED`。
+Owner Verification 状态的唯一机器事实源是 `state.yaml.owner_verification.status`（取值 `NOT_REQUIRED` / `PENDING` / `ACCEPTED`）。`PENDING` / `NOT_REQUIRED` 由 Cleaner 生成 `core-logic.md` 时按「是否产生 CL 验证卡」初始机械写入 `state.yaml`；`ACCEPTED` 仅在 Owner 明确确认/接受指令驱动下由 Cleaner 机械持久化到 `state.yaml`。`core-logic.md` 只承载 Owner Core Logic 验证卡、因果说明与验证证据，不承担 Owner Verification 状态权威；如为便于人类阅读而保留展示性状态字段，必须明确标记为非权威 mirror，任何 Gate / Validator / Agent 决策均不得依赖它。任何 Agent 不得因 `CLEAN`、测试通过、Owner 阅读过文件或其它间接信号自行把 `PENDING` 置为 `ACCEPTED`。
 
 Owner 是 `ACCEPTED / REJECTED`（Contract 与 Core Logic 两处）的唯一 Decision Authority；Agent 只能在收到 Owner 明确指令后机械持久化该决定，不得通过测试通过、Cleaner `CLEAN` 或读取聊天上下文自行推断 Owner 已接受。Deliverer 不得要求 Owner 手工编辑 Markdown。
 

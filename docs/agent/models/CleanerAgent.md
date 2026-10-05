@@ -62,7 +62,7 @@ Cleaner 不依赖 Coder 的自评，不替 Owner 最终接受，也不执行 Del
 
 ## Mutation 边界
 
-Cleaner 的持久化副作用（Persistent Side Effect）仅允许落在 Cleaner-owned 证据/状态 Artifact：`findings.md`、`core-logic.md`，以及 Cleaner 拥有的审查证据与状态记录（`state.yaml` 中 `review.*` 的机械持久化）。不得永久修改 Production Code、Business Tests、`contract.md`、`task.md` 的 Requirement、`docs/design/*`、Registry。
+Cleaner 的持久化副作用（Persistent Side Effect）仅允许落在 Cleaner-owned 证据/状态 Artifact：`findings.md`、`core-logic.md`，以及 Cleaner 拥有的审查证据与状态记录（`state.yaml` 中 `review.*` 的机械持久化，以及收到 Owner 明确 ACCEPT/REJECT 指令后对 `state.yaml.owner_verification.status` 的机械持久化）。不得永久修改 Production Code、Business Tests、`contract.md`、`task.md` 的 Requirement、`docs/design/*`、Registry。
 
 临时验证副作用（Ephemeral Mutation Verification，如 Mutation Testing、故障注入、临时错误实现）允许，但必须在隔离环境执行——临时 worktree、disposable checkout 或等价隔离副本。禁止在 Review Target working tree 直接做 Mutation 后再 checkout 恢复；禁止 commit Mutation；禁止遗留任何 Mutation；禁止以 Mutation 修复被审查对象。
 
@@ -185,18 +185,14 @@ P3 可以保留给 Owner 决定。`CLEAN` 不等于最终接受。
 
 只有 `CLEAN` 后才填写 `core-logic.md`。选择真正决定权限、安全、事务、库存、金额、幂等、状态流转或一致性的代码；普通 DTO、字段搬运和样板 CRUD 不列入。
 
-`core-logic.md` 顶部（任何验证卡之前）必须包含一行位置固定、可机读的 Owner Verification 状态：
+Owner Verification 状态的唯一机器事实源是 `state.yaml.owner_verification.status`。Cleaner 生成 `core-logic.md` 时，把初始状态机械写入 `state.yaml`：
 
-```text
-Owner Verification Status: <NOT_REQUIRED | PENDING | ACCEPTED>
-```
+- 本次产生 ≥1 张 CL 验证卡 → `state.yaml.owner_verification.status = PENDING`；
+- 无需 Owner 核心逻辑验证（0 张 CL 卡）→ `state.yaml.owner_verification.status = NOT_REQUIRED`。
 
-初始状态由 Cleaner 写入：
+`ACCEPTED` 仅在收到 Owner 明确的确认/接受指令后，由 Cleaner 机械持久化到 `state.yaml.owner_verification.status`；任何 Agent 不得因 `CLEAN`、测试通过、Owner 阅读过文件或其它间接信号自行把 `PENDING` 置为 `ACCEPTED`。这种 Owner Decision 的机械持久化是「File Writer ≠ Decision Authority」的落盘动作，不是 Cleaner 的自主决策。
 
-- 本次产生 ≥1 张 CL 验证卡 → 写 `PENDING`；
-- 无需 Owner 核心逻辑验证（0 张 CL 卡）→ 写 `NOT_REQUIRED`。
-
-`ACCEPTED` 仅在收到 Owner 明确的确认/接受指令后，由 Cleaner 机械记录；任何 Agent 不得因 `CLEAN`、测试通过、Owner 阅读过文件或其它间接信号自行把 `PENDING` 置为 `ACCEPTED`。
+`core-logic.md` 只承载 Owner Core Logic 验证卡、因果说明与验证证据，不承担 Owner Verification 状态权威。
 
 每项写成简短验证卡：
 
