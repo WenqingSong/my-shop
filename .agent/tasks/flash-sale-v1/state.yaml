@@ -2,7 +2,7 @@ task: flash-sale-v1
 phase: READY_FOR_REVIEW
 review:
   status: CLEAN
-  target_base: "ca4c92a71cc458aaed3d81a9ae0b8ef14315b6f3"
+  target_base: "805980899e297f8bd216f66ff6937067d9b051a9"
   target_paths:
     - "api/flashsale/v1/flash_sale.go"
     - "internal/controller/flashsale/flashsale.go"

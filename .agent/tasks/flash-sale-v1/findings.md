@@ -4,8 +4,8 @@
 
 - 分支：`feat/flash-sale-v1`
 - 任务基线 Base commit：`e0a48e9f023809d279e61fe7a0052a7cff461095`（与 task.md Review Baseline 一致，任务前 working tree clean）
-- 当前 HEAD（本次 CLEAN 绑定 target_base）：`ca4c92a71cc458aaed3d81a9ae0b8ef14315b6f3`（`fix(flash-sale): renumber reserved resources`）
-- 本次为**复审（re_review）**：原因 = 秒杀全局资源从「10000-10999 / 20261001000009」重编号为「12000-12999 / 20261001000011」并合并 `develop` 后，前次 CLEAN 被机械失效（`review.status → STALE`）；复审验证 CLEAN-001 修复在重编号后仍成立，并重验全局资源三边一致性与全部 AC。
+- 当前 HEAD（本次 CLEAN 绑定 target_base）：`805980899e297f8bd216f66ff6937067d9b051a9`（`docs(flash-sale): 修正陈旧注释`）
+- 本次为**复审（re_review）**：原因 = 秒杀全局资源从「10000-10999 / 20261001000009」重编号为「12000-12999 / 20261001000011」并合并 `develop` 后，前次 CLEAN 被机械失效（`review.status → STALE`）；复审验证 CLEAN-001 修复在重编号后仍成立，并重验全局资源三边一致性与全部 AC。随后 `ca4c92a..8059808` 仅为陈旧注释/说明修正，见「Incremental Review」节。
 - 被审查文件（`state.yaml` `review.target_paths` 17 项）：秒杀 API/controller/logic/service、migration、集成测试、design、registry、codes、seed、routes、logic、migrations_test。
 - 环境：MySQL 8.0（`my-shop-mysql` healthy）、Redis 7（`my-shop-redis` healthy）、Go 1.24.1。
 - Contract：APPROVED（2026-10-05）；Design Impact = NEW，`docs/design/flash-sale.md` 已存在并与 Contract 同步。
@@ -61,10 +61,19 @@ CLEAN
 - Required Fix Boundary：Update 必须保持「绑定集合只能在 Create 时确定」的不变量，仅允许改已绑定 SKU 的秒杀价/库存且 `total_stock ≥ sold`，不得新增/删除绑定、不得重置 `sold`。
 - 结论：关闭。重编号（12007 替换 10007）后修复逻辑与回归测试均保持成立。
 
-### 附注（P3，不阻塞，交 Owner 决定）
+### 附注（P3，不阻塞，交 Owner 决定；已于 `8059808` 修正）
 
-- `api/flashsale/v1/flash_sale.go` L100 `CreateOrderReq.IdempotencyKey` 的 `dc` 注释仍写「同键不同内容 10005」，实际错误码已重编号为 12005，属重编号遗漏的陈旧注释。
-- `internal/migrations/migrations_test.go` L145 注释「建立 16 张业务表」与 L365 注释「7 张 baseline 表 + orders + order_items」与实际（现 21 张业务表，含秒杀/评价）不符，属陈旧注释。
-- `internal/migrations/sql/20261001000011_flash_sale.up.sql` 头注释「version 紧随 refresh_tokens 20261001000008」已过时（实际为 20261001000011，中间隔着 reviews/favorites），属陈旧注释。
+- ~~`api/flashsale/v1/flash_sale.go` `dc` 注释「同键不同内容 10005」~~ → 已改为 `12005`。
+- ~~`internal/migrations/migrations_test.go` 注释「建立 16 张业务表」「7 张 baseline 表 + orders + order_items」~~ → 已改为「21 张业务表」「7 张 baseline 表 + orders + order_items + reviews + flash_sale 3 表」。
+- ~~`internal/migrations/sql/20261001000011_flash_sale.up.sql` 头注释「version 紧随 refresh_tokens 20261001000008」~~ → 已改为「version 20261001000011」。
 
-以上均为文档注释，不影响业务正确性与测试结论。
+以上均为文档注释修正，不影响业务正确性与测试结论。
+
+## Incremental Review
+
+> Incremental Review：检查 `ca4c92a..8059808`，变化仅为陈旧注释/说明修正（API `dc` 文本、migration 测试注释、migration SQL 头注释）及上一轮 Cleaner 已完成的 `findings.md`/`state.yaml` 复审产物提交；无 Go 运行时行为、SQL 执行语义、测试断言/执行逻辑、Contract 或 Design 语义变化。上一轮 CLEAN 结论继续成立。Review Target 更新为 `8059808`。
+
+- 变更文件（5 个）：`api/flashsale/v1/flash_sale.go`（仅 `dc` 10005→12005）、`internal/migrations/migrations_test.go`（仅 2 处注释文字）、`internal/migrations/sql/20261001000011_flash_sale.up.sql`（仅头注释）、`findings.md`、`state.yaml`（Cleaner 复审产物）。
+- 语义判定：Go runtime UNCHANGED、SQL UNCHANGED、Test assertions UNCHANGED、Contract UNCHANGED、Design UNCHANGED。
+- 验证：`go build ./...` PASS、`git diff --check` PASS、`go run ./cmd/workflow-check .agent/tasks/flash-sale-v1` PASS（Review Validity 恢复）。
+- 新 Finding：无（无新增 P0/P1/P2）。
