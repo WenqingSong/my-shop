@@ -1,14 +1,14 @@
 task: flash-sale-v1
-phase: WAITING_FOR_OWNER_ACCEPTANCE
+phase: READY_FOR_REVIEW
 review:
-  status: CLEAN
-  target_base: "e0a48e9f023809d279e61fe7a0052a7cff461095"
+  status: STALE
+  target_base: ""
   target_paths:
     - "api/flashsale/v1/flash_sale.go"
     - "internal/controller/flashsale/flashsale.go"
     - "internal/logic/flashsale/flashsale.go"
     - "internal/service/flashsale.go"
-    - "internal/migrations/sql/20261001000009_flash_sale.up.sql"
+    - "internal/migrations/sql/20261001000011_flash_sale.up.sql"
     - "internal/cmd/flashsale_test.go"
     - "docs/design/flash-sale.md"
     - ".agent/registry/error-codes.md"
@@ -22,14 +22,14 @@ review:
     - "internal/logic/logic.go"
     - "internal/migrations/migrations_test.go"
 owner_verification:
-  status: ACCEPTED
+  status: PENDING
 delivery:
   status: NONE
 required_resources:
   error_code_domains:
-    - "10000-10999（语义：秒杀错误码域，域序 10）"
+    - "12000-12999"
   migrations:
-    - "20261001000009（语义：秒杀活动/秒杀库存/秒杀订单表 migration）"
+    - "20261001000011"
 blocked:
   is_blocked: false
   reason: ""

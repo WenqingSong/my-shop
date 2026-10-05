@@ -122,6 +122,15 @@ func TestRouteTable(t *testing.T) {
 		// 秒杀活动后台写操作（AdminAuth + RequirePermission）。
 		"POST /admin/flash-sales",
 		"PUT /admin/flash-sales/:id",
+		// 商品评价公开列表（无 token）。
+		"GET /products/:id/reviews",
+		// 商品评价前台用户接口（Auth 保护）。
+		"POST /reviews",
+		"GET /my/reviews",
+		"PUT /reviews/:id",
+		"DELETE /reviews/:id",
+		// 商品评价后台写操作（AdminAuth + RequirePermission）。
+		"POST /admin/reviews/:id/take-down",
 	}
 	for _, w := range want {
 		if !got[w] {

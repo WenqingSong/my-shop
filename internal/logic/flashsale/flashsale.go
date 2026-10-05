@@ -237,7 +237,7 @@ func (s *sFlashSale) UpdateActivity(ctx context.Context, req *v1.UpdateReq) (*v1
 }
 
 // CreateOrder 秒杀下单：校验参数与 SKU/商品可用性后，单事务「时间窗校验 → 条件扣秒杀库存 → 创建订单」。
-// 幂等键命中（uk_flash_idempotency）回滚扣减后读回既有订单；一人一单命中（uk_flash_one_per_user）回滚并返回 10004。
+// 幂等键命中（uk_flash_idempotency）回滚扣减后读回既有订单；一人一单命中（uk_flash_one_per_user）回滚并返回 12004。
 func (s *sFlashSale) CreateOrder(ctx context.Context, userID, activityID int64, req *v1.CreateOrderReq) (*v1.CreateOrderRes, error) {
 	skuID := req.SkuId
 	if skuID <= 0 {
@@ -291,7 +291,7 @@ func (s *sFlashSale) CreateOrder(ctx context.Context, userID, activityID int64, 
 }
 
 // resolveSku 校验 SKU 存在且 enabled、商品 on_shelf，并捕获下单快照（名称/主图）。
-// 返回 5001（SKU 不存在）、4001（商品不存在）、10006（SKU 禁用或商品下架）。
+// 返回 5001（SKU 不存在）、4001（商品不存在）、12006（SKU 禁用或商品下架）。
 func (s *sFlashSale) resolveSku(ctx context.Context, skuID int64) (*skuSnapshot, error) {
 	sku, err := service.Sku().GetByID(ctx, skuID)
 	if err != nil {
@@ -331,7 +331,7 @@ func (s *sFlashSale) insertOrder(
 ) (int64, error) {
 	var orderID int64
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		// 1. 活动存在性 + 状态：不存在或已下架 → 10001。
+		// 1. 活动存在性 + 状态：不存在或已下架 → 12001。
 		activity, e := loadActivityInTx(ctx, tx, activityID)
 		if e != nil {
 			return e
@@ -403,7 +403,7 @@ func (s *sFlashSale) insertOrder(
 	return orderID, nil
 }
 
-// handleIdempotency 读回既有秒杀订单：同请求指纹返回既有订单（幂等成功），否则 10005。
+// handleIdempotency 读回既有秒杀订单：同请求指纹返回既有订单（幂等成功），否则 12005。
 func (s *sFlashSale) handleIdempotency(ctx context.Context, userID int64, key, hash string) (*v1.CreateOrderRes, error) {
 	row, err := s.findByIdempotencyKey(ctx, userID, key)
 	if err != nil {
@@ -420,7 +420,7 @@ func (s *sFlashSale) handleIdempotency(ctx context.Context, userID int64, key, h
 
 // updateBindings 仅更新活动已存在 SKU 绑定的秒杀价/库存，不新增、不删除绑定。
 // SKU 绑定集合只能在 Create 时确定（Contract 未授权 Update 增删绑定）：
-// 请求中的 sku_id 必须已绑定该活动，否则返回 10007；新库存必须 ≥ 已售（sold），
+// 请求中的 sku_id 必须已绑定该活动，否则返回 12007；新库存必须 ≥ 已售（sold），
 // 保证更新后 remaining = total_stock - sold 恒 ≥ 0（避免重置 sold 导致超卖）。
 func (s *sFlashSale) updateBindings(ctx context.Context, tx gdb.TX, activityID int64, inputs []bindingInput) error {
 	for _, in := range inputs {
@@ -632,7 +632,7 @@ func statusToString(s int) string {
 	return v1.StatusDisabled
 }
 
-// parseStatus 将 API 字符串状态枚举解析为 DB TINYINT，非法值返回 10007。
+// parseStatus 将 API 字符串状态枚举解析为 DB TINYINT，非法值返回 12007。
 func parseStatus(status string) (int, error) {
 	switch status {
 	case v1.StatusEnabled:

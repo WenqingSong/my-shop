@@ -87,14 +87,20 @@ const (
 	CodeOrderInvalidQuantity         Code = 9005 // 直接购买数量非法 → 400
 	CodeOrderIdempotencyConflict     Code = 9006 // 同幂等键不同请求内容 → 409
 
-	// 秒杀域（FlashSale）10000-10999。
-	CodeFlashSaleActivityNotFound    Code = 10001 // 秒杀活动不存在或已下架 → 404
-	CodeFlashSaleNotInTimeWindow     Code = 10002 // 活动未开始或已结束 → 409
-	CodeFlashSaleStockInsufficient   Code = 10003 // 秒杀库存不足 → 409
-	CodeFlashSaleAlreadyPurchased    Code = 10004 // 一人一单，已购买 → 409
-	CodeFlashSaleIdempotencyConflict Code = 10005 // 同幂等键不同请求内容 → 409
-	CodeFlashSaleSkuUnavailable      Code = 10006 // 下单时 SKU 禁用或商品下架 → 409
-	CodeFlashSaleInvalidArgument     Code = 10007 // 活动参数非法（秒杀价/库存/时间/状态）→ 400
+	// 商品评价域（Review）10000-10999。
+	CodeReviewNotFound      Code = 10001 // 评价不存在/非本人/不可见（防枚举）→ 404
+	CodeReviewNotEligible   Code = 10002 // 未购买该商品或订单未达可评价状态 → 409
+	CodeReviewAlreadyExists Code = 10003 // 同一订单项已评价 → 409
+	CodeReviewInvalidInput  Code = 10004 // 星级越界/内容为空或超长 → 400
+
+	// 秒杀域（FlashSale）12000-12999。
+	CodeFlashSaleActivityNotFound    Code = 12001 // 秒杀活动不存在或已下架 → 404
+	CodeFlashSaleNotInTimeWindow     Code = 12002 // 活动未开始或已结束 → 409
+	CodeFlashSaleStockInsufficient   Code = 12003 // 秒杀库存不足 → 409
+	CodeFlashSaleAlreadyPurchased    Code = 12004 // 一人一单，已购买 → 409
+	CodeFlashSaleIdempotencyConflict Code = 12005 // 同幂等键不同请求内容 → 409
+	CodeFlashSaleSkuUnavailable      Code = 12006 // 下单时 SKU 禁用或商品下架 → 409
+	CodeFlashSaleInvalidArgument     Code = 12007 // 活动参数非法（秒杀价/库存/时间/状态）→ 400
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -161,6 +167,11 @@ var codeTable = map[Code]codeInfo{
 	CodeOrderCartEmpty:               {http.StatusBadRequest, "购物车无勾选商品"},
 	CodeOrderInvalidQuantity:         {http.StatusBadRequest, "购买数量非法"},
 	CodeOrderIdempotencyConflict:     {http.StatusConflict, "幂等键冲突"},
+
+	CodeReviewNotFound:      {http.StatusNotFound, "评价不存在"},
+	CodeReviewNotEligible:   {http.StatusConflict, "暂不可评价"},
+	CodeReviewAlreadyExists: {http.StatusConflict, "该订单项已评价"},
+	CodeReviewInvalidInput:  {http.StatusBadRequest, "评价内容非法"},
 
 	CodeFlashSaleActivityNotFound:    {http.StatusNotFound, "秒杀活动不存在"},
 	CodeFlashSaleNotInTimeWindow:     {http.StatusConflict, "秒杀活动不在进行中"},

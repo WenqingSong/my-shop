@@ -55,6 +55,7 @@ var seedPermissionList = []permissionSeed{
 	{Code: "order:refund", Name: "订单退款"},
 	{Code: "flash_sale:create", Name: "创建秒杀活动"},
 	{Code: "flash_sale:update", Name: "更新秒杀活动"},
+	{Code: "review:take_down", Name: "下架评价"},
 }
 
 // seedPermissions 幂等写入标准权限：已存在（code 唯一）则跳过。

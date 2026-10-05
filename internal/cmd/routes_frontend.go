@@ -10,6 +10,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/order"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/product"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/review"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 )
 
@@ -29,6 +30,7 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	cartCtrl := cart.NewV1()
 	orderCtrl := order.NewV1()
 	flashsaleCtrl := flashsale.NewV1()
+	reviewCtrl := review.NewV1()
 
 	// 前台公开接口：注册、登录、刷新、分类查询、商品查询（无需 token）。
 	root.POST("/register", iamCtrl.Register)
@@ -38,6 +40,8 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	root.GET("/categories/:id", categoriesCtrl.Detail)
 	root.GET("/products", productCtrl.List)
 	root.GET("/products/:id", productCtrl.Detail)
+	// 商品公开评价列表与汇总（无需 token）。
+	root.GET("/products/:id/reviews", reviewCtrl.ListProduct)
 
 	// 前台登录用户接口：/me、收货地址、购物车与会话管理均需要认证 + 会话有效性校验。
 	root.Group("/", func(user *ghttp.RouterGroup) {
@@ -68,6 +72,12 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 
 		// 秒杀下单（仅登录用户，作用于本人数据）。
 		user.POST("/flash-sales/:id/orders", flashsaleCtrl.CreateOrder)
+
+		// 商品评价（仅登录用户，作用于本人数据）。
+		user.POST("/reviews", reviewCtrl.Create)
+		user.GET("/my/reviews", reviewCtrl.MyList)
+		user.PUT("/reviews/:id", reviewCtrl.Update)
+		user.DELETE("/reviews/:id", reviewCtrl.Delete)
 
 		user.GET("/sessions", iamCtrl.ListSessions)
 		user.DELETE("/sessions/:sid", iamCtrl.RevokeSession)

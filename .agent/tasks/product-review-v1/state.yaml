@@ -1,0 +1,33 @@
+task: product-review-v1
+phase: WAITING_FOR_OWNER_ACCEPTANCE
+review:
+  status: CLEAN
+  target_base: "237663eb5d6658fea2c4201fc6062a431ce40d14"
+  target_paths:
+    - "api/review/v1/review.go"
+    - "internal/controller/review/review.go"
+    - "internal/logic/review/review.go"
+    - "internal/service/review.go"
+    - "internal/cmd/review_test.go"
+    - "internal/migrations/sql/20261001000009_reviews.up.sql"
+    - "docs/design/review.md"
+    - "internal/boot/boot_migration_test.go"
+    - "internal/boot/seed.go"
+    - "internal/cmd/routes_admin.go"
+    - "internal/cmd/routes_frontend.go"
+    - "internal/cmd/routes_test.go"
+    - "internal/codes/codes.go"
+    - "internal/logic/logic.go"
+    - "internal/migrations/migrations_test.go"
+owner_verification:
+  status: ACCEPTED
+delivery:
+  status: NONE
+required_resources:
+  error_code_domains:
+    - "10000-10999"
+  migrations:
+    - "20261001000009"
+blocked:
+  is_blocked: false
+  reason: ""

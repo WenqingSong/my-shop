@@ -260,7 +260,7 @@ func TestFlashSaleCreateActivityAndPermission(t *testing.T) {
 	}
 }
 
-// TestFlashSaleOrderTimeWindow 覆盖 AC-002：活动开始前/结束后下单被稳定拒绝（10002），且不产生订单、不扣库存。
+// TestFlashSaleOrderTimeWindow 覆盖 AC-002：活动开始前/结束后下单被稳定拒绝（12002），且不产生订单、不扣库存。
 func TestFlashSaleOrderTimeWindow(t *testing.T) {
 	base := setupFlashSaleServer(t)
 	skuID := flashSetupSku(t, "SKU-TIME", 5000, 1)
@@ -270,16 +270,16 @@ func TestFlashSaleOrderTimeWindow(t *testing.T) {
 	notStarted := flashInsertActivity(t, "未开始", 1, flashMySQLNow(t).Add(24*time.Hour), flashMySQLNow(t).Add(48*time.Hour))
 	flashInsertBinding(t, notStarted, skuID, 1000, 10)
 	before := flashOrderCall(t, base, notStarted, userToken, map[string]any{"sku_id": skuID, "idempotency_key": "k-before"})
-	if before.Status != 409 || before.Code != 10002 {
-		t.Fatalf("before start: status=%d code=%d want 409/10002", before.Status, before.Code)
+	if before.Status != 409 || before.Code != 12002 {
+		t.Fatalf("before start: status=%d code=%d want 409/12002", before.Status, before.Code)
 	}
 
 	// 已结束。
 	ended := flashInsertActivity(t, "已结束", 1, flashMySQLNow(t).Add(-48*time.Hour), flashMySQLNow(t).Add(-24*time.Hour))
 	flashInsertBinding(t, ended, skuID, 1000, 10)
 	after := flashOrderCall(t, base, ended, userToken, map[string]any{"sku_id": skuID, "idempotency_key": "k-after"})
-	if after.Status != 409 || after.Code != 10002 {
-		t.Fatalf("after end: status=%d code=%d want 409/10002", after.Status, after.Code)
+	if after.Status != 409 || after.Code != 12002 {
+		t.Fatalf("after end: status=%d code=%d want 409/12002", after.Status, after.Code)
 	}
 
 	// 均无订单、无库存扣减。
@@ -331,7 +331,7 @@ func TestFlashSaleOrderPricingSnapshot(t *testing.T) {
 	}
 }
 
-// TestFlashSaleOnePerUser 覆盖 AC-004/INV-003：同一用户对同一活动商品只能成功购买一次，重复被 10004 拒绝且无写入。
+// TestFlashSaleOnePerUser 覆盖 AC-004/INV-003：同一用户对同一活动商品只能成功购买一次，重复被 12004 拒绝且无写入。
 func TestFlashSaleOnePerUser(t *testing.T) {
 	base := setupFlashSaleServer(t)
 	skuID := flashSetupSku(t, "SKU-ONE", 5000, 1)
@@ -348,8 +348,8 @@ func TestFlashSaleOnePerUser(t *testing.T) {
 	}
 
 	second := flashOrderCall(t, base, activityID, userToken, map[string]any{"sku_id": skuID, "idempotency_key": "k-one-2"})
-	if second.Status != 409 || second.Code != 10004 {
-		t.Fatalf("second order: status=%d code=%d want 409/10004", second.Status, second.Code)
+	if second.Status != 409 || second.Code != 12004 {
+		t.Fatalf("second order: status=%d code=%d want 409/12004", second.Status, second.Code)
 	}
 	// 仍只有一个订单、库存只扣一次。
 	if n := flashOrderCount(t, activityID); n != 1 {
@@ -361,7 +361,7 @@ func TestFlashSaleOnePerUser(t *testing.T) {
 }
 
 // TestFlashSaleIdempotency 覆盖 AC-005/INV-005：
-// 同幂等键重复提交只产生一个订单、库存只扣一次、返回既有订单；同键不同内容返回 10005。
+// 同幂等键重复提交只产生一个订单、库存只扣一次、返回既有订单；同键不同内容返回 12005。
 func TestFlashSaleIdempotency(t *testing.T) {
 	base := setupFlashSaleServer(t)
 	skuID := flashSetupSku(t, "SKU-IDEM", 5000, 1)
@@ -391,10 +391,10 @@ func TestFlashSaleIdempotency(t *testing.T) {
 		t.Fatalf("sku sold=%d want 1", sold)
 	}
 
-	// 同键不同内容（不同 SKU）→ 10005，且不扣新 SKU 库存。
+	// 同键不同内容（不同 SKU）→ 12005，且不扣新 SKU 库存。
 	conflict := flashOrderCall(t, base, activityID, userToken, map[string]any{"sku_id": skuID2, "idempotency_key": "k-idem"})
-	if conflict.Status != 409 || conflict.Code != 10005 {
-		t.Fatalf("idempotency conflict: status=%d code=%d want 409/10005", conflict.Status, conflict.Code)
+	if conflict.Status != 409 || conflict.Code != 12005 {
+		t.Fatalf("idempotency conflict: status=%d code=%d want 409/12005", conflict.Status, conflict.Code)
 	}
 	if _, sold := flashBindingStock(t, activityID, skuID2); sold != 0 {
 		t.Fatalf("sku2 sold=%d want 0", sold)
@@ -471,14 +471,14 @@ func TestFlashSaleOrderFailures(t *testing.T) {
 	active := flashInsertActivity(t, "失败场景", 1, flashMySQLNow(t).Add(-time.Hour), flashMySQLNow(t).Add(time.Hour))
 	flashInsertBinding(t, active, skuID, 1000, 1)
 
-	// 库存不足：第二个用户下单，库存已耗尽 → 10003，无订单、库存不变。
+	// 库存不足：第二个用户下单，库存已耗尽 → 12003，无订单、库存不变。
 	first := flashOrderCall(t, base, active, userToken, map[string]any{"sku_id": skuID, "idempotency_key": "k-fail-1"})
 	if first.Status != 200 || first.Code != 0 {
 		t.Fatalf("first order: status=%d code=%d", first.Status, first.Code)
 	}
 	insufficient := flashOrderCall(t, base, active, userToken2, map[string]any{"sku_id": skuID, "idempotency_key": "k-fail-2"})
-	if insufficient.Status != 409 || insufficient.Code != 10003 {
-		t.Fatalf("insufficient: status=%d code=%d want 409/10003", insufficient.Status, insufficient.Code)
+	if insufficient.Status != 409 || insufficient.Code != 12003 {
+		t.Fatalf("insufficient: status=%d code=%d want 409/12003", insufficient.Status, insufficient.Code)
 	}
 	if n := flashOrderCount(t, active); n != 1 {
 		t.Fatalf("insufficient should not create order, count=%d want 1", n)
@@ -498,18 +498,18 @@ func TestFlashSaleOrderFailures(t *testing.T) {
 		t.Fatalf("invalid key: status=%d code=%d want 400/1001", badKey.Status, badKey.Code)
 	}
 
-	// 活动不存在 → 404/10001。
+	// 活动不存在 → 404/12001。
 	notFound := flashOrderCall(t, base, 999999, userToken2, map[string]any{"sku_id": skuID, "idempotency_key": "k-nf"})
-	if notFound.Status != 404 || notFound.Code != 10001 {
-		t.Fatalf("not found: status=%d code=%d want 404/10001", notFound.Status, notFound.Code)
+	if notFound.Status != 404 || notFound.Code != 12001 {
+		t.Fatalf("not found: status=%d code=%d want 404/12001", notFound.Status, notFound.Code)
 	}
 
-	// 活动下架（status=0）→ 404/10001。
+	// 活动下架（status=0）→ 404/12001。
 	disabled := flashInsertActivity(t, "下架", 0, flashMySQLNow(t).Add(-time.Hour), flashMySQLNow(t).Add(time.Hour))
 	flashInsertBinding(t, disabled, skuID, 1000, 10)
 	disRes := flashOrderCall(t, base, disabled, userToken2, map[string]any{"sku_id": skuID, "idempotency_key": "k-dis"})
-	if disRes.Status != 404 || disRes.Code != 10001 {
-		t.Fatalf("disabled activity: status=%d code=%d want 404/10001", disRes.Status, disRes.Code)
+	if disRes.Status != 404 || disRes.Code != 12001 {
+		t.Fatalf("disabled activity: status=%d code=%d want 404/12001", disRes.Status, disRes.Code)
 	}
 
 	// SKU 未绑定该活动 → 400/1001。
@@ -618,14 +618,14 @@ func TestFlashSaleUpdateCannotAddOrRemoveBindings(t *testing.T) {
 		t.Fatalf("skuA sold after subset update=%d want 6 (must be preserved)", sold)
 	}
 
-	// 2) 更新时提交未绑定的 skuC → 拒绝 10007，且不新增绑定。
+	// 2) 更新时提交未绑定的 skuC → 拒绝 12007，且不新增绑定。
 	bad := flashPut(t, base, fmt.Sprintf("/admin/flash-sales/%d", activityID), map[string]any{
 		"skus": []map[string]any{
 			{"sku_id": skuC, "flash_price": 1000, "total_stock": 10},
 		},
 	}, adminToken)
-	if bad.Status != 400 || bad.Code != 10007 {
-		t.Fatalf("add unbound sku: status=%d code=%d want 400/10007", bad.Status, bad.Code)
+	if bad.Status != 400 || bad.Code != 12007 {
+		t.Fatalf("add unbound sku: status=%d code=%d want 400/12007", bad.Status, bad.Code)
 	}
 	if n, _ := g.DB().Model("flash_sale_activity_skus").Ctx(context.Background()).
 		Where("activity_id", activityID).Where("sku_id", skuC).Count(); n != 0 {

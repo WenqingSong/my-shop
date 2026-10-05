@@ -31,4 +31,6 @@
 | 20261001000006 | cart_items | db-migration | ACTIVE | 基线 |
 | 20261001000007 | orders | order-v1 | ACTIVE | orders + order_items |
 | 20261001000008 | refresh_tokens | iam-v4 | ACTIVE | IAM V4 refresh token 表（前台用户域） |
-| 20261001000009 | flash_sale | flash-sale-v1 | RESERVED | flash_sale_activities + flash_sale_activity_skus + flash_sale_orders |
+| 20261001000009 | reviews | product-review-v1 | RESERVED | reviews 评价表 |
+| 20261001000010 | favorites | product-favorite-v1 | RESERVED | favorites 收藏表 |
+| 20261001000011 | flash_sale | flash-sale-v1 | RESERVED | flash_sale_activities + flash_sale_activity_skus + flash_sale_orders |

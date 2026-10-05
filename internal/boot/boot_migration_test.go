@@ -23,7 +23,7 @@ const migrationBaselineVersion = uint(20261001000001)
 var migrationRelatedTables = []string{
 	"flash_sale_orders", "flash_sale_activity_skus", "flash_sale_activities",
 	"order_items", "orders",
-	"refresh_tokens", "cart_items", "role_permissions", "admin_roles", "permissions", "roles",
+	"refresh_tokens", "cart_items", "reviews", "role_permissions", "admin_roles", "permissions", "roles",
 	"admins", "inventory_logs", "inventories", "skus", "product_images", "products", "categories", "addresses", "users",
 	"schema_migrations", "migration_probe",
 }

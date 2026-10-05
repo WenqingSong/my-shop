@@ -9,6 +9,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/inventory"
 	orderController "cnb.cool/go-cloud-devops/my-shop/internal/controller/order"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/product"
+	reviewController "cnb.cool/go-cloud-devops/my-shop/internal/controller/review"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/sku"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 )
@@ -31,6 +32,7 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 	inventoryCtrl := inventory.NewV1()
 	orderAdminCtrl := orderController.NewAdminV1()
 	flashsaleAdminCtrl := flashsale.NewAdminV1()
+	reviewAdminCtrl := reviewController.NewAdminV1()
 
 	// 后台公开接口：管理员登录（无需 token）。
 	root.POST("/admin/login", adminCtrl.Login)
@@ -109,5 +111,8 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 		// 秒杀活动后台写操作（AdminAuth + RequirePermission）。
 		require("flash_sale:create").POST("/admin/flash-sales", flashsaleAdminCtrl.Create)
 		require("flash_sale:update").PUT("/admin/flash-sales/:id", flashsaleAdminCtrl.Update)
+
+		// 商品评价后台写操作（AdminAuth + RequirePermission）。
+		require("review:take_down").POST("/admin/reviews/:id/take-down", reviewAdminCtrl.TakeDown)
 	})
 }

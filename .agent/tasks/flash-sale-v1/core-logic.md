@@ -15,10 +15,10 @@
 
 ## CL-002：一人一单 + 幂等去重（DB 唯一约束兜底）
 
-- Owner 需要理解：一人一单与幂等去重是两层语义，且都**不能只靠应用层「先查再写」**——并发下会漏。真正兜底是 `flash_sale_orders` 表上的两个唯一约束：`uk_flash_one_per_user(activity_id, sku_id, user_id)`（一人一单）与 `uk_flash_idempotency(user_id, idempotency_key)`（幂等）。插入命中唯一约束时事务回滚（连同已做的库存扣减），再按键名分流：幂等键命中返回既有订单（同 hash）或 `10005`（不同 hash），一人一单命中返回 `10004`。若删掉任一唯一约束，重复购买/重复请求会各建出第二单并重复扣库存。
-- 生产代码：`internal/logic/flashsale/flashsale.go` `insertOrder`（L376-395 插入 + `duplicateKeyName` 提取键名）、`CreateOrder`（L266-274 按键名分流）、`handleIdempotency`（L406-418）；约束定义于 `internal/migrations/sql/20261001000009_flash_sale.up.sql`
+- Owner 需要理解：一人一单与幂等去重是两层语义，且都**不能只靠应用层「先查再写」**——并发下会漏。真正兜底是 `flash_sale_orders` 表上的两个唯一约束：`uk_flash_one_per_user(activity_id, sku_id, user_id)`（一人一单）与 `uk_flash_idempotency(user_id, idempotency_key)`（幂等）。插入命中唯一约束时事务回滚（连同已做的库存扣减），再按键名分流：幂等键命中返回既有订单（同 hash）或 `12005`（不同 hash），一人一单命中返回 `12004`。若删掉任一唯一约束，重复购买/重复请求会各建出第二单并重复扣库存。
+- 生产代码：`internal/logic/flashsale/flashsale.go` `insertOrder`（L376-395 插入 + `duplicateKeyName` 提取键名）、`CreateOrder`（L266-274 按键名分流）、`handleIdempotency`（L406-418）；约束定义于 `internal/migrations/sql/20261001000011_flash_sale.up.sql`
 - 关键测试：`TestFlashSaleOnePerUser`、`TestFlashSaleIdempotency`（`internal/cmd/flashsale_test.go`）
 - 基线验证：`go test -race -run 'TestFlashSaleOnePerUser|TestFlashSaleIdempotency' ./internal/cmd/`
 - 可选 Mutation：从 `flash_sale_orders` 移除 `uk_flash_one_per_user` 或 `uk_flash_idempotency` 唯一约束
-- 预期失败：`TestFlashSaleOnePerUser`（第二次购买会成功建单而非 10004）或 `TestFlashSaleIdempotency`（重复请求会建第二个订单而非返回既有订单）失败
+- 预期失败：`TestFlashSaleOnePerUser`（第二次购买会成功建单而非 12004）或 `TestFlashSaleIdempotency`（重复请求会建第二个订单而非返回既有订单）失败
 - 恢复确认：还原唯一约束后重跑上述命令，恢复通过
