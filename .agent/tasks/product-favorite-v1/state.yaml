@@ -1,0 +1,18 @@
+task: product-favorite-v1
+phase: APPROVED
+review:
+  status: NONE
+  target_base: ""
+  target_paths: []
+owner_verification:
+  status: PENDING
+delivery:
+  status: NONE
+required_resources:
+  error_code_domains:
+    - "11000-11999"
+  migrations:
+    - "20261001000010"
+blocked:
+  is_blocked: false
+  reason: ""
