@@ -1,8 +1,8 @@
 task: product-review-v1
-phase: READY_FOR_REVIEW
+phase: WAITING_FOR_OWNER_ACCEPTANCE
 review:
-  status: STALE
-  target_base: "20046a0cc3be4bc1d5658b9b915a6649f567cf5d"
+  status: CLEAN
+  target_base: "237663eb5d6658fea2c4201fc6062a431ce40d14"
   target_paths:
     - "api/review/v1/review.go"
     - "internal/controller/review/review.go"
@@ -20,7 +20,7 @@ review:
     - "internal/logic/logic.go"
     - "internal/migrations/migrations_test.go"
 owner_verification:
-  status: PENDING
+  status: ACCEPTED
 delivery:
   status: NONE
 required_resources:
