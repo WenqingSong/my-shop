@@ -1,5 +1,5 @@
 -- 秒杀核心闭环 V1：flash_sale_activities（活动）+ flash_sale_activity_skus（活动×SKU 绑定：秒杀价 + 秒杀库存）+ flash_sale_orders（秒杀订单）。
--- 说明：经 golang-migrate 机制新增（version 紧随 refresh_tokens 20261001000008）。
+-- 说明：经 golang-migrate 机制新增（version 20261001000011）。
 -- DDL 不使用 IF NOT EXISTS（迁移只执行一次，由 schema_migrations 追踪）。
 -- 秒杀库存独立建模：total_stock 为初始库存（语义为普通可售库存的预分配/预留活动配额），sold 为已售，
 -- 剩余 = total_stock - sold（恒 ≥ 0）；V1 抢购事务内不联动普通 inventories。

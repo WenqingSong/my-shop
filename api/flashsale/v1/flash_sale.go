@@ -97,7 +97,7 @@ type CreateOrderReq struct {
 	g.Meta         `path:"/flash-sales/:id/orders" method:"post" tags:"秒杀" summary:"秒杀下单"`
 	Id             int64  `json:"id" in:"path" v:"required" dc:"活动 id"`
 	SkuId          int64  `json:"sku_id" dc:"SKU id（必须为该活动绑定的 SKU）"`
-	IdempotencyKey string `json:"idempotency_key" dc:"幂等键（同键同内容幂等返回既有订单，同键不同内容 10005）"`
+	IdempotencyKey string `json:"idempotency_key" dc:"幂等键（同键同内容幂等返回既有订单，同键不同内容 12005）"`
 }
 
 // CreateOrderRes 秒杀下单响应。
