@@ -63,7 +63,7 @@ extra_instruction: <可选>
 
 ## 全局资源预留
 
-实现中出现的每个错误码域/编号与 migration version，都必须已存在于 APPROVED Contract 的全局资源清单。禁止自行推断「当前最大是 X，所以写 X+1」这类占用。实现阶段新增全局资源需求时，走既有 `CONTRACT_REVISION` 流程（Analyst 从 `.agent/registry/*` 派生新值 → Owner 批准 Contract → Analyst 更新 Contract 并形成 Registry-only commit 落 `RESERVED`），不得自行分配。
+实现中出现的每个全局资源（Shared Resource，当前 my-shop 示例为错误码域/编号与 migration version），都必须已存在于 APPROVED Contract 的全局资源清单。禁止自行推断「当前最大是 X，所以写 X+1」这类占用。实现阶段新增全局资源需求时，走既有 `CONTRACT_REVISION` 流程（Analyst 读 `.agent/workflow.yaml` 确认 Shared Resource Kinds，再从对应 `.agent/registry/*` 派生新值 → Owner 批准 Contract → Analyst 更新 Contract 并形成 Registry-only commit 落 `RESERVED`），不得自行分配。
 
 ## 错误、数据与安全
 

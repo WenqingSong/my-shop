@@ -198,7 +198,7 @@ Build Command
 Adoption 在 Owner Decision 确认后，必须生成 / 更新长期机器配置 `.agent/workflow.yaml`，至少 materialize：
 
 - shared integration branch（`git.integration_branch`）；
-- applicable Registry path（`resources.migration_version.registry` / `resources.error_code_domain.registry`，仅项目确实启用对应资源时声明）。
+- 项目实际声明的 Shared Resource Kinds 的 Registry 路径（`resources.<kind>.registry`，仅项目确实启用对应资源时声明；kind 名必须是合法 `lower_snake_case`，如 `migration_version`、`im_migration_version`）。
 
 `.agent/workflow.yaml` 是长期机器配置，**不是** temporary；`PROJECT_ADAPTATION.md` 仍是 temporary，完成后删除。
 
@@ -310,7 +310,7 @@ Adoption 必须逐项判断：
 | --- | --- | --- |
 | integration branch | 原硬编码 `origin/develop` | 已解决（P1）：由 `.agent/workflow.yaml` 的 `git.integration_branch` 声明 |
 | Registry 路径 | 原硬编码 `.agent/registry/migrations.md` / `error-codes.md` | 已解决（P1）：由 `.agent/workflow.yaml` 的 `resources.*.registry` 声明 |
-| `internal/workflow/state.go` `Resources` | 硬编码 `Migrations` / `ErrorCodeDomains` 两个字段 | 保留（P2 泛化 resource model 时处理） |
+| `internal/workflow/state.go` `Resources` | 硬编码 `Migrations` / `ErrorCodeDomains` 两个字段 | 已解决（P2）：泛化为 `Resources.Reservations map[string][]string`，schema v2 legacy 由兼容层 normalize |
 | `internal/workflow/paths.go` | 硬编码 `.agent/tasks/<task>/` 根路径 | 保留（Core convention，本轮不配置化） |
 | `scripts/check-registry.sh` | 硬编码 `internal/codes/codes.go`、`internal/migrations/sql`、错误码 `CodeOK == 0`、14 位数字 migration version | 保留（Project Policy，非 Engine runtime） |
 | Go module path | `cnb.cool/go-cloud-devops/my-shop`（import path） | 保留（Package Architecture 时处理） |

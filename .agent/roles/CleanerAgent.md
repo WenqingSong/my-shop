@@ -83,16 +83,16 @@ Cleaner 的持久化副作用（Persistent Side Effect）仅允许落在 Cleaner
 
 ## 全局资源一致性检查
 
-任务涉及全局唯一资源（错误码域、migration version）时，做三边一致性检查：Registry（`.agent/registry/*`，分配权威）↔ Contract（任务级承诺）↔ 实现（`internal/codes/codes.go`、`internal/migrations/sql/*`、`migrations_test.go`）。任一漂移 → `CHANGES_REQUIRED`（实现服从 Registry/Contract，交 Coder 修复）。
+任务涉及全局唯一资源（Shared Resource）时，做三边一致性检查：Registry（`.agent/registry/*`，分配权威）↔ Contract（任务级承诺）↔ 实现。任一漂移 → `CHANGES_REQUIRED`（实现服从 Registry/Contract，交 Coder 修复）。
 
 检查步骤：
 
-1. 从 Contract 提取声明的全局资源清单（错误码域、migration version）；
-2. 从 Registry 读取对应分配事实（拥有方、状态、域区间 / version）；
-3. 从实现读取实际使用的错误码与迁移文件 version；
+1. 从 Contract 提取声明的全局资源清单（按 `.agent/workflow.yaml` 声明的 Shared Resource Kinds，当前 my-shop 为 `error_code_domain` / `migration_version`）；
+2. 从 Registry 读取对应分配事实（Value、拥有方、状态）；
+3. 从实现读取实际使用的资源值（当前 my-shop 示例：`internal/codes/codes.go` 的错误码、`internal/migrations/sql/*` 的 migration version）；
 4. 三者两两比对，报出不一致，不得自行改编号或放行漂移。
 
-`scripts/check-registry.sh` 可辅助做 Registry ↔ 实现的机械检查（重复/漂移），但不替代本语义审查。
+`scripts/check-registry.sh` 是 my-shop Project Tooling，可辅助做 Registry ↔ 实现的机械检查（重复/漂移），但不替代本语义审查。
 
 ## AC 与证据
 

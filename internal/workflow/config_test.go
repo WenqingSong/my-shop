@@ -23,6 +23,16 @@ func writeConfigFile(t *testing.T, content string) string {
 	return dir
 }
 
+// configWithResources 构造一份 v1 机器配置，用任意 resource kind → registry 映射（确定性排序）。
+func configWithResources(resources map[string]string) string {
+	var b strings.Builder
+	b.WriteString("schema_version: 1\ngit:\n  integration_branch: develop\nresources:\n")
+	for _, kind := range sortedKeys(resources) {
+		fmt.Fprintf(&b, "  %s:\n    registry: %q\n", kind, resources[kind])
+	}
+	return b.String()
+}
+
 func TestLoadConfigDefault(t *testing.T) {
 	dir := writeConfigFile(t, `schema_version: 1
 git:
@@ -40,11 +50,11 @@ resources:
 	if cfg.Git.IntegrationBranch != "develop" {
 		t.Fatalf("integration_branch=%q，期望 develop", cfg.Git.IntegrationBranch)
 	}
-	if cfg.Resources.MigrationVersion.Registry != ".agent/registry/migrations.md" {
-		t.Fatalf("migration registry=%q", cfg.Resources.MigrationVersion.Registry)
+	if cfg.Resources["migration_version"].Registry != ".agent/registry/migrations.md" {
+		t.Fatalf("migration registry=%q", cfg.Resources["migration_version"].Registry)
 	}
-	if cfg.Resources.ErrorCodeDomain.Registry != ".agent/registry/error-codes.md" {
-		t.Fatalf("error-code registry=%q", cfg.Resources.ErrorCodeDomain.Registry)
+	if cfg.Resources["error_code_domain"].Registry != ".agent/registry/error-codes.md" {
+		t.Fatalf("error-code registry=%q", cfg.Resources["error_code_domain"].Registry)
 	}
 }
 
@@ -62,9 +72,64 @@ git:
 	}
 }
 
-// registryConfig 构造一份 v1 机器配置，用于指定两个 registry 路径。
-func registryConfig(migrationPath, errorCodePath string) string {
-	return fmt.Sprintf("schema_version: 1\ngit:\n  integration_branch: develop\nresources:\n  migration_version:\n    registry: %q\n  error_code_domain:\n    registry: %q\n", migrationPath, errorCodePath)
+// TestLoadConfigArbitraryKind 覆盖任意 resource kind 无需修改 Go 代码。
+func TestLoadConfigArbitraryKind(t *testing.T) {
+	dir := writeConfigFile(t, configWithResources(map[string]string{
+		"im_migration_version": ".agent/registry/im-migrations.md",
+	}))
+	cfg, err := LoadConfig(dir)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.Resources["im_migration_version"].Registry != ".agent/registry/im-migrations.md" {
+		t.Fatalf("im_migration_version registry=%q", cfg.Resources["im_migration_version"].Registry)
+	}
+}
+
+// TestLoadConfigMultipleArbitraryKinds 覆盖多个任意 kind。
+func TestLoadConfigMultipleArbitraryKinds(t *testing.T) {
+	dir := writeConfigFile(t, configWithResources(map[string]string{
+		"im_migration_version":  ".agent/registry/im-migrations.md",
+		"idp_migration_version": ".agent/registry/idp-migrations.md",
+		"nats_subject":          ".agent/registry/nats-subjects.md",
+	}))
+	cfg, err := LoadConfig(dir)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if len(cfg.Resources) != 3 {
+		t.Fatalf("期望 3 个 kind，实际 %d", len(cfg.Resources))
+	}
+}
+
+func TestLoadConfigInvalidKindName(t *testing.T) {
+	for _, kind := range []string{"MigrationVersion", "migration-version", "foo.bar", "1foo"} {
+		t.Run(kind, func(t *testing.T) {
+			dir := writeConfigFile(t, configWithResources(map[string]string{
+				kind: ".agent/registry/foo.md",
+			}))
+			_, err := LoadConfig(dir)
+			if err == nil {
+				t.Fatalf("非法 kind %q 应报错", kind)
+			}
+			if !strings.Contains(err.Error(), "resource kind") {
+				t.Fatalf("期望错误涉及 resource kind，实际 %v", err)
+			}
+		})
+	}
+}
+
+func TestLoadConfigMissingRegistryPath(t *testing.T) {
+	dir := writeConfigFile(t, configWithResources(map[string]string{
+		"migration_version": "",
+	}))
+	_, err := LoadConfig(dir)
+	if err == nil {
+		t.Fatal("空 registry 路径应报错")
+	}
+	if !strings.Contains(err.Error(), "registry") {
+		t.Fatalf("期望错误涉及 registry，实际 %v", err)
+	}
 }
 
 func TestLoadConfigRegistryPathValid(t *testing.T) {
@@ -74,7 +139,9 @@ func TestLoadConfigRegistryPathValid(t *testing.T) {
 		".agent/registry/im-migrations.md",
 	} {
 		t.Run(p, func(t *testing.T) {
-			_, err := LoadConfig(writeConfigFile(t, registryConfig(p, ".agent/registry/error-codes.md")))
+			_, err := LoadConfig(writeConfigFile(t, configWithResources(map[string]string{
+				"migration_version": p,
+			})))
 			if err != nil {
 				t.Fatalf("合法 registry 路径 %q 不应报错: %v", p, err)
 			}
@@ -83,7 +150,6 @@ func TestLoadConfigRegistryPathValid(t *testing.T) {
 }
 
 func TestLoadConfigRegistryPathInvalid(t *testing.T) {
-	valid := ".agent/registry/error-codes.md"
 	illegal := []string{
 		"docs/design/foo.md",
 		"../foo.md",
@@ -91,21 +157,32 @@ func TestLoadConfigRegistryPathInvalid(t *testing.T) {
 		"/tmp/foo.md",
 	}
 	for _, p := range illegal {
-		t.Run("migration/"+p, func(t *testing.T) {
-			_, err := LoadConfig(writeConfigFile(t, registryConfig(p, valid)))
+		t.Run(p, func(t *testing.T) {
+			_, err := LoadConfig(writeConfigFile(t, configWithResources(map[string]string{
+				"migration_version": p,
+			})))
 			if err == nil {
-				t.Fatalf("非法 migration registry 路径 %q 应报错", p)
+				t.Fatalf("非法 registry 路径 %q 应报错", p)
 			}
 			if !strings.Contains(err.Error(), "registry") {
 				t.Fatalf("期望错误涉及 registry，实际 %v", err)
 			}
 		})
-		t.Run("error-code/"+p, func(t *testing.T) {
-			_, err := LoadConfig(writeConfigFile(t, registryConfig(valid, p)))
-			if err == nil {
-				t.Fatalf("非法 error-code registry 路径 %q 应报错", p)
-			}
-		})
+	}
+}
+
+// TestLoadConfigDuplicateRegistryPath 覆盖两个不同 kind 声明相同 registry 路径 → ERROR。
+func TestLoadConfigDuplicateRegistryPath(t *testing.T) {
+	dir := writeConfigFile(t, configWithResources(map[string]string{
+		"migration_version": ".agent/registry/shared.md",
+		"error_code_domain": ".agent/registry/shared.md",
+	}))
+	_, err := LoadConfig(dir)
+	if err == nil {
+		t.Fatal("重复 registry 路径应报错")
+	}
+	if !strings.Contains(err.Error(), "相同") {
+		t.Fatalf("期望错误涉及重复路径，实际 %v", err)
 	}
 }
 

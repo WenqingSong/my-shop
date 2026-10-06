@@ -3,14 +3,13 @@ package workflow
 import (
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
 
+// mustState 用版本化 parseState 解析测试 state.yaml。
 func mustState(t *testing.T, yml string) State {
 	t.Helper()
-	var s State
-	if err := yaml.Unmarshal([]byte(yml), &s); err != nil {
+	s, err := parseState([]byte(yml))
+	if err != nil {
 		t.Fatalf("解析测试 state.yaml 失败: %v", err)
 	}
 	return s
@@ -27,17 +26,16 @@ func issueCheck(t *testing.T, issues []Issue, checkSubstr string) bool {
 	return false
 }
 
-// TestSchemaValidationLegal 覆盖合法完整 V2 state → 无 issue。
+// TestSchemaValidationLegal 覆盖合法完整 v3 state → 无 issue。
 func TestSchemaValidationLegal(t *testing.T) {
 	s := mustState(t, `
-schema_version: 2
+schema_version: 3
 task_id: demo
 contract:
   status: APPROVED
   target: a1b2c3d
 resources:
-  migrations: []
-  error_code_domains: []
+  reservations: {}
 review:
   status: CLEAN
   target: c1d2e3f
@@ -66,11 +64,11 @@ func TestSchemaValidationIllegal(t *testing.T) {
 		yaml      string
 		wantCheck string
 	}{
-		{"task_id 空", "schema_version: 2\ntask_id: \"\"\n", "schema"},
-		{"contract.status 非法", "schema_version: 2\ntask_id: t\ncontract:\n  status: BOGUS\n", "contract.status enum"},
-		{"review.status 非法(STALE)", "schema_version: 2\ntask_id: t\nreview:\n  status: STALE\n", "review.status enum"},
-		{"owner.status 非法", "schema_version: 2\ntask_id: t\nowner:\n  status: BOGUS\n", "owner.status enum"},
-		{"delivery.status 非法(CONDITIONAL_PASS)", "schema_version: 2\ntask_id: t\ndelivery:\n  status: CONDITIONAL_PASS\n", "delivery.status enum"},
+		{"task_id 空", "schema_version: 3\ntask_id: \"\"\n", "schema"},
+		{"contract.status 非法", "schema_version: 3\ntask_id: t\ncontract:\n  status: BOGUS\n", "contract.status enum"},
+		{"review.status 非法(STALE)", "schema_version: 3\ntask_id: t\nreview:\n  status: STALE\n", "review.status enum"},
+		{"owner.status 非法", "schema_version: 3\ntask_id: t\nowner:\n  status: BOGUS\n", "owner.status enum"},
+		{"delivery.status 非法(CONDITIONAL_PASS)", "schema_version: 3\ntask_id: t\ndelivery:\n  status: CONDITIONAL_PASS\n", "delivery.status enum"},
 	}
 
 	for _, tt := range tests {

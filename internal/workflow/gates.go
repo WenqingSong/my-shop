@@ -28,7 +28,7 @@ func failResult(task, check, actual, expected, reason string) Result {
 // GateCoderStart 确认 Coder 已经被授权开始实现（INV-2）。
 func (v *Validator) GateCoderStart(taskDir string) Result {
 	taskSlug := filepath.Base(filepath.Clean(taskDir))
-	s, res := v.loadV2State(taskDir)
+	s, res := v.loadStateFile(taskDir)
 	if res.Status != StatusPass {
 		return res
 	}
@@ -53,7 +53,7 @@ func (v *Validator) GateCoderStart(taskDir string) Result {
 // GateCleanerStart 确认 Cleaner 拿到的是可复核、已发布到 feature remote 的 implementation snapshot。
 func (v *Validator) GateCleanerStart(taskDir string) Result {
 	taskSlug := filepath.Base(filepath.Clean(taskDir))
-	s, res := v.loadV2State(taskDir)
+	s, res := v.loadStateFile(taskDir)
 	if res.Status != StatusPass {
 		return res
 	}
@@ -87,7 +87,7 @@ func (v *Validator) GateCleanerStart(taskDir string) Result {
 // GateOwnerGateStart 确认 OwnerGate 只能围绕一个仍然有效的 CLEAN snapshot 取得 Owner 决策。
 func (v *Validator) GateOwnerGateStart(taskDir string) Result {
 	taskSlug := filepath.Base(filepath.Clean(taskDir))
-	s, res := v.loadV2State(taskDir)
+	s, res := v.loadStateFile(taskDir)
 	if res.Status != StatusPass {
 		return res
 	}
@@ -113,7 +113,7 @@ func (v *Validator) GateOwnerGateStart(taskDir string) Result {
 // GateDeliveryStart 确认 Deliverer 只能开始验收一个已被 CLEAN、Owner 明确接受、且 feature 已同步的候选。
 func (v *Validator) GateDeliveryStart(taskDir string) Result {
 	taskSlug := filepath.Base(filepath.Clean(taskDir))
-	s, res := v.loadV2State(taskDir)
+	s, res := v.loadStateFile(taskDir)
 	if res.Status != StatusPass {
 		return res
 	}
@@ -151,7 +151,7 @@ func (v *Validator) GateDeliveryStart(taskDir string) Result {
 // GateMergeReady 是最终 Agent Gate：告诉 Owner 该 feature 在刚才验证的 develop 基线上仍保持可集成含义。
 func (v *Validator) GateMergeReady(taskDir string) Result {
 	taskSlug := filepath.Base(filepath.Clean(taskDir))
-	s, res := v.loadV2State(taskDir)
+	s, res := v.loadStateFile(taskDir)
 	if res.Status != StatusPass {
 		return res
 	}
@@ -335,15 +335,16 @@ func (v *Validator) deliveryFreshness(taskSlug string, s State, remoteFeatureHea
 
 // resourcesAuthorized 校验 resources 已在 shared integration branch 的 Registry 授权（INV-2）。
 // Registry 路径与 integration branch 来自机器配置 .agent/workflow.yaml。
+// 未知 resource kind / registry 读取失败 → ERROR（exit 2）；未登记 / owner 不一致 / 状态无效 → FAIL（exit 1）。
 func (v *Validator) resourcesAuthorized(s State) Result {
 	if !s.HasRequiredResources() {
 		return Result{Status: StatusPass}
 	}
-	reg, err := v.loadDevelopRegistry(s)
+	regs, err := v.loadDevelopRegistries(s)
 	if err != nil {
 		return Result{Status: StatusError, Error: err.Error()}
 	}
-	issues := checkResourceAuthority(s.TaskID, s, reg)
+	issues := checkResourceAuthority(s.TaskID, s.Resources.Reservations, regs)
 	if len(issues) > 0 {
 		return Result{Status: StatusFail, Issues: issues}
 	}

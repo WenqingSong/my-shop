@@ -155,7 +155,7 @@ Cleaner 审查测试可信度，在 `core-logic.md` 整理核心验证卡；Owne
 ## 11. Git 权限与最终决定
 
 - Agent 允许：`fetch / status / diff / log / show / rev-parse`、`switch` 到已存在且属于当前任务的分支、`pull --ff-only` 当前 feature。
-- Agent 禁止：创建/删除/重命名 branch、merge feature→develop、`push --force`、`reset --hard`、`clean -fd`、`git add -A` / `git add .`、rebase 已发布历史、`commit --amend`、rewrite history。`push develop` 默认禁止——唯一例外是 Analyst 的 Registry-only develop commit（仅 `.agent/registry/migrations.md` 与 `.agent/registry/error-codes.md`，见 §12.2）。
+- Agent 禁止：创建/删除/重命名 branch、merge feature→develop、`push --force`、`reset --hard`、`clean -fd`、`git add -A` / `git add .`、rebase 已发布历史、`commit --amend`、rewrite history。`push develop` 默认禁止——唯一例外是 Analyst 的 Registry-only develop commit（仅 `.agent/workflow.yaml` 已声明的 Registry 文件，见 §12.2）。
 - 这些 git 写约束是协议/Prompt 硬约束；shared develop 的机器级保护交给仓库 branch protection / 外部 Git 控制能力。`workflow-check` 只读，不拦截 git 写命令。
 - 标准 commit 前流程：`git status --short` → `git diff` → `git add <明确属于本角色的文件>` → `git diff --cached` → `git commit`。发现其他角色遗留修改 → STOP，不得顺便提交。
 - Agent-generated commit message 默认使用中文摘要，保持 Conventional Commit 结构：`<type>(<scope>): <中文摘要>`。`type` / `scope` 保留英文关键字（常用 `feat` / `fix` / `refactor` / `test` / `docs` / `chore`），中文只用于 summary。不要求 summary 必须英文，不因中文 commit message 阻塞流程。
@@ -178,11 +178,11 @@ C 类**不得以任何形式要求注册**；新增资源类型进入治理须�
 
 ### 12.2 共享事实源与 Reservation 流程
 
-`.agent/registry/`（`develop` 上）是全局资源分配状态的权威事实源，含 `error-codes.md` 与 `migrations.md`。这两个 Registry 文件由机器配置 `.agent/workflow.yaml`（`resources.*.registry`）声明；Analyst 的 Registry-only shared-develop mutation 仅限该配置声明的 Registry 文件。
+`.agent/registry/`（`develop` 上）是全局资源分配状态的权威事实源。机器配置 `.agent/workflow.yaml` 的 `resources.<kind>.registry` 声明当前项目有哪些 Shared Resource Kind 及各对应哪个 Registry 文件（当前 my-shop 为 `migration_version → .agent/registry/migrations.md`、`error_code_domain → .agent/registry/error-codes.md`）。Analyst 的 Registry-only shared-develop mutation 仅限该配置已声明的 Registry 文件。
 
-需要资源时，Analyst fetch `origin/develop` → 读取最新 Registry → 计算 candidate → 检查空闲 → 将 candidate 写入 Contract 并请求 Owner Contract Decision。Contract APPROVED 后，Analyst 形成 Registry-only commit（仅 `.agent/registry/migrations.md` 与 `.agent/registry/error-codes.md`）并 push `origin develop` 落实 `RESERVED`。push 前必须确认 staged/commit diff 不含任何其他路径，出现即 STOP；push 因 non-fast-forward 被拒时禁止 force，改为 fetch 最新 develop → 重新读取 Registry → 重新计算资源 → 重新形成合法 reservation。落 `RESERVED` 后，Analyst 重新读取 `origin/develop` Registry 验证：资源存在、owner 正确、状态 `RESERVED/ACTIVE`，通过后才 HANDOFF Coder。
+需要资源时，Analyst 读取 `.agent/workflow.yaml` 确认当前项目已声明哪些 Shared Resource Kinds → fetch `origin/develop` → 读取对应 Registry → 计算 candidate value → 检查空闲 → 将 candidate 写入 Contract 并请求 Owner Contract Decision。Contract APPROVED 后，Analyst 形成 Registry-only commit（仅含配置已声明的 Registry 文件）并 push `origin develop` 落实 `RESERVED`。push 前必须确认 staged/commit diff 只含这些合法 Registry 文件，出现任何其他路径 → 立即 STOP；push 因 non-fast-forward 被拒时禁止 force，改为 fetch 最新 develop → 重新读取 Registry → 重新计算资源 → 重新形成合法 reservation。落 `RESERVED` 后，Analyst 重新读取 `origin/develop` Registry 验证：资源存在、owner 正确、状态 `RESERVED/ACTIVE`，通过后才 HANDOFF Coder。
 
-Feature Branch 内自行声明 `RESERVED` 不构成有效预留；`state.yaml.resources` 只记录「需要什么」，不自证满足。
+Feature Branch 内自行声明 `RESERVED` 不构成有效预留；`state.yaml.resources.reservations` 只记录「需要什么」，不自证满足。
 
 ### 12.3 生命周期
 

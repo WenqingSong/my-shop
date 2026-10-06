@@ -23,9 +23,9 @@ const registryRoot = ".agent/registry"
 // 它只保存「跨项目会变化、且 Workflow Engine runtime 必须知道的最小参数」。
 // 它不是 PROJECT_ADAPTATION.md、Task Artifact、业务配置。
 type Config struct {
-	SchemaVersion int            `yaml:"schema_version"`
-	Git           GitConfig      `yaml:"git"`
-	Resources     ResourceConfig `yaml:"resources"`
+	SchemaVersion int                       `yaml:"schema_version"`
+	Git           GitConfig                 `yaml:"git"`
+	Resources     map[string]ResourceConfig `yaml:"resources"`
 }
 
 // GitConfig 记录 Git 集成模型的最小参数。
@@ -33,17 +33,12 @@ type GitConfig struct {
 	IntegrationBranch string `yaml:"integration_branch"`
 }
 
-// ResourceConfig 记录资源 kind → registry 文件的映射。
-// 本轮只有 migration_version 与 error_code_domain 两个固定 kind，
-// 与 state.resources 的现有 schema（migrations / error_code_domains）保持兼容桥接；
-// P2 才泛化为通用 resource model，本轮不扩展。
+// ResourceConfig 记录单个 resource kind 的 Registry 文件路径（相对仓库根）。
+//
+// P2 起 resources 是 arbitrary map：resource kind → ResourceConfig，
+// Workflow Core 不预置任何固定 kind，migration_version / error_code_domain
+// 只是当前 my-shop Project Config 声明的 kind。
 type ResourceConfig struct {
-	MigrationVersion ResourceRegistry `yaml:"migration_version"`
-	ErrorCodeDomain  ResourceRegistry `yaml:"error_code_domain"`
-}
-
-// ResourceRegistry 记录单个资源 kind 的 Registry 文件路径（相对仓库根）。
-type ResourceRegistry struct {
 	Registry string `yaml:"registry"`
 }
 
@@ -73,17 +68,31 @@ func validateConfig(c Config) error {
 	if c.Git.IntegrationBranch == "" {
 		return fmt.Errorf("缺少必填 git.integration_branch")
 	}
-	if err := validateRegistryPath(c.Resources.MigrationVersion.Registry); err != nil {
-		return fmt.Errorf("resources.migration_version: %w", err)
-	}
-	if err := validateRegistryPath(c.Resources.ErrorCodeDomain.Registry); err != nil {
-		return fmt.Errorf("resources.error_code_domain: %w", err)
+
+	// registry path -> kind，用于检测两个不同 kind 声明完全相同的 Registry 文件。
+	// 共享同一无 kind discriminator 的 Registry 会造成解析歧义，故视为 Config ERROR。
+	seen := map[string]string{}
+	for _, kind := range sortedKeys(c.Resources) {
+		if !ValidResourceKind(kind) {
+			return fmt.Errorf("非法 resource kind %q（应为 ^[a-z][a-z0-9_]*$）", kind)
+		}
+		rc := c.Resources[kind]
+		if rc.Registry == "" {
+			return fmt.Errorf("resources.%s.registry 不得为空", kind)
+		}
+		if err := validateRegistryPath(rc.Registry); err != nil {
+			return fmt.Errorf("resources.%s: %w", kind, err)
+		}
+		if prev, ok := seen[rc.Registry]; ok {
+			return fmt.Errorf("resources.%s 与 resources.%s 声明了相同的 registry 路径 %q", kind, prev, rc.Registry)
+		}
+		seen[rc.Registry] = kind
 	}
 	return nil
 }
 
 // validateRegistryPath 校验 registry 路径必须是仓库相对路径，且规范化后严格位于 .agent/registry/ 下。
-// 空串表示「未声明该资源」，允许通过（由资源真正需要时另行 ERROR），不做路径校验。
+// 空串由 validateConfig 在调用前显式拒绝，本函数只做路径安全校验。
 func validateRegistryPath(p string) error {
 	if p == "" {
 		return nil

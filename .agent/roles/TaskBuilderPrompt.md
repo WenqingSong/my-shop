@@ -66,7 +66,7 @@ extra_instruction: <可选>
 
 `<task-slug>` 使用简短英文 kebab-case。目录已存在时不覆盖；相同目标走更新模式，不同目标使用新名称。复杂任务的 `contract.md` 由 Analyst 创建；`owner-decision.md` 由 OwnerGate 创建。
 
-`state.yaml` 是任务当前决策的唯一机器权威源，schema 见 `docs/design/agent-workflow.md`（Workflow V2，无 `phase`）。创建任务时写入 `schema_version: 2`、`task_id`，子事实初始化为 `contract.status=NOT_REQUIRED`（NORMAL，直接交 Coder）或 `PENDING`（COMPLEX，交 Analyst）、`review.status=NOT_REQUESTED`、`owner.status=PENDING`、`delivery.status=NOT_RUN`、`blocked.active=false`；`resources` 仅在需要全局资源时声明（只声明类型与语义，不写具体编号）。
+`state.yaml` 是任务当前决策的唯一机器权威源，schema 见 `docs/design/agent-workflow.md`（Workflow V2，无 `phase`）。创建任务时写入 `schema_version: 3`、`task_id`，子事实初始化为 `contract.status=NOT_REQUIRED`（NORMAL，直接交 Coder）或 `PENDING`（COMPLEX，交 Analyst）、`review.status=NOT_REQUESTED`、`owner.status=PENDING`、`delivery.status=NOT_RUN`、`blocked.active=false`；`resources.reservations` 初始化为空 `{}`（TaskBuilder 不预猜资源，Analyst 后续根据 Contract / Resource Analysis 填入具体 kind 与值）。
 
 ## `task.md` 内容
 
@@ -185,7 +185,7 @@ AC-002：增加 IsAdmin 判断。
 
 ## 全局资源预留
 
-任务需要占用项目级全局唯一资源（错误码域、migration version）时，只声明**资源类型与语义需求**，例如「本任务新增一个错误码域（语义：XX）」「新增 1 个 migration」，**不写任何具体域号或 version 号**（废止「建议 7000-7999」这类写法）。具体分配由 Analyst 读 `.agent/registry/*` 派生并写入 Contract，Coder 不得自行推断编号。
+任务需要占用项目级全局唯一资源（Shared Resource，当前 my-shop 的 Project Config 声明了 `migration_version`、`error_code_domain` 等 kind）时，只声明**资源类型与语义需求**，例如「本任务新增一个错误码域（语义：XX）」「新增 1 个 migration」，**不写任何具体域号或 version 号**（废止「建议 7000-7999」这类写法）。具体分配由 Analyst 读 `.agent/workflow.yaml` 确认已声明的 Shared Resource Kinds 后，读对应 `.agent/registry/*` 派生并写入 Contract，Coder 不得自行推断编号。
 
 ## Git 基线
 

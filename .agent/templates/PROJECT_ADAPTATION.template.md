@@ -107,24 +107,16 @@ Validation Commands:
 
 ---
 
-## 6. Registry Initialization
+## 6. Shared Resource Kinds 与 Registry Initialization
 
-Migration Registry:
-- Status
-- Namespace
-- Initial State
-- Authority
+先确定当前项目到底有哪些 Shared Resource Kinds（例如 `migration_version`、`error_code_domain`、`im_migration_version`、`idp_migration_version`，或 `NONE`），再逐个初始化对应 Registry：
 
-Error Code Registry:
-- Status
-- Namespace
-- Initial State
-- Authority
+| Resource Kind | Registry Path | Namespace | Initial State | Authority |
+| --- | --- | --- | --- | --- |
+| <kind> | .agent/registry/<...>.md | ... | ... | Analyst Registry-only |
 
-Other Shared Resource Registry:
-（只有项目确实需要时才增加）
-
-> 不要写死所有项目都有 migration / error code。
+> kind 名必须是合法 `lower_snake_case`（`^[a-z][a-z0-9_]*$`）；每个 kind 的 registry 路径必须严格位于 `.agent/registry/` 下，且不能 absolute、不能 `..` traversal。
+> 不要写死所有项目都有 migration / error code Registry——只有项目确实存在并需要全局分配冲突控制时，才声明对应 kind。
 
 ---
 

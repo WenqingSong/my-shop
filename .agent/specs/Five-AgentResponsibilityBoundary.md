@@ -66,9 +66,9 @@ Analyst 回答：复杂问题有哪些约束，可行方案是什么，哪些性
 - 起草 `contract.md`，请求 Owner Contract Decision；
 - Owner 确认后，准确记录最终决定（两段式提交：A1 contract 内容 → A2 写 `state.contract.status=APPROVED`、`state.contract.target=A1`）；
 - 作为长期 Design（`docs/design/*`）内容的主责：`Design Impact = NEW/UPDATE` 时，在 Contract 经 Owner `APPROVED` 后、Coder 实现前新增/更新对应 Design Artifact；
-- 读 `.agent/registry/*` 派生候选资源，在 Contract APPROVED 后形成 Registry-only commit（仅 `.agent/registry/migrations.md` 与 `.agent/registry/error-codes.md`）并 push `origin develop` 落实 `RESERVED`，然后验证 Reservation 真正进入 `origin/develop`；不得凭空自选编号。
+- 读 `.agent/workflow.yaml` 确认已声明的 Shared Resource Kinds，再读对应 `.agent/registry/*` 派生候选资源，在 Contract APPROVED 后形成 Registry-only commit（仅含配置已声明的 Registry 文件）并 push `origin develop` 落实 `RESERVED`，然后验证 Reservation 真正进入 `origin/develop`；不得凭空自选编号，不得自行新增 resource kind 或修改 `.agent/workflow.yaml`。
 
-不负责：修改生产代码、测试或任务目标；不能批准自己的推荐方案；除 Registry-only 例外（仅 `.agent/registry/migrations.md` 与 `.agent/registry/error-codes.md`）外，不修改 shared develop 上的其他任何内容。
+不负责：修改生产代码、测试或任务目标；不能批准自己的推荐方案；除 Registry-only 例外（仅 `.agent/workflow.yaml` 已声明的 Registry 文件）外，不修改 shared develop 上的其他任何内容。
 
 Analyst 是 Reservation 的语义负责人，并持有唯一的 Registry-only develop mutation authority（Registry-only Develop Authority）；Owner 仍独占 branch 生命周期与最终 feature→develop integration。
 

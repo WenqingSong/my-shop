@@ -25,140 +25,106 @@ const errorDomainsFixture = `# 全局错误码域 Registry
 | 10000-10999 | order-v2 | RESERVED | feature 分支预留 |
 `
 
-func TestParseMigrations(t *testing.T) {
-	entries, err := ParseMigrations(migrationsFixture)
-	if err != nil {
-		t.Fatalf("解析失败: %v", err)
-	}
+// TestParseRegistryMigrationsLayout 覆盖 5 列布局（Value|Name|Owner|Status|Description）。
+func TestParseRegistryMigrationsLayout(t *testing.T) {
+	entries := ParseRegistry(migrationsFixture)
 	if len(entries) != 4 {
-		t.Fatalf("期望 4 条，实际 %d：%v", len(entries), entries)
+		t.Fatalf("期望 4 条，实际 %d：%+v", len(entries), entries)
 	}
-	if entries[2].Version != "20261001000009" || entries[2].Owner != "order-v2" || entries[2].Status != "RESERVED" {
-		t.Fatalf("第 3 条解析错误: %+v", entries[2])
+	e := entries[2]
+	if e.Value != "20261001000009" || e.Owner != "order-v2" || e.Status != "RESERVED" {
+		t.Fatalf("第 3 条解析错误: %+v", e)
 	}
 }
 
-func TestParseErrorDomains(t *testing.T) {
-	entries, err := ParseErrorDomains(errorDomainsFixture)
-	if err != nil {
-		t.Fatalf("解析失败: %v", err)
-	}
+// TestParseRegistryErrorCodesLayout 覆盖 4 列布局（Value|Owner|Status|Description）。
+func TestParseRegistryErrorCodesLayout(t *testing.T) {
+	entries := ParseRegistry(errorDomainsFixture)
 	if len(entries) != 3 {
-		t.Fatalf("期望 3 条，实际 %d：%v", len(entries), entries)
+		t.Fatalf("期望 3 条，实际 %d：%+v", len(entries), entries)
 	}
-	if entries[2].Start != 10000 || entries[2].End != 10999 || entries[2].Owner != "order-v2" {
-		t.Fatalf("第 3 条解析错误: %+v", entries[2])
-	}
-}
-
-// TestValidResourceValues 覆盖 Resource 纯机器值校验。
-func TestValidResourceValues(t *testing.T) {
-	if !validMigrationValue("20261001000011") {
-		t.Fatal("纯数字 migration 应为合法")
-	}
-	if validMigrationValue("20261001000011 flash sale") {
-		t.Fatal("带说明的 migration 应为非法")
-	}
-	if validMigrationValue("") {
-		t.Fatal("空 migration 应为非法")
-	}
-	if validMigrationValue("abc") {
-		t.Fatal("非数字 migration 应为非法")
-	}
-
-	if !validDomainValue("12000-12999") {
-		t.Fatal("合法域区间应为合法")
-	}
-	if validDomainValue("12000-12999（秒杀）") {
-		t.Fatal("带说明的域区间应为非法")
-	}
-	if validDomainValue("12999-12000") {
-		t.Fatal("start>end 的域区间应为非法")
-	}
-	if validDomainValue("12000") {
-		t.Fatal("缺少 - 的域区间应为非法")
+	e := entries[2]
+	if e.Value != "10000-10999" || e.Owner != "order-v2" || e.Status != "RESERVED" {
+		t.Fatalf("第 3 条解析错误: %+v", e)
 	}
 }
 
+// TestParseRegistryTrailingEmptyDescription 覆盖 5 列布局行尾备注为空时 Owner/Status 定位稳定。
+func TestParseRegistryTrailingEmptyDescription(t *testing.T) {
+	content := `| version | title | 拥有方（任务） | 状态 | 备注 |
+| --- | --- | --- | --- | --- |
+| 20261001000009 | foo | demo | RESERVED | |
+`
+	entries := ParseRegistry(content)
+	if len(entries) != 1 {
+		t.Fatalf("期望 1 条，实际 %d：%+v", len(entries), entries)
+	}
+	if entries[0].Value != "20261001000009" || entries[0].Owner != "demo" || entries[0].Status != "RESERVED" {
+		t.Fatalf("解析错误: %+v", entries[0])
+	}
+}
+
+// TestCheckResourceAuthority 覆盖 generic 授权：owner/status 校验，与多 kind。
 func TestCheckResourceAuthority(t *testing.T) {
-	reg := Registry{
-		Migrations:   mustMigrations(t),
-		ErrorDomains: mustDomains(t),
+	registries := map[string][]RegistryEntry{
+		"migration_version": ParseRegistry(migrationsFixture),
+		"error_code_domain": ParseRegistry(errorDomainsFixture),
 	}
 
 	tests := []struct {
-		name      string
-		task      string
-		state     State
-		wantIssue bool
-		wantCheck string
+		name         string
+		task         string
+		reservations map[string][]string
+		wantIssue    bool
+		wantCheck    string
 	}{
 		{
-			name: "合法 migration Reservation",
+			name:         "合法 reservation（RESERVED + owner 匹配）",
+			task:         "order-v2",
+			reservations: map[string][]string{"migration_version": {"20261001000009"}},
+			wantIssue:    false,
+		},
+		{
+			name:         "value 未登记",
+			task:         "order-v2",
+			reservations: map[string][]string{"migration_version": {"20261001000099"}},
+			wantIssue:    true,
+			wantCheck:    "Resource Authority (INV-2)",
+		},
+		{
+			name:         "owner 不一致",
+			task:         "other-task",
+			reservations: map[string][]string{"migration_version": {"20261001000009"}},
+			wantIssue:    true,
+			wantCheck:    "Resource Authority (INV-2)",
+		},
+		{
+			name:         "RELEASED 状态无效",
+			task:         "cancelled-task",
+			reservations: map[string][]string{"migration_version": {"20261001000010"}},
+			wantIssue:    true,
+			wantCheck:    "Resource Authority (INV-2)",
+		},
+		{
+			name:         "合法错误码域 reservation",
+			task:         "order-v2",
+			reservations: map[string][]string{"error_code_domain": {"10000-10999"}},
+			wantIssue:    false,
+		},
+		{
+			name: "多 kind 同时授权",
 			task: "order-v2",
-			state: State{
-				Resources: Resources{Migrations: []string{"20261001000009"}},
+			reservations: map[string][]string{
+				"migration_version": {"20261001000009"},
+				"error_code_domain": {"10000-10999"},
 			},
 			wantIssue: false,
-		},
-		{
-			name: "migration 未登记",
-			task: "order-v2",
-			state: State{
-				Resources: Resources{Migrations: []string{"20261001000099"}},
-			},
-			wantIssue: true,
-			wantCheck: "Resource Authority (INV-2)",
-		},
-		{
-			name: "migration owner 不一致",
-			task: "other-task",
-			state: State{
-				Resources: Resources{Migrations: []string{"20261001000009"}},
-			},
-			wantIssue: true,
-			wantCheck: "Resource Authority (INV-2)",
-		},
-		{
-			name: "migration RELEASED 无效",
-			task: "cancelled-task",
-			state: State{
-				Resources: Resources{Migrations: []string{"20261001000010"}},
-			},
-			wantIssue: true,
-			wantCheck: "Resource Authority (INV-2)",
-		},
-		{
-			name: "migration 带说明非法值",
-			task: "order-v2",
-			state: State{
-				Resources: Resources{Migrations: []string{"20261001000009 flash sale"}},
-			},
-			wantIssue: true,
-			wantCheck: "Resource Schema (INV-2)",
-		},
-		{
-			name: "合法错误码域 Reservation",
-			task: "order-v2",
-			state: State{
-				Resources: Resources{ErrorCodeDomains: []string{"10000-10999"}},
-			},
-			wantIssue: false,
-		},
-		{
-			name: "错误码域带说明非法值",
-			task: "order-v2",
-			state: State{
-				Resources: Resources{ErrorCodeDomains: []string{"10000-10999（订单）"}},
-			},
-			wantIssue: true,
-			wantCheck: "Resource Schema (INV-2)",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			issues := checkResourceAuthority(tt.task, tt.state, reg)
+			issues := checkResourceAuthority(tt.task, tt.reservations, registries)
 			if tt.wantIssue != (len(issues) > 0) {
 				t.Fatalf("期望 wantIssue=%v，实际 issues=%v", tt.wantIssue, issues)
 			}
@@ -167,22 +133,4 @@ func TestCheckResourceAuthority(t *testing.T) {
 			}
 		})
 	}
-}
-
-func mustMigrations(t *testing.T) []MigrationEntry {
-	t.Helper()
-	entries, err := ParseMigrations(migrationsFixture)
-	if err != nil {
-		t.Fatalf("解析失败: %v", err)
-	}
-	return entries
-}
-
-func mustDomains(t *testing.T) []ErrorCodeDomainEntry {
-	t.Helper()
-	entries, err := ParseErrorDomains(errorDomainsFixture)
-	if err != nil {
-		t.Fatalf("解析失败: %v", err)
-	}
-	return entries
 }

@@ -157,15 +157,21 @@ RECOMMENDATION：……
 
 并发目标必须落到可验证结果，例如订单数、库存、唯一性和最终数据状态，不能只写“支持高并发”。
 
-## 全局资源预留
+## 全局资源预留（Generic Shared Resource）
 
-任务需要全局唯一资源（错误码域、migration version）时：
+任务需要全局唯一资源时，按 Project Config 驱动的流程工作：
 
-- 读 `.agent/registry/*`，按规则派生：错误码域 `domain_seq_next = max(已记录域序) + 1`（域序 = `code / 1000`、域区间 `[domain_seq × 1000, domain_seq × 1000 + 999]`、大小固定 1000、域内编号逐个列出；域序为正整数、不受四位数宽度限制）；migration version `next = max(所有已记录 version, 含 RELEASED) + 1`。
-- 将派生结果写入 Contract 的全局资源清单，并请求 Owner Contract Decision（`WAITING_FOR_OWNER_DECISION`，不是 Handoff，同 Session 继续）。
-- Contract APPROVED 后，Analyst 直接形成 **Registry-only commit**（仅 `.agent/registry/migrations.md` 与 `.agent/registry/error-codes.md`）并 push `origin develop` 落实 `RESERVED`。这是 Analyst 唯一的 shared-develop 写例外（Registry-only Develop Authority），不需要 Owner 手工改 Registry。
-- Registry-only commit 前必须确认 staged/commit diff **只含**上述两个文件，出现任何其他路径 → 立即 STOP。push 因 non-fast-forward 被拒 → 禁止 force → fetch 最新 develop → 重新读取 Registry → 重新计算资源 → 重新形成合法 reservation。
-- 不得凭空自选编号；push 成功后，Analyst `git fetch origin` 重新读取 `origin/develop` Registry，验证资源存在、owner 正确、状态 `RESERVED/ACTIVE`，通过后才 HANDOFF Coder。`RESERVED → ACTIVE` 由 feature 合并进 `develop` 时同步，`RESERVED → RELEASED` 在 Task 取消时标记（migration version 一经分配永不复用，错误码域仅纯 `RESERVED` 阶段可复用）。
+1. 读取 `.agent/workflow.yaml`，确认当前项目已声明哪些 Shared Resource Kinds（`resources.<kind>.registry`）。
+2. 根据任务需求确定需要哪些 kind；若任务需要的 kind 未在 `.agent/workflow.yaml` 声明，Analyst **不得自行新增 kind、不得修改 `.agent/workflow.yaml`**，必须 STOP 交 Owner / Project Policy Decision。
+3. 对已声明的 kind，读对应 `.agent/registry/*` 按该 kind 的 Project Policy 规则派生 candidate value（当前 my-shop 示例：错误码域 `domain_seq_next = max(已记录域序) + 1`；migration version `next = max(所有已记录 version, 含 RELEASED) + 1`）。
+4. 将派生结果写入 Contract 的全局资源清单，并请求 Owner Contract Decision（`WAITING_FOR_OWNER_DECISION`，不是 Handoff，同 Session 继续）。
+5. Contract APPROVED 后，Analyst 直接形成 **Registry-only commit**（仅 `.agent/workflow.yaml` 已声明的 Registry 文件）并 push `origin develop` 落实 `RESERVED`。这是 Analyst 唯一的 shared-develop 写例外（Registry-only Develop Authority），不需要 Owner 手工改 Registry。
+6. Registry-only commit 前必须确认 staged/commit diff **只含**上述已声明的 Registry 文件，出现任何其他路径 → 立即 STOP。push 因 non-fast-forward 被拒 → 禁止 force → fetch 最新 develop → 重新读取 Registry → 重新计算资源 → 重新形成合法 reservation。
+7. 不得凭空自选编号；push 成功后，Analyst `git fetch origin` 重新读取 `origin/develop` Registry，验证资源存在、owner 正确、状态 `RESERVED/ACTIVE`，然后更新 `state.resources.reservations.<kind>` 写入 candidate value，通过后才 HANDOFF Coder。
+
+不再把 migration / error code 写成 Workflow 层固定必查项——它们只是当前 my-shop Project Config 声明的 kind，由 Config 驱动，不是 Core 写死。
+
+`RESERVED → ACTIVE` 由 feature 合并进 `develop` 时同步，`RESERVED → RELEASED` 在 Task 取消时标记；具体复用规则由各 kind 的 Project Policy 决定（my-shop 示例：migration version 一经分配永不复用，错误码域仅纯 `RESERVED` 阶段可复用）。
 
 ## Owner 确认
 

@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-
-	"gopkg.in/yaml.v3"
 )
 
 // Validator 编排对 state.yaml 的只读 Gate 校验。它不修改任何 Artifact，不代理任何 git 写操作。
@@ -20,20 +18,17 @@ func (v *Validator) developRef() string {
 	return "origin/" + v.Config.Git.IntegrationBranch
 }
 
-// loadV2State 读取并解析 taskDir/state.yaml，校验 schema_version==2。
-// 非 V2 任务（含 Legacy V1）返回 ERROR。
-func (v *Validator) loadV2State(taskDir string) (State, Result) {
+// loadStateFile 读取并解析 taskDir/state.yaml，支持 schema v3（generic）与 v2（legacy 兼容）。
+// 非 V2/V3 任务（含 Legacy V1）与 schema 错误返回 ERROR（exit 2）。
+func (v *Validator) loadStateFile(taskDir string) (State, Result) {
 	statePath := filepath.Join(v.Root, taskDir, "state.yaml")
 	raw, err := os.ReadFile(statePath)
 	if err != nil {
 		return State{}, Result{Status: StatusError, Error: fmt.Sprintf("read %s: %v", statePath, err)}
 	}
-	var s State
-	if err := yaml.Unmarshal(raw, &s); err != nil {
+	s, err := parseState(raw)
+	if err != nil {
 		return State{}, Result{Status: StatusError, Error: fmt.Sprintf("parse %s: %v", statePath, err)}
-	}
-	if s.SchemaVersion != SchemaV2 {
-		return State{}, Result{Status: StatusError, Error: fmt.Sprintf("task %q 不是 V2 任务（schema_version=%d，期望 %d）", s.TaskID, s.SchemaVersion, SchemaV2)}
 	}
 	return s, Result{Status: StatusPass}
 }
@@ -108,46 +103,24 @@ func (v *Validator) featureHead() (string, error) {
 	return v.Git.RevParse("HEAD")
 }
 
-// loadDevelopRegistry 按 state 实际声明的资源 kind 读取 shared integration branch 上的 Registry 权威事实。
-// 路径来自机器配置 .agent/workflow.yaml（config.resources.*.registry），不再硬编码。
-// 按需加载：state 只声明 migrations 时，不要求 error_code_domain registry 存在，反之亦然。
-func (v *Validator) loadDevelopRegistry(s State) (Registry, error) {
+// loadDevelopRegistries 按 state 实际声明的 resource kind 读取 shared integration branch 上的 Registry 权威事实。
+// 路径来自机器配置 .agent/workflow.yaml（config.resources.<kind>.registry）。
+// 未在配置中声明的 kind 属于 Workflow Configuration ERROR（exit 2），不是「resource not reserved」。
+func (v *Validator) loadDevelopRegistries(s State) (map[string][]RegistryEntry, error) {
 	ref := v.developRef()
-	var reg Registry
-
-	if len(s.Resources.Migrations) > 0 {
-		p := v.Config.Resources.MigrationVersion.Registry
-		if p == "" {
-			return Registry{}, fmt.Errorf("机器配置缺少 resources.migration_version.registry")
+	regs := map[string][]RegistryEntry{}
+	for _, kind := range sortedKeys(s.Resources.Reservations) {
+		rc, ok := v.Config.Resources[kind]
+		if !ok {
+			return nil, fmt.Errorf("机器配置未声明 resource kind %q（缺少 resources.%s.registry）", kind, kind)
 		}
-		content, err := v.Git.ShowFile(ref, p)
+		content, err := v.Git.ShowFile(ref, rc.Registry)
 		if err != nil {
-			return Registry{}, fmt.Errorf("读取 %s:%s: %w", ref, p, err)
+			return nil, fmt.Errorf("读取 %s:%s: %w", ref, rc.Registry, err)
 		}
-		entries, err := ParseMigrations(content)
-		if err != nil {
-			return Registry{}, fmt.Errorf("解析 %s:%s: %w", ref, p, err)
-		}
-		reg.Migrations = entries
+		regs[kind] = ParseRegistry(content)
 	}
-
-	if len(s.Resources.ErrorCodeDomains) > 0 {
-		p := v.Config.Resources.ErrorCodeDomain.Registry
-		if p == "" {
-			return Registry{}, fmt.Errorf("机器配置缺少 resources.error_code_domain.registry")
-		}
-		content, err := v.Git.ShowFile(ref, p)
-		if err != nil {
-			return Registry{}, fmt.Errorf("读取 %s:%s: %w", ref, p, err)
-		}
-		entries, err := ParseErrorDomains(content)
-		if err != nil {
-			return Registry{}, fmt.Errorf("解析 %s:%s: %w", ref, p, err)
-		}
-		reg.ErrorDomains = entries
-	}
-
-	return reg, nil
+	return regs, nil
 }
 
 // contractPath 返回当前 task 的 contract.md 相对路径。

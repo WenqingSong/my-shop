@@ -114,10 +114,10 @@ func (r *testRepo) writeState(s State) {
 
 func baseState() State {
 	return State{
-		SchemaVersion: SchemaV2,
+		SchemaVersion: SchemaV3,
 		TaskID:        "demo",
 		Contract:      Contract{Status: ContractNotRequired, Target: ""},
-		Resources:     Resources{},
+		Resources:     Resources{Reservations: map[string][]string{}},
 		Review:        Review{Status: ReviewNotRequested, Target: ""},
 		Owner:         Owner{Status: OwnerPending, ReviewTarget: ""},
 		Delivery:      Delivery{Status: DeliveryNotRun, ReviewTarget: "", FeatureHead: "", DevelopBase: ""},
@@ -421,7 +421,7 @@ func TestGateCoderStartResourceAuthorized(t *testing.T) {
 
 	r.checkout("feature/agent-workflow-v2")
 	s := baseState()
-	s.Resources = Resources{Migrations: []string{"20261001000009"}}
+	s.Resources = Resources{Reservations: map[string][]string{"migration_version": {"20261001000009"}}}
 	r.writeState(s)
 	r.commit("feature state")
 	r.syncOrigin("feature/agent-workflow-v2")
@@ -438,7 +438,7 @@ func TestGateCoderStartResourceFeatureOnlyReserved(t *testing.T) {
 
 	r.checkout("feature/agent-workflow-v2")
 	s := baseState()
-	s.Resources = Resources{Migrations: []string{"20261001000009"}}
+	s.Resources = Resources{Reservations: map[string][]string{"migration_version": {"20261001000009"}}}
 	r.writeState(s)
 	r.commit("feature state")
 	r.syncOrigin("feature/agent-workflow-v2")
@@ -473,7 +473,7 @@ func TestValidatorIntegrationBranchMain(t *testing.T) {
 
 	r.checkout("feature/agent-workflow-v2")
 	s := baseState()
-	s.Resources = Resources{Migrations: []string{"20261001000009"}}
+	s.Resources = Resources{Reservations: map[string][]string{"migration_version": {"20261001000009"}}}
 	r.writeState(s)
 	r.commit("feature state")
 	r.syncOrigin("feature/agent-workflow-v2")
@@ -508,7 +508,7 @@ func TestValidatorCustomRegistryPaths(t *testing.T) {
 
 	r.checkout("feature/agent-workflow-v2")
 	s := baseState()
-	s.Resources = Resources{Migrations: []string{"20261001000009"}, ErrorCodeDomains: []string{"10000-10999"}}
+	s.Resources = Resources{Reservations: map[string][]string{"migration_version": {"20261001000009"}, "error_code_domain": {"10000-10999"}}}
 	r.writeState(s)
 	r.commit("feature state")
 	r.syncOrigin("feature/agent-workflow-v2")
@@ -516,27 +516,25 @@ func TestValidatorCustomRegistryPaths(t *testing.T) {
 	expectStatus(t, r.validator().GateCoderStart(".agent/tasks/demo"), StatusPass)
 }
 
-// --- machine config 缺 registry 声明 → ERROR（exit 2），而非「resource not reserved」---
+// --- 未知 resource kind → ERROR（exit 2），而非「resource not reserved」---
 
-const noMigrationRegistryConfig = `schema_version: 1
+const onlyMigrationConfig = `schema_version: 1
 git:
   integration_branch: develop
 resources:
   migration_version:
-    registry: ""
-  error_code_domain:
-    registry: .agent/registry/error-codes.md
+    registry: .agent/registry/migrations.md
 `
 
-func TestResourceNeedsMigrationButConfigMissingMigrationRegistry(t *testing.T) {
-	r := newTestRepoWithConfig(t, noMigrationRegistryConfig)
-	r.write(".agent/registry/error-codes.md", errorDomainsBase)
+func TestGateCoderStartUnknownResourceKind(t *testing.T) {
+	r := newTestRepoWithConfig(t, onlyMigrationConfig)
+	r.write(".agent/registry/migrations.md", migrationsBase)
 	r.commit("baseline")
 	r.syncOrigin("develop")
 
 	r.checkout("feature/agent-workflow-v2")
 	s := baseState()
-	s.Resources = Resources{Migrations: []string{"20261001000009"}}
+	s.Resources = Resources{Reservations: map[string][]string{"nats_subject": {"im.message.created"}}}
 	r.writeState(s)
 	r.commit("feature state")
 	r.syncOrigin("feature/agent-workflow-v2")
@@ -547,32 +545,184 @@ func TestResourceNeedsMigrationButConfigMissingMigrationRegistry(t *testing.T) {
 	}
 }
 
-const noErrorCodeRegistryConfig = `schema_version: 1
+// --- 任意 resource kind（custom_resource）授权 ---
+
+const customResourceConfig = `schema_version: 1
 git:
   integration_branch: develop
 resources:
-  migration_version:
-    registry: .agent/registry/migrations.md
-  error_code_domain:
-    registry: ""
+  custom_resource:
+    registry: .agent/registry/custom.md
 `
 
-func TestResourceNeedsErrorCodeButConfigMissingErrorCodeRegistry(t *testing.T) {
-	r := newTestRepoWithConfig(t, noErrorCodeRegistryConfig)
-	r.write(".agent/registry/migrations.md", migrationsBase)
-	r.commit("baseline")
+const customResourceBase = `# custom resources
+| Value | Name | Owner | Status | Description |
+| --- | --- | --- | --- | --- |
+| alpha | a | demo | RESERVED | |
+`
+
+// Case A：任意 kind 配置 + 值存在 + owner 当前 task + RESERVED → PASS。
+func TestGateCoderStartCustomResourceAuthorized(t *testing.T) {
+	r := newTestRepoWithConfig(t, customResourceConfig)
+	r.write(".agent/registry/custom.md", customResourceBase)
+	r.commit("registry baseline")
 	r.syncOrigin("develop")
 
 	r.checkout("feature/agent-workflow-v2")
 	s := baseState()
-	s.Resources = Resources{ErrorCodeDomains: []string{"10000-10999"}}
+	s.Resources = Resources{Reservations: map[string][]string{"custom_resource": {"alpha"}}}
 	r.writeState(s)
 	r.commit("feature state")
 	r.syncOrigin("feature/agent-workflow-v2")
 
-	res := r.validator().GateCoderStart(".agent/tasks/demo")
-	if res.Status != StatusError {
-		t.Fatalf("期望 ERROR，实际 status=%s error=%q", res.Status, res.Error)
+	expectStatus(t, r.validator().GateCoderStart(".agent/tasks/demo"), StatusPass)
+}
+
+// Case C：kind 配置存在、Registry 无该 value → FAIL（exit 1）。
+func TestGateCoderStartResourceValueMissing(t *testing.T) {
+	r := newTestRepoWithConfig(t, customResourceConfig)
+	r.write(".agent/registry/custom.md", customResourceBase)
+	r.commit("registry baseline")
+	r.syncOrigin("develop")
+
+	r.checkout("feature/agent-workflow-v2")
+	s := baseState()
+	s.Resources = Resources{Reservations: map[string][]string{"custom_resource": {"beta"}}}
+	r.writeState(s)
+	r.commit("feature state")
+	r.syncOrigin("feature/agent-workflow-v2")
+
+	expectCheck(t, r.validator().GateCoderStart(".agent/tasks/demo"), "Resource Authority")
+}
+
+// Case D：value 存在但 owner mismatch → FAIL（exit 1）。
+func TestGateCoderStartResourceOwnerMismatch(t *testing.T) {
+	r := newTestRepoWithConfig(t, customResourceConfig)
+	r.write(".agent/registry/custom.md", `# custom
+| Value | Name | Owner | Status | Description |
+| --- | --- | --- | --- | --- |
+| alpha | a | other-task | RESERVED | |
+`)
+	r.commit("registry baseline")
+	r.syncOrigin("develop")
+
+	r.checkout("feature/agent-workflow-v2")
+	s := baseState()
+	s.Resources = Resources{Reservations: map[string][]string{"custom_resource": {"alpha"}}}
+	r.writeState(s)
+	r.commit("feature state")
+	r.syncOrigin("feature/agent-workflow-v2")
+
+	expectCheck(t, r.validator().GateCoderStart(".agent/tasks/demo"), "Resource Authority")
+}
+
+// Case E：status unauthorized（RELEASED）→ FAIL（exit 1）。
+func TestGateCoderStartResourceUnauthorizedStatus(t *testing.T) {
+	r := newTestRepoWithConfig(t, customResourceConfig)
+	r.write(".agent/registry/custom.md", `# custom
+| Value | Name | Owner | Status | Description |
+| --- | --- | --- | --- | --- |
+| alpha | a | demo | RELEASED | |
+`)
+	r.commit("registry baseline")
+	r.syncOrigin("develop")
+
+	r.checkout("feature/agent-workflow-v2")
+	s := baseState()
+	s.Resources = Resources{Reservations: map[string][]string{"custom_resource": {"alpha"}}}
+	r.writeState(s)
+	r.commit("feature state")
+	r.syncOrigin("feature/agent-workflow-v2")
+
+	expectCheck(t, r.validator().GateCoderStart(".agent/tasks/demo"), "Resource Authority")
+}
+
+// Case F：多个任意 resource kind 同时授权 → PASS。
+func TestGateCoderStartMultiGenericKinds(t *testing.T) {
+	r := newTestRepoWithConfig(t, `schema_version: 1
+git:
+  integration_branch: develop
+resources:
+  im_migration_version:
+    registry: .agent/registry/im.md
+  idp_migration_version:
+    registry: .agent/registry/idp.md
+`)
+	r.write(".agent/registry/im.md", "# im\n| Value | Name | Owner | Status | Description |\n| --- | --- | --- | --- | --- |\n| 20261001000020 | a | demo | RESERVED | |\n")
+	r.write(".agent/registry/idp.md", "# idp\n| Value | Name | Owner | Status | Description |\n| --- | --- | --- | --- | --- |\n| 20261001000030 | a | demo | ACTIVE | |\n")
+	r.commit("registry baseline")
+	r.syncOrigin("develop")
+
+	r.checkout("feature/agent-workflow-v2")
+	s := baseState()
+	s.Resources = Resources{Reservations: map[string][]string{
+		"im_migration_version":  {"20261001000020"},
+		"idp_migration_version": {"20261001000030"},
+	}}
+	r.writeState(s)
+	r.commit("feature state")
+	r.syncOrigin("feature/agent-workflow-v2")
+
+	expectStatus(t, r.validator().GateCoderStart(".agent/tasks/demo"), StatusPass)
+}
+
+// --- legacy schema v2 状态经 normalize 后通过 Gate，且不改写磁盘 ---
+
+func TestGateCoderStartLegacyV2StateNormalized(t *testing.T) {
+	r := newTestRepo(t)
+	r.write(".agent/registry/migrations.md", migrationsBase)
+	r.write(".agent/registry/error-codes.md", errorDomainsBase)
+	r.commit("registry baseline")
+	r.syncOrigin("develop")
+
+	r.write(".agent/registry/migrations.md", migrationsBase+"| 20261001000009 | foo | demo | RESERVED | |\n")
+	r.write(".agent/registry/error-codes.md", errorDomainsBase+"| 10000-10999 | demo | RESERVED | |\n")
+	r.commit("develop reserved")
+	r.syncOrigin("develop")
+
+	r.checkout("feature/agent-workflow-v2")
+	v2State := `schema_version: 2
+task_id: demo
+contract:
+  status: NOT_REQUIRED
+  target: ""
+resources:
+  migrations:
+    - "20261001000009"
+  error_code_domains:
+    - "10000-10999"
+review:
+  status: NOT_REQUESTED
+  target: ""
+owner:
+  status: PENDING
+  review_target: ""
+delivery:
+  status: NOT_RUN
+  review_target: ""
+  feature_head: ""
+  develop_base: ""
+blocked:
+  active: false
+  by: ""
+  reason: ""
+`
+	r.write(".agent/tasks/demo/state.yaml", v2State)
+	r.commit("legacy v2 state")
+	r.syncOrigin("feature/agent-workflow-v2")
+
+	statePath := filepath.Join(r.dir, ".agent/tasks/demo/state.yaml")
+	before, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	expectStatus(t, r.validator().GateCoderStart(".agent/tasks/demo"), StatusPass)
+	after, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Fatal("Gate 不应改写历史 v2 state 文件")
 	}
 }
 
@@ -586,7 +736,7 @@ func TestConfigRegistryPathNotFound(t *testing.T) {
 
 	r.checkout("feature/agent-workflow-v2")
 	s := baseState()
-	s.Resources = Resources{Migrations: []string{"20261001000009"}}
+	s.Resources = Resources{Reservations: map[string][]string{"migration_version": {"20261001000009"}}}
 	r.writeState(s)
 	r.commit("feature state")
 	r.syncOrigin("feature/agent-workflow-v2")

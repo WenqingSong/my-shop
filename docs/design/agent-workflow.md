@@ -26,7 +26,7 @@ Workflow V2 不是抽象的设计稿，而是针对真实执行中暴露的缺�
 | 5 | Conversation 状态和 Git 实际状态不一致 | 以 Git + Repository Artifacts 为跨 Session 唯一事实源 |
 | 6 | Dirty Worktree 导致角色之间事实不稳定 | Handoff 前强制 clean exit（`handoffReady`） |
 | 7 | Review Target 漂移 | Evidence Snapshot 绑定 immutable commit |
-| 8 | Shared Resource collision（migration version / 错误码域撞车） | 共享 develop Registry + 只读 Validator 机械授权 |
+| 8 | Shared Resource collision（resource kind 撞车，如 migration version / 错误码域） | 共享 develop Registry + 只读 Validator 机械授权（Generic Reservation） |
 | 9 | Agent 越权修改 shared develop | INV-1 权限边界 + 唯一 Registry-only 例外 |
 | 10 | 「业务结果完成」与「Role Session 完成」混淆 | 通用 Completion Contract（业务结果 ≠ Session 完成） |
 
@@ -171,7 +171,7 @@ V2 改为：**不保存 `phase`、`STALE`、`DONE`**。生命周期由 Owner 与
 ### 当前真实 `state.yaml` 数据模型
 
 ```yaml
-schema_version: 2
+schema_version: 3
 task_id: <task-slug>
 
 contract:
@@ -179,8 +179,9 @@ contract:
   target: <evidence-commit-sha | "">
 
 resources:
-  migrations: [<version>]
-  error_code_domains: [<区间>]
+  reservations:
+    <resource-kind>:
+      - <opaque-value>
 
 review:
   status: NOT_REQUESTED | PENDING | CLEAN | CHANGES_REQUIRED
@@ -204,9 +205,10 @@ blocked:
 
 要点：
 
-- `resources` 只声明「需要什么」，不自证满足；真正 Authority 永远读取 shared integration branch 上的 Registry（当前 my-shop 为 `origin/develop:.agent/registry/*`，由 `.agent/workflow.yaml` 声明，见 §29）。
-- 资源值必须是纯机器值（如 `20261001000011`、`12000-12999`），带说明的非法值在 Resource Schema 层直接 FAIL。
-- `schema_version != 2` 的任务调用 Gate → `ERROR`（exit 2）。
+- `resources.reservations` 只声明「需要什么」，不自证满足；真正 Authority 永远读取 shared integration branch 上的 Registry（当前 my-shop 为 `origin/develop:.agent/registry/*`，由 `.agent/workflow.yaml` 声明，见 §29）。
+- `resources.reservations.<resource-kind>` 是 **Generic Shared Resource Reservation**：Workflow Core 只认识 resource kind → opaque value 列表，不预置任何具体资源类型（migration / error code 等只是当前 my-shop Project Config 声明的 kind）。
+- 每个 reservation value 对 Workflow Core 都是 opaque non-empty string，具体格式正确性属于 Project Policy。
+- `schema_version: 3` 是新任务当前 schema；`schema_version: 2` 仅为历史任务做 Legacy Read Compatibility（读取后 runtime normalize，不写回磁盘）。其它 schema version 调用 Gate → `ERROR`（exit 2）。
 
 ---
 
@@ -299,7 +301,7 @@ Evidence Snapshot 之后可以存在**有限**的 metadata commit，但必须严
 ## 10. 核心不变量（INV-1 ~ INV-7）
 
 - **INV-1 Shared Branch Authority**：Only Owner mutates shared develop（branch 生命周期与最终 feature→develop integration）。Agent 不创建任务 branch、不最终 merge、不 push develop——**唯一例外**是 Analyst 的 Registry-only develop commit（仅 `.agent/workflow.yaml` 声明的 Registry 文件，当前 my-shop 为 `.agent/registry/migrations.md` 与 `.agent/registry/error-codes.md`）。
-- **INV-2 Implement Authorization**：Coder 开始前 Contract valid + Resources 由 `origin/develop` Registry 授权。
+- **INV-2 Implement Authorization**：Coder 开始前 Contract valid + 每个 Shared Resource Reservation 由 `origin/<integration-branch>` 上对应的 Registry 授权（value 存在、owner 与当前 Task 一致、status 为 RESERVED/ACTIVE）。
 - **INV-3 Immutable Review**：Cleaner 只能 CLEAN 明确 immutable commit，不能 CLEAN working tree。
 - **INV-4 Review Freshness**：任何 substantive change 使旧 CLEAN 自动失效；不保存 STALE。
 - **INV-5 Owner Binding**：Owner ACCEPTED 必须绑定当前 CLEAN review target（`owner.review_target == review.target`）。
@@ -574,14 +576,16 @@ delivery.develop_base   # 验证时 shared develop 基线
 
 ---
 
-## 26. Registry Authority 与 Business Migration 的关系
+## 26. Registry Authority 与 Generic Shared Resource 的关系
 
 本轮只整理当前 Workflow 内部语义，**不设计跨项目迁移机制**。
 
-Registry（`.agent/registry/*`，位于 `develop`）的作用是：在**同一个仓库的并行任务之间**协调 migration version 与 error code domain，避免资源碰撞。它属于 Workflow shared coordination state。
+Registry（`.agent/registry/*`，位于 `develop`）的作用是：在**同一个仓库的并行任务之间**协调**项目声明的 Shared Resource Kind** 的分配，避免资源碰撞。它属于 Workflow shared coordination state。
+
+P2 起 Registry 的业务含义泛化：Workflow Core 不预置任何资源类型，只把每个 Registry row 抽象为 `Value / Owner / Status`（第 1 列 = Value、倒数第 3 列 = Owner、倒数第 2 列 = Status）。`migration_version` / `error_code_domain` 只是当前 my-shop 通过 `.agent/workflow.yaml` 声明的 resource kind，不是 Workflow Core builtin type。
 
 - 状态三态：`RESERVED`（已落 develop、Feature 未合并）/ `ACTIVE`（已合并，终态）/ `RELEASED`（取消释放）。
-- 复用规则：migration version 一经分配永久 tombstone、不得复用；错误码域仅纯 `RESERVED` 阶段可 `RELEASE` 后复用。
+- 复用规则由各 resource kind 的 Project Policy 决定（如 my-shop 的 migration version 一经分配永久 tombstone、错误码域仅纯 `RESERVED` 阶段可复用）；Workflow Core 不承载这些业务规则。
 - 并行竞争防护：无外部锁，以 Git 提交顺序 + 冲突检测串行化——先提交到 develop 者胜。
 
 跨项目迁移 / 复用的具体流程见 §28 Project Adoption 与 `.agent/specs/WorkflowAdoption.md`。
@@ -649,10 +653,31 @@ resources:
 
 - `schema_version` 必须为 `1`；缺失或不支持 → exit 2。
 - `git.integration_branch` 必填；Engine 据此构造 `origin/<integration_branch>`。
-- `resources.*.registry` 是各 resource kind 的 Registry 文件路径。当前 `state.resources.migrations` 映射到 `migration_version`、`state.resources.error_code_domains` 映射到 `error_code_domain`（兼容桥接，P2 才泛化）。
-- 配置损坏（缺失 / 无法解析 / 缺 `integration_branch` / 缺所需 registry / registry 无法读取）一律 exit 2，不误报为「resource not reserved」。
+- `resources` 是 arbitrary map：`resource kind → { registry }`。Workflow Core 不预置任何固定 kind，新增 `im_migration_version` 等 kind 无需修改 Go 代码。
+- 每个 resource kind 必须：
+  - 是合法 `lower_snake_case`（`^[a-z][a-z0-9_]*$`）；
+  - 有非空 registry 路径，且路径规范化后严格位于 `.agent/registry/` 下（不能 absolute、不能 `..` traversal）；
+  - 不同 kind 不得声明完全相同的 registry 路径（避免无 kind discriminator 的解析歧义）。
+- 配置损坏（缺失 / 无法解析 / 缺 `integration_branch` / 非法 kind / 缺 registry / registry 路径非法 / registry 无法读取）一律 exit 2，不误报为「resource not reserved」。
 
 硬编码不等于错误：`.agent/tasks/<task-id>` 仍属于 Workflow Core Convention，本轮不配置化。
+
+### Generic Shared Resource Reservation 三层关系
+
+P2 后，Workflow Core 只认识 Generic Shared Resource Reservation，不再认识 migration / error code 等具体业务语义。三者关系：
+
+```text
+Task State
+resources.reservations.<resource-kind>
+        ↓ 按 kind 动态绑定
+Machine Configuration
+resources.<resource-kind>.registry
+        ↓ 读取 origin/<integration-branch>:<registry-path>
+Shared Registry
+reservation row（Value / Owner / Status）
+```
+
+`migration_version` / `error_code_domain` 只是当前 my-shop Project Config 声明的 resource kind，不是 Workflow Core builtin type。未来新增 `im_migration_version`、`nats_subject` 等 kind 只改 `.agent/workflow.yaml`，无需修改 Validator Core。
 
 ---
 

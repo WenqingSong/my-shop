@@ -1,13 +1,31 @@
 package workflow
 
+import "regexp"
+
 // 本文件定义 Workflow V2 的 state.yaml 结构化 schema 与合法枚举。
 //
 // V2 与 V1 的根本差异：删除全局 phase 状态机（13 值 phase、Transition Authority、
 // STALE 持久状态），只保存 Git 无法推导的工作流决策事实。生命周期由 Owner 与 Gate 控制，
 // 状态有效性由 immutable Evidence Snapshot + Neutral Tail 机械推导（INV-1 ~ INV-7）。
 
-// SchemaV2 是 Workflow V2 的 schema_version。
+// SchemaV3 是当前 Workflow V2（major）任务的 state schema_version。
+//
+// schema version 与 Workflow major version 是不同概念：本轮仍是 Workflow V2，
+// 只是 state schema 从 2 演进到 3（Generic Shared Resource Reservation）。
+const SchemaV3 = 3
+
+// SchemaV2 是历史任务的 state schema_version，仅作 Legacy Read Compatibility。
+// 读取后 runtime normalize 为 generic reservations，绝不写回磁盘。
 const SchemaV2 = 2
+
+// resourceKindPattern 约束 resource kind 必须是稳定机器 key（lower_snake_case）。
+// 非法 kind 是 Workflow State / Config 的 ERROR（exit 2），不是业务 Gate FAIL。
+var resourceKindPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+// ValidResourceKind 报告 kind 是否为合法 resource kind。
+func ValidResourceKind(kind string) bool {
+	return resourceKindPattern.MatchString(kind)
+}
 
 // ContractStatus 是 contract.status 的合法枚举。
 type ContractStatus = string
@@ -108,9 +126,12 @@ type Contract struct {
 }
 
 // Resources 声明 Task 需要的全局共享资源（只声明，不自证满足）。
+//
+// P2 起泛化为 resource kind → reservation value 列表，不再认识任何具体资源类型。
+// 每个 value 对 Workflow Core 都是 opaque non-empty string；具体格式正确性属于 Project Policy。
+// schema v2 的 migrations / error_code_domains 由 state_load.go 的兼容层 normalize 到此结构。
 type Resources struct {
-	Migrations       []string `yaml:"migrations"`
-	ErrorCodeDomains []string `yaml:"error_code_domains"`
+	Reservations map[string][]string `yaml:"reservations"`
 }
 
 // Review 是 Cleaner 审查结论，绑定 immutable implementation Evidence Commit。
@@ -154,5 +175,5 @@ type State struct {
 
 // HasRequiredResources 报告 Task 是否声明了任何全局资源需求。
 func (s State) HasRequiredResources() bool {
-	return len(s.Resources.Migrations) > 0 || len(s.Resources.ErrorCodeDomains) > 0
+	return len(s.Resources.Reservations) > 0
 }
