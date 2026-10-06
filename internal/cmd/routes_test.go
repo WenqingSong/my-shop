@@ -131,7 +131,12 @@ func TestRouteTable(t *testing.T) {
 		"DELETE /reviews/:id",
 		// 商品评价后台写操作（AdminAuth + RequirePermission）。
 		"POST /admin/reviews/:id/take-down",
-	}
+		// 商品点赞：公开计数（无 token）+ 点赞/取消/是否已点赞（Auth 保护）。
+		"GET /likes/count",
+		"POST /likes",
+		"DELETE /likes/:product_id",
+		"GET /likes/check",
+		}
 	for _, w := range want {
 		if !got[w] {
 			t.Errorf("缺少路由 %q", w)

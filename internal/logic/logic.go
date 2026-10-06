@@ -13,6 +13,7 @@ import (
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/health"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/iam"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/inventory"
+	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/like"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/order"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/product"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/review"
