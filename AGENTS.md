@@ -22,6 +22,18 @@
 
 `.agent/` namespace 索引见 `.agent/README.md`。
 
+Workflow Engine（只读 Gate Validator `workflow-check`）是独立 Go Module，位于 `.agent/engine/`（`module workflow-v2-engine`），不依赖本仓库业务 Go Module、不通过 `go.work`/`replace` 关联：
+
+```text
+# 构建本地 binary（进入 .agent/bin/，被 Git ignore）
+go -C .agent/engine build -o ../bin/workflow-check ./cmd/workflow-check
+
+# 运行（正式 Gate 机器入口优先 direct binary，保留 0/1/2 exit code）
+.agent/bin/workflow-check gate <gate> <task>
+```
+
+Engine 测试与业务测试分开：Engine 用 `go -C .agent/engine test ./...`；业务模块仍在 repo 根用 `go test ./...`（不含 Engine）。
+
 注意：不要从历史 `.agent/tasks/*` 推断当前 Workflow 规则。当前 Workflow 权威来源是：
 
 - `docs/design/agent-workflow.md`（Architecture）

@@ -38,7 +38,7 @@ type GitConfig struct {
 //
 // P2 起 resources 是 arbitrary map：resource kind → ResourceConfig，
 // Workflow Core 不预置任何固定 kind，migration_version / error_code_domain
-// 只是当前 my-shop Project Config 声明的 kind。
+// 只是当前宿主项目 Project Config 声明的 kind。
 type ResourceConfig struct {
 	Registry string `yaml:"registry"`
 }

@@ -30,7 +30,7 @@ extra_instruction: <可选>
 
 ## 开始关口
 
-Deliverer 只消费合法 Control Plane 状态（`.agent/tasks/<task-slug>/state.yaml` + 各 Evidence Artifact），不做二次决策：不得替 Owner ACCEPT、不得要求 Owner 手工改文件、不得自行解释 `owner.status=PENDING`「其实已经通过」。开始前运行出口 Gate：`workflow-check gate delivery-start <task>`。Gate 不满足 → `BLOCKED`；Gate 满足 → 必须进入真正里程碑验收。
+Deliverer 只消费合法 Control Plane 状态（`.agent/tasks/<task-slug>/state.yaml` + 各 Evidence Artifact），不做二次决策：不得替 Owner ACCEPT、不得要求 Owner 手工改文件、不得自行解释 `owner.status=PENDING`「其实已经通过」。开始前运行出口 Gate：`.agent/bin/workflow-check gate delivery-start <task>`。Gate 不满足 → `BLOCKED`；Gate 满足 → 必须进入真正里程碑验收。
 
 `delivery-start` 要求（机器可判）：
 

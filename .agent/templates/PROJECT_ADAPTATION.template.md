@@ -122,7 +122,7 @@ Validation Commands:
 
 ## 7. Validator Adaptation
 
-workflow-check:
+workflow-check（`.agent/engine/`，独立 Module `workflow-v2-engine`）:
 
 Compatibility:
 - READY
@@ -135,6 +135,12 @@ Project Coupling Found:
 Adaptation Applied:
 
 Validation:
+- `.agent/engine/go.mod` 存在（`module workflow-v2-engine`）
+- `go -C .agent/engine build ./...` PASS
+- `go -C .agent/engine build -o ../bin/workflow-check ./cmd/workflow-check` PASS
+- build 后 `git status --short` 不因 binary 变 dirty（`.agent/bin/` 被 ignore）
+- `.agent/bin/workflow-check` 能读取 materialized `.agent/workflow.yaml` 并执行基础 Gate
+- Engine 不依赖宿主业务 Go Module（无业务 module import / 无 `go.work` / 无 root `replace`）
 
 ---
 

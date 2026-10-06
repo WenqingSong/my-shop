@@ -151,7 +151,7 @@ Deliverer 可使用临时目录、临时 worktree、detached HEAD 等本地集�
 
 ## 9. 默认交接与 Gate
 
-每一角色正常 Handoff 前运行对应出口 Gate（`workflow-check gate <name> <task>`）：
+每一角色正常 Handoff 前运行对应出口 Gate（`.agent/bin/workflow-check gate <name> <task>`）：
 
 ```text
 Analyst   → gate coder-start      → HANDOFF Coder

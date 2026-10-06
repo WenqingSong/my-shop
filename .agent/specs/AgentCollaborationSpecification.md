@@ -156,7 +156,7 @@ Cleaner 审查测试可信度，在 `core-logic.md` 整理核心验证卡；Owne
 
 - Agent 允许：`fetch / status / diff / log / show / rev-parse`、`switch` 到已存在且属于当前任务的分支、`pull --ff-only` 当前 feature。
 - Agent 禁止：创建/删除/重命名 branch、merge feature→develop、`push --force`、`reset --hard`、`clean -fd`、`git add -A` / `git add .`、rebase 已发布历史、`commit --amend`、rewrite history。`push develop` 默认禁止——唯一例外是 Analyst 的 Registry-only develop commit（仅 `.agent/workflow.yaml` 已声明的 Registry 文件，见 §12.2）。
-- 这些 git 写约束是协议/Prompt 硬约束；shared develop 的机器级保护交给仓库 branch protection / 外部 Git 控制能力。`workflow-check` 只读，不拦截 git 写命令。
+- 这些 git 写约束是协议/Prompt 硬约束；shared develop 的机器级保护交给仓库 branch protection / 外部 Git 控制能力。`.agent/bin/workflow-check` 只读，不拦截 git 写命令。
 - 标准 commit 前流程：`git status --short` → `git diff` → `git add <明确属于本角色的文件>` → `git diff --cached` → `git commit`。发现其他角色遗留修改 → STOP，不得顺便提交。
 - Agent-generated commit message 默认使用中文摘要，保持 Conventional Commit 结构：`<type>(<scope>): <中文摘要>`。`type` / `scope` 保留英文关键字（常用 `feat` / `fix` / `refactor` / `test` / `docs` / `chore`），中文只用于 summary。不要求 summary 必须英文，不因中文 commit message 阻塞流程。
 
@@ -200,4 +200,4 @@ Coder 实现中出现的每个全局资源都必须已存在于 APPROVED Contrac
 
 Cleaner 做三边一致性检查：Registry ↔ Contract ↔ 实现，任一漂移 → `CHANGES_REQUIRED`。
 
-`scripts/check-registry.sh` 提供最小只读机械校验；`workflow-check gate coder-start` 以 shared `develop` Registry 为权威机械验证 Reservation。
+`scripts/check-registry.sh` 提供最小只读机械校验；`.agent/bin/workflow-check gate coder-start` 以 shared `develop` Registry 为权威机械验证 Reservation。

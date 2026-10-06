@@ -219,9 +219,16 @@ Adoption 在 Owner Decision 确认后，必须生成 / 更新长期机器配置 
 - Owner branch lifecycle authority 明确
 - Analyst Registry-only exception 能够映射到当前项目
 
-**Validator**
+**Workflow Engine（`.agent/engine/`，独立 Module）**
 
-检查 `workflow-check` 是否能够 build、run、读取当前项目结构、执行基础 Gate。
+P3 起 Workflow Engine 是 source-vendored 独立 Go Module（module `workflow-v2-engine`），不依赖宿主业务 Go Module。VERIFY 至少检查：
+
+- `.agent/engine/go.mod` 存在，`module workflow-v2-engine`；
+- Engine 能独立 build：`go -C .agent/engine build ./...`；
+- 本地 binary 能生成：`go -C .agent/engine build -o ../bin/workflow-check ./cmd/workflow-check`；
+- build 后 Git working tree 不因 binary 变 dirty（`.agent/bin/` 被 ignore）；
+- `.agent/bin/workflow-check` 能读取 materialized `.agent/workflow.yaml` 并执行基础 Gate；
+- Engine 不依赖宿主业务 Go Module（无业务 module import、无 `go.work`、无 root `replace`）。
 
 - 如果当前 Validator 存在项目耦合：必须明确记录（见 §6）。
 - 如果需要小型项目适配才能运行：在 Owner 已确认的 Adaptation 范围内 materialize。
@@ -304,16 +311,16 @@ Adoption 必须逐项判断：
 
 ## 7. 当前 Validator 已知项目耦合（源项目）
 
-本节记录**当前 my-shop 源项目**里 `workflow-check` / `internal/workflow` 的已知耦合。前两项已由 P1（Machine Configuration 最小配置化）解决；其余保留，本轮不重构。
+本节记录**当前 my-shop 源项目**里 `.agent/engine/`（`workflow-check` / `internal/workflow`）的已知耦合。前三项已由 P1 / P2 / P3 解决；其余保留，本轮不重构。
 
 | 位置 | 当前耦合 | 状态 |
 | --- | --- | --- |
 | integration branch | 原硬编码 `origin/develop` | 已解决（P1）：由 `.agent/workflow.yaml` 的 `git.integration_branch` 声明 |
 | Registry 路径 | 原硬编码 `.agent/registry/migrations.md` / `error-codes.md` | 已解决（P1）：由 `.agent/workflow.yaml` 的 `resources.*.registry` 声明 |
-| `internal/workflow/state.go` `Resources` | 硬编码 `Migrations` / `ErrorCodeDomains` 两个字段 | 已解决（P2）：泛化为 `Resources.Reservations map[string][]string`，schema v2 legacy 由兼容层 normalize |
-| `internal/workflow/paths.go` | 硬编码 `.agent/tasks/<task>/` 根路径 | 保留（Core convention，本轮不配置化） |
+| `.agent/engine/internal/workflow/state.go` `Resources` | 硬编码 `Migrations` / `ErrorCodeDomains` 两个字段 | 已解决（P2）：泛化为 `Resources.Reservations map[string][]string`，schema v2 legacy 由兼容层 normalize |
+| `.agent/engine/internal/workflow/paths.go` | 硬编码 `.agent/tasks/<task>/` 根路径 | 保留（Core convention，本轮不配置化） |
 | `scripts/check-registry.sh` | 硬编码 `internal/codes/codes.go`、`internal/migrations/sql`、错误码 `CodeOK == 0`、14 位数字 migration version | 保留（Project Policy，非 Engine runtime） |
-| Go module path | `cnb.cool/go-cloud-devops/my-shop`（import path） | 保留（Package Architecture 时处理） |
+| Go module path | 原 `cnb.cool/go-cloud-devops/my-shop`（import path） | 已解决（P3）：Engine 独立 module `workflow-v2-engine`，不再依赖 my-shop module |
 
 上述未解决项**不在本轮重构**，留待后续正式打包设计时单独决定。
 

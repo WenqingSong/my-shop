@@ -242,7 +242,7 @@ CLEAN / CHANGES_REQUIRED / BLOCKED
 5. `git commit` Cleaner-owned review artifacts。
 6. `git push` 当前 feature branch。
 7. 确认 working tree clean、local HEAD == `origin/<current-feature>`。
-8. 运行下一角色入口 Gate：`workflow-check gate owner-gate-start <task>`。
+8. 运行下一角色入口 Gate：`.agent/bin/workflow-check gate owner-gate-start <task>`。
 9. 只有 Gate `PASS` 后，才允许输出正式 `HANDOFF → OwnerGate`。
 10. Cleaner 自己的 findings/core-logic/state commit 只是 review-neutral tail，`review.target` 保持 C1，不得前移到 Cleaner artifact commit。
 

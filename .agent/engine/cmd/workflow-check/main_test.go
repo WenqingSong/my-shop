@@ -174,3 +174,66 @@ func TestRunGateConfigMissing(t *testing.T) {
 		t.Fatalf("机器配置缺失 期望 exit 2，实际 %d", code)
 	}
 }
+
+// chdirEngine 在临时仓库内创建 .agent/engine 子目录并切换过去，返回恢复函数。
+// Engine 是 nested module，其 cwd 可能位于 repo/.agent/engine，Repository Root 必须
+// 仍通过 git 解析为 repo 根（而非 .agent/engine），否则会错误地拼接出
+// .agent/engine/.agent/workflow.yaml 之类的路径。
+func chdirEngine(t *testing.T, dir string) func() {
+	t.Helper()
+	engineDir := filepath.Join(dir, ".agent", "engine")
+	if err := os.MkdirAll(engineDir, 0o755); err != nil {
+		t.Fatalf("mkdir engine: %v", err)
+	}
+	prev, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(engineDir); err != nil {
+		t.Fatalf("chdir engine: %v", err)
+	}
+	return func() { _ = os.Chdir(prev) }
+}
+
+// TestFindRootFromEngineSubdir 覆盖：cwd 位于 repo/.agent/engine 时，
+// findRoot 仍通过 git rev-parse --show-toplevel 解析到 Repository Root。
+func TestFindRootFromEngineSubdir(t *testing.T) {
+	dir := cliRepo(t, v2PassState)
+	restore := chdirEngine(t, dir)
+	defer restore()
+
+	got, err := filepath.EvalSymlinks(findRoot())
+	if err != nil {
+		t.Fatalf("eval root: %v", err)
+	}
+	want, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("eval dir: %v", err)
+	}
+	if got != want {
+		t.Fatalf("findRoot 期望 %q，实际 %q", want, got)
+	}
+}
+
+// TestRunGateFromEngineSubdirNoRoot 覆盖：不传 --root、从 .agent/engine cwd 运行 gate，
+// 仍能解析 Repository Root、读取 repo/.agent/workflow.yaml 并正确执行 Gate（exit 0）。
+func TestRunGateFromEngineSubdirNoRoot(t *testing.T) {
+	dir := cliRepo(t, v2PassState)
+	restore := chdirEngine(t, dir)
+	defer restore()
+
+	if code := run([]string{"gate", "coder-start", ".agent/tasks/demo"}); code != 0 {
+		t.Fatalf("从 engine 子目录运行 gate 期望 exit 0，实际 %d", code)
+	}
+}
+
+// TestRunGateExplicitRootStillWorks 覆盖：显式 --root 仍可工作（不依赖 cwd）。
+func TestRunGateExplicitRootStillWorks(t *testing.T) {
+	dir := cliRepo(t, v2PassState)
+	restore := chdirEngine(t, dir)
+	defer restore()
+
+	if code := run([]string{"gate", "coder-start", ".agent/tasks/demo", "--root", dir}); code != 0 {
+		t.Fatalf("显式 --root 期望 exit 0，实际 %d", code)
+	}
+}

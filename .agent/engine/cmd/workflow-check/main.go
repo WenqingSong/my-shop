@@ -1,6 +1,6 @@
 // Command workflow-check 是 Agent Workflow V2 的独立只读 Gate 校验器。
 //
-// 它与业务运行二进制 my-shop 分离，只读校验 .agent/tasks/<task>/state.yaml，
+// 它与宿主业务运行二进制分离，只读校验 .agent/tasks/<task>/state.yaml，
 // 不修改任何 Workflow Artifact、Registry，不承担 Orchestrator 职责，不代理任何 git 写操作。
 //
 // 用法：
@@ -20,7 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"cnb.cool/go-cloud-devops/my-shop/internal/workflow"
+	"workflow-v2-engine/internal/workflow"
 )
 
 func main() {

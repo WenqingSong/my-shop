@@ -16,6 +16,28 @@
 - `workflow.yaml` — Workflow Engine machine configuration
 - `registry/` — shared resource registries
 - `tasks/` — task runtime artifacts
+- `engine/` — 独立 Workflow Engine Go Module（`module workflow-v2-engine`），含 `go.mod`/`go.sum`、`cmd/workflow-check`、`internal/workflow`
+- `bin/` — 本地生成的 `workflow-check` binary（Git ignore，不进入 Git）
+
+## Workflow Engine（独立 Module）
+
+Workflow Engine 位于 `.agent/engine/`，是 source-vendored 独立 Go Module，不依赖宿主业务 Go Module、`go.work`、root `replace`；只依赖 Git 仓库与 Go toolchain。
+
+```text
+# 构建本地 binary（进入 .agent/bin/，被 Git ignore）
+go -C .agent/engine build -o ../bin/workflow-check ./cmd/workflow-check
+
+# 运行（正式 Gate 机器入口优先 direct binary，保留 0/1/2 exit code）
+.agent/bin/workflow-check gate <gate> <task>
+
+# 测试 / 静态检查（Engine 与 Business 分开运行）
+go -C .agent/engine test ./...
+go -C .agent/engine test -race ./...
+go -C .agent/engine vet ./...
+go -C .agent/engine build ./...
+```
+
+Repository Root 通过 `git rev-parse --show-toplevel` 解析，与 Engine Module Root（`.agent/engine/`）无关；workflow config / task / registry 始终位于 `<repo-root>/.agent/workflow.yaml`、`<repo-root>/.agent/tasks/`、`<repo-root>/.agent/registry/`。
 
 ## Normal Flow
 

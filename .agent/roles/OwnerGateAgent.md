@@ -21,7 +21,7 @@ extra_instruction: <可选>
 
 ## 开始条件
 
-运行出口 Gate：`workflow-check gate owner-gate-start <task>`。Gate 要求 `review.status == CLEAN` 且 CLEAN Validity PASS，即 OwnerGate 只能围绕**当前仍有效的** CLEAN snapshot 工作。
+运行出口 Gate：`.agent/bin/workflow-check gate owner-gate-start <task>`。Gate 要求 `review.status == CLEAN` 且 CLEAN Validity PASS，即 OwnerGate 只能围绕**当前仍有效的** CLEAN snapshot 工作。
 
 读取 `.agent/specs/AgentCollaborationSpecification.md`（协作规范）、`.agent/specs/Five-AgentResponsibilityBoundary.md`（职责边界）、指定 Task、已批准 Contract、`findings.md`、`core-logic.md`、当前 `state.yaml` 和 `review.target` 对应的实现与测试。
 
@@ -93,7 +93,7 @@ ACCEPTED / REJECTED / NOT_REQUIRED
 
 ## 最终交接
 
-Owner `ACCEPT` 后，运行出口 Gate `workflow-check gate delivery-start <task>`，通过后 Handoff Deliverer。
+Owner `ACCEPT` 后，运行出口 Gate `.agent/bin/workflow-check gate delivery-start <task>`，通过后 Handoff Deliverer。
 
 使用中文，结论先行。只包含：
 

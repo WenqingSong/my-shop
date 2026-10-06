@@ -6,7 +6,7 @@
 
 事实源优先级：
 
-1. 当前真实代码 / Validator / Tests（`internal/workflow/*`、`cmd/workflow-check/*`）；
+1. 当前真实代码 / Validator / Tests（`.agent/engine/internal/workflow/*`、`.agent/engine/cmd/workflow-check/*`）；
 2. 当前现行 Agent Prompt / 协作规范（`.agent/specs/*` 与 `.agent/roles/*`）；
 3. 本文（`docs/design/agent-workflow.md`）；
 4. 历史 Task Artifact（`.agent/tasks/*`，仅作历史证据，不作为现行语义来源）。
@@ -312,7 +312,7 @@ Evidence Snapshot 之后可以存在**有限**的 metadata commit，但必须严
 
 ## 11. workflow-check 的职责
 
-`cmd/workflow-check` 是**只读 Validator**，与业务二进制 `my-shop` 分离。
+`.agent/engine/cmd/workflow-check` 是**只读 Validator**，与业务二进制 `my-shop` 分离。Workflow Engine 是独立 Go Module（module `workflow-v2-engine`，位于 `.agent/engine/`），不依赖宿主业务 Go Module、GoFrame、MySQL / Redis 或任何业务包；只依赖 Git 仓库与 Go toolchain。
 
 它只做：读取事实 → 判断 Gate → 输出 `PASS / FAIL / ERROR`。
 
@@ -330,6 +330,26 @@ workflow-check gate <coder-start|cleaner-start|owner-gate-start|delivery-start|m
 ```
 
 integration branch 与 Registry 路径来自 `.agent/workflow.yaml`（见 §29 Machine Configuration），不再由 CLI 写死；本地 develop 分支不是权威。
+
+### 构建与运行（独立 Engine Module）
+
+Workflow Engine 是 source-vendored nested Go Module，与业务 Module 彻底独立，不通过 `go.work` / `replace` 关联：
+
+```text
+# 构建本地 binary（进入 Git ignore，不进入 Git）
+go -C .agent/engine build -o ../bin/workflow-check ./cmd/workflow-check
+
+# 运行（正式 Gate 机器入口优先 direct binary，保留 0/1/2 exit code）
+.agent/bin/workflow-check gate <gate> <task>
+
+# 测试 / 静态检查（Engine 与 Business 分开运行）
+go -C .agent/engine test ./...
+go -C .agent/engine test -race ./...
+go -C .agent/engine vet ./...
+go -C .agent/engine build ./...
+```
+
+Repository Root 始终通过 `git rev-parse --show-toplevel` 解析，与 Engine Module Root（`.agent/engine/`）无关；从 repo 根、`.agent/`、`.agent/engine/` 任一 cwd 运行 binary 都应解析到同一个 Repository Root，并读取 `<repo-root>/.agent/workflow.yaml`。
 
 ### exit code
 
@@ -630,7 +650,7 @@ Adoption 的五阶段（DISCOVER → RESOLVE → MATERIALIZE → VERIFY → CLEA
 
 Workflow 有三层事实：
 
-1. **Workflow Core**：Roles、Authority、Evidence Snapshot、Handoff、Gate、Completion Contract、Git safety model、Registry coordination concept——跨项目稳定，固化在 `internal/workflow/*` 与 `.agent/specs/*`、`.agent/roles/*`。
+1. **Workflow Core**：Roles、Authority、Evidence Snapshot、Handoff、Gate、Completion Contract、Git safety model、Registry coordination concept——跨项目稳定，固化在 `.agent/engine/internal/workflow/*` 与 `.agent/specs/*`、`.agent/roles/*`。
 2. **Machine Configuration**：`.agent/workflow.yaml`——「跨项目会变化、且 Workflow Engine runtime 必须知道的最小参数」。
 3. **Project Policy**：README / Makefile / `docs/design/*` / `AGENTS.md` 等——项目工程约束，供 Agent 读取，不供 `workflow-check` 机器解析。
 
