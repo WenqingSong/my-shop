@@ -8,7 +8,7 @@
 
 - 状态模型属于 **Agent Control Plane**（治理事实），与 **Work Plane**（业务 `my-shop` 服务）分离。
 - 机器事实源是 `state.yaml`；人读证据 Artifact（`findings.md` / `core-logic.md` / `owner-decision.md` / `delivery.md` / `contract.md`）是「为什么」，不承担阶段权威。
-- **Agent Autonomous Zone = Feature Branch**；**Owner Controlled Zone = Branch Lifecycle + Shared `develop`**。Agent 在 feature 内自主工程化协作，但不能替 Owner 决定任务边界，也不能控制共享主线。
+- **Agent Autonomous Zone = Feature Branch**；**Owner Controlled Zone = Branch Lifecycle + Shared `develop`**。Agent 在 feature 内自主工程化协作，但不能替 Owner 决定任务边界，也不能控制共享主线。唯一例外：Analyst 持有 Registry-only develop mutation authority（见 §9），仅能对 `.agent/registry/*` 两个文件形成 Registry-only commit。
 - 不引入 DB/MQ/BPMN/Web UI/Orchestrator；不自动派发角色；不代理任何 git 写操作。
 
 ## 2. 六角色模型
@@ -133,13 +133,13 @@ Owner 保留四类真正需要人判断的职责：
 1. **Task / Branch Boundary**：新任务还是延续、是否开新 feature、branch 名称与基线。
 2. **Contract Decision**：Analyst 分析后请求 Owner `ACCEPT / REJECT / 继续解释`；Owner 不修改文件，Analyst 根据决定持久化。
 3. **Core Logic Decision**：OwnerGate 提炼 1~3 个核心机制，请求 Owner 决策；Owner 不修改 `state.yaml`/`owner-decision.md`，由 OwnerGate 持久化。
-4. **Shared Integration Decision**：何时/如何 merge、merge 顺序、squash 方式、并行依赖。**任何 Agent 都不得 merge/push `develop`**。
+4. **Shared Integration Decision**：何时/如何 merge、merge 顺序、squash 方式、并行依赖。**任何 Agent 都不得 merge feature→`develop`**（Analyst 的 Registry-only develop commit 是唯一例外，见 §9）。
 
-两个 Owner Checkpoint（`WAITING_FOR_OWNER_DECISION` / `WAITING_FOR_OWNER_ACTION`）**不是 Handoff**：不结束当前 Session、没有 NEXT_ROLE，Owner 回复后原 Agent 继续。
+Owner Checkpoint（`WAITING_FOR_OWNER_DECISION`）**不是 Handoff**：不结束当前 Session、没有 NEXT_ROLE，Owner 回复后原 Agent 继续。
 
 ## 7. 核心不变量（INV-1 ~ INV-7）
 
-- **INV-1 Shared Branch Authority**：Only Owner mutates shared develop。Agent 不创建任务 branch、不 push develop、不最终 merge。
+- **INV-1 Shared Branch Authority**：Only Owner mutates shared develop（branch 生命周期与最终 feature→develop integration）。Agent 不创建任务 branch、不最终 merge、不 push `develop`——唯一例外是 Analyst 的 Registry-only develop commit（仅 `.agent/registry/migrations.md` 与 `.agent/registry/error-codes.md`，见 §9）。
 - **INV-2 Implement Authorization**：Coder 开始前 Contract valid + Resources 由 origin/develop 授权。
 - **INV-3 Immutable Review**：Cleaner 只能 CLEAN 明确 immutable commit，不能 CLEAN working tree。
 - **INV-4 Review Freshness**：任何 substantive change 使旧 CLEAN 自动失效；不保存 STALE。
@@ -159,8 +159,9 @@ Handoff 禁止携带：上一个 Agent 的完整思维过程、聊天历史、�
 
 - 状态：`RESERVED`（Reservation 已落到共享 `develop`、Feature 未合并）/ `ACTIVE`（已合并）/ `RELEASED`（取消释放）。
 - `Task State records the fact; shared develop Registry authorizes the fact.` Feature 内私自声明 `RESERVED` 不产生全局授权。
-- Analyst 是 Reservation 的语义负责人；Owner 是 Shared Registry Mutation Authority。
-- Reservation 流程是 Owner Checkpoint（`WAITING_FOR_OWNER_ACTION`），Analyst 验证 `origin/develop` Registry 真正含 `RESERVED/ACTIVE` 且 owner 正确后才 HANDOFF Coder。
+- Analyst 是 Reservation 的语义负责人，并持有唯一的 **Registry-only Develop Authority**：可对 `.agent/registry/migrations.md` 与 `.agent/registry/error-codes.md` 形成 Registry-only commit 并 push `origin develop`。这是唯一授予 Agent 的 shared-develop mutation 例外，不需要 Owner 手工改 Registry。
+- Registry-only commit 规则：push 前必须确认 staged/commit diff **只含**上述两个文件，出现任何其他路径 → 立即 STOP。push 因 non-fast-forward 被拒 → 禁止 force → fetch 最新 develop → 重新读取 Registry → 重新计算资源 → 重新形成合法 reservation。
+- Analyst 落 `RESERVED` 后，重新读取 `origin/develop` Registry，验证资源真正含 `RESERVED/ACTIVE` 且 owner 正确，通过后才 HANDOFF Coder。
 - migration version 一经分配永久 tombstone、不得复用；错误码域仅纯 `RESERVED` 阶段可 `RELEASE` 后复用。
 
 ## 10. Validator 边界

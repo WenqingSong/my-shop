@@ -31,8 +31,7 @@ Owner 负责：
 - 确认复杂任务的关键方案（Contract Decision）；
 - 阅读核心逻辑说明，做 Core Logic Decision（ACCEPT / REJECT / 继续询问）；
 - 决定 Shared Integration：何时/如何 merge、merge 顺序、squash 方式、并行依赖；
-- 真正修改 shared develop Registry（`.agent/registry/*`）；
-- 决定 Commit、Merge、Push 和 Deploy。
+- 决定最终 feature→develop integration 的 Commit、Merge、Push 和 Deploy。
 
 Owner 不修改 `contract.md`、`owner-decision.md`、`state.yaml`（由对应角色在明确指令下机械持久化）。Owner 不必逐行代替 Cleaner Review，也不因 Agent 给出 `CLEAN` 或 `PASS` 自动接受任务。
 
@@ -67,11 +66,11 @@ Analyst 回答：复杂问题有哪些约束，可行方案是什么，哪些性
 - 起草 `contract.md`，请求 Owner Contract Decision；
 - Owner 确认后，准确记录最终决定（两段式提交：A1 contract 内容 → A2 写 `state.contract.status=APPROVED`、`state.contract.target=A1`）；
 - 作为长期 Design（`docs/design/*`）内容的主责：`Design Impact = NEW/UPDATE` 时，在 Contract 经 Owner `APPROVED` 后、Coder 实现前新增/更新对应 Design Artifact；
-- 读 `.agent/registry/*` 派生候选资源，提出 Reservation Proposal（`WAITING_FOR_OWNER_ACTION`），并验证 Reservation 真正进入 `origin/develop`；不得凭空自选编号。
+- 读 `.agent/registry/*` 派生候选资源，在 Contract APPROVED 后形成 Registry-only commit（仅 `.agent/registry/migrations.md` 与 `.agent/registry/error-codes.md`）并 push `origin develop` 落实 `RESERVED`，然后验证 Reservation 真正进入 `origin/develop`；不得凭空自选编号。
 
-不负责：修改生产代码、测试或任务目标；不能批准自己的推荐方案；不直接修改 shared Registry（由 Owner 执行）。
+不负责：修改生产代码、测试或任务目标；不能批准自己的推荐方案；除 Registry-only 例外（仅 `.agent/registry/migrations.md` 与 `.agent/registry/error-codes.md`）外，不修改 shared develop 上的其他任何内容。
 
-Analyst 是 Reservation 的语义负责人；Owner 是 Shared Registry Mutation Authority。
+Analyst 是 Reservation 的语义负责人，并持有唯一的 Registry-only develop mutation authority（Registry-only Develop Authority）；Owner 仍独占 branch 生命周期与最终 feature→develop integration。
 
 ## 5. Coder
 

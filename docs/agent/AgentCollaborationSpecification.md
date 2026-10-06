@@ -74,7 +74,7 @@ Owner 准备 feature branch
 
 简单任务（无需独立 Contract/Design，`contract.status = NOT_REQUIRED`）可 `TaskBuilder → Coder`。TaskBuilder 不能为省流程擅自跳过 Analyst。
 
-Owner Checkpoint（`WAITING_FOR_OWNER_DECISION` / `WAITING_FOR_OWNER_ACTION`）不是 Handoff：不结束当前 Session、没有 NEXT_ROLE，Owner 回复后原 Agent 继续。
+Owner Checkpoint（`WAITING_FOR_OWNER_DECISION`）不是 Handoff：不结束当前 Session、没有 NEXT_ROLE，Owner 回复后原 Agent 继续。
 
 ## 6. 阶段关口（Gate）
 
@@ -140,7 +140,7 @@ Cleaner 审查测试可信度，在 `core-logic.md` 整理核心验证卡；Owne
 ## 11. Git 权限与最终决定
 
 - Agent 允许：`fetch / status / diff / log / show / rev-parse`、`switch` 到已存在且属于当前任务的分支、`pull --ff-only` 当前 feature。
-- Agent 禁止：创建/删除/重命名 branch、`push develop`、merge feature→develop、`push --force`、`reset --hard`、`clean -fd`、`git add -A` / `git add .`、rebase 已发布历史、`commit --amend`、rewrite history。
+- Agent 禁止：创建/删除/重命名 branch、merge feature→develop、`push --force`、`reset --hard`、`clean -fd`、`git add -A` / `git add .`、rebase 已发布历史、`commit --amend`、rewrite history。`push develop` 默认禁止——唯一例外是 Analyst 的 Registry-only develop commit（仅 `.agent/registry/migrations.md` 与 `.agent/registry/error-codes.md`，见 §12.2）。
 - 这些 git 写约束是协议/Prompt 硬约束；shared develop 的机器级保护交给仓库 branch protection / 外部 Git 控制能力。`workflow-check` 只读，不拦截 git 写命令。
 - 标准 commit 前流程：`git status --short` → `git diff` → `git add <明确属于本角色的文件>` → `git diff --cached` → `git commit`。发现其他角色遗留修改 → STOP，不得顺便提交。
 - Agent-generated commit message 统一英文：`<type>(<scope>): <English summary>`。
@@ -165,7 +165,7 @@ C 类**不得以任何形式要求注册**；新增资源类型进入治理须�
 
 `.agent/registry/`（`develop` 上）是全局资源分配状态的权威事实源，含 `error-codes.md` 与 `migrations.md`。
 
-需要资源时，Analyst fetch `origin/develop` → 读取最新 Registry → 计算 candidate → 检查空闲 → 准备 Reservation Proposal → `WAITING_FOR_OWNER_ACTION`（不是 Handoff）。Owner 决定并执行 shared develop mutation，然后告诉 Analyst 继续。Analyst 重新 fetch 并验证：资源存在、owner 正确、状态 `RESERVED/ACTIVE`，通过后才 HANDOFF Coder。
+需要资源时，Analyst fetch `origin/develop` → 读取最新 Registry → 计算 candidate → 检查空闲 → 将 candidate 写入 Contract 并请求 Owner Contract Decision。Contract APPROVED 后，Analyst 形成 Registry-only commit（仅 `.agent/registry/migrations.md` 与 `.agent/registry/error-codes.md`）并 push `origin develop` 落实 `RESERVED`。push 前必须确认 staged/commit diff 不含任何其他路径，出现即 STOP；push 因 non-fast-forward 被拒时禁止 force，改为 fetch 最新 develop → 重新读取 Registry → 重新计算资源 → 重新形成合法 reservation。落 `RESERVED` 后，Analyst 重新读取 `origin/develop` Registry 验证：资源存在、owner 正确、状态 `RESERVED/ACTIVE`，通过后才 HANDOFF Coder。
 
 Feature Branch 内自行声明 `RESERVED` 不构成有效预留；`state.yaml.resources` 只记录「需要什么」，不自证满足。
 

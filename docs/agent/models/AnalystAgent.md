@@ -162,8 +162,10 @@ RECOMMENDATION：……
 任务需要全局唯一资源（错误码域、migration version）时：
 
 - 读 `.agent/registry/*`，按规则派生：错误码域 `domain_seq_next = max(已记录域序) + 1`（域序 = `code / 1000`、域区间 `[domain_seq × 1000, domain_seq × 1000 + 999]`、大小固定 1000、域内编号逐个列出；域序为正整数、不受四位数宽度限制）；migration version `next = max(所有已记录 version, 含 RELEASED) + 1`。
-- 将派生结果写入 Contract 的全局资源清单，并提出 Reservation Proposal（`WAITING_FOR_OWNER_ACTION`，不是 Handoff，同 Session 继续）：告诉 Owner 需要预留的 migration / error-code domain。真正修改 shared `develop` Registry 由 Owner 执行，Analyst 不直接改 Registry。
-- 不得凭空自选编号；Owner 完成 shared develop mutation 后，Analyst `git fetch origin` 重新读取 `origin/develop` Registry，验证资源存在、owner 正确、状态 `RESERVED/ACTIVE`，通过后才 HANDOFF Coder。`RESERVED → ACTIVE` 由 feature 合并进 `develop` 时同步，`RESERVED → RELEASED` 在 Task 取消时标记（migration version 一经分配永不复用，错误码域仅纯 `RESERVED` 阶段可复用）。
+- 将派生结果写入 Contract 的全局资源清单，并请求 Owner Contract Decision（`WAITING_FOR_OWNER_DECISION`，不是 Handoff，同 Session 继续）。
+- Contract APPROVED 后，Analyst 直接形成 **Registry-only commit**（仅 `.agent/registry/migrations.md` 与 `.agent/registry/error-codes.md`）并 push `origin develop` 落实 `RESERVED`。这是 Analyst 唯一的 shared-develop 写例外（Registry-only Develop Authority），不需要 Owner 手工改 Registry。
+- Registry-only commit 前必须确认 staged/commit diff **只含**上述两个文件，出现任何其他路径 → 立即 STOP。push 因 non-fast-forward 被拒 → 禁止 force → fetch 最新 develop → 重新读取 Registry → 重新计算资源 → 重新形成合法 reservation。
+- 不得凭空自选编号；push 成功后，Analyst `git fetch origin` 重新读取 `origin/develop` Registry，验证资源存在、owner 正确、状态 `RESERVED/ACTIVE`，通过后才 HANDOFF Coder。`RESERVED → ACTIVE` 由 feature 合并进 `develop` 时同步，`RESERVED → RELEASED` 在 Task 取消时标记（migration version 一经分配永不复用，错误码域仅纯 `RESERVED` 阶段可复用）。
 
 ## Owner 确认
 
