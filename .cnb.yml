@@ -2,7 +2,7 @@ $:
   vscode:
     - name: goland-dev
       runner:
-        cpus: 4
+        cpus: 8
       services:
         - vscode
         - docker
