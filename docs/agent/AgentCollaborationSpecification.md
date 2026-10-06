@@ -178,7 +178,7 @@ C 类**不得以任何形式要求注册**；新增资源类型进入治理须�
 
 ### 12.2 共享事实源与 Reservation 流程
 
-`.agent/registry/`（`develop` 上）是全局资源分配状态的权威事实源，含 `error-codes.md` 与 `migrations.md`。
+`.agent/registry/`（`develop` 上）是全局资源分配状态的权威事实源，含 `error-codes.md` 与 `migrations.md`。这两个 Registry 文件由机器配置 `.agent/workflow.yaml`（`resources.*.registry`）声明；Analyst 的 Registry-only shared-develop mutation 仅限该配置声明的 Registry 文件。
 
 需要资源时，Analyst fetch `origin/develop` → 读取最新 Registry → 计算 candidate → 检查空闲 → 将 candidate 写入 Contract 并请求 Owner Contract Decision。Contract APPROVED 后，Analyst 形成 Registry-only commit（仅 `.agent/registry/migrations.md` 与 `.agent/registry/error-codes.md`）并 push `origin develop` 落实 `RESERVED`。push 前必须确认 staged/commit diff 不含任何其他路径，出现即 STOP；push 因 non-fast-forward 被拒时禁止 force，改为 fetch 最新 develop → 重新读取 Registry → 重新计算资源 → 重新形成合法 reservation。落 `RESERVED` 后，Analyst 重新读取 `origin/develop` Registry 验证：资源存在、owner 正确、状态 `RESERVED/ACTIVE`，通过后才 HANDOFF Coder。
 

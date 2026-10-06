@@ -195,6 +195,13 @@ Build Command
 
 具体落点必须结合项目已有结构判断，优先复用现有权威文件，不为 Adoption 新建大量重复 Project Policy 文件。
 
+Adoption 在 Owner Decision 确认后，必须生成 / 更新长期机器配置 `.agent/workflow.yaml`，至少 materialize：
+
+- shared integration branch（`git.integration_branch`）；
+- applicable Registry path（`resources.migration_version.registry` / `resources.error_code_domain.registry`，仅项目确实启用对应资源时声明）。
+
+`.agent/workflow.yaml` 是长期机器配置，**不是** temporary；`PROJECT_ADAPTATION.md` 仍是 temporary，完成后删除。
+
 ### 4.4 VERIFY
 
 必须验证迁移后的 Workflow 真正可以工作。
@@ -219,6 +226,15 @@ Build Command
 - 如果当前 Validator 存在项目耦合：必须明确记录（见 §6）。
 - 如果需要小型项目适配才能运行：在 Owner 已确认的 Adaptation 范围内 materialize。
 - 如果发现需要重新设计 Validator Core：STOP，报告，不要在 Adoption 中偷偷重构 Workflow Engine。
+
+**Machine Configuration**
+
+验证 `.agent/workflow.yaml`：
+
+- 可解析、schema_version 受支持；
+- integration branch 可用（`origin/<integration_branch>` 存在）；
+- 声明的 Registry 可在 integration branch 上读取；
+- `workflow-check` 能基于该配置工作。
 
 **Project validation**
 
@@ -288,18 +304,18 @@ Adoption 必须逐项判断：
 
 ## 7. 当前 Validator 已知项目耦合（源项目）
 
-本节只记录**当前 my-shop 源项目**里 `workflow-check` / `internal/workflow` 的已知耦合。这些是 PORTABILITY FINDING，**本轮不自动重构**；在目标项目 Adoption 的 VERIFY 阶段按 §4.4 记录 / materialize / STOP。
+本节记录**当前 my-shop 源项目**里 `workflow-check` / `internal/workflow` 的已知耦合。前两项已由 P1（Machine Configuration 最小配置化）解决；其余保留，本轮不重构。
 
-| 位置 | 当前耦合 | 迁移影响 | 后续可能方案 |
-| --- | --- | --- | --- |
-| `internal/workflow/validator.go` `loadDevelopRegistry()` | 硬编码读取 `.agent/registry/migrations.md` 与 `.agent/registry/error-codes.md` 两个文件 | 无 migration 或 error code Registry 的项目无法通过 `resourcesAuthorized` | 引入「registry 集合可配置 / 可 N/A」的项目适配 |
-| `internal/workflow/state.go` `Resources` | 硬编码 `Migrations` / `ErrorCodeDomains` 两个字段 | 无这两类资源的项目 schema 语义空转 | 资源类型可项目声明 |
-| `internal/workflow/paths.go` | 硬编码 `.agent/tasks/<task>/` 根路径 | 任务根路径不同的项目需适配 | 任务根路径配置化 |
-| `cmd/workflow-check/main.go` | 默认 `developRef = "origin/develop"` | Shared Integration Branch 不叫 develop 的项目默认失效 | 默认分支可项目声明 |
-| `scripts/check-registry.sh` | 硬编码 `internal/codes/codes.go`、`internal/migrations/sql`、错误码 `CodeOK == 0`、14 位数字 migration version | 目录结构 / 资源格式不同的项目不可用 | 脚本按项目适配 |
-| Go module path | `cnb.cool/go-cloud-devops/my-shop`（import path） | 跨项目复制需改 module path | 打包时统一处理 module identity |
+| 位置 | 当前耦合 | 状态 |
+| --- | --- | --- |
+| integration branch | 原硬编码 `origin/develop` | 已解决（P1）：由 `.agent/workflow.yaml` 的 `git.integration_branch` 声明 |
+| Registry 路径 | 原硬编码 `.agent/registry/migrations.md` / `error-codes.md` | 已解决（P1）：由 `.agent/workflow.yaml` 的 `resources.*.registry` 声明 |
+| `internal/workflow/state.go` `Resources` | 硬编码 `Migrations` / `ErrorCodeDomains` 两个字段 | 保留（P2 泛化 resource model 时处理） |
+| `internal/workflow/paths.go` | 硬编码 `.agent/tasks/<task>/` 根路径 | 保留（Core convention，本轮不配置化） |
+| `scripts/check-registry.sh` | 硬编码 `internal/codes/codes.go`、`internal/migrations/sql`、错误码 `CodeOK == 0`、14 位数字 migration version | 保留（Project Policy，非 Engine runtime） |
+| Go module path | `cnb.cool/go-cloud-devops/my-shop`（import path） | 保留（Package Architecture 时处理） |
 
-上述项**不在本轮重构**，留待后续正式打包设计时单独决定 Validator portability 方案。
+上述未解决项**不在本轮重构**，留待后续正式打包设计时单独决定。
 
 ## 8. 禁止事项
 

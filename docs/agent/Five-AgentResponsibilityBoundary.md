@@ -72,6 +72,8 @@ Analyst 回答：复杂问题有哪些约束，可行方案是什么，哪些性
 
 Analyst 是 Reservation 的语义负责人，并持有唯一的 Registry-only develop mutation authority（Registry-only Develop Authority）；Owner 仍独占 branch 生命周期与最终 feature→develop integration。
 
+Analyst 的 Registry-only shared-develop mutation 仅限 `.agent/workflow.yaml` 声明的 Registry 文件（当前 my-shop 为 `.agent/registry/migrations.md` 与 `.agent/registry/error-codes.md`）。正常任务期间 Analyst 只读 `.agent/workflow.yaml`，不修改它。
+
 ## 5. Coder
 
 Coder 回答：怎样在已确定的范围和约束内完成实现？

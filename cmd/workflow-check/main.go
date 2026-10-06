@@ -5,7 +5,7 @@
 //
 // 用法：
 //
-//	workflow-check gate <coder-start|cleaner-start|owner-gate-start|delivery-start|merge-ready> <task> [--root DIR] [--develop-ref REF]
+//	workflow-check gate <coder-start|cleaner-start|owner-gate-start|delivery-start|merge-ready> <task> [--root DIR]
 //
 // exit code：
 //   - 0：PASS；
@@ -36,7 +36,7 @@ var validGates = map[string]bool{
 }
 
 func run(args []string) int {
-	var root, developRef string
+	var root string
 	var positional []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -50,22 +50,13 @@ func run(args []string) int {
 			root = args[i]
 		case strings.HasPrefix(a, "--root="):
 			root = strings.TrimPrefix(a, "--root=")
-		case a == "--develop-ref":
-			if i+1 >= len(args) {
-				fmt.Fprintln(os.Stderr, "error: --develop-ref 缺少值")
-				return 2
-			}
-			i++
-			developRef = args[i]
-		case strings.HasPrefix(a, "--develop-ref="):
-			developRef = strings.TrimPrefix(a, "--develop-ref=")
 		default:
 			positional = append(positional, a)
 		}
 	}
 
 	if len(positional) < 1 || positional[0] != "gate" {
-		fmt.Fprintln(os.Stderr, "usage: workflow-check gate <coder-start|cleaner-start|owner-gate-start|delivery-start|merge-ready> <task> [--root DIR] [--develop-ref REF]")
+		fmt.Fprintln(os.Stderr, "usage: workflow-check gate <coder-start|cleaner-start|owner-gate-start|delivery-start|merge-ready> <task> [--root DIR]")
 		return 2
 	}
 	if len(positional) < 3 {
@@ -82,12 +73,15 @@ func run(args []string) int {
 	if root == "" {
 		root = findRoot()
 	}
-	if developRef == "" {
-		developRef = "origin/develop"
+
+	cfg, err := workflow.LoadConfig(root)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 2
 	}
 
 	git := &workflow.ExecGit{Root: root}
-	v := &workflow.Validator{Root: root, Git: git, DevelopRef: developRef}
+	v := &workflow.Validator{Root: root, Git: git, Config: cfg}
 
 	taskDir, err := resolveTaskDir(root, taskArg)
 	if err != nil {

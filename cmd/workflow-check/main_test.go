@@ -8,8 +8,23 @@ import (
 	"testing"
 )
 
+const defaultWorkflowConfig = `schema_version: 1
+git:
+  integration_branch: develop
+resources:
+  migration_version:
+    registry: .agent/registry/migrations.md
+  error_code_domain:
+    registry: .agent/registry/error-codes.md
+`
+
 // cliRepo 构造一个含 feature 分支且已同步远端的临时 git 仓库，返回仓库根目录。
 func cliRepo(t *testing.T, stateYAML string) string {
+	return cliRepoWithConfig(t, stateYAML, defaultWorkflowConfig)
+}
+
+// cliRepoWithConfig 与 cliRepo 相同，但允许指定（或不指定）机器配置内容。
+func cliRepoWithConfig(t *testing.T, stateYAML, configYAML string) string {
 	t.Helper()
 	dir := t.TempDir()
 	git := func(args ...string) string {
@@ -42,6 +57,9 @@ func cliRepo(t *testing.T, stateYAML string) string {
 	git("config", "user.name", "t")
 	git("config", "user.email", "t@e.c")
 	git("config", "commit.gpgsign", "false")
+	if configYAML != "" {
+		write(".agent/workflow.yaml", configYAML)
+	}
 	write("README.md", "# base\n")
 	git("add", "-A")
 	git("commit", "-q", "-m", "baseline")
@@ -136,5 +154,12 @@ func TestRunGateErrorNonV2(t *testing.T) {
 	dir := cliRepo(t, "task_id: demo\nphase: NEW\n")
 	if code := run([]string{"gate", "coder-start", ".agent/tasks/demo", "--root", dir}); code != 2 {
 		t.Fatalf("非 V2 task 期望 exit 2，实际 %d", code)
+	}
+}
+
+func TestRunGateConfigMissing(t *testing.T) {
+	dir := cliRepoWithConfig(t, v2PassState, "")
+	if code := run([]string{"gate", "coder-start", ".agent/tasks/demo", "--root", dir}); code != 2 {
+		t.Fatalf("机器配置缺失 期望 exit 2，实际 %d", code)
 	}
 }

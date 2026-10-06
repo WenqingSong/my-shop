@@ -10,9 +10,14 @@ import (
 
 // Validator 编排对 state.yaml 的只读 Gate 校验。它不修改任何 Artifact，不代理任何 git 写操作。
 type Validator struct {
-	Root       string // 仓库根目录，用于文件系统访问（state.yaml / contract.md 读取）
-	Git        Git    // 只读 git 操作（应与 Root 指向同一仓库）
-	DevelopRef string // shared develop 远端引用（如 origin/develop），资源权威来源；本地 develop 分支不是权威
+	Root   string  // 仓库根目录，用于文件系统访问（state.yaml / contract.md 读取）
+	Git    Git     // 只读 git 操作（应与 Root 指向同一仓库）
+	Config *Config // 机器配置（.agent/workflow.yaml），提供 integration branch 与 registry 映射
+}
+
+// developRef 返回 shared integration branch 的远端引用（origin/<integration_branch>）。
+func (v *Validator) developRef() string {
+	return "origin/" + v.Config.Git.IntegrationBranch
 }
 
 // loadV2State 读取并解析 taskDir/state.yaml，校验 schema_version==2。
@@ -103,31 +108,46 @@ func (v *Validator) featureHead() (string, error) {
 	return v.Git.RevParse("HEAD")
 }
 
-// loadDevelopRegistry 读取 shared develop 上的 Registry 权威事实。
-func (v *Validator) loadDevelopRegistry() (Registry, error) {
-	if v.DevelopRef == "" {
-		return Registry{}, fmt.Errorf("缺少 develop-ref，无法机械验证 shared develop Registry 权威")
+// loadDevelopRegistry 按 state 实际声明的资源 kind 读取 shared integration branch 上的 Registry 权威事实。
+// 路径来自机器配置 .agent/workflow.yaml（config.resources.*.registry），不再硬编码。
+// 按需加载：state 只声明 migrations 时，不要求 error_code_domain registry 存在，反之亦然。
+func (v *Validator) loadDevelopRegistry(s State) (Registry, error) {
+	ref := v.developRef()
+	var reg Registry
+
+	if len(s.Resources.Migrations) > 0 {
+		p := v.Config.Resources.MigrationVersion.Registry
+		if p == "" {
+			return Registry{}, fmt.Errorf("机器配置缺少 resources.migration_version.registry")
+		}
+		content, err := v.Git.ShowFile(ref, p)
+		if err != nil {
+			return Registry{}, fmt.Errorf("读取 %s:%s: %w", ref, p, err)
+		}
+		entries, err := ParseMigrations(content)
+		if err != nil {
+			return Registry{}, fmt.Errorf("解析 %s:%s: %w", ref, p, err)
+		}
+		reg.Migrations = entries
 	}
 
-	migContent, err := v.Git.ShowFile(v.DevelopRef, ".agent/registry/migrations.md")
-	if err != nil {
-		return Registry{}, fmt.Errorf("读取 develop Registry migrations.md（%s）: %w", v.DevelopRef, err)
-	}
-	ecContent, err := v.Git.ShowFile(v.DevelopRef, ".agent/registry/error-codes.md")
-	if err != nil {
-		return Registry{}, fmt.Errorf("读取 develop Registry error-codes.md（%s）: %w", v.DevelopRef, err)
-	}
-
-	migrations, err := ParseMigrations(migContent)
-	if err != nil {
-		return Registry{}, fmt.Errorf("解析 develop migrations.md: %w", err)
-	}
-	domains, err := ParseErrorDomains(ecContent)
-	if err != nil {
-		return Registry{}, fmt.Errorf("解析 develop error-codes.md: %w", err)
+	if len(s.Resources.ErrorCodeDomains) > 0 {
+		p := v.Config.Resources.ErrorCodeDomain.Registry
+		if p == "" {
+			return Registry{}, fmt.Errorf("机器配置缺少 resources.error_code_domain.registry")
+		}
+		content, err := v.Git.ShowFile(ref, p)
+		if err != nil {
+			return Registry{}, fmt.Errorf("读取 %s:%s: %w", ref, p, err)
+		}
+		entries, err := ParseErrorDomains(content)
+		if err != nil {
+			return Registry{}, fmt.Errorf("解析 %s:%s: %w", ref, p, err)
+		}
+		reg.ErrorDomains = entries
 	}
 
-	return Registry{Migrations: migrations, ErrorDomains: domains}, nil
+	return reg, nil
 }
 
 // contractPath 返回当前 task 的 contract.md 相对路径。

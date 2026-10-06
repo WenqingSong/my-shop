@@ -16,7 +16,22 @@ type testRepo struct {
 	t   *testing.T
 }
 
+const defaultWorkflowConfig = `schema_version: 1
+git:
+  integration_branch: develop
+resources:
+  migration_version:
+    registry: .agent/registry/migrations.md
+  error_code_domain:
+    registry: .agent/registry/error-codes.md
+`
+
 func newTestRepo(t *testing.T) *testRepo {
+	return newTestRepoWithConfig(t, defaultWorkflowConfig)
+}
+
+// newTestRepoWithConfig 与 newTestRepo 相同，但允许注入自定义机器配置内容。
+func newTestRepoWithConfig(t *testing.T, configYAML string) *testRepo {
 	t.Helper()
 	dir := t.TempDir()
 	r := &testRepo{dir: dir, t: t}
@@ -25,6 +40,9 @@ func newTestRepo(t *testing.T) *testRepo {
 	r.git("config", "user.name", "test")
 	r.git("config", "user.email", "test@example.com")
 	r.git("config", "commit.gpgsign", "false")
+	if configYAML != "" {
+		r.write(".agent/workflow.yaml", configYAML)
+	}
 	return r
 }
 
@@ -74,10 +92,14 @@ func (r *testRepo) syncOrigin(branch string) {
 }
 
 func (r *testRepo) validator() *Validator {
+	cfg, err := LoadConfig(r.dir)
+	if err != nil {
+		r.t.Fatalf("load config: %v", err)
+	}
 	return &Validator{
-		Root:       r.dir,
-		Git:        &ExecGit{Root: r.dir},
-		DevelopRef: "origin/develop",
+		Root:   r.dir,
+		Git:    &ExecGit{Root: r.dir},
+		Config: cfg,
 	}
 }
 
@@ -422,4 +444,155 @@ func TestGateCoderStartResourceFeatureOnlyReserved(t *testing.T) {
 	r.syncOrigin("feature/agent-workflow-v2")
 
 	expectCheck(t, r.validator().GateCoderStart(".agent/tasks/demo"), "Resource Authority")
+}
+
+// --- machine config：非 develop 集成分支 ---
+
+const mainWorkflowConfig = `schema_version: 1
+git:
+  integration_branch: main
+resources:
+  migration_version:
+    registry: .agent/registry/migrations.md
+  error_code_domain:
+    registry: .agent/registry/error-codes.md
+`
+
+func TestValidatorIntegrationBranchMain(t *testing.T) {
+	r := newTestRepoWithConfig(t, mainWorkflowConfig)
+	r.git("branch", "-m", "main") // 集成分支改为 main
+	r.write(".agent/registry/migrations.md", migrationsBase)
+	r.write(".agent/registry/error-codes.md", errorDomainsBase)
+	r.commit("registry baseline")
+	r.syncOrigin("main")
+
+	// 在 main 上追加 RESERVED
+	r.write(".agent/registry/migrations.md", migrationsBase+"| 20261001000009 | foo | demo | RESERVED | |\n")
+	r.commit("reserve on main")
+	r.syncOrigin("main")
+
+	r.checkout("feature/agent-workflow-v2")
+	s := baseState()
+	s.Resources = Resources{Migrations: []string{"20261001000009"}}
+	r.writeState(s)
+	r.commit("feature state")
+	r.syncOrigin("feature/agent-workflow-v2")
+
+	// Validator 应读取 origin/main（而非 origin/develop）上的 registry。
+	expectStatus(t, r.validator().GateCoderStart(".agent/tasks/demo"), StatusPass)
+}
+
+// --- machine config：自定义 registry 路径 ---
+
+const customRegistryConfig = `schema_version: 1
+git:
+  integration_branch: develop
+resources:
+  migration_version:
+    registry: .agent/registry/custom-migrations.md
+  error_code_domain:
+    registry: .agent/registry/custom-error-codes.md
+`
+
+func TestValidatorCustomRegistryPaths(t *testing.T) {
+	r := newTestRepoWithConfig(t, customRegistryConfig)
+	r.write(".agent/registry/custom-migrations.md", migrationsBase)
+	r.write(".agent/registry/custom-error-codes.md", errorDomainsBase)
+	r.commit("registry baseline")
+	r.syncOrigin("develop")
+
+	r.write(".agent/registry/custom-migrations.md", migrationsBase+"| 20261001000009 | foo | demo | RESERVED | |\n")
+	r.write(".agent/registry/custom-error-codes.md", errorDomainsBase+"| 10000-10999 | demo | RESERVED | |\n")
+	r.commit("reserve")
+	r.syncOrigin("develop")
+
+	r.checkout("feature/agent-workflow-v2")
+	s := baseState()
+	s.Resources = Resources{Migrations: []string{"20261001000009"}, ErrorCodeDomains: []string{"10000-10999"}}
+	r.writeState(s)
+	r.commit("feature state")
+	r.syncOrigin("feature/agent-workflow-v2")
+
+	expectStatus(t, r.validator().GateCoderStart(".agent/tasks/demo"), StatusPass)
+}
+
+// --- machine config 缺 registry 声明 → ERROR（exit 2），而非「resource not reserved」---
+
+const noMigrationRegistryConfig = `schema_version: 1
+git:
+  integration_branch: develop
+resources:
+  migration_version:
+    registry: ""
+  error_code_domain:
+    registry: .agent/registry/error-codes.md
+`
+
+func TestResourceNeedsMigrationButConfigMissingMigrationRegistry(t *testing.T) {
+	r := newTestRepoWithConfig(t, noMigrationRegistryConfig)
+	r.write(".agent/registry/error-codes.md", errorDomainsBase)
+	r.commit("baseline")
+	r.syncOrigin("develop")
+
+	r.checkout("feature/agent-workflow-v2")
+	s := baseState()
+	s.Resources = Resources{Migrations: []string{"20261001000009"}}
+	r.writeState(s)
+	r.commit("feature state")
+	r.syncOrigin("feature/agent-workflow-v2")
+
+	res := r.validator().GateCoderStart(".agent/tasks/demo")
+	if res.Status != StatusError {
+		t.Fatalf("期望 ERROR，实际 status=%s error=%q", res.Status, res.Error)
+	}
+}
+
+const noErrorCodeRegistryConfig = `schema_version: 1
+git:
+  integration_branch: develop
+resources:
+  migration_version:
+    registry: .agent/registry/migrations.md
+  error_code_domain:
+    registry: ""
+`
+
+func TestResourceNeedsErrorCodeButConfigMissingErrorCodeRegistry(t *testing.T) {
+	r := newTestRepoWithConfig(t, noErrorCodeRegistryConfig)
+	r.write(".agent/registry/migrations.md", migrationsBase)
+	r.commit("baseline")
+	r.syncOrigin("develop")
+
+	r.checkout("feature/agent-workflow-v2")
+	s := baseState()
+	s.Resources = Resources{ErrorCodeDomains: []string{"10000-10999"}}
+	r.writeState(s)
+	r.commit("feature state")
+	r.syncOrigin("feature/agent-workflow-v2")
+
+	res := r.validator().GateCoderStart(".agent/tasks/demo")
+	if res.Status != StatusError {
+		t.Fatalf("期望 ERROR，实际 status=%s error=%q", res.Status, res.Error)
+	}
+}
+
+// --- config 声明的 registry 路径无法读取 → ERROR ---
+
+func TestConfigRegistryPathNotFound(t *testing.T) {
+	r := newTestRepoWithConfig(t, customRegistryConfig)
+	r.write(".agent/registry/unrelated.md", "# not the configured path\n")
+	r.commit("baseline")
+	r.syncOrigin("develop")
+
+	r.checkout("feature/agent-workflow-v2")
+	s := baseState()
+	s.Resources = Resources{Migrations: []string{"20261001000009"}}
+	r.writeState(s)
+	r.commit("feature state")
+	r.syncOrigin("feature/agent-workflow-v2")
+
+	res := r.validator().GateCoderStart(".agent/tasks/demo")
+	if res.Status != StatusError {
+		t.Fatalf("期望 ERROR，实际 status=%s error=%q", res.Status, res.Error)
+	}
 }

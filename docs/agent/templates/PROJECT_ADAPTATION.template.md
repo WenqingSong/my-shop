@@ -71,6 +71,7 @@ Existing Workflow Assets:
 - Design Authority Root:
 - Workflow Task Root:
 - Registry Root:
+- Machine Config (.agent/workflow.yaml): integration_branch + registry 映射
 
 Migration Registry: ENABLED / DISABLED / NOT_APPLICABLE
 
@@ -102,6 +103,7 @@ Validation Commands:
 
 > 最终每一个重要 Adaptation Fact 都必须找到长期权威 Destination。
 > PROJECT_ADAPTATION.md 本身不能作为长期 Destination。
+> 必含长期机器配置 `.agent/workflow.yaml`：至少 materialize integration branch 与适用的 Registry 路径（它长期存在，不是 temporary）。
 
 ---
 
@@ -152,6 +154,7 @@ Validation:
 - Git authority
 - Registry
 - Validator
+- Machine Config (.agent/workflow.yaml 可解析 / integration branch 可用 / registry 可读取)
 - Project build/test mapping
 - Owner decisions
 - Materialization completeness

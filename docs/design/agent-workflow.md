@@ -109,6 +109,8 @@ Analyst 是唯一被允许进行 shared-develop mutation 的 Agent 例外。但�
 .agent/registry/error-codes.md
 ```
 
+> 这两个文件路径由机器配置 `.agent/workflow.yaml` 声明（见 §29 Machine Configuration）；本文中的两个路径是当前 my-shop 的默认值。
+
 形成 **Registry-only commit**。流程：
 
 ```text
@@ -202,7 +204,7 @@ blocked:
 
 要点：
 
-- `resources` 只声明「需要什么」，不自证满足；真正 Authority 永远读取 `origin/develop:.agent/registry/*`。
+- `resources` 只声明「需要什么」，不自证满足；真正 Authority 永远读取 shared integration branch 上的 Registry（当前 my-shop 为 `origin/develop:.agent/registry/*`，由 `.agent/workflow.yaml` 声明，见 §29）。
 - 资源值必须是纯机器值（如 `20261001000011`、`12000-12999`），带说明的非法值在 Resource Schema 层直接 FAIL。
 - `schema_version != 2` 的任务调用 Gate → `ERROR`（exit 2）。
 
@@ -296,7 +298,7 @@ Evidence Snapshot 之后可以存在**有限**的 metadata commit，但必须严
 
 ## 10. 核心不变量（INV-1 ~ INV-7）
 
-- **INV-1 Shared Branch Authority**：Only Owner mutates shared develop（branch 生命周期与最终 feature→develop integration）。Agent 不创建任务 branch、不最终 merge、不 push develop——**唯一例外**是 Analyst 的 Registry-only develop commit（仅 `.agent/registry/migrations.md` 与 `.agent/registry/error-codes.md`）。
+- **INV-1 Shared Branch Authority**：Only Owner mutates shared develop（branch 生命周期与最终 feature→develop integration）。Agent 不创建任务 branch、不最终 merge、不 push develop——**唯一例外**是 Analyst 的 Registry-only develop commit（仅 `.agent/workflow.yaml` 声明的 Registry 文件，当前 my-shop 为 `.agent/registry/migrations.md` 与 `.agent/registry/error-codes.md`）。
 - **INV-2 Implement Authorization**：Coder 开始前 Contract valid + Resources 由 `origin/develop` Registry 授权。
 - **INV-3 Immutable Review**：Cleaner 只能 CLEAN 明确 immutable commit，不能 CLEAN working tree。
 - **INV-4 Review Freshness**：任何 substantive change 使旧 CLEAN 自动失效；不保存 STALE。
@@ -322,10 +324,10 @@ Evidence Snapshot 之后可以存在**有限**的 metadata commit，但必须严
 ### 当前真实 CLI
 
 ```text
-workflow-check gate <coder-start|cleaner-start|owner-gate-start|delivery-start|merge-ready> <task> [--root DIR] [--develop-ref REF]
+workflow-check gate <coder-start|cleaner-start|owner-gate-start|delivery-start|merge-ready> <task> [--root DIR]
 ```
 
-`--develop-ref` 默认 `origin/develop`（本地 develop 分支不是权威）。
+integration branch 与 Registry 路径来自 `.agent/workflow.yaml`（见 §29 Machine Configuration），不再由 CLI 写死；本地 develop 分支不是权威。
 
 ### exit code
 
@@ -617,6 +619,40 @@ Workflow V2 Core（Roles、Authority、Evidence Snapshot、Handoff、Gate、Comp
 - 正常六角色运行不依赖 `PROJECT_ADAPTATION.md`。
 
 Adoption 的五阶段（DISCOVER → RESOLVE → MATERIALIZE → VERIFY → CLEANUP）、`PROJECT_ADAPTATION.md` 生命周期、Migration / Registry 的 `ENABLED / DISABLED / NOT_APPLICABLE` 抽象、以及当前源项目 Validator 的项目耦合清单，详见 `docs/agent/WorkflowAdoption.md`，不在本文重复。模板见 `docs/agent/templates/PROJECT_ADAPTATION.template.md`。
+
+---
+
+## 29. Machine Configuration（.agent/workflow.yaml）
+
+Workflow 有三层事实：
+
+1. **Workflow Core**：Roles、Authority、Evidence Snapshot、Handoff、Gate、Completion Contract、Git safety model、Registry coordination concept——跨项目稳定，固化在 `internal/workflow/*` 与 `docs/agent/*`。
+2. **Machine Configuration**：`.agent/workflow.yaml`——「跨项目会变化、且 Workflow Engine runtime 必须知道的最小参数」。
+3. **Project Policy**：README / Makefile / `docs/design/*` / `AGENTS.md` 等——项目工程约束，供 Agent 读取，不供 `workflow-check` 机器解析。
+
+`.agent/workflow.yaml` 是长期机器配置，**不是** `PROJECT_ADAPTATION.md`（一次性临时工作单）、不是 Task Artifact、不是业务配置。它在 Adoption 完成后长期存在，供 `workflow-check` 读取。
+
+当前 v1 schema：
+
+```yaml
+schema_version: 1
+git:
+  integration_branch: develop
+resources:
+  migration_version:
+    registry: .agent/registry/migrations.md
+  error_code_domain:
+    registry: .agent/registry/error-codes.md
+```
+
+约束：
+
+- `schema_version` 必须为 `1`；缺失或不支持 → exit 2。
+- `git.integration_branch` 必填；Engine 据此构造 `origin/<integration_branch>`。
+- `resources.*.registry` 是各 resource kind 的 Registry 文件路径。当前 `state.resources.migrations` 映射到 `migration_version`、`state.resources.error_code_domains` 映射到 `error_code_domain`（兼容桥接，P2 才泛化）。
+- 配置损坏（缺失 / 无法解析 / 缺 `integration_branch` / 缺所需 registry / registry 无法读取）一律 exit 2，不误报为「resource not reserved」。
+
+硬编码不等于错误：`.agent/tasks/<task-id>` 仍属于 Workflow Core Convention，本轮不配置化。
 
 ---
 

@@ -194,9 +194,9 @@ func (v *Validator) GateMergeReady(taskDir string) Result {
 	if err != nil {
 		return Result{Status: StatusError, Error: err.Error()}
 	}
-	developHead, err := v.Git.RevParse(v.DevelopRef)
+	developHead, err := v.Git.RevParse(v.developRef())
 	if err != nil {
-		return Result{Status: StatusError, Error: fmt.Sprintf("rev-parse %s: %v", v.DevelopRef, err)}
+		return Result{Status: StatusError, Error: fmt.Sprintf("rev-parse %s: %v", v.developRef(), err)}
 	}
 	if res := v.deliveryFreshness(taskSlug, s, remoteFeatureHead, developHead); res.Status != StatusPass {
 		return res
@@ -308,7 +308,7 @@ func (v *Validator) ownerAcceptanceValid(taskSlug string, s State, featureHead s
 // deliveryFreshness 校验 Delivery PASS 仍有效（INV-6）：
 //   - delivery.feature_head 是当前 remote feature HEAD 的祖先；
 //   - feature_head..remote HEAD 只允许当前 task 的 delivery-neutral artifacts；
-//   - 当前 origin/develop == delivery.develop_base。
+//   - 当前 origin/<integration_branch> == delivery.develop_base。
 func (v *Validator) deliveryFreshness(taskSlug string, s State, remoteFeatureHead, developHead string) Result {
 	if s.Delivery.FeatureHead == "" {
 		return failResult(taskSlug, "Delivery Freshness (INV-6)", "delivery.feature_head 为空", "<evidence-commit-sha>", "delivery PASS 必须绑定 feature_head")
@@ -328,17 +328,18 @@ func (v *Validator) deliveryFreshness(taskSlug string, s State, remoteFeatureHea
 		}
 	}
 	if developHead != s.Delivery.DevelopBase {
-		return failResult(taskSlug, "Delivery Freshness (INV-6)", fmt.Sprintf("origin/develop=%s", developHead), s.Delivery.DevelopBase, "develop 已前进，旧 Delivery PASS 不再 Merge Ready")
+		return failResult(taskSlug, "Delivery Freshness (INV-6)", fmt.Sprintf("%s=%s", v.developRef(), developHead), s.Delivery.DevelopBase, "develop 已前进，旧 Delivery PASS 不再 Merge Ready")
 	}
 	return Result{Status: StatusPass}
 }
 
-// resourcesAuthorized 校验 resources 已在 origin/develop Registry 授权（INV-2）。
+// resourcesAuthorized 校验 resources 已在 shared integration branch 的 Registry 授权（INV-2）。
+// Registry 路径与 integration branch 来自机器配置 .agent/workflow.yaml。
 func (v *Validator) resourcesAuthorized(s State) Result {
 	if !s.HasRequiredResources() {
 		return Result{Status: StatusPass}
 	}
-	reg, err := v.loadDevelopRegistry()
+	reg, err := v.loadDevelopRegistry(s)
 	if err != nil {
 		return Result{Status: StatusError, Error: err.Error()}
 	}
