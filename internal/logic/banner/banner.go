@@ -146,7 +146,8 @@ func (s *sBanner) Create(ctx context.Context, req *v1.CreateReq) (*v1.CreateRes,
 	return &v1.CreateRes{Banner: *toBanner(row)}, nil
 }
 
-// Update 按提交字段更新轮播图：仅更新提交字段，核对 RowsAffected（0 → 14001）。
+// Update 按提交字段更新轮播图：仅更新提交字段；「不存在」由更新前的 findOne 存在性判断，
+// 不依据 RowsAffected（避免把「值无变化的幂等更新」误判为不存在）。
 // link_url 提交为空字符串时清空（写 NULL）；未提交字段保持不变。
 func (s *sBanner) Update(ctx context.Context, req *v1.UpdateReq) (*v1.UpdateRes, error) {
 	old, err := s.findOne(ctx, req.Id)
@@ -198,12 +199,10 @@ func (s *sBanner) Update(ctx context.Context, req *v1.UpdateReq) (*v1.UpdateRes,
 		return &v1.UpdateRes{Banner: *toBanner(old)}, nil
 	}
 
-	result, err := g.DB().Model("banners").Ctx(ctx).Where("id", req.Id).Data(data).Update()
-	if err != nil {
+	// 执行更新：不依据 RowsAffected 判断存在性——目标存在但提交值无变化时，
+	// MySQL 的 UPDATE 同样返回 0 行受影响（幂等保存），此时仍应视为成功。
+	if _, err := g.DB().Model("banners").Ctx(ctx).Where("id", req.Id).Data(data).Update(); err != nil {
 		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("更新轮播图: %w", err))
-	}
-	if n, _ := result.RowsAffected(); n == 0 {
-		return nil, codes.New(codes.CodeBannerNotFound)
 	}
 
 	row, err := s.findOne(ctx, req.Id)
@@ -211,7 +210,8 @@ func (s *sBanner) Update(ctx context.Context, req *v1.UpdateReq) (*v1.UpdateRes,
 		return nil, err
 	}
 	if row == nil {
-		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("更新轮播图后未找到记录"))
+		// 更新前已确认存在、更新后消失：并发删除兜底，按不存在处理。
+		return nil, codes.New(codes.CodeBannerNotFound)
 	}
 	return &v1.UpdateRes{Banner: *toBanner(row)}, nil
 }

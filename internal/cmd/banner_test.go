@@ -397,3 +397,56 @@ func TestBannerInvalidInputRejected(t *testing.T) {
 		t.Fatalf("invalid input must not write, count=%d", n)
 	}
 }
+
+// TestBannerUpdateRegression 回归 CLEAN-001：Update 不依据 RowsAffected 判断存在性，
+// 覆盖「不存在→404」「正常修改→成功」「相同值幂等→成功」「无权限→403 且无副作用」。
+func TestBannerUpdateRegression(t *testing.T) {
+	base := setupBannerServer(t)
+	adminToken, _ := isoAdminLogin(t, base, isoSuperUsername, isoAdminPassword)
+
+	create := bannerCall(t, base, "POST", "/admin/banners", adminToken, map[string]any{
+		"title": "原始", "image_url": "/storage/banners/banner-1.png", "status": 1,
+	})
+	if create.Status != 200 || create.Code != 0 {
+		t.Fatalf("create: status=%d code=%d", create.Status, create.Code)
+	}
+	id := bannerDecodeData(t, create.Data).Id
+
+	// 1) 不存在 → 404/14001。
+	if miss := bannerCall(t, base, "PUT", "/admin/banners/999999", adminToken, map[string]any{"title": "x"}); miss.Status != 404 || miss.Code != 14001 {
+		t.Fatalf("missing update: status=%d code=%d want 404/14001", miss.Status, miss.Code)
+	}
+
+	// 2) 正常修改 → 成功且数据更新。
+	chg := bannerCall(t, base, "PUT", fmt.Sprintf("/admin/banners/%d", id), adminToken, map[string]any{"title": "已修改"})
+	if chg.Status != 200 || chg.Code != 0 {
+		t.Fatalf("change update: status=%d code=%d", chg.Status, chg.Code)
+	}
+	if b := bannerDecodeData(t, chg.Data); b.Title != "已修改" {
+		t.Fatalf("change update not applied: %+v", b)
+	}
+
+	// 3) 完全相同值重复 Update → 幂等成功（不得 404/14001）。
+	same := bannerCall(t, base, "PUT", fmt.Sprintf("/admin/banners/%d", id), adminToken, map[string]any{"title": "已修改"})
+	if same.Status != 200 || same.Code != 0 {
+		t.Fatalf("noop update: status=%d code=%d msg=%q want 200/0", same.Status, same.Code, same.Message)
+	}
+	if b := bannerDecodeData(t, same.Data); b.Id != id || b.Title != "已修改" {
+		t.Fatalf("noop update response wrong: %+v", b)
+	}
+
+	// 4) 无权限更新 → 403/1003 且无副作用。
+	isoInsertAdmin(t, "bannerupdplain", "bannerupdplain123")
+	plainToken, _ := isoAdminLogin(t, base, "bannerupdplain", "bannerupdplain123")
+	forbidden := bannerCall(t, base, "PUT", fmt.Sprintf("/admin/banners/%d", id), plainToken, map[string]any{"title": "篡改"})
+	if forbidden.Status != 403 || forbidden.Code != 1003 {
+		t.Fatalf("plain admin update: status=%d code=%d want 403/1003", forbidden.Status, forbidden.Code)
+	}
+	v, err := g.DB().Model("banners").Ctx(context.Background()).Fields("title").Where("id", id).Value()
+	if err != nil {
+		t.Fatalf("query title: %v", err)
+	}
+	if v == nil || v.String() != "已修改" {
+		t.Fatalf("forbidden update must not change title, got %v", v)
+	}
+}
