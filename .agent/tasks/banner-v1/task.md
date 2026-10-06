@@ -2,7 +2,7 @@
 
 ## Goal
 
-交付后端「轮播图」核心能力：前端可通过公开接口获取当前启用中的轮播图列表（含标题、图片地址、可选跳转目标，按展示顺序排列）；3 张轮播图图片以静态资源形式放进仓库并由后端直接对外可访问；后台管理员可在后台对轮播图进行创建、更新、排序、启用/禁用与删除管理。本次不实现文件上传与对象存储，图片通过仓库内静态资源引用。
+交付后端「轮播图」核心能力：前端可通过公开接口获取当前启用中的轮播图列表（含标题、图片地址、可选跳转目标，按展示顺序排列）；3 张轮播图占位图经运行时本地文件存储（LocalStorage）由后端直接对外可访问；后台管理员可在后台对轮播图进行创建、更新、排序、启用/禁用与删除管理。本次不实现文件上传（无 HTTP 上传接口）与对象存储，图片经独立 Storage 边界引用。
 
 ## Scope
 
@@ -12,14 +12,14 @@
   - 创建轮播图（标题、图片引用、可选跳转目标、排序、状态）；
   - 更新轮播图（改标题/图片/跳转/排序/状态）；
   - 删除轮播图。
-- 图片静态资源：将 3 张轮播图图片（占位/示例图）放入仓库，并由后端提供可访问的静态文件地址；`banners` 记录通过该地址引用图片（不做文件上传、不做对象存储）。
+- 图片存储：3 张占位图经运行时本地文件存储（LocalStorage）+ 独立 Storage 边界对外可访问；`banners.image_url` 存可访问地址；无 HTTP 上传接口、不接对象存储。
 - 错误码：新增轮播图错误码域（语义：轮播图 Banner），具体编号由 Analyst 读 `.agent/registry/*` 派生并写入 Contract。
 - 长期设计：新增 `docs/design/banner.md`（Design Impact = NEW），沉淀轮播图数据模型、图片引用与静态服务方式、排序/状态语义、权限边界与错误码域。
 - 必要测试：公开列表（启用过滤/排序/边界）、后台创建/更新/删除/权限拒绝、状态启用禁用的可见性，以及迁移幂等。
 
 ## Out of Scope
 
-- 文件上传、对象存储（OSS/S3 等）、CDN、图片处理（裁剪/压缩/水印）。
+- 文件上传（V1 无 HTTP 上传接口）、对象存储（OSS/S3 等，MinIO/OSS/S3 为 Storage 边界后续替换项、不在 V1）、CDN、图片处理（裁剪/压缩/水印）。
 - 前端页面改造（`frotend_web`/`frotend_manage` 为未接入本后端的模板工程）；轮播图的前端渲染、轮播动画、点击跳转行为均不在本次范围。
 - 多位置/多分组轮播（如首页位、活动位），除非 Analyst/Owner 明确需要（见 Analyst Questions）。
 - 定时上下架 / 生效时间窗，除非 Analyst/Owner 明确需要（见 Analyst Questions）。
@@ -34,7 +34,7 @@ Design Artifact: docs/design/banner.md
 ## Acceptance Criteria
 
 - [ ] AC-001（公开列表）：无 token 访问 `GET /banners` 成功返回启用中的轮播图列表，仅含启用项，且按展示顺序（`sort`）排列；每项含标题、图片地址（该地址可直接访问）、可选跳转目标。
-- [ ] AC-002（图片可访问）：仓库内 3 张轮播图图片均可通过后端返回的图片地址直接访问（HTTP 200，且内容类型为图片），不存在依赖外部 URL 或本机临时文件。
+- [ ] AC-002（图片可访问）：本地存储目录内 3 张占位图均可经 `image_url` 直接访问（HTTP 200，且内容类型为图片）。
 - [ ] AC-003（后台创建与权限）：管理员携带相应权限可创建轮播图并落库；无权限或未认证访问返回稳定拒绝（401/403）且不产生写入。
 - [ ] AC-004（后台更新与排序）：管理员可更新轮播图标题、图片、跳转目标、排序与状态，更新后公开列表与详情反映新值。
 - [ ] AC-005（后台删除）：管理员可删除轮播图，删除后不再出现在公开列表与后台可见数据中。
@@ -48,7 +48,7 @@ Design Artifact: docs/design/banner.md
 
 - 技术栈 GoFrame v2（Go 1.23+），模块 `cnb.cool/go-cloud-devops/my-shop`；分层 `api/<module>/v1`（`g.Meta` 声明 path/method）→ `internal/controller` → `internal/service`（接口 + `Register`）→ `internal/logic`（`init()` 注册），数据访问用 `g.DB().Model()`，无 `dao`/`model` 层。轮播图模块应沿用此结构。
 - 身份域：前台用户经 `middleware.Auth` 注入 `Principal{UserID, Sid}`；后台管理员经 `AdminAuth` + `RequirePermission(code)`（`IsSuper` 放行、fail-closed）。前台公开路由挂 `routes_frontend.go`，后台写路由挂 `routes_admin.go` 的 `require(code)` 分组。
-- 静态资源现状：后端当前**没有任何静态文件服务**（`AddStaticPath`/`AddStaticServer`/`SetServerRoot`/`go:embed` 资源目录均不存在于业务代码），`manifest/config/config.yaml` 亦无静态资源相关配置。服务轮播图图片是本次新增的能力，服务方式（静态目录 vs 内嵌资源 vs 外部 URL）需 Analyst 确定。
+- 静态资源现状：后端当前**没有任何静态文件服务**（`AddStaticPath`/`AddStaticServer`/`SetServerRoot`/`go:embed` 资源目录均不存在于业务代码），`manifest/config/config.yaml` 亦无静态资源相关配置。轮播图图片的本地文件静态服务为本次新增能力（V1 实现为 LocalStorage，见 Contract）。
 - 错误码集中在 `internal/codes/codes.go`；`.agent/registry/error-codes.md` 已分配至 `12000-12999`（flash-sale-v1，RESERVED）。轮播图为下一空闲错误码域（具体域号由 Analyst 派生）。
 - 迁移机制 golang-migrate v4：`internal/migrations/sql/{14位时间戳}_{title}.up.sql`，`.agent/registry/migrations.md` 最新为 `20261001000012`（product-view-count-v1，RESERVED）。轮播图表需新增 1 个 migration（具体 version 由 Analyst 派生），并同步更新 `migrations_test.go`（`latestMigrationVersion` 当前为 `20261001000012`、`businessTables` 当前 22 张）。
 - RBAC seed：`internal/boot/seed.go` 的 `seedPermissionList` 现含 27 个权限；轮播图管理写权限需新增并登记（权限 code 属 namespace 类资源，不进 `.agent/registry/*`）。
@@ -58,13 +58,13 @@ Design Artifact: docs/design/banner.md
 Assumption（合理但未经 Owner 确认，交 Analyst 核实并向 Owner 确认）：
 
 - 轮播图为数据库驱动（`banners` 表 + 后台管理），而非硬编码/配置文件清单；「先实现轮播图功能」指具备可运营管理的最小闭环。
-- 后台管理在本次范围，图片以「仓库内静态资源地址」引用，不上传、不接对象存储。
-- 3 张图片为占位/示例用途，由实现方从公开来源获取并提交进仓库（需注意来源可用性，不含敏感或侵权内容假设）。
+- 后台管理在本次范围，图片经运行时本地文件存储（LocalStorage）+ 独立 Storage 边界引用，无 HTTP 上传、不接对象存储。
+- 3 张图片为占位/示例用途，由启动 seed/初始化写入本地存储目录（图片不可得时以程序生成的极简占位图替代）。
 
 OPEN QUESTION（不阻塞任务创建，交 Analyst 分析、Owner 确认）：
 
 - 跳转目标语义：轮播图是否携带跳转（商品/分类/外部 URL/无跳转），跳转目标是外键引用还是自由字符串。
-- 静态服务方式：仓库静态目录 + GoFrame 静态路由 vs `go:embed` 内嵌资源 vs 外部 URL。
+- 静态服务方式：已由 Owner 决定为运行时本地文件存储（LocalStorage）+ 独立 Storage 边界（见 Contract），不再开放。
 - 字段集合：是否需要生效时间窗、多位置/多分组（position/type）、副标题等；是否仅单一「首页轮播」场景即可。
 - 后台权限粒度：`banner:create/update/delete` 是否足够，是否需区分读权限（现有后台读接口普遍仅 AdminAuth，无读权限）。
 
@@ -73,7 +73,7 @@ OPEN QUESTION（不阻塞任务创建，交 Analyst 分析、Owner 确认）：
 环境：需可连接的 MySQL 8.0 与 Redis 7（`docker compose up -d`）；集成测试必须走真实 `RegisterFrontendRoutes`（公开列表）与 `RegisterAdminRoutes` + `AdminAuth/RequirePermission`（后台管理），用真实管理员账号断言。
 
 - AC-001 → 需 MySQL：预置启用/禁用轮播图后，无 token 请求 `GET /banners`，断言仅含启用项、按 `sort` 排列、字段完整。
-- AC-002 → 需启动服务：直接请求返回的图片地址，断言 HTTP 200 且 `Content-Type` 为图片类型，图片文件存在于仓库。
+- AC-002 → 需启动服务：直接请求返回的图片地址，断言 HTTP 200 且 `Content-Type` 为图片类型，占位图存在于本地存储目录。
 - AC-003 → 需 MySQL：管理员带权限创建轮播图断言落库；无权限/未认证断言 401/403 且无写入。
 - AC-004 → 需 MySQL：更新各字段后断言公开列表与后台详情反映新值。
 - AC-005 → 需 MySQL：删除后断言公开列表与后台均不再出现。
@@ -102,7 +102,7 @@ COMPLEX
 
 - Base commit：`727cf978976d63010ed8bb67a991109e251bc57f`（分支 `feature/banner`）。
 - 任务开始时已有修改：无（working tree clean，`git status --short` 为空）。
-- 重叠修改的区分方式：本任务新增产物为 `.agent/tasks/banner-v1/`、`api/banner*/`（或等价轮播图 API 包）、`internal/controller/banner*/`、`internal/logic/banner*/`、`internal/service` 的 `IBanner` 接口、`internal/codes` 轮播图域扩展、migration 文件（`banners`）、静态图片资源目录、`internal/boot/seed.go` 的轮播图权限 seed、`internal/cmd` 路由扩展及对应测试；`docs/design/banner.md` 由 Analyst 写入。当前工作区干净，无既有未提交修改。
+- 重叠修改的区分方式：本任务新增产物为 `.agent/tasks/banner-v1/`、`api/banner*/`（或等价轮播图 API 包）、`internal/controller/banner*/`、`internal/logic/banner*/`、`internal/service` 的 `IBanner` 接口、`internal/codes` 轮播图域扩展、migration 文件（`banners`）、Storage 边界（`internal/storage`，本地目录静态路由）、`internal/boot/seed.go` 的轮播图权限 seed、`internal/cmd` 路由扩展及对应测试；`docs/design/banner.md` 由 Analyst 写入。当前工作区干净，无既有未提交修改。
 
 ## Initial Route
 
