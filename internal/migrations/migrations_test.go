@@ -13,19 +13,19 @@ import (
 // baselineVersion 是内嵌 baseline 迁移的版本号（14 位时间戳）。
 const baselineVersion = uint(20261001000001)
 
-// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + products + skus + inventory + addresses + cart_items + orders + refresh_tokens + reviews + favorites + flash_sale + product_view_count）。
-const latestMigrationVersion = uint(20261001000012)
+// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + products + skus + inventory + addresses + cart_items + orders + refresh_tokens + reviews + favorites + flash_sale + product_view_count + banners）。
+const latestMigrationVersion = uint(20261001000014)
 
-// businessTables 是 migration 应建立的 22 张业务表。
+// businessTables 是 migration 应建立的 23 张业务表。
 // 注意顺序：order_items 通过外键引用 orders（ON DELETE CASCADE），故 order_items 排在 orders 之前；
 // flash_sale_activity_skus 通过外键引用 flash_sale_activities（ON DELETE CASCADE），故排在它之前；
-// refresh_tokens/cart_items/favorites/flash_sale_orders 无外键、置前；addresses 通过外键引用 users（ON DELETE CASCADE），
+// refresh_tokens/cart_items/favorites/flash_sale_orders/banners 无外键、置前；addresses 通过外键引用 users（ON DELETE CASCADE），
 // 故 addresses 排在 users 之前；inventories/inventory_logs 通过外键引用 skus，skus 通过外键引用
 // products，products 通过外键引用 categories（均 ON DELETE RESTRICT），因此被引用方必须排在引用方之后，
 // 即 inventories/inventory_logs 排在 skus 之前、skus 排在 products 之前、products 排在 categories 之前，
 // 否则 DROP TABLE 会因外键依赖失败。
 var businessTables = []string{
-	"favorites", "flash_sale_orders", "flash_sale_activity_skus", "flash_sale_activities",
+	"banners", "favorites", "flash_sale_orders", "flash_sale_activity_skus", "flash_sale_activities",
 	"order_items", "orders", "refresh_tokens", "cart_items", "reviews", "addresses", "users", "inventory_logs", "inventories", "skus", "products", "product_images", "categories", "admins", "roles", "permissions", "admin_roles", "role_permissions",
 }
 
@@ -255,14 +255,14 @@ func TestUpAppliesOnlyPendingMigration(t *testing.T) {
 	}
 
 	migrationFS = sourceWithExtra(map[string]string{
-		"20261001000013_probe.up.sql": "CREATE TABLE migration_probe (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)) ENGINE=InnoDB;",
+		"20261001000015_probe.up.sql": "CREATE TABLE migration_probe (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)) ENGINE=InnoDB;",
 	})
 
 	if err := Up(ctx); err != nil {
 		t.Fatalf("incremental up: %v", err)
 	}
-	if v := currentVersion(t, db); v != uint(20261001000013) {
-		t.Errorf("expected current version %d after incremental up, got %d", uint(20261001000013), v)
+	if v := currentVersion(t, db); v != uint(20261001000015) {
+		t.Errorf("expected current version %d after incremental up, got %d", uint(20261001000015), v)
 	}
 	if !tableExists(t, db, "migration_probe") {
 		t.Errorf("expected migration_probe table created by incremental migration")
@@ -641,6 +641,25 @@ var expectedSchema = []tableSpec{
 		Indexes: []indexSpec{
 			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
 			{Name: "uk_user_product", Unique: true, Columns: []string{"user_id", "product_id"}},
+		},
+	},
+	{
+		Name:      "banners",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "title", Type: "varchar(64)"},
+			{Name: "image_url", Type: "varchar(255)"},
+			{Name: "link_url", Type: "varchar(512)", Nullable: true},
+			{Name: "sort", Type: "int", Default: strPtr("0")},
+			{Name: "status", Type: "tinyint", Default: strPtr("1")},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "idx_status_sort", Unique: false, Columns: []string{"status", "sort"}},
 		},
 	},
 }

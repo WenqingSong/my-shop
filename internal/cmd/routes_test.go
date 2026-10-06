@@ -131,6 +131,15 @@ func TestRouteTable(t *testing.T) {
 		"DELETE /reviews/:id",
 		// 商品评价后台写操作（AdminAuth + RequirePermission）。
 		"POST /admin/reviews/:id/take-down",
+		// 公开轮播图列表（无 token）。
+		"GET /banners",
+		// 轮播图后台查询（AdminAuth，无读权限）。
+		"GET /admin/banners",
+		"GET /admin/banners/:id",
+		// 轮播图后台写操作（AdminAuth + RequirePermission）。
+		"POST /admin/banners",
+		"PUT /admin/banners/:id",
+		"DELETE /admin/banners/:id",
 	}
 	for _, w := range want {
 		if !got[w] {

@@ -60,6 +60,13 @@ order:
   # 超时未支付订单的后台扫描周期（秒）。
   cancel_scan_interval: 60
 
+# 本地存储配置（以下均为开发默认值，可通过环境变量覆盖）
+# 对应环境变量：STORAGE_LOCAL_ROOT
+storage:
+  local:
+    # 本地文件存储根目录（轮播图占位图等运行时静态资源写入此目录）。
+    root: "./storage"
+
 # 启动配置（以下均为开发默认值，可通过环境变量覆盖）
 # 对应环境变量：STARTUP_DEPENDENCY_TIMEOUT
 startup:

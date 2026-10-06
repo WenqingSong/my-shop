@@ -4,10 +4,11 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/address"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/banner"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/cart"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
-	"cnb.cool/go-cloud-devops/my-shop/internal/controller/flashsale"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/favorite"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/flashsale"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/order"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/product"
@@ -33,8 +34,9 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	flashsaleCtrl := flashsale.NewV1()
 	reviewCtrl := review.NewV1()
 	favoriteCtrl := favorite.NewV1()
+	bannerCtrl := banner.NewV1()
 
-	// 前台公开接口：注册、登录、刷新、分类查询、商品查询（无需 token）。
+	// 前台公开接口：注册、登录、刷新、分类查询、商品查询、轮播图列表（无需 token）。
 	root.POST("/register", iamCtrl.Register)
 	root.POST("/login", iamCtrl.Login)
 	root.POST("/refresh", iamCtrl.Refresh)
@@ -44,6 +46,8 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	root.GET("/products/:id", productCtrl.Detail)
 	// 商品公开评价列表与汇总（无需 token）。
 	root.GET("/products/:id/reviews", reviewCtrl.ListProduct)
+	// 公开轮播图列表（无需 token，仅返回启用项）。
+	root.GET("/banners", bannerCtrl.List)
 
 	// 前台登录用户接口：/me、收货地址、购物车与会话管理均需要认证 + 会话有效性校验。
 	root.Group("/", func(user *ghttp.RouterGroup) {

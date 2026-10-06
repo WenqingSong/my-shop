@@ -4,6 +4,7 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 
 	adminController "cnb.cool/go-cloud-devops/my-shop/internal/controller/admin"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/banner"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/flashsale"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/inventory"
@@ -33,6 +34,7 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 	orderAdminCtrl := orderController.NewAdminV1()
 	flashsaleAdminCtrl := flashsale.NewAdminV1()
 	reviewAdminCtrl := reviewController.NewAdminV1()
+	bannerCtrl := banner.NewV1()
 
 	// 后台公开接口：管理员登录（无需 token）。
 	root.POST("/admin/login", adminCtrl.Login)
@@ -114,5 +116,14 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 
 		// 商品评价后台写操作（AdminAuth + RequirePermission）。
 		require("review:take_down").POST("/admin/reviews/:id/take-down", reviewAdminCtrl.TakeDown)
+
+		// 轮播图后台查询（仅 AdminAuth，无读权限；查看全部状态）。
+		admin.GET("/admin/banners", bannerCtrl.AdminList)
+		admin.GET("/admin/banners/:id", bannerCtrl.AdminDetail)
+
+		// 轮播图后台写操作（AdminAuth + RequirePermission）。
+		require("banner:create").POST("/admin/banners", bannerCtrl.Create)
+		require("banner:update").PUT("/admin/banners/:id", bannerCtrl.Update)
+		require("banner:delete").DELETE("/admin/banners/:id", bannerCtrl.Delete)
 	})
 }

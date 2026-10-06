@@ -17,6 +17,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
 	"cnb.cool/go-cloud-devops/my-shop/internal/service"
+	"cnb.cool/go-cloud-devops/my-shop/internal/storage"
 )
 
 // 命令结构：my-shop [serve|migrate <up|force|version>]。
@@ -88,6 +89,11 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 	startOrderCancelScanner(ctx)
 
 	s := g.Server()
+	// 初始化本地图片存储：seed 轮播图占位图，并将 banner 目录映射为静态路由 /storage/banners。
+	if err := configureBannerStorage(ctx, s); err != nil {
+		return err
+	}
+
 	s.Group("/", func(root *ghttp.RouterGroup) {
 		root.Middleware(middleware.Response)
 		root.Bind(health.NewV1())
@@ -97,6 +103,26 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 	})
 	s.Run()
 	return nil
+}
+
+// configureBannerStorage 初始化轮播图图片的本地存储：seed 3 张占位图，并将 banner 目录
+// 映射为 /storage/banners 静态路由（LocalStorage 为 V1 唯一实现，后续可替换 MinIO/OSS/S3）。
+func configureBannerStorage(ctx context.Context, s *ghttp.Server) error {
+	local := storage.NewLocal(storageRoot(ctx))
+	if _, err := local.PrepareBannerPlaceholders(ctx); err != nil {
+		return err
+	}
+	s.AddStaticPath(storage.BannerURLPrefix, local.BannerDir())
+	return nil
+}
+
+// storageRoot 读取本地存储根目录（环境变量 STORAGE_LOCAL_ROOT 可覆盖），默认 ./storage。
+func storageRoot(ctx context.Context) string {
+	v, err := g.Cfg().GetEffective(ctx, "storage.local.root", "./storage")
+	if err != nil || v == nil {
+		return "./storage"
+	}
+	return v.String()
 }
 
 // orderCancelScanBatch 是每轮超时取消扫描处理的最大订单数。
