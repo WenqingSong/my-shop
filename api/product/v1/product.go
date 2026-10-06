@@ -26,6 +26,7 @@ type Product struct {
 	MainImage  string      `json:"main_image" dc:"主图 URL"`
 	Detail     string      `json:"detail" dc:"商品详情"`
 	Status     string      `json:"status" dc:"状态：draft/on_shelf/off_shelf"`
+	ViewCount  int64       `json:"view_count" dc:"累计浏览量（只读）"`
 	Images     []string    `json:"images" dc:"图片 URL 列表（按 sort 升序）"`
 	CreatedAt  *gtime.Time `json:"created_at" dc:"创建时间"`
 	UpdatedAt  *gtime.Time `json:"updated_at" dc:"更新时间"`

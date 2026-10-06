@@ -69,6 +69,7 @@ type product struct {
 	MainImage  string      `json:"main_image"`
 	Detail     *string     `json:"detail"`
 	Status     int         `json:"status"`
+	ViewCount  int64       `json:"view_count"`
 	CreatedAt  *gtime.Time `json:"created_at"`
 	UpdatedAt  *gtime.Time `json:"updated_at"`
 }
@@ -95,7 +96,20 @@ func (s *sProduct) AdminList(ctx context.Context, req *v1.AdminListReq) (*v1.Adm
 }
 
 // Detail 前台详情：仅 on_shelf 可见，并组合该商品的 enabled SKU。
+// 计数语义：先对 on_shelf 商品原子自增 view_count，用「单条条件 UPDATE + RowsAffected」
+// 合并「可见性校验 + 计数 + 404 判定」三合一；0 行 → 商品不存在或非上架（4001/404，无写入）；
+// 显式 updated_at = updated_at 规避 ON UPDATE CURRENT_TIMESTAMP 副作用；计数失败 fail-hard（500）。
 func (s *sProduct) Detail(ctx context.Context, id int64) (*v1.DetailRes, error) {
+	result, err := g.DB().Exec(ctx,
+		"UPDATE products SET view_count = view_count + 1, updated_at = updated_at WHERE id = ? AND status = ?",
+		id, statusOnShelf,
+	)
+	if err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("计数商品浏览量: %w", err))
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return nil, codes.New(codes.CodeProductNotFound)
+	}
 	p, err := s.load(ctx, id, true)
 	if err != nil {
 		return nil, err
@@ -480,6 +494,7 @@ func (s *sProduct) toProduct(r *product, images []string) *v1.Product {
 		MainImage:  r.MainImage,
 		Detail:     productDetail(r),
 		Status:     statusToString(r.Status),
+		ViewCount:  r.ViewCount,
 		Images:     images,
 		CreatedAt:  r.CreatedAt,
 		UpdatedAt:  r.UpdatedAt,
