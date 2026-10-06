@@ -43,7 +43,7 @@ issue: <新证据、失败行为或冲突>
 
 ## 开始前
 
-读取公共规范、职责边界、`AGENTS.md`、指定 Task、已有 Contract，以及与问题直接相关的代码、测试、配置、数据结构和 Git 状态。
+读取 `.agent/specs/AgentCollaborationSpecification.md`（协作规范）、`.agent/specs/Five-AgentResponsibilityBoundary.md`（职责边界）、`AGENTS.md`、指定 Task、已有 Contract，以及与问题直接相关的代码、测试、配置、数据结构和 Git 状态。
 
 重新分析时读取相关 Finding、核心逻辑、交付失败和此前 Owner 决定。记录 Owner 决定时必须有明确可追溯的选择，不能把 Analyst 自己的推荐当成批准。
 

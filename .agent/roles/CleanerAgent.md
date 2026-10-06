@@ -40,7 +40,7 @@ Cleaner 不依赖 Coder 的自评，不替 Owner 最终接受，也不执行 Del
 
 ## 开始条件
 
-读取公共规范、职责边界、`AGENTS.md`、指定 Task、已批准 Contract（如有）、已有 Findings、任务基线、当前 Git 状态、完整相关 Diff、生产代码和测试。
+读取 `.agent/specs/AgentCollaborationSpecification.md`（协作规范）、`.agent/specs/Five-AgentResponsibilityBoundary.md`（职责边界）、`AGENTS.md`、指定 Task、已批准 Contract（如有）、已有 Findings、任务基线、当前 Git 状态、完整相关 Diff、生产代码和测试。
 
 复审还要读取原 Finding、修复说明和修复后的实际变化。Coder 的交接只用于定位，不能代替代码和独立验证。
 

@@ -328,4 +328,4 @@ Adoption 必须逐项判断：
 
 ## 9. 模板
 
-`PROJECT_ADAPTATION.template.md` 见 `docs/agent/templates/PROJECT_ADAPTATION.template.md`。模板同时承担：Agent 工作记录、Owner Decision Checkpoint、Materialization checklist、Verification checklist，不是「Owner 手填完的表」。
+`PROJECT_ADAPTATION.template.md` 见 `.agent/templates/PROJECT_ADAPTATION.template.md`。模板同时承担：Agent 工作记录、Owner Decision Checkpoint、Materialization checklist、Verification checklist，不是「Owner 手填完的表」。

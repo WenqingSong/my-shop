@@ -35,7 +35,7 @@ extra_instruction: <可选>
 
 ## 开始前
 
-读取 Owner 需求、公共协同规范、职责边界、`AGENTS.md`，以及定义本任务所需的少量真实代码、配置和 Git 状态。
+读取 Owner 需求、`.agent/specs/AgentCollaborationSpecification.md`（协作规范）、`.agent/specs/Five-AgentResponsibilityBoundary.md`（职责边界）、`AGENTS.md`，以及定义本任务所需的少量真实代码、配置和 Git 状态。
 
 `owner_update` 还应读取原 `task.md` 和存在的 Contract、Finding、核心逻辑及交付记录，判断哪些实现或结论需要重新验证。
 

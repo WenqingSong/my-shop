@@ -1,8 +1,41 @@
+# AGENTS
+
+本仓库使用 **Workflow V2**。Agent 进入仓库后，先按职责定位规则，再阅读下方长期工程规范。
+
+## Workflow 入口
+
+执行 Workflow Task 前，根据职责读取：
+
+1. 协作规范：`.agent/specs/AgentCollaborationSpecification.md`
+2. 职责边界：`.agent/specs/Five-AgentResponsibilityBoundary.md`
+3. 本角色 Prompt：`.agent/roles/<Role>.md`
+4. 机器配置：`.agent/workflow.yaml`
+5. 当前任务事实：`.agent/tasks/<task-id>/` 下的 `task.md` / `state.yaml` / `contract.md` 等
+
+架构 Design（WHY / architecture）：
+
+`docs/design/agent-workflow.md`
+
+首次跨项目 Adoption：
+
+`.agent/specs/WorkflowAdoption.md` + `.agent/templates/PROJECT_ADAPTATION.template.md`
+
+`.agent/` namespace 索引见 `.agent/README.md`。
+
+注意：不要从历史 `.agent/tasks/*` 推断当前 Workflow 规则。当前 Workflow 权威来源是：
+
+- `docs/design/agent-workflow.md`（Architecture）
+- `.agent/specs/*`（Execution Specifications）
+- `.agent/roles/*`（Role Instructions）
+- `.agent/workflow.yaml`（Machine Configuration）
+
+---
+
 # 项目工程规范
 
-本文档只保留长期适用于多数任务、违反后代价明显的工程规则。当前业务目标和验收标准写入 `task.md`；关键设计写入经 Owner 确认的 `contract.md`；项目级长期设计事实（架构、数据模型、状态机、模块边界、不变量、公开协议等）沉淀在 `docs/design/*`，其职责、同步时机与 `CLEAN` 门槛由 `docs/agent/*` 与各角色 Prompt 定义；协作流程见 `docs/agent/`。
+本文档保留长期适用于多数任务、违反后代价明显的工程规则。当前业务目标和验收标准写入 `task.md`；关键设计写入经 Owner 确认的 `contract.md`；项目级长期设计事实（架构、数据模型、状态机、模块边界、不变量、公开协议等）沉淀在 `docs/design/*`，其职责、同步时机与 `CLEAN` 门槛由 `.agent/specs/*` 与 `.agent/roles/*` 定义；协作流程见 `.agent/specs/`。
 
-规则优先级：Owner 当前指令 → 当前 Task → 已确认 Contract/设计 → 本文件 → 角色流程。其中「已确认设计」包括任务级设计约束（`contract.md`）与项目级长期设计（`docs/design/*`），后者的落点与维护规则见 `docs/agent/*`。发现冲突时报告证据，不自行改写目标。
+规则优先级：Owner 当前指令 → 当前 Task → 已确认 Contract/设计 → 本文件 → 角色流程。其中「已确认设计」包括任务级设计约束（`contract.md`）与项目级长期设计（`docs/design/*`），后者的落点与维护规则见 `.agent/specs/*`。发现冲突时报告证据，不自行改写目标。
 
 ## 1. 基本取舍
 
@@ -136,4 +169,4 @@ go build ./...
 
 ## 12. 全局资源预留
 
-需要占用项目级全局唯一资源（至少含错误码域/编号与 migration version）的任务，必须在进入 Coder 前，从 `develop` 上的共享事实源 `.agent/registry/*` 取得独占分配；Coder 只能使用已预留资源，禁止自行推断编号。分类、生命周期、分配与一致性检查规则见 `docs/agent/*`（唯一来源），不在本文件复制全文。
+需要占用项目级全局唯一资源（至少含错误码域/编号与 migration version）的任务，必须在进入 Coder 前，从 `develop` 上的共享事实源 `.agent/registry/*` 取得独占分配；Coder 只能使用已预留资源，禁止自行推断编号。分类、生命周期、分配与一致性检查规则见 `.agent/specs/AgentCollaborationSpecification.md`（唯一来源），不在本文件复制全文。

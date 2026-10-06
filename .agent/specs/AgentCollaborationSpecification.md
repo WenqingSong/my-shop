@@ -4,11 +4,11 @@
 
 Agent 用来扩大实现、测试和审查能力；Owner 决定需求、关键方案和最终是否接受，并掌握重要业务逻辑。
 
-本文件只规定跨角色协作。长期工程规则见仓库根目录 `AGENTS.md`，角色边界见 `docs/agent/Five-AgentResponsibilityBoundary.md`，当前需求以 `.agent/tasks/<task-slug>/task.md` 为准，状态模型见 `docs/design/agent-workflow.md`。
+本文件只规定跨角色协作。长期工程规则见仓库根目录 `AGENTS.md`，角色边界见 `.agent/specs/Five-AgentResponsibilityBoundary.md`，当前需求以 `.agent/tasks/<task-slug>/task.md` 为准，状态模型见 `docs/design/agent-workflow.md`。
 
 角色数量不是质量指标。只启用能为当前任务增加明确价值的角色。
 
-正常六角色运行只依赖 Git + Artifacts + `AGENTS.md` + `docs/agent/*` + `docs/design/*`，不依赖临时文件 `PROJECT_ADAPTATION.md`。`PROJECT_ADAPTATION.md` 只存在于 Workflow V2 首次迁移 / Adoption 到一个项目的过程中，Adoption 完成后即删除，见 `docs/agent/WorkflowAdoption.md`。
+正常六角色运行只依赖 Git + Artifacts + `AGENTS.md` + `.agent/specs/*` + `.agent/roles/*` + `docs/design/*`，不依赖临时文件 `PROJECT_ADAPTATION.md`。`PROJECT_ADAPTATION.md` 只存在于 Workflow V2 首次迁移 / Adoption 到一个项目的过程中，Adoption 完成后即删除，见 `.agent/specs/WorkflowAdoption.md`。
 
 ## 2. 指令与事实来源
 

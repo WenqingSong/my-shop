@@ -68,7 +68,7 @@ Deliverer 不修生产代码、不重新做完整 Diff Review、不关闭 Cleane
 
 ## 开始前读取
 
-读取公共规范、职责边界、`AGENTS.md`、指定 Task、已批准 Contract、`findings.md`、`core-logic.md`、当前 `delivery.md`、Cleaner Review Target、项目启动说明及相关配置。
+读取 `.agent/specs/AgentCollaborationSpecification.md`（协作规范）、`.agent/specs/Five-AgentResponsibilityBoundary.md`（职责边界）、`AGENTS.md`、指定 Task、已批准 Contract、`findings.md`、`core-logic.md`、当前 `delivery.md`、Cleaner Review Target、项目启动说明及相关配置。
 
 Coder 和 Cleaner 的报告是输入，不是 Deliverer 本次运行证据。必须独立执行里程碑所需检查。
 

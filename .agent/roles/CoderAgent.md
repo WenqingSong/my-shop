@@ -37,7 +37,7 @@ extra_instruction: <可选>
 
 ## 开工条件
 
-读取 `AGENTS.md`、公共协同规范、职责边界、指定 Task、相关代码和测试，以及当前 Git 状态和任务基线。
+读取 `AGENTS.md`、`.agent/specs/AgentCollaborationSpecification.md`（协作规范）、`.agent/specs/Five-AgentResponsibilityBoundary.md`（职责边界）、指定 Task、相关代码和测试，以及当前 Git 状态和任务基线。
 
 复杂任务必须读取状态为 `APPROVED` 的 `contract.md`。修复模式必须读取指定 Finding 和复审要求。
 

@@ -2,12 +2,12 @@
 
 本文是 Workflow V2 的**唯一核心架构 Design 文档**：解释「为什么这样设计」「整个系统如何运行」「各概念之间的关系」「为什么需要这些 Gate / Git / Evidence 规则」。
 
-本文定位是「**为什么**」。`docs/agent/*`（协作规范、职责边界、六个角色 Prompt）负责「**具体怎么做**」，引用本文，不重复定义。
+本文定位是「**为什么**」。`.agent/specs/*`（协作规范、职责边界）与 `.agent/roles/*`（六个角色 Prompt）负责「**具体怎么做**」，引用本文，不重复定义。
 
 事实源优先级：
 
 1. 当前真实代码 / Validator / Tests（`internal/workflow/*`、`cmd/workflow-check/*`）；
-2. 当前现行 Agent Prompt / 协作规范（`docs/agent/*`）；
+2. 当前现行 Agent Prompt / 协作规范（`.agent/specs/*` 与 `.agent/roles/*`）；
 3. 本文（`docs/design/agent-workflow.md`）；
 4. 历史 Task Artifact（`.agent/tasks/*`，仅作历史证据，不作为现行语义来源）。
 
@@ -469,7 +469,7 @@ Owner-only 动作（例如 Owner 创建 / 切换 feature branch）发生在**角
 
 Handoff 只携带**最小必要导航和事实**，不复制完整推理过程、不携带大量主观评价、不替下一 Reviewer 做判断。
 
-当前标准 Handoff 必填项（以现行 `docs/agent/*` 为准）：
+当前标准 Handoff 必填项（以现行 `.agent/specs/*` 与 `.agent/roles/*` 为准）：
 
 - **Git SHA**：明确当前 feature HEAD；
 - **REMOTE_SYNCED=YES**：local == `origin/<current-feature>`；
@@ -584,7 +584,7 @@ Registry（`.agent/registry/*`，位于 `develop`）的作用是：在**同一�
 - 复用规则：migration version 一经分配永久 tombstone、不得复用；错误码域仅纯 `RESERVED` 阶段可 `RELEASE` 后复用。
 - 并行竞争防护：无外部锁，以 Git 提交顺序 + 冲突检测串行化——先提交到 develop 者胜。
 
-跨项目迁移 / 复用的具体流程见 §28 Project Adoption 与 `docs/agent/WorkflowAdoption.md`。
+跨项目迁移 / 复用的具体流程见 §28 Project Adoption 与 `.agent/specs/WorkflowAdoption.md`。
 
 ---
 
@@ -618,7 +618,7 @@ Workflow V2 Core（Roles、Authority、Evidence Snapshot、Handoff、Gate、Comp
 - Adoption 不新增第七个长期 Agent Role；完成后正常项目回到原六角色模型。
 - 正常六角色运行不依赖 `PROJECT_ADAPTATION.md`。
 
-Adoption 的五阶段（DISCOVER → RESOLVE → MATERIALIZE → VERIFY → CLEANUP）、`PROJECT_ADAPTATION.md` 生命周期、Migration / Registry 的 `ENABLED / DISABLED / NOT_APPLICABLE` 抽象、以及当前源项目 Validator 的项目耦合清单，详见 `docs/agent/WorkflowAdoption.md`，不在本文重复。模板见 `docs/agent/templates/PROJECT_ADAPTATION.template.md`。
+Adoption 的五阶段（DISCOVER → RESOLVE → MATERIALIZE → VERIFY → CLEANUP）、`PROJECT_ADAPTATION.md` 生命周期、Migration / Registry 的 `ENABLED / DISABLED / NOT_APPLICABLE` 抽象、以及当前源项目 Validator 的项目耦合清单，详见 `.agent/specs/WorkflowAdoption.md`，不在本文重复。模板见 `.agent/templates/PROJECT_ADAPTATION.template.md`。
 
 ---
 
@@ -626,7 +626,7 @@ Adoption 的五阶段（DISCOVER → RESOLVE → MATERIALIZE → VERIFY → CLEA
 
 Workflow 有三层事实：
 
-1. **Workflow Core**：Roles、Authority、Evidence Snapshot、Handoff、Gate、Completion Contract、Git safety model、Registry coordination concept——跨项目稳定，固化在 `internal/workflow/*` 与 `docs/agent/*`。
+1. **Workflow Core**：Roles、Authority、Evidence Snapshot、Handoff、Gate、Completion Contract、Git safety model、Registry coordination concept——跨项目稳定，固化在 `internal/workflow/*` 与 `.agent/specs/*`、`.agent/roles/*`。
 2. **Machine Configuration**：`.agent/workflow.yaml`——「跨项目会变化、且 Workflow Engine runtime 必须知道的最小参数」。
 3. **Project Policy**：README / Makefile / `docs/design/*` / `AGENTS.md` 等——项目工程约束，供 Agent 读取，不供 `workflow-check` 机器解析。
 

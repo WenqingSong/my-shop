@@ -2,7 +2,7 @@
 
 本文件是 **migration version 分配**的权威事实源（`.agent/registry/`，位于 `develop` 上）。任何需要新增 migration 的 Task，必须在进入 Coder 前，通过一个只改 Registry 文件的 commit 把 `RESERVED` 条目提交到 `develop`，才能使用对应 version；仅在 Feature Branch 内自行声明不构成有效预留。
 
-机制、生命周期与角色职责见 `docs/agent/AgentCollaborationSpecification.md`（跨任务全局资源预留）与 `docs/agent/Five-AgentResponsibilityBoundary.md`。
+机制、生命周期与角色职责见 `.agent/specs/AgentCollaborationSpecification.md`（跨任务全局资源预留）与 `.agent/specs/Five-AgentResponsibilityBoundary.md`。
 
 ## 状态与生命周期
 
