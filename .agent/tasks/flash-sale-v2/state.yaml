@@ -3,7 +3,7 @@ task_id: flash-sale-v2
 
 contract:
   status: APPROVED
-  target: "06cf46f0a696d1de956c94bf1a871650b795adcc"
+  target: "998da33917d5e3fc84ed3f1ddf92ea5ae7b61e15"
 
 resources:
   # 本任务是否需要新增全局资源由 Analyst 依对账/补偿方案判定：
