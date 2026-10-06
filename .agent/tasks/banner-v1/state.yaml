@@ -1,0 +1,29 @@
+schema_version: 2
+task_id: banner-v1
+
+contract:
+  status: APPROVED
+  target: "27db2fc38beb7505dd1528ef083080c19e2592c0"
+
+resources:
+  migrations: ["20261001000014"]
+  error_code_domains: ["14000-14999"]
+
+review:
+  status: CLEAN
+  target: "27db2fc38beb7505dd1528ef083080c19e2592c0"
+
+owner:
+  status: ACCEPTED
+  review_target: "27db2fc38beb7505dd1528ef083080c19e2592c0"
+
+delivery:
+  status: PASS
+  review_target: "27db2fc38beb7505dd1528ef083080c19e2592c0"
+  feature_head: "ad8f0abd1570ececde55f2fdc4deaa4102a6b9f8"
+  develop_base: "d335dcb75012ec1ba00e76a3510b1c8c32ae71d6"
+
+blocked:
+  active: false
+  by: ""
+  reason: ""

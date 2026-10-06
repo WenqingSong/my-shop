@@ -107,6 +107,10 @@ const (
 	CodeFlashSaleIdempotencyConflict Code = 12005 // 同幂等键不同请求内容 → 409
 	CodeFlashSaleSkuUnavailable      Code = 12006 // 下单时 SKU 禁用或商品下架 → 409
 	CodeFlashSaleInvalidArgument     Code = 12007 // 活动参数非法（秒杀价/库存/时间/状态）→ 400
+
+	// 轮播图域（Banner）14000-14999。
+	CodeBannerNotFound     Code = 14001 // 轮播图不存在 → 404
+	CodeBannerInvalidInput Code = 14002 // 轮播图参数非法（标题/图片/跳转/状态）→ 400
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -188,6 +192,9 @@ var codeTable = map[Code]codeInfo{
 	CodeFlashSaleIdempotencyConflict: {http.StatusConflict, "幂等键冲突"},
 	CodeFlashSaleSkuUnavailable:      {http.StatusConflict, "秒杀商品不可购买"},
 	CodeFlashSaleInvalidArgument:     {http.StatusBadRequest, "秒杀活动参数非法"},
+
+	CodeBannerNotFound:     {http.StatusNotFound, "轮播图不存在"},
+	CodeBannerInvalidInput: {http.StatusBadRequest, "轮播图参数非法"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。
