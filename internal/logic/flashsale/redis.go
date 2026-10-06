@@ -298,11 +298,17 @@ func (s *sFlashSale) markOrderSuccess(ctx context.Context, activityID, skuID, us
 	}
 }
 
-// compensatePreDeduct 在 MySQL 下单失败时补偿 Redis 预扣（INCR remaining）。
-// Redis 失败仅记录日志（残留预扣由对账兜底收敛）。
+// compensatePreDeduct 在 MySQL 下单失败时补偿 Redis 预扣（INCR remaining），
+// 并清除售罄标记，避免「预扣最后一单 → 并发请求置售罄 → 该单 MySQL 失败补偿」序列下
+// 残留伪售罄（库存已回补却仍快速失败，最长一个对账周期）。Redis 失败仅记录日志
+// （残留预扣/售罄由对账兜底收敛，不破坏不变量）。
 func (s *sFlashSale) compensatePreDeduct(ctx context.Context, activityID, skuID int64) {
 	if _, err := g.Redis().Incr(ctx, flashSaleStockKey(activityID, skuID)); err != nil {
 		glog.Warningf(ctx, "补偿秒杀预扣失败(activity=%d sku=%d): %v", activityID, skuID, err)
+		return
+	}
+	if _, err := g.Redis().Del(ctx, flashSaleSoldoutKey(activityID, skuID)); err != nil {
+		glog.Warningf(ctx, "清除售罄标记失败(activity=%d sku=%d): %v", activityID, skuID, err)
 	}
 }
 
