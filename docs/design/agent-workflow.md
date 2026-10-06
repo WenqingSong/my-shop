@@ -151,7 +151,20 @@ Owner Checkpoint（`WAITING_FOR_OWNER_DECISION`）**不是 Handoff**：不结束
 
 Handoff = 真正交班（当前角色完成或终止本轮职责，把控制权交给另一个角色）。正常一个 Session 只产生一次最终 Handoff。Gate 是 Handoff 前的机械出站检查。
 
-正常 Handoff 必须：该提交的已 commit、该 push 的已 push、working tree clean、明确 Git SHA、`REMOTE_SYNCED=YES`、`NEXT_ROLE` 与 `NEXT_ACTION` 必填。仅阻塞退出可例外（`RESULT=BLOCKED`）。
+正常 HANDOFF 的前提是：
+
+- 当前角色职责已经全部完成；
+- 本角色 owned artifacts 已持久化；
+- 应 commit 的已 commit；
+- 应 push 的已 push；
+- working tree clean；
+- remote synced（local HEAD == `origin/<current-feature>`）；
+- 下一角色入口 Gate 已 `PASS`；
+- 然后才能输出最终 `HANDOFF`（明确 Git SHA、`REMOTE_SYNCED=YES`、`NEXT_ROLE` 与 `NEXT_ACTION` 必填）。
+
+角色得到业务结果（如 Cleaner 的 `CLEAN`）只是阶段结论，不等于本轮完成：必须先完成上述出站收尾并通过下一角色入口 Gate，才能宣布 HANDOFF。仅阻塞退出可例外（`RESULT=BLOCKED`）。
+
+Decision Checkpoint（`WAITING_FOR_OWNER_DECISION`）**不是 Handoff**，期间不得结束 Session。
 
 Handoff 禁止携带：上一个 Agent 的完整思维过程、聊天历史、大量源代码、对下一角色结论的诱导。
 

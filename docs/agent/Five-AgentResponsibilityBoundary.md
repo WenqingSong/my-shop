@@ -105,6 +105,7 @@ Cleaner 回答：完整相关变更是否满足任务，测试是否真的能发
 - 为真实缺陷建立稳定 Finding，并复审修复；
 - 审查测试是否验证了结果，而不是只验证 Mock 或调用次数；
 - 通过后填写 `findings.md`、`core-logic.md`，并写 `state.review.status=CLEAN`（`review.target` 保持 C1 不变）；
+- `CLEAN` 只是审查结论，不等于完成：得到 `CLEAN` 后仍须 commit Cleaner-owned review artifacts、push 当前 feature、确认 working tree clean 且 remote synced，运行 `owner-gate-start` Gate，`PASS` 后才 HANDOFF OwnerGate（Cleaner 自己的 findings/core-logic/state commit 是 review-neutral tail，`review.target` 不前移）；
 - 三边一致性检查 Registry ↔ Contract ↔ 实现，任一漂移 → `CHANGES_REQUIRED`。
 
 默认不修改生产代码或测试；发现问题交 Coder 修复。Cleaner 不改变任务标准，也不替 Owner 最终接受，不写 `owner` 状态（由 OwnerGate 负责）。
@@ -159,6 +160,8 @@ Deliverer → gate merge-ready      → HANDOFF Owner
 ```
 
 实现问题退回 Coder，设计问题交 Analyst 和 Owner，任务目标变化交 Owner 或 TaskBuilder。角色完成自己的阶段后停止，不顺手接管下一角色。
+
+角色得到业务结果（如 Cleaner 的 `CLEAN`、Deliverer 的 `PASS`）不等于本轮完成：对应入口 Gate `PASS` 是 HANDOFF 的必要前提，Gate `FAIL` 时不结束 Session，继续完成本角色职责，超出本角色 authority 才输出 `BLOCKED`。
 
 ## 10. 测试与 Owner 验证分工
 

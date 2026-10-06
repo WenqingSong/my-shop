@@ -167,7 +167,7 @@ P0/P1/P2 阻塞 `CLEAN`。Task 或 Contract 本身冲突时输出 `BLOCKED`，�
 - `Design Impact = NEW/UPDATE` 时，Task ↔ APPROVED Contract ↔ `docs/design/*` ↔ 最终 Implementation 四者一致；`NONE` 时不要求 Design；
 - Review Target 与最终代码一致。
 
-P3 可以保留给 Owner 决定。`CLEAN` 不等于最终接受。
+P3 可以保留给 Owner 决定。`CLEAN` 不等于最终接受，也不等于 Cleaner Session 完成；`CLEAN` 之后的出站收尾见「CLEAN 完成契约」。
 
 ### `CHANGES_REQUIRED`
 
@@ -231,6 +231,28 @@ CLEAN / CHANGES_REQUIRED / BLOCKED
 <Finding 或 No actionable findings.>
 ```
 
+## CLEAN 完成契约
+
+`CLEAN` 只是审查结论，**不等于 Cleaner 本轮职责完成**。得到 `CLEAN` 后，Cleaner 仍必须完成以下出站收尾，全部通过后才允许结束 Session 并宣布 HANDOFF：
+
+1. 持久化 Cleaner-owned artifacts：`findings.md`、`core-logic.md`，以及 `state.yaml` 的 `review.status = CLEAN`、`review.target = C1`（`review.target` 保持原 implementation Evidence Commit C1 不变）。
+2. `git status --short` 检查 working tree。
+3. 只 stage Cleaner 自己拥有的文件（`git add <明确文件>`）。禁止 `git add -A` / `git add .`。
+4. `git diff --cached` 确认 staged 内容只属于 Cleaner-owned artifacts。
+5. `git commit` Cleaner-owned review artifacts。
+6. `git push` 当前 feature branch。
+7. 确认 working tree clean、local HEAD == `origin/<current-feature>`。
+8. 运行下一角色入口 Gate：`workflow-check gate owner-gate-start <task>`。
+9. 只有 Gate `PASS` 后，才允许输出正式 `HANDOFF → OwnerGate`。
+10. Cleaner 自己的 findings/core-logic/state commit 只是 review-neutral tail，`review.target` 保持 C1，不得前移到 Cleaner artifact commit。
+
+若 `owner-gate-start` `FAIL`：
+
+- 不得宣布 HANDOFF；
+- Cleaner Session 不结束；
+- 根据失败原因继续完成自己职责（如补 commit / push）；
+- 若失败原因超出 Cleaner authority，再输出 `BLOCKED`。
+
 ## 最终交接
 
 使用中文，结论先行。聊天中只保留决策所需信息。
@@ -255,7 +277,8 @@ CLEAN / CHANGES_REQUIRED / BLOCKED
 - 独立验证：<关键结果>
 - Owner 重点：已在 core-logic.md 整理 CL-001……
 - 剩余 P3/风险：<无则省略>
-- 下一步：Owner 执行核心验证并决定是否接受。
+- 收尾：已 commit Cleaner-owned artifacts 并 push，`owner-gate-start` Gate PASS。
+- 下一步：HANDOFF → OwnerGate。
 
 状态：CLEAN
 ```

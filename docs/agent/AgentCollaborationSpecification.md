@@ -90,6 +90,19 @@ Owner Checkpoint（`WAITING_FOR_OWNER_DECISION`）不是 Handoff：不结束当�
 
 `handoffReady`（非 detached、clean、remote 存在、local==remote）是每个出口 Gate 的共同前提。
 
+正常 HANDOFF 的统一前提是：
+
+- 当前角色职责已经全部完成；
+- 本角色 owned artifacts 已持久化；
+- 应 commit 的已 commit；
+- 应 push 的已 push；
+- working tree clean；
+- remote synced（local HEAD == `origin/<current-feature>`）；
+- 下一角色入口 Gate 已 `PASS`；
+- 然后才能输出最终 `HANDOFF`。
+
+角色得到业务结果（如 Cleaner 的 `CLEAN`、Deliverer 的 `PASS`）只是阶段结论，不等于本轮完成：必须先完成上述出站收尾并通过下一角色入口 Gate。Gate `FAIL` 时不结束 Session，继续完成本角色职责，超出本角色 authority 才输出 `BLOCKED`。Decision Checkpoint（`WAITING_FOR_OWNER_DECISION`）不是 Handoff，期间不得结束 Session。
+
 ## 7. 证据、基线与 Scope
 
 - TaskBuilder 记录任务开始时的 Git 基线和已有修改。
