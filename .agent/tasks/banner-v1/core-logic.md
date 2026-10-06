@@ -21,3 +21,13 @@
 - 可选 Mutation：把 `require("banner:create").POST("/admin/banners", ...)` 改为 `admin.POST("/admin/banners", ...)`（去掉权限校验）。
 - 预期失败：`TestBannerAdminCreateAndPermission` 失败——普通管理员创建从 403/1003 变为 200，`banner count` 断言失败。
 - 恢复确认：恢复 `require("banner:create")` 后再次运行同一命令 → PASS。
+
+## CL-003：更新三态语义（幂等更新不误报 404）
+
+- Owner 需要理解：轮播图更新以「记录是否存在」判断存在性，不依赖 MySQL `UPDATE` 的 `RowsAffected`——因为「记录不存在」与「记录存在但提交值与原值完全相同」都会让 `RowsAffected=0`。若误用 `RowsAffected=0` 判不存在，幂等保存会被误报为 404，前端可能误判记录丢失。
+- 生产代码：`internal/logic/banner/banner.go` `Update`（更新前 `findOne` 判存在 → `UPDATE`（不依赖 `RowsAffected`）→ 更新后 `findOne` 兜底并发删除）。
+- 关键测试：`TestBannerUpdateRegression`（`internal/cmd/banner_test.go`），覆盖「不存在→404 / 有变化→成功 / 相同值幂等→200 / 无权限→403 无副作用」。
+- 基线验证：`go test ./internal/cmd -run TestBannerUpdateRegression -count=1` → 预期 PASS。
+- 可选 Mutation：在 `Update` 的 `UPDATE` 之后恢复 `if n, _ := result.RowsAffected(); n == 0 { return nil, codes.New(codes.CodeBannerNotFound) }`。
+- 预期失败：`TestBannerUpdateRegression` 的「相同值幂等更新」断言失败——相同值重复 Update 返回 404/14001 而非 200/0。
+- 恢复确认：移除该 `RowsAffected=0 → 404` 判断后再次运行同一命令 → PASS。
