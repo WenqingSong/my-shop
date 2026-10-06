@@ -2,33 +2,58 @@ package workflow
 
 import "path"
 
-// 本文件定义 Review Target 的实质变化判定（default-deny + 白名单豁免）。
+// 本文件定义 Review-neutral / Delivery-neutral 白名单（task-scoped，禁止 basename-only）。
 //
-// default-deny：自 review.target_base 起，任何非白名单变化默认使旧 CLEAN 失效。
-// 白名单（Review-neutral，唯一豁免，显式有限）：findings.md、core-logic.md、
-// delivery.md、合法 state.yaml 机械状态持久化、Contract 明确批准的其他纯 Workflow Evidence。
-// Cleaner 更新这些文件不使 CLEAN 失效。
+// 白名单必须精确限定在 .agent/tasks/<current-task>/ 下：
+//   - review-neutral：CLEAN evidence commit 之后允许的 Artifact tail（INV-4）；
+//   - delivery-neutral：delivery.feature_head 之后允许的 Artifact tail（更窄，INV-6）。
 //
-// review.target_paths 是 Cleaner 对本轮审查范围的 Evidence / Audit Record（审查了什么），
-// 不是 STALE 判定边界、不是允许变化列表、也不是隐式白名单；「不在 target_paths」≠「可以忽略变化」。
+// 其他目录、其他 task 的同名文件（如 .agent/tasks/other/state.yaml）一律判 substantive。
 
-// reviewNeutralBasenames 是 Review-neutral 白名单（按 basename 匹配，唯一豁免）。
+// reviewNeutralBasenames 是 review tail 允许的文件名（精确匹配，不含子目录）。
 var reviewNeutralBasenames = map[string]struct{}{
-	"findings.md":   {},
-	"core-logic.md": {},
-	"delivery.md":   {},
-	"state.yaml":    {},
+	"findings.md":       {},
+	"core-logic.md":     {},
+	"owner-decision.md": {},
+	"delivery.md":       {},
+	"state.yaml":        {},
 }
 
-// isReviewNeutral 报告变更路径是否为 Review-neutral（白名单豁免），
-// 即该变化不会使 CLEAN 失效。
-func isReviewNeutral(p string) bool {
+// deliveryNeutralBasenames 是 delivery tail 允许的文件名（更窄）。
+var deliveryNeutralBasenames = map[string]struct{}{
+	"delivery.md": {},
+	"state.yaml":  {},
+}
+
+// taskScoped 报告路径 p 是否精确位于 .agent/tasks/<task>/ 下（不含更深的子目录）。
+func taskScoped(taskSlug, p string) bool {
+	return path.Dir(p) == path.Join(".agent", "tasks", taskSlug)
+}
+
+// isReviewNeutral 报告变更路径 p 是否为当前 task 的 review-neutral Artifact。
+func isReviewNeutral(taskSlug, p string) bool {
+	if !taskScoped(taskSlug, p) {
+		return false
+	}
 	_, ok := reviewNeutralBasenames[path.Base(p)]
 	return ok
 }
 
-// isSubstantialChange 报告变更路径是否为实质变化（default-deny）：
-// 除白名单外的任何变化都视为实质变化，会导致旧 CLEAN 客观失效。
-func isSubstantialChange(p string) bool {
-	return !isReviewNeutral(p)
+// isDeliveryNeutral 报告变更路径 p 是否为当前 task 的 delivery-neutral Artifact。
+func isDeliveryNeutral(taskSlug, p string) bool {
+	if !taskScoped(taskSlug, p) {
+		return false
+	}
+	_, ok := deliveryNeutralBasenames[path.Base(p)]
+	return ok
+}
+
+// isReviewSubstantial 报告变更路径 p 是否为 review 视角的实质变化（default-deny）。
+func isReviewSubstantial(taskSlug, p string) bool {
+	return !isReviewNeutral(taskSlug, p)
+}
+
+// isDeliverySubstantial 报告变更路径 p 是否为 delivery 视角的实质变化（default-deny）。
+func isDeliverySubstantial(taskSlug, p string) bool {
+	return !isDeliveryNeutral(taskSlug, p)
 }
