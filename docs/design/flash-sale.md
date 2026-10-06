@@ -140,10 +140,11 @@ V1 五个核心不变量（INV-001~005）在 V2 下依然成立，最终由 MySQ
 
 ### 6.2 Lua 原子性边界（仅 Redis 内，不访问 MySQL）
 
-抢购 Lua 脚本原子完成：空值标记检查 → 活动存在/启用/时间窗检查 → 售罄检查 → 一人一单检查 → 幂等检查 → 剩余库存检查与 DECR 预扣。返回码：`NOT_FOUND` / `NOT_IN_WINDOW` / `SOLD_OUT` / `ALREADY_PURCHASED` / `IDEMPOTENT_HIT` / `IDEMPOTENT_CONFLICT` / `GATE_PASSED`。
+抢购 Lua 脚本原子完成：空值标记检查 → 活动存在/启用/时间窗检查 → 售罄检查 → 幂等检查 → 一人一单检查 → 剩余库存检查与 DECR 预扣。返回码：`NOT_FOUND` / `NOT_IN_WINDOW` / `SOLD_OUT` / `ALREADY_PURCHASED` / `IDEMPOTENT_HIT` / `IDEMPOTENT_CONFLICT` / `GATE_PASSED`。
 
 - 预扣成功（`GATE_PASSED`）≠ 下单成功；后续 MySQL 事务失败时由调用方补偿预扣。
 - 一人一单/幂等标记**在 MySQL 下单成功后**才写入 Redis（无孤儿标记），Lua 仅对已存在的标记做快速失败/快速命中检查。
+- 检查顺序幂等先于一人一单：同幂等键重试（同 hash）应返回既有订单（200）而非已购（12004），与 V1 语义一致。
 
 ### 6.3 预热与缓存一致性
 

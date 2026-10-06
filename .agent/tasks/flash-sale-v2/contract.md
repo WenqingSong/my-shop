@@ -54,7 +54,7 @@ RECOMMENDATION：**同步落单**。Redis Lua 预扣（闸门）成功后，在�
 - 事实来源：MySQL 为活动/库存/订单的权威事实；Redis 为加速闸门与派生缓存，最终经对账收敛到 MySQL。
 
 ### Lua 脚本边界（仅 Redis 内，不访问 MySQL）
-原子完成：空值标记检查 → 活动存在/启用/时间窗检查 → 售罄检查 → 一人一单检查 → 幂等检查 → 剩余库存检查与 DECR 预扣。返回码：NOT_FOUND / NOT_IN_WINDOW / SOLD_OUT / ALREADY_PURCHASED / IDEMPOTENT_HIT / IDEMPOTENT_CONFLICT / GATE_PASSED。预扣成功 ≠ 下单成功。
+原子完成：空值标记检查 → 活动存在/启用/时间窗检查 → 售罄检查 → 幂等检查 → 一人一单检查 → 剩余库存检查与 DECR 预扣。返回码：NOT_FOUND / NOT_IN_WINDOW / SOLD_OUT / ALREADY_PURCHASED / IDEMPOTENT_HIT / IDEMPOTENT_CONFLICT / GATE_PASSED。预扣成功 ≠ 下单成功。
 
 ## Business Invariants
 
@@ -105,3 +105,4 @@ RECOMMENDATION：**同步落单**。Redis Lua 预扣（闸门）成功后，在�
   2. 降级容错 = Redis 失败时降级 MySQL。
   3. 资源 = 不新增 migration / 错误码 / 持久化补偿表。
 - 决定适用范围：本任务 V2 全部实现与 `docs/design/flash-sale.md`（Design Impact = UPDATE）更新。
+- 2026-10-06，P3-1 文档措辞修订（CONTRACT_REVISION，Owner ACCEPT）：将「Lua 脚本边界」检查顺序由「一人一单检查 → 幂等检查」更正为「幂等检查 → 一人一单检查」，与实现（`internal/logic/flashsale/redis.go` Lua 脚本，幂等检查先于一人一单）及 §重复/重试 语义一致；不改接口、不变量、失败语义或数据契约。
