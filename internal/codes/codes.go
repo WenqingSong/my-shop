@@ -96,6 +96,9 @@ const (
 	// 商品收藏域（Favorite）11000-11999。
 	CodeFavoriteProductUnavailable Code = 11001 // 商品不在售/不可收藏 → 409
 
+	// 商品点赞域（Like）13000-13999。
+	CodeLikeProductUnavailable Code = 13001 // 商品不在售/不可点赞 → 409
+
 	// 秒杀域（FlashSale）12000-12999。
 	CodeFlashSaleActivityNotFound    Code = 12001 // 秒杀活动不存在或已下架 → 404
 	CodeFlashSaleNotInTimeWindow     Code = 12002 // 活动未开始或已结束 → 409
@@ -176,7 +179,8 @@ var codeTable = map[Code]codeInfo{
 	CodeReviewAlreadyExists: {http.StatusConflict, "该订单项已评价"},
 	CodeReviewInvalidInput:  {http.StatusBadRequest, "评价内容非法"},
 
-	CodeFavoriteProductUnavailable: {http.StatusConflict, "商品不可收藏"},
+	CodeFavoriteProductUnavailable:   {http.StatusConflict, "商品不可收藏"},
+	CodeLikeProductUnavailable:       {http.StatusConflict, "商品不可点赞"},
 	CodeFlashSaleActivityNotFound:    {http.StatusNotFound, "秒杀活动不存在"},
 	CodeFlashSaleNotInTimeWindow:     {http.StatusConflict, "秒杀活动不在进行中"},
 	CodeFlashSaleStockInsufficient:   {http.StatusConflict, "秒杀库存不足"},
