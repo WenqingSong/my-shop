@@ -48,3 +48,7 @@ TaskBuilder → Analyst → Coder → Cleaner → OwnerGate → Deliverer → Ow
 - historical task artifacts are evidence, not current Workflow specification
 - normal Agent rules come from roles/specs/design
 - PROJECT_ADAPTATION.md is temporary and removed after successful Adoption
+
+## Separate: Project Mastery Workflow
+
+`.agent/mastery/` 是独立的 Project Mastery Workflow（学习 / 面试掌握），与 Workflow V2 生产开发流程目的不同、资产隔离，不参与 Workflow V2 状态机。入口：`mastery/README.md`。
