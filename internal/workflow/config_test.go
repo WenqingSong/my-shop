@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,6 +59,53 @@ git:
 	}
 	if cfg.Git.IntegrationBranch != "main" {
 		t.Fatalf("integration_branch=%q，期望 main", cfg.Git.IntegrationBranch)
+	}
+}
+
+// registryConfig 构造一份 v1 机器配置，用于指定两个 registry 路径。
+func registryConfig(migrationPath, errorCodePath string) string {
+	return fmt.Sprintf("schema_version: 1\ngit:\n  integration_branch: develop\nresources:\n  migration_version:\n    registry: %q\n  error_code_domain:\n    registry: %q\n", migrationPath, errorCodePath)
+}
+
+func TestLoadConfigRegistryPathValid(t *testing.T) {
+	for _, p := range []string{
+		".agent/registry/migrations.md",
+		".agent/registry/error-codes.md",
+		".agent/registry/im-migrations.md",
+	} {
+		t.Run(p, func(t *testing.T) {
+			_, err := LoadConfig(writeConfigFile(t, registryConfig(p, ".agent/registry/error-codes.md")))
+			if err != nil {
+				t.Fatalf("合法 registry 路径 %q 不应报错: %v", p, err)
+			}
+		})
+	}
+}
+
+func TestLoadConfigRegistryPathInvalid(t *testing.T) {
+	valid := ".agent/registry/error-codes.md"
+	illegal := []string{
+		"docs/design/foo.md",
+		"../foo.md",
+		".agent/registry/../../README.md",
+		"/tmp/foo.md",
+	}
+	for _, p := range illegal {
+		t.Run("migration/"+p, func(t *testing.T) {
+			_, err := LoadConfig(writeConfigFile(t, registryConfig(p, valid)))
+			if err == nil {
+				t.Fatalf("非法 migration registry 路径 %q 应报错", p)
+			}
+			if !strings.Contains(err.Error(), "registry") {
+				t.Fatalf("期望错误涉及 registry，实际 %v", err)
+			}
+		})
+		t.Run("error-code/"+p, func(t *testing.T) {
+			_, err := LoadConfig(writeConfigFile(t, registryConfig(valid, p)))
+			if err == nil {
+				t.Fatalf("非法 error-code registry 路径 %q 应报错", p)
+			}
+		})
 	}
 }
 

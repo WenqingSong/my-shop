@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -13,6 +14,10 @@ const ConfigSchemaV1 = 1
 
 // DefaultConfigPath 是 Workflow Engine runtime machine configuration 的固定路径（相对仓库根）。
 const DefaultConfigPath = ".agent/workflow.yaml"
+
+// registryRoot 是 Registry 文件必须严格位于其下的目录（相对仓库根）。
+// Analyst 的 Registry-only shared-develop mutation authority 仅限该目录内的文件。
+const registryRoot = ".agent/registry"
 
 // Config 是 Workflow Engine 的机器配置（Machine Configuration）。
 // 它只保存「跨项目会变化、且 Workflow Engine runtime 必须知道的最小参数」。
@@ -67,6 +72,32 @@ func validateConfig(c Config) error {
 	}
 	if c.Git.IntegrationBranch == "" {
 		return fmt.Errorf("缺少必填 git.integration_branch")
+	}
+	if err := validateRegistryPath(c.Resources.MigrationVersion.Registry); err != nil {
+		return fmt.Errorf("resources.migration_version: %w", err)
+	}
+	if err := validateRegistryPath(c.Resources.ErrorCodeDomain.Registry); err != nil {
+		return fmt.Errorf("resources.error_code_domain: %w", err)
+	}
+	return nil
+}
+
+// validateRegistryPath 校验 registry 路径必须是仓库相对路径，且规范化后严格位于 .agent/registry/ 下。
+// 空串表示「未声明该资源」，允许通过（由资源真正需要时另行 ERROR），不做路径校验。
+func validateRegistryPath(p string) error {
+	if p == "" {
+		return nil
+	}
+	if filepath.IsAbs(p) {
+		return fmt.Errorf("registry 路径必须是仓库相对路径，不能是绝对路径: %q", p)
+	}
+	cleaned := filepath.Clean(p)
+	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("registry 路径不得穿越出 .agent/registry/: %q", p)
+	}
+	prefix := registryRoot + string(filepath.Separator)
+	if !strings.HasPrefix(cleaned, prefix) {
+		return fmt.Errorf("registry 路径必须严格位于 %s/ 下: %q", registryRoot, p)
 	}
 	return nil
 }
