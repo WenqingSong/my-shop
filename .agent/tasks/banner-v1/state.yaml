@@ -2,8 +2,8 @@ schema_version: 2
 task_id: banner-v1
 
 contract:
-  status: APPROVED
-  target: "558221a52bab4e9b27428690d44b57efe5937eec"
+  status: PENDING
+  target: ""
 
 resources:
   migrations: ["20261001000014"]

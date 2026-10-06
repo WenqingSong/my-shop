@@ -1,9 +1,9 @@
 # Technical Contract
 
 ## Decision Status
-APPROVED
+WAITING_FOR_OWNER_DECISION
 
-> Owner 已就 Q1–Q4 全部给出决定并记录于 `Owner Decision Record`；`task.md` 已同步 Q2 变更，与本文一致。
+> 本文处于**最小 Contract Revision（REV-001 / CLEAN-001）待确认**：修正 `Update` 存在性判断语义，与已实现的三态语义对齐（详见下文 `Contract Revision`）。待 Owner ACCEPT/REJECT 后恢复 APPROVED。
 
 ## Problem
 
@@ -111,7 +111,9 @@ RECOMMENDATION：采用「单一位首页轮播 + 数据库驱动 + 自由字符
 ## Failure and Consistency Semantics
 
 - 事实来源：单一 MySQL `banners`；图片文件位于本地文件系统（LocalStorage），不参与 DB 事务。Redis 仅会话，不参与轮播图；无 MQ、无异步。
-- 创建成功 = 单条 `INSERT banners`；更新/删除 = 条件更新/删除并核对 `RowsAffected`（`RowsAffected=0` → 14001 404）。
+- 创建成功 = 单条 `INSERT banners`。
+- 更新 = 先按 `id` 查存在性（不存在 → 14001 404、无写入），再执行 `UPDATE`；**不依据 `RowsAffected` 判断存在性**——目标存在但提交值无变化时 `RowsAffected=0` 仍为幂等成功；更新后再次查询兜底并发删除（已消失 → 14001 404）。未提交任何字段视为幂等成功。
+- 删除 = 条件删除并核对 `RowsAffected`（`RowsAffected=0` → 14001 404、无写入）。
 - 失败语义：未认证 401、无权限 403、不存在 404（14001）、非法输入 400（14002），均无写入；DB 技术错误统一 `1000`（500），不泄漏底层细节。
 - `image_url` 为软引用：V1 不做「路径必须命中本地存储文件」的硬校验（无上传，图片由 seed/部署管理），悬空路径表现为图片 404/不可访问，不影响 DB 记录一致性。
 - 无跨表/跨系统事务、无幂等键、无并发窗口（CRUD 为单表原子操作）；删除 banner 不触达文件系统。
@@ -167,3 +169,14 @@ Q2 改变原 `task.md`，已同步以下 4 处（`task.md` 现已与本文一致
 2. Out of Scope：保留「文件上传」排除（V1 无 HTTP 上传接口）；「对象存储（OSS/S3）」仍排除，但注明 MinIO/OSS/S3 为 Storage 边界后续替换项、不在 V1。
 3. AC-002：由「仓库内 3 张轮播图图片」改为「本地存储目录 3 张占位图，经 `image_url` 可访问（HTTP 200、内容类型为图片）」。
 4. 字段名 `image` → `image_url`（Goal/Scope/AC 中涉及处）。
+
+## Contract Revision
+
+### REV-001（CLEAN-001）：修正 Update 存在性判断语义
+
+- 分类：CONTRACT_REVISION（文档/Contract 对正确实现的语义校正，非新功能需求）。
+- 原因：MySQL `UPDATE` 的 `RowsAffected=0` 既可能表示「记录不存在」，也可能表示「记录存在但提交值与原值完全相同」。原 Contract 将「更新/删除 `RowsAffected=0 → 14001 404`」统一用于 Update，导致「无变化的幂等更新」被误判为 404。
+- 修订内容：仅修正 `Update` 语义为三态——不存在 → 14001/404；存在且字段变化 → 成功；存在但值未变（含未提交任何字段）→ 幂等成功；不再以 `RowsAffected=0` 等价不存在。`Delete` 语义不变（`RowsAffected=0 → 404` 对 DELETE 仍正确）。
+- 与实现一致：`internal/logic/banner/banner.go` `Update` 已采用「更新前 `findOne` 判存在 → `UPDATE`（不依赖 `RowsAffected`）→ 更新后 `findOne` 兜底并发删除」；回归测试 `TestBannerUpdateRegression` 覆盖「不存在→404 / 有变化→成功 / 相同值幂等→成功 / 无权限→403 无副作用」。
+- 范围：仅 `Failure and Consistency Semantics` 一处 + `docs/design/banner.md` §5 同步；不改 API、错误码、数据库结构、权限、业务代码或测试。
+- 状态：WAITING_FOR_OWNER_DECISION（待 Owner ACCEPT/REJECT）。
