@@ -35,3 +35,4 @@
 | 20261001000010 | favorites | product-favorite-v1 | RESERVED | favorites 收藏表 |
 | 20261001000011 | flash_sale | flash-sale-v1 | RESERVED | flash_sale_activities + flash_sale_activity_skus + flash_sale_orders |
 | 20261001000012 | product_view_count | product-view-count-v1 | RESERVED | products.view_count 浏览量计数字段 |
+| 20261001000013 | product_likes | product-like-v1 | RESERVED | product_likes 点赞表 |
