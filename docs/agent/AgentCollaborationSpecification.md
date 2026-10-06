@@ -8,6 +8,8 @@ Agent 用来扩大实现、测试和审查能力；Owner 决定需求、关键�
 
 角色数量不是质量指标。只启用能为当前任务增加明确价值的角色。
 
+正常六角色运行只依赖 Git + Artifacts + `AGENTS.md` + `docs/agent/*` + `docs/design/*`，不依赖临时文件 `PROJECT_ADAPTATION.md`。`PROJECT_ADAPTATION.md` 只存在于 Workflow V2 首次迁移 / Adoption 到一个项目的过程中，Adoption 完成后即删除，见 `docs/agent/WorkflowAdoption.md`。
+
 ## 2. 指令与事实来源
 
 按以下顺序执行：

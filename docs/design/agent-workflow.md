@@ -582,7 +582,7 @@ Registry（`.agent/registry/*`，位于 `develop`）的作用是：在**同一�
 - 复用规则：migration version 一经分配永久 tombstone、不得复用；错误码域仅纯 `RESERVED` 阶段可 `RELEASE` 后复用。
 - 并行竞争防护：无外部锁，以 Git 提交顺序 + 冲突检测串行化——先提交到 develop 者胜。
 
-跨项目迁移 / 复用问题留到后续单独讨论。
+跨项目迁移 / 复用的具体流程见 §28 Project Adoption 与 `docs/agent/WorkflowAdoption.md`。
 
 ---
 
@@ -601,6 +601,22 @@ Registry（`.agent/registry/*`，位于 `develop`）的作用是：在**同一�
 - **修复**：CLEAN != Session Complete（§14）。Handoff 前必须完成 Artifact persistence + Git clean exit + next gate PASS。
 
 这两个 Finding 说明为什么 V2 要进行真实 dogfood，而不能只靠静态设计。
+
+---
+
+## 28. Project Adoption / Cross-project Migration
+
+Workflow V2 Core（Roles、Authority、Evidence Snapshot、Handoff、Gate、Completion Contract、Git safety model、Registry coordination concept）跨项目稳定，可以迁移。项目差异（框架、目录、build/test、migration、design mapping、shared resource applicability、项目工程约束）通过**一次性 Project Adoption** 解决。
+
+关键结论：
+
+- Workflow Core 可迁移；项目差异由一次性 Adoption 解决。
+- `PROJECT_ADAPTATION.md` 是**临时工作单**，只存在于迁移 / Adoption 过程中。
+- Adoption 完成后 `PROJECT_ADAPTATION.md` 必须删除，不成为长期事实源。
+- Adoption 不新增第七个长期 Agent Role；完成后正常项目回到原六角色模型。
+- 正常六角色运行不依赖 `PROJECT_ADAPTATION.md`。
+
+Adoption 的五阶段（DISCOVER → RESOLVE → MATERIALIZE → VERIFY → CLEANUP）、`PROJECT_ADAPTATION.md` 生命周期、Migration / Registry 的 `ENABLED / DISABLED / NOT_APPLICABLE` 抽象、以及当前源项目 Validator 的项目耦合清单，详见 `docs/agent/WorkflowAdoption.md`，不在本文重复。模板见 `docs/agent/templates/PROJECT_ADAPTATION.template.md`。
 
 ---
 
