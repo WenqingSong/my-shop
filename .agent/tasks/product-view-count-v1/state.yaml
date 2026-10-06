@@ -16,8 +16,8 @@ review:
   target: "df272012781fa29120f5a1d5aec09cbde041d02b"
 
 owner:
-  status: PENDING
-  review_target: ""
+  status: ACCEPTED
+  review_target: "df272012781fa29120f5a1d5aec09cbde041d02b"
 
 delivery:
   status: NOT_RUN
