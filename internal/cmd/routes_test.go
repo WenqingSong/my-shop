@@ -136,7 +136,7 @@ func TestRouteTable(t *testing.T) {
 		"POST /likes",
 		"DELETE /likes/:product_id",
 		"GET /likes/check",
-		}
+	}
 	for _, w := range want {
 		if !got[w] {
 			t.Errorf("缺少路由 %q", w)

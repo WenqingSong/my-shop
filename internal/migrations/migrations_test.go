@@ -255,14 +255,14 @@ func TestUpAppliesOnlyPendingMigration(t *testing.T) {
 	}
 
 	migrationFS = sourceWithExtra(map[string]string{
-		"20261001000013_probe.up.sql": "CREATE TABLE migration_probe (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)) ENGINE=InnoDB;",
+		"20261001000014_probe.up.sql": "CREATE TABLE migration_probe (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)) ENGINE=InnoDB;",
 	})
 
 	if err := Up(ctx); err != nil {
 		t.Fatalf("incremental up: %v", err)
 	}
-	if v := currentVersion(t, db); v != uint(20261001000013) {
-		t.Errorf("expected current version %d after incremental up, got %d", uint(20261001000013), v)
+	if v := currentVersion(t, db); v != uint(20261001000014) {
+		t.Errorf("expected current version %d after incremental up, got %d", uint(20261001000014), v)
 	}
 	if !tableExists(t, db, "migration_probe") {
 		t.Errorf("expected migration_probe table created by incremental migration")
@@ -276,7 +276,7 @@ func TestUpFailsFastAndMarksDirty(t *testing.T) {
 	db := setupCleanDB(t)
 
 	migrationFS = sourceWithExtra(map[string]string{
-		"20261001000013_broken.up.sql": "THIS IS NOT VALID SQL;",
+		"20261001000014_broken.up.sql": "THIS IS NOT VALID SQL;",
 	})
 
 	if err := Up(ctx); err == nil {
@@ -292,7 +292,7 @@ func TestUpFailsFastAndMarksDirty(t *testing.T) {
 	}
 
 	// force 恢复 dirty。
-	if err := Force(ctx, uint(20261001000013)); err != nil {
+	if err := Force(ctx, uint(20261001000014)); err != nil {
 		t.Fatalf("force recover: %v", err)
 	}
 	if dirtyState(t, db) {

@@ -179,8 +179,8 @@ var codeTable = map[Code]codeInfo{
 	CodeReviewAlreadyExists: {http.StatusConflict, "该订单项已评价"},
 	CodeReviewInvalidInput:  {http.StatusBadRequest, "评价内容非法"},
 
-	CodeFavoriteProductUnavailable: {http.StatusConflict, "商品不可收藏"},
-	CodeLikeProductUnavailable:     {http.StatusConflict, "商品不可点赞"},
+	CodeFavoriteProductUnavailable:   {http.StatusConflict, "商品不可收藏"},
+	CodeLikeProductUnavailable:       {http.StatusConflict, "商品不可点赞"},
 	CodeFlashSaleActivityNotFound:    {http.StatusNotFound, "秒杀活动不存在"},
 	CodeFlashSaleNotInTimeWindow:     {http.StatusConflict, "秒杀活动不在进行中"},
 	CodeFlashSaleStockInsufficient:   {http.StatusConflict, "秒杀库存不足"},
