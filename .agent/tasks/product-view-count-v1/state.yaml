@@ -12,8 +12,8 @@ resources:
   error_code_domains: []
 
 review:
-  status: NOT_REQUESTED
-  target: ""
+  status: PENDING
+  target: "df272012781fa29120f5a1d5aec09cbde041d02b"
 
 owner:
   status: PENDING
