@@ -12,7 +12,7 @@ resources:
   error_code_domains: []
 
 review:
-  status: PENDING
+  status: CLEAN
   target: "df272012781fa29120f5a1d5aec09cbde041d02b"
 
 owner:
