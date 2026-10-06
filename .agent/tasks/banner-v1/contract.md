@@ -1,9 +1,9 @@
 # Technical Contract
 
 ## Decision Status
-WAITING_FOR_OWNER_DECISION
+APPROVED
 
-> 本文处于**最小 Contract Revision（REV-001 / CLEAN-001）待确认**：修正 `Update` 存在性判断语义，与已实现的三态语义对齐（详见下文 `Contract Revision`）。待 Owner ACCEPT/REJECT 后恢复 APPROVED。
+> Owner 已 ACCEPT 最小 Contract Revision（REV-001 / CLEAN-001），`Update` 存在性判断语义已修正并与实现对齐。
 
 ## Problem
 
@@ -179,4 +179,4 @@ Q2 改变原 `task.md`，已同步以下 4 处（`task.md` 现已与本文一致
 - 修订内容：仅修正 `Update` 语义为三态——不存在 → 14001/404；存在且字段变化 → 成功；存在但值未变（含未提交任何字段）→ 幂等成功；不再以 `RowsAffected=0` 等价不存在。`Delete` 语义不变（`RowsAffected=0 → 404` 对 DELETE 仍正确）。
 - 与实现一致：`internal/logic/banner/banner.go` `Update` 已采用「更新前 `findOne` 判存在 → `UPDATE`（不依赖 `RowsAffected`）→ 更新后 `findOne` 兜底并发删除」；回归测试 `TestBannerUpdateRegression` 覆盖「不存在→404 / 有变化→成功 / 相同值幂等→成功 / 无权限→403 无副作用」。
 - 范围：仅 `Failure and Consistency Semantics` 一处 + `docs/design/banner.md` §5 同步；不改 API、错误码、数据库结构、权限、业务代码或测试。
-- 状态：WAITING_FOR_OWNER_DECISION（待 Owner ACCEPT/REJECT）。
+- 状态：ACCEPTED（Owner 已确认）。
