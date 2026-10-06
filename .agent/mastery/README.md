@@ -17,7 +17,10 @@ Project Mastery Workflow 是一个独立的轻量学习体系，与生产 Workfl
 
 Question / Quiz / Interview / Feynman 都作为 Tutorial Content 的组成部分，不作为独立 Agent。
 
-> P1 仅定义角色边界与共享协议，正式 Role Prompt 由 P2（Analyst）、P3（Writer）实现。
+## Role Prompts
+
+- `roles/MasteryAnalyst.md` — Project Mastery Analyst 正式执行 Prompt（P2 已实现）。
+- Tutorial Writer 正式 Prompt 由 P3 实现。
 
 ## Output Location
 

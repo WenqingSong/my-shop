@@ -37,11 +37,11 @@ Client → WebSocket Gateway → NATS → Consumer → DB
 
 ## 4. Source Map
 
-整个 Learning Target 的主要源码地图。每项：Path / Symbol / Responsibility。
+整个 Learning Target 的主要源码地图。每项：Path / Symbol / Responsibility / Relevance。
 
-| Path | Symbol | Responsibility |
-|------|--------|----------------|
-| <path> | <symbol> | <职责> |
+| Path | Symbol | Responsibility | Relevance |
+|------|--------|----------------|-----------|
+| <path> | <symbol> | <职责> | <为什么进入本计划> |
 
 ## 5. Scope
 
