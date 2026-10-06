@@ -13,8 +13,8 @@ resources:
   error_code_domains: []
 
 review:
-  status: NOT_REQUESTED
-  target: ""
+  status: PENDING
+  target: "d1f878a233355ad988bf93a06038af81ef2482f9"
 
 owner:
   status: PENDING
