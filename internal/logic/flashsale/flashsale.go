@@ -20,6 +20,7 @@ import (
 	"github.com/go-sql-driver/mysql"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/glog"
 	"github.com/gogf/gf/v2/os/gtime"
 
 	v1 "cnb.cool/go-cloud-devops/my-shop/api/flashsale/v1"
@@ -157,6 +158,12 @@ func (s *sFlashSale) CreateActivity(ctx context.Context, req *v1.CreateReq) (*v1
 		return nil, err
 	}
 
+	// MySQL 提交后同步维护 Redis 缓存（预热）；Redis 失败仅记录日志，
+	// 由后台扫描器兜底回补，不阻断已成功落库的创建结果。
+	if err := s.syncActivityCache(ctx, activityID); err != nil {
+		glog.Warningf(ctx, "同步秒杀活动缓存失败(activity=%d): %v", activityID, err)
+	}
+
 	a, err := s.loadActivity(ctx, activityID)
 	if err != nil {
 		return nil, err
@@ -229,6 +236,12 @@ func (s *sFlashSale) UpdateActivity(ctx context.Context, req *v1.UpdateReq) (*v1
 		return nil, err
 	}
 
+	// MySQL 提交后同步维护 Redis 缓存（预热/失效/重载）；Redis 失败仅记录日志，
+	// 由后台扫描器兜底回补，不阻断已成功落库的更新结果。
+	if err := s.syncActivityCache(ctx, req.Id); err != nil {
+		glog.Warningf(ctx, "同步秒杀活动缓存失败(activity=%d): %v", req.Id, err)
+	}
+
 	a, err := s.loadActivity(ctx, req.Id)
 	if err != nil {
 		return nil, err
@@ -236,7 +249,9 @@ func (s *sFlashSale) UpdateActivity(ctx context.Context, req *v1.UpdateReq) (*v1
 	return &v1.UpdateRes{Activity: *a}, nil
 }
 
-// CreateOrder 秒杀下单：校验参数与 SKU/商品可用性后，单事务「时间窗校验 → 条件扣秒杀库存 → 创建订单」。
+// CreateOrder 秒杀下单（V2）：先经 Redis Lua 闸门快速失败（售罄/穿透/已购/幂等命中），
+// 通过后在同请求内继续 V1 的 MySQL 事务落单（活动校验/时间窗/条件扣库存/建单）；
+// MySQL 失败补偿 Redis 预扣；一人一单/幂等标记在 MySQL 提交成功后写入。
 // 幂等键命中（uk_flash_idempotency）回滚扣减后读回既有订单；一人一单命中（uk_flash_one_per_user）回滚并返回 12004。
 func (s *sFlashSale) CreateOrder(ctx context.Context, userID, activityID int64, req *v1.CreateOrderReq) (*v1.CreateOrderRes, error) {
 	skuID := req.SkuId
@@ -248,13 +263,41 @@ func (s *sFlashSale) CreateOrder(ctx context.Context, userID, activityID int64, 
 		return nil, codes.New(codes.CodeInvalidArgument)
 	}
 
+	hash := requestHash(activityID, skuID)
+
+	// V2 闸门：Redis 不可用或 Lua 执行失败时降级走 V1 纯 MySQL 路径（正确性由 MySQL 保证）。
+	preDeducted := false
+	if gate, err := s.runGate(ctx, activityID, skuID, userID, idempotencyKey, hash); err != nil {
+		glog.Warningf(ctx, "秒杀闸门执行失败，降级纯 MySQL 路径: %v", err)
+	} else {
+		switch gate {
+		case gateNotFound:
+			return nil, codes.New(codes.CodeFlashSaleActivityNotFound)
+		case gateNotInWindow:
+			return nil, codes.New(codes.CodeFlashSaleNotInTimeWindow)
+		case gateSoldOut:
+			return nil, codes.New(codes.CodeFlashSaleStockInsufficient)
+		case gateAlreadyPurchased:
+			return nil, codes.New(codes.CodeFlashSaleAlreadyPurchased)
+		case gateIdempotentHit:
+			return s.handleIdempotency(ctx, userID, idempotencyKey, hash)
+		case gateIdempotentConflict:
+			return nil, codes.New(codes.CodeFlashSaleIdempotencyConflict)
+		case gatePassed:
+			preDeducted = true
+		case gateSkuNotBound:
+			// SKU 未绑定该活动：透传 MySQL，由 V1 路径返回 1001（参数非法）。
+		}
+	}
+
 	// SKU/商品可用性校验 + 快照（事务外，与普通订单 resolveLine 一致；服务端定价不信任客户端）。
 	snap, err := s.resolveSku(ctx, skuID)
 	if err != nil {
+		if preDeducted {
+			s.compensatePreDeduct(ctx, activityID, skuID)
+		}
 		return nil, err
 	}
-
-	hash := requestHash(activityID, skuID)
 
 	var createdID int64
 	for attempt := 0; attempt < maxOrderNoRetry; attempt++ {
@@ -267,18 +310,33 @@ func (s *sFlashSale) CreateOrder(ctx context.Context, userID, activityID int64, 
 		if errors.As(err, &dk) {
 			switch {
 			case strings.Contains(dk.key, "uk_flash_idempotency"):
+				if preDeducted {
+					s.compensatePreDeduct(ctx, activityID, skuID)
+				}
 				return s.handleIdempotency(ctx, userID, idempotencyKey, hash)
 			case strings.Contains(dk.key, "uk_flash_one_per_user"):
+				if preDeducted {
+					s.compensatePreDeduct(ctx, activityID, skuID)
+				}
 				return nil, codes.New(codes.CodeFlashSaleAlreadyPurchased)
 			case strings.Contains(dk.key, "uk_flash_order_no"):
-				continue // 撞号，重新生成订单号重试
+				continue // 撞号重试（事务已整体回滚，预扣保留待最终结果统一处理）
 			}
+		}
+		if preDeducted {
+			s.compensatePreDeduct(ctx, activityID, skuID)
 		}
 		return nil, err
 	}
 	if createdID == 0 {
+		if preDeducted {
+			s.compensatePreDeduct(ctx, activityID, skuID)
+		}
 		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("生成秒杀订单号重试失败"))
 	}
+
+	// MySQL 下单成功：写入一人一单/幂等标记（无孤儿标记）；Redis 失败仅记录日志（MySQL 唯一约束兜底）。
+	s.markOrderSuccess(ctx, activityID, skuID, userID, idempotencyKey, hash)
 
 	o, err := s.loadOrder(ctx, userID, createdID)
 	if err != nil {
@@ -496,6 +554,16 @@ func (s *sFlashSale) findActivity(ctx context.Context, id int64) (*activityRow, 
 		return nil, nil
 	}
 	return rows[0], nil
+}
+
+// findBindings 查询活动全部 SKU 绑定（按 id 升序），供预热/失效复用。
+func (s *sFlashSale) findBindings(ctx context.Context, activityID int64) ([]*activitySkuRow, error) {
+	var rows []*activitySkuRow
+	if err := g.DB().Model("flash_sale_activity_skus").Ctx(ctx).
+		Where("activity_id", activityID).Order("id").Scan(&rows); err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("查询秒杀绑定: %w", err))
+	}
+	return rows, nil
 }
 
 // loadActivity 加载完整活动（含 SKU 绑定列表）。

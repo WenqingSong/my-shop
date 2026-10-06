@@ -1,0 +1,339 @@
+// Redis 热路径实现（秒杀 V2）：活动/库存预热、Lua 原子预扣闸门、售罄/穿透快速失败、
+// 一人一单/幂等标记与对账收敛。Redis 是派生缓存与加速闸门，MySQL 仍是权威事实来源与正确性兜底。
+package flashsale
+
+import (
+	"context"
+	"fmt"
+	"strconv"
+	"time"
+
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/glog"
+
+	"cnb.cool/go-cloud-devops/my-shop/internal/codes"
+)
+
+// Redis key 前缀（B 类 namespace，与会话 iam: 前缀隔离）。
+const (
+	flashSaleActivityKeyPrefix = "flashsale:activity:"
+	flashSaleStockKeyPrefix    = "flashsale:stock:"
+	flashSaleBoughtKeyPrefix   = "flashsale:bought:"
+	flashSaleIdemKeyPrefix     = "flashsale:idem:"
+	flashSaleSoldoutKeyPrefix  = "flashsale:soldout:"
+	flashSaleNullKeyPrefix     = "flashsale:null:"
+)
+
+// 活动元数据 Hash 字段名（与 Lua 脚本约定一致）。
+const (
+	flashSaleFieldStatus = "status"
+	flashSaleFieldStart  = "start"
+	flashSaleFieldEnd    = "end"
+)
+
+// TTL 常量（秒）。
+const (
+	// flashSaleGraceTTL 活动域 key 在活动结束后保留的宽限秒数（覆盖在途请求，保证不残留脏数据）。
+	flashSaleGraceTTL = 60
+	// flashSaleNullTTL 空值/负缓存标记的短 TTL。
+	flashSaleNullTTL = 60
+)
+
+// gateResult 是 Lua 抢购闸门的返回码（内部协议，非客户端错误码）。
+type gateResult string
+
+const (
+	gateNotFound           gateResult = "NOT_FOUND"
+	gateNotInWindow        gateResult = "NOT_IN_WINDOW"
+	gateSoldOut            gateResult = "SOLD_OUT"
+	gateAlreadyPurchased   gateResult = "ALREADY_PURCHASED"
+	gateIdempotentHit      gateResult = "IDEMPOTENT_HIT"
+	gateIdempotentConflict gateResult = "IDEMPOTENT_CONFLICT"
+	gateSkuNotBound        gateResult = "SKU_NOT_BOUND"
+	gatePassed             gateResult = "GATE_PASSED"
+)
+
+// flashSaleGateScript 是抢购热路径 Lua 脚本：原子完成空值标记检查 → 活动存在/启用/时间窗检查 →
+// 售罄检查 → 幂等检查 → 一人一单检查 → 剩余库存检查与 DECR 预扣。
+// 幂等检查先于一人一单：同幂等键重试（同 hash）应返回既有订单（200），而非已购（12004），与 V1 语义一致。
+// KEYS：1=null 2=activity 3=stock 4=bought 5=idem 6=soldout
+// ARGV：1=now(unix 秒) 2=request_hash 3=grace(秒)
+//
+// 注意：SKU 未绑定（活动已预热但无该 SKU 库存 key）时返回 SKU_NOT_BOUND，透传 MySQL 走既有 1001 语义；
+// 预扣成功（GATE_PASSED）≠ 下单成功，MySQL 事务失败时由调用方补偿预扣。
+const flashSaleGateScript = `
+local function field(t, name)
+  for i = 1, #t, 2 do
+    if t[i] == name then return t[i + 1] end
+  end
+  return nil
+end
+
+if redis.call('EXISTS', KEYS[1]) == 1 then
+  return 'NOT_FOUND'
+end
+
+local a = redis.call('HGETALL', KEYS[2])
+if #a == 0 then
+  return 'NOT_FOUND'
+end
+
+local status = field(a, 'status')
+local start = tonumber(field(a, 'start'))
+local finish = tonumber(field(a, 'end'))
+if status ~= '1' then
+  return 'NOT_FOUND'
+end
+
+local now = tonumber(ARGV[1])
+local grace = tonumber(ARGV[3])
+if start == nil or finish == nil or now < start or now >= finish then
+  return 'NOT_IN_WINDOW'
+end
+
+local function markSoldout()
+  local ttl = finish - now + grace
+  if ttl < 1 then ttl = 1 end
+  redis.call('SET', KEYS[6], '1', 'EX', ttl)
+end
+
+if redis.call('EXISTS', KEYS[6]) == 1 then
+  return 'SOLD_OUT'
+end
+
+local idem = redis.call('GET', KEYS[5])
+if idem then
+  if idem == ARGV[2] then
+    return 'IDEMPOTENT_HIT'
+  end
+  return 'IDEMPOTENT_CONFLICT'
+end
+
+if redis.call('EXISTS', KEYS[4]) == 1 then
+  return 'ALREADY_PURCHASED'
+end
+
+local remaining = tonumber(redis.call('GET', KEYS[3]))
+if remaining == nil then
+  return 'SKU_NOT_BOUND'
+end
+
+if remaining <= 0 then
+  markSoldout()
+  return 'SOLD_OUT'
+end
+
+local after = redis.call('DECR', KEYS[3])
+if after < 0 then
+  redis.call('INCR', KEYS[3])
+  markSoldout()
+  return 'SOLD_OUT'
+end
+return 'GATE_PASSED'
+`
+
+func flashSaleActivityKey(activityID int64) string {
+	return flashSaleActivityKeyPrefix + strconv.FormatInt(activityID, 10)
+}
+
+func flashSaleStockKey(activityID, skuID int64) string {
+	return flashSaleStockKeyPrefix + strconv.FormatInt(activityID, 10) + ":" + strconv.FormatInt(skuID, 10)
+}
+
+func flashSaleBoughtKey(activityID, skuID, userID int64) string {
+	return flashSaleBoughtKeyPrefix + strconv.FormatInt(activityID, 10) + ":" + strconv.FormatInt(skuID, 10) + ":" + strconv.FormatInt(userID, 10)
+}
+
+func flashSaleIdemKey(userID int64, idempotencyKey string) string {
+	return flashSaleIdemKeyPrefix + strconv.FormatInt(userID, 10) + ":" + idempotencyKey
+}
+
+func flashSaleSoldoutKey(activityID, skuID int64) string {
+	return flashSaleSoldoutKeyPrefix + strconv.FormatInt(activityID, 10) + ":" + strconv.FormatInt(skuID, 10)
+}
+
+func flashSaleNullKey(activityID int64) string {
+	return flashSaleNullKeyPrefix + strconv.FormatInt(activityID, 10)
+}
+
+// flashSaleActivityTTL 计算活动域 key 的 TTL（秒）：end - now + grace，至少 1 秒。
+func flashSaleActivityTTL(nowUnix, endUnix int64) int64 {
+	ttl := endUnix - nowUnix + flashSaleGraceTTL
+	if ttl < 1 {
+		ttl = 1
+	}
+	return ttl
+}
+
+// activityCacheRow 是预热/对账所需的精简活动行；StartTs/EndTs 为 MySQL UNIX_TIMESTAMP
+// 计算的绝对秒，避免 Go↔MySQL 时区漂移导致闸门时间窗误判。
+type activityCacheRow struct {
+	Id      int64 `json:"id"`
+	Status  int   `json:"status"`
+	StartTs int64 `json:"start_ts"`
+	EndTs   int64 `json:"end_ts"`
+}
+
+// findActivityCache 查询活动（status + UNIX_TIMESTAMP 起止），不存在返回 nil。
+func (s *sFlashSale) findActivityCache(ctx context.Context, activityID int64) (*activityCacheRow, error) {
+	rec, err := g.DB().Model("flash_sale_activities").Ctx(ctx).
+		Fields("id", "status", "UNIX_TIMESTAMP(start_time) AS start_ts", "UNIX_TIMESTAMP(end_time) AS end_ts").
+		Where("id", activityID).One()
+	if err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("查询秒杀活动缓存: %w", err))
+	}
+	if rec == nil || rec.IsEmpty() {
+		return nil, nil
+	}
+	return &activityCacheRow{
+		Id:      rec["id"].Int64(),
+		Status:  rec["status"].Int(),
+		StartTs: rec["start_ts"].Int64(),
+		EndTs:   rec["end_ts"].Int64(),
+	}, nil
+}
+
+// runGate 执行 Lua 抢购闸门。返回 (gateResult, nil) 表示 Lua 正常执行（含各类快速失败）；
+// 返回 error 表示 Redis 不可用或 Lua 执行失败，调用方应降级走纯 MySQL 路径。
+func (s *sFlashSale) runGate(ctx context.Context, activityID, skuID, userID int64, idempotencyKey, hash string) (gateResult, error) {
+	v, err := g.Redis().Do(ctx, "EVAL", flashSaleGateScript, 6,
+		flashSaleNullKey(activityID),
+		flashSaleActivityKey(activityID),
+		flashSaleStockKey(activityID, skuID),
+		flashSaleBoughtKey(activityID, skuID, userID),
+		flashSaleIdemKey(userID, idempotencyKey),
+		flashSaleSoldoutKey(activityID, skuID),
+		time.Now().Unix(), hash, flashSaleGraceTTL,
+	)
+	if err != nil {
+		return "", fmt.Errorf("执行秒杀闸门 Lua: %w", err)
+	}
+	return gateResult(v.String()), nil
+}
+
+// syncActivityCache 将指定活动同步到 Redis：enabled 且未结束 → 预热（活动元数据 + 剩余库存）；
+// 下架/已结束/不存在 → 失效（清除活动与库存/售罄标记，并置空值标记）。
+// 返回 error 表示 Redis 同步失败（MySQL 已提交的事实不受影响，由后台扫描器兜底）。
+func (s *sFlashSale) syncActivityCache(ctx context.Context, activityID int64) error {
+	a, err := s.findActivityCache(ctx, activityID)
+	if err != nil {
+		return err
+	}
+	if a == nil {
+		return s.setNullMarker(ctx, activityID)
+	}
+	skus, err := s.findBindings(ctx, activityID)
+	if err != nil {
+		return err
+	}
+	now := time.Now().Unix()
+	if a.Status != statusEnabled || a.EndTs <= now {
+		return s.invalidateActivityCache(ctx, activityID, skus)
+	}
+
+	ttl := flashSaleActivityTTL(now, a.EndTs)
+	if _, err := g.Redis().HSet(ctx, flashSaleActivityKey(activityID), map[string]any{
+		flashSaleFieldStatus: strconv.Itoa(a.Status),
+		flashSaleFieldStart:  strconv.FormatInt(a.StartTs, 10),
+		flashSaleFieldEnd:    strconv.FormatInt(a.EndTs, 10),
+	}); err != nil {
+		return fmt.Errorf("预热活动元数据: %w", err)
+	}
+	if _, err := g.Redis().Expire(ctx, flashSaleActivityKey(activityID), ttl); err != nil {
+		return fmt.Errorf("设置活动 TTL: %w", err)
+	}
+	for _, b := range skus {
+		remaining := b.TotalStock - b.Sold
+		if remaining < 0 {
+			remaining = 0
+		}
+		if err := g.Redis().SetEX(ctx, flashSaleStockKey(activityID, b.SkuId), strconv.FormatInt(remaining, 10), ttl); err != nil {
+			return fmt.Errorf("预热库存: %w", err)
+		}
+	}
+	if _, err := g.Redis().Del(ctx, flashSaleNullKey(activityID)); err != nil {
+		return fmt.Errorf("清除空值标记: %w", err)
+	}
+	for _, b := range skus {
+		if _, err := g.Redis().Del(ctx, flashSaleSoldoutKey(activityID, b.SkuId)); err != nil {
+			return fmt.Errorf("清除售罄标记: %w", err)
+		}
+	}
+	return nil
+}
+
+// invalidateActivityCache 下架/结束活动时清除活动域缓存并置空值标记，使后续抢购快速失败（12001）。
+func (s *sFlashSale) invalidateActivityCache(ctx context.Context, activityID int64, skus []*activitySkuRow) error {
+	keys := []string{flashSaleActivityKey(activityID)}
+	for _, b := range skus {
+		keys = append(keys, flashSaleStockKey(activityID, b.SkuId), flashSaleSoldoutKey(activityID, b.SkuId))
+	}
+	if _, err := g.Redis().Del(ctx, keys...); err != nil {
+		return fmt.Errorf("失效活动缓存: %w", err)
+	}
+	return s.setNullMarker(ctx, activityID)
+}
+
+// setNullMarker 写入空值/负缓存标记（短 TTL），使不存在/下架/未预热活动快速失败。
+func (s *sFlashSale) setNullMarker(ctx context.Context, activityID int64) error {
+	if err := g.Redis().SetEX(ctx, flashSaleNullKey(activityID), "1", flashSaleNullTTL); err != nil {
+		return fmt.Errorf("写入空值标记: %w", err)
+	}
+	return nil
+}
+
+// markOrderSuccess 在下单成功（MySQL 提交）后写入一人一单与幂等标记（无孤儿标记）。
+// Redis 失败仅记录日志不阻断响应（MySQL 唯一约束是永久兜底，标记仅为快速失败优化）。
+func (s *sFlashSale) markOrderSuccess(ctx context.Context, activityID, skuID, userID int64, idempotencyKey, hash string) {
+	ttl := int64(flashSaleGraceTTL)
+	if a, err := s.findActivityCache(ctx, activityID); err == nil && a != nil {
+		ttl = flashSaleActivityTTL(time.Now().Unix(), a.EndTs)
+	}
+	if err := g.Redis().SetEX(ctx, flashSaleBoughtKey(activityID, skuID, userID), "1", ttl); err != nil {
+		glog.Warningf(ctx, "写入一人一单标记失败(activity=%d sku=%d user=%d): %v", activityID, skuID, userID, err)
+		return
+	}
+	if err := g.Redis().SetEX(ctx, flashSaleIdemKey(userID, idempotencyKey), hash, ttl); err != nil {
+		glog.Warningf(ctx, "写入幂等标记失败(user=%d): %v", userID, err)
+	}
+}
+
+// compensatePreDeduct 在 MySQL 下单失败时补偿 Redis 预扣（INCR remaining）。
+// Redis 失败仅记录日志（残留预扣由对账兜底收敛）。
+func (s *sFlashSale) compensatePreDeduct(ctx context.Context, activityID, skuID int64) {
+	if _, err := g.Redis().Incr(ctx, flashSaleStockKey(activityID, skuID)); err != nil {
+		glog.Warningf(ctx, "补偿秒杀预扣失败(activity=%d sku=%d): %v", activityID, skuID, err)
+	}
+}
+
+// SyncCache 同步指定活动缓存（预热或失效），供管理端、后台扫描器与测试复用。
+func (s *sFlashSale) SyncCache(ctx context.Context, activityID int64) error {
+	return s.syncActivityCache(ctx, activityID)
+}
+
+// ReconcileCache 对账/回补（供后台扫描器复用）：扫描启用且未结束的活动，
+// 将 Redis remaining 刷成 total_stock - sold、回补缺失预热。返回本次处理的活动数。
+func (s *sFlashSale) ReconcileCache(ctx context.Context, limit int) (int, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var rows []*activityRow
+	if err := g.DB().Model("flash_sale_activities").Ctx(ctx).
+		Fields("id").
+		Where("status", statusEnabled).
+		Where("end_time > NOW()").
+		Order("id").
+		Limit(limit).
+		Scan(&rows); err != nil {
+		return 0, codes.Wrap(codes.CodeInternalError, fmt.Errorf("扫描秒杀活动: %w", err))
+	}
+	count := 0
+	for _, r := range rows {
+		if err := s.syncActivityCache(ctx, r.Id); err != nil {
+			glog.Warningf(ctx, "同步秒杀活动缓存失败(activity=%d): %v", r.Id, err)
+			continue
+		}
+		count++
+	}
+	return count, nil
+}

@@ -19,6 +19,7 @@ import (
 
 	v1 "cnb.cool/go-cloud-devops/my-shop/api/flashsale/v1"
 	"cnb.cool/go-cloud-devops/my-shop/internal/auth"
+	"cnb.cool/go-cloud-devops/my-shop/internal/service"
 )
 
 // flashOrderEnvelope 是秒杀下单接口的统一响应封装。
@@ -145,6 +146,15 @@ func flashInsertBinding(t *testing.T, activityID, skuID, flashPrice, totalStock 
 	return id
 }
 
+// flashSyncCache 将指定活动预热/失效到 Redis（V2 闸门依赖预热）。
+// V1 测试经 flashInsertActivity 直写 MySQL，不经过管理端 API，故需显式同步缓存。
+func flashSyncCache(t *testing.T, activityID int64) {
+	t.Helper()
+	if err := service.FlashSale().SyncCache(context.Background(), activityID); err != nil {
+		t.Fatalf("sync flash sale cache %d: %v", activityID, err)
+	}
+}
+
 // flashBindingStock 查询绑定的 (total_stock, sold)。
 func flashBindingStock(t *testing.T, activityID, skuID int64) (int64, int64) {
 	t.Helper()
@@ -260,26 +270,29 @@ func TestFlashSaleCreateActivityAndPermission(t *testing.T) {
 	}
 }
 
-// TestFlashSaleOrderTimeWindow 覆盖 AC-002：活动开始前/结束后下单被稳定拒绝（12002），且不产生订单、不扣库存。
+// TestFlashSaleOrderTimeWindow 覆盖 AC-002：活动开始前下单被稳定拒绝（12002，闸门时间窗校验）；
+// 已结束活动经预热后失效（12001），且不产生订单、不扣库存。
 func TestFlashSaleOrderTimeWindow(t *testing.T) {
 	base := setupFlashSaleServer(t)
 	skuID := flashSetupSku(t, "SKU-TIME", 5000, 1)
 	userToken := flashMintUserToken(t, 500001)
 
-	// 未开始。
+	// 未开始（预热后闸门时间窗判定 → 12002）。
 	notStarted := flashInsertActivity(t, "未开始", 1, flashMySQLNow(t).Add(24*time.Hour), flashMySQLNow(t).Add(48*time.Hour))
 	flashInsertBinding(t, notStarted, skuID, 1000, 10)
+	flashSyncCache(t, notStarted)
 	before := flashOrderCall(t, base, notStarted, userToken, map[string]any{"sku_id": skuID, "idempotency_key": "k-before"})
 	if before.Status != 409 || before.Code != 12002 {
 		t.Fatalf("before start: status=%d code=%d want 409/12002", before.Status, before.Code)
 	}
 
-	// 已结束。
+	// 已结束（预热即失效 → 12001）。
 	ended := flashInsertActivity(t, "已结束", 1, flashMySQLNow(t).Add(-48*time.Hour), flashMySQLNow(t).Add(-24*time.Hour))
 	flashInsertBinding(t, ended, skuID, 1000, 10)
+	flashSyncCache(t, ended)
 	after := flashOrderCall(t, base, ended, userToken, map[string]any{"sku_id": skuID, "idempotency_key": "k-after"})
-	if after.Status != 409 || after.Code != 12002 {
-		t.Fatalf("after end: status=%d code=%d want 409/12002", after.Status, after.Code)
+	if after.Status != 404 || after.Code != 12001 {
+		t.Fatalf("after end: status=%d code=%d want 404/12001", after.Status, after.Code)
 	}
 
 	// 均无订单、无库存扣减。
@@ -307,6 +320,7 @@ func TestFlashSaleOrderPricingSnapshot(t *testing.T) {
 
 	activityID := flashInsertActivity(t, "快照", 1, flashMySQLNow(t).Add(-time.Hour), flashMySQLNow(t).Add(time.Hour))
 	flashInsertBinding(t, activityID, skuID, 1000, 10)
+	flashSyncCache(t, activityID)
 
 	env := flashOrderCall(t, base, activityID, userToken, map[string]any{"sku_id": skuID, "idempotency_key": "k-snap"})
 	if env.Status != 200 || env.Code != 0 {
@@ -341,6 +355,7 @@ func TestFlashSaleOnePerUser(t *testing.T) {
 
 	activityID := flashInsertActivity(t, "一人一单", 1, flashMySQLNow(t).Add(-time.Hour), flashMySQLNow(t).Add(time.Hour))
 	flashInsertBinding(t, activityID, skuID, 1000, 10)
+	flashSyncCache(t, activityID)
 
 	first := flashOrderCall(t, base, activityID, userToken, map[string]any{"sku_id": skuID, "idempotency_key": "k-one-1"})
 	if first.Status != 200 || first.Code != 0 {
@@ -371,6 +386,7 @@ func TestFlashSaleIdempotency(t *testing.T) {
 	activityID := flashInsertActivity(t, "幂等", 1, flashMySQLNow(t).Add(-time.Hour), flashMySQLNow(t).Add(time.Hour))
 	flashInsertBinding(t, activityID, skuID, 1000, 10)
 	flashInsertBinding(t, activityID, skuID2, 1000, 10)
+	flashSyncCache(t, activityID)
 
 	body := map[string]any{"sku_id": skuID, "idempotency_key": "k-idem"}
 	first := flashOrderCall(t, base, activityID, userToken, body)
@@ -413,6 +429,7 @@ func TestFlashSaleConcurrentNoOversell(t *testing.T) {
 	)
 	activityID := flashInsertActivity(t, "并发", 1, flashMySQLNow(t).Add(-time.Hour), flashMySQLNow(t).Add(time.Hour))
 	flashInsertBinding(t, activityID, skuID, 1000, totalStock)
+	flashSyncCache(t, activityID)
 
 	// 预先为 n 个不同用户签发 token（不依赖用户表，flash_sale_orders.user_id 为软引用）。
 	tokens := make([]string, n)
@@ -470,6 +487,7 @@ func TestFlashSaleOrderFailures(t *testing.T) {
 
 	active := flashInsertActivity(t, "失败场景", 1, flashMySQLNow(t).Add(-time.Hour), flashMySQLNow(t).Add(time.Hour))
 	flashInsertBinding(t, active, skuID, 1000, 1)
+	flashSyncCache(t, active)
 
 	// 库存不足：第二个用户下单，库存已耗尽 → 12003，无订单、库存不变。
 	first := flashOrderCall(t, base, active, userToken, map[string]any{"sku_id": skuID, "idempotency_key": "k-fail-1"})
@@ -586,6 +604,7 @@ func TestFlashSaleUpdateCannotAddOrRemoveBindings(t *testing.T) {
 	activityID := flashInsertActivity(t, "增删绑定", 1, flashMySQLNow(t).Add(-time.Hour), flashMySQLNow(t).Add(time.Hour))
 	flashInsertBinding(t, activityID, skuA, 1000, 10)
 	flashInsertBinding(t, activityID, skuB, 1000, 10)
+	flashSyncCache(t, activityID)
 
 	// 卖出 skuA 6 件（6 个不同用户），使 skuA.sold=6。
 	for i := 0; i < 6; i++ {

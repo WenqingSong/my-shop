@@ -60,6 +60,12 @@ order:
   # 超时未支付订单的后台扫描周期（秒）。
   cancel_scan_interval: 60
 
+# 秒杀配置（以下均为开发默认值，可通过环境变量覆盖）
+# 对应环境变量：FLASH_SALE_RECONCILE_SCAN_INTERVAL
+flash_sale:
+  # 秒杀缓存对账/回补的后台扫描周期（秒）。
+  reconcile_scan_interval: 60
+
 # 启动配置（以下均为开发默认值，可通过环境变量覆盖）
 # 对应环境变量：STARTUP_DEPENDENCY_TIMEOUT
 startup:
