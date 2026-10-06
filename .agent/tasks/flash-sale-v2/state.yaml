@@ -1,0 +1,32 @@
+schema_version: 2
+task_id: flash-sale-v2
+
+contract:
+  status: APPROVED
+  target: "998da33917d5e3fc84ed3f1ddf92ea5ae7b61e15"
+
+resources:
+  # 本任务是否需要新增全局资源由 Analyst 依对账/补偿方案判定：
+  # - error_code_domains：预计复用秒杀域 12000-12999（flash-sale-v1 已 RESERVED），V2 不新增域；域内是否新增错误码由 Analyst 定。
+  # - migrations：若对账方案需要持久化对账/补偿记录表则新增 1 个 migration，具体 version 由 Analyst 读 .agent/registry/* 派生。
+  migrations: []
+  error_code_domains: []
+
+review:
+  status: CLEAN
+  target: "4ec27c2cb961e5dd1dbee979cbb1d241936feae6"
+
+owner:
+  status: ACCEPTED
+  review_target: "4ec27c2cb961e5dd1dbee979cbb1d241936feae6"
+
+delivery:
+  status: PASS
+  review_target: "4ec27c2cb961e5dd1dbee979cbb1d241936feae6"
+  feature_head: "bcd4c4d1bb66957a1cf675b698c3c66a0b33e42b"
+  develop_base: "95909127caac44512c9a62cadaeba0ad2c949d73"
+
+blocked:
+  active: false
+  by: ""
+  reason: ""
