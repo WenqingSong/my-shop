@@ -1,6 +1,14 @@
-# Agent Workflow V2 — 核心架构设计
+# Agent Workflow V3 — 核心架构设计
 
-本文是 Workflow V2 的**唯一核心架构 Design 文档**：解释「为什么这样设计」「整个系统如何运行」「各概念之间的关系」「为什么需要这些 Gate / Git / Evidence 规则」。
+> **Workflow V3 Baseline**（`.agent/VERSION` = `3.0.0`）
+>
+> 当前 Workflow 协作 / 工程架构 major version 为 **V3**。Baseline 包含：six-role independent-session workflow、Evidence Snapshot、machine gates、Generic Shared Resources、strict YAML、independent Workflow Engine module、Adoption mechanism。
+>
+> 已知验证边界：Cross-project Adoption Dogfood **NOT PERFORMED**（DEFERRED BY OWNER）。portability architecture 已静态与内部验证，但尚未在第二个真实项目验证跨项目 Adoption。
+>
+> 命名约定：正文中「Workflow V2」若指当前架构名称，已被 V3 取代；若指 V1→V2 历史演进、legacy reference 或 state schema v2/v3，则保留历史含义，不随本次 Release Marking 改写。`module workflow-v2-engine` 为 historical technical identifier，本轮不改。
+
+本文是 Workflow V3 的**唯一核心架构 Design 文档**：解释「为什么这样设计」「整个系统如何运行」「各概念之间的关系」「为什么需要这些 Gate / Git / Evidence 规则」。
 
 本文定位是「**为什么**」。`.agent/specs/*`（协作规范、职责边界）与 `.agent/roles/*`（六个角色 Prompt）负责「**具体怎么做**」，引用本文，不重复定义。
 

@@ -1,6 +1,14 @@
-# Workflow V2 Runtime Assets
+# Workflow V3 Runtime Assets
 
-`.agent/` 是 Workflow V2 的 Repository Runtime Namespace：集中存放角色 Prompt、协作规范、职责边界、Adoption 协议、模板、机器配置、Registry 与运行时 Task Artifact。Agent 正常执行 Workflow 时，主要读取本目录。
+`.agent/` 是 Workflow V3 的 Repository Runtime Namespace：集中存放角色 Prompt、协作规范、职责边界、Adoption 协议、模板、机器配置、Registry 与运行时 Task Artifact。Agent 正常执行 Workflow 时，主要读取本目录。
+
+> **Workflow V3 Baseline**（`.agent/VERSION` = `3.0.0`）
+>
+> 当前 Workflow major version = **3**。Baseline 包含：six-role independent-session workflow、Evidence Snapshot、machine gates、Generic Shared Resources、strict YAML、independent Workflow Engine module、Adoption mechanism。
+>
+> Cross-project Adoption Dogfood：**NOT PERFORMED**（DEFERRED BY OWNER）。
+>
+> 命名约定：`module workflow-v2-engine` 是 historical technical identifier（本轮不随 Release Marking 修改）；state schema v2/v3 版本号与 Workflow major version 相互独立。
 
 ## Entry
 
@@ -51,4 +59,4 @@ TaskBuilder → Analyst → Coder → Cleaner → OwnerGate → Deliverer → Ow
 
 ## Separate: Project Mastery Workflow
 
-`.agent/mastery/` 是独立的 Project Mastery Workflow（学习 / 面试掌握），与 Workflow V2 生产开发流程目的不同、资产隔离，不参与 Workflow V2 状态机。入口：`mastery/README.md`。
+`.agent/mastery/` 是独立的 Project Mastery Workflow（学习 / 面试掌握），与 Workflow V3 生产开发流程目的不同、资产隔离，不参与 Workflow V3 状态机。入口：`mastery/README.md`。

@@ -1,6 +1,6 @@
-# Workflow V2 项目 Adoption / 跨项目迁移规范
+# Workflow V3 项目 Adoption / 跨项目迁移规范
 
-本文定义 Workflow V2 首次被复制 / 迁移到一个新项目时的一次性 **Project Adoption Procedure**。它是迁移协议，不是 Workflow V3，也不是新增的第七个长期 Agent Role。
+本文定义 Workflow V3 首次被复制 / 迁移到一个新项目时的一次性 **Project Adoption Procedure**。它是迁移协议，不是新增的第七个长期 Agent Role。
 
 正常六角色运行（`TaskBuilder → Analyst → Coder → Cleaner → OwnerGate → Deliverer → Owner Integration`）不依赖本文，也不依赖临时文件 `PROJECT_ADAPTATION.md`。本文只在迁移 / Adoption 时被读取。
 
