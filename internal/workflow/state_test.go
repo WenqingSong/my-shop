@@ -1,84 +1,111 @@
 package workflow
 
-import "testing"
+import (
+	"testing"
 
-// TestPhaseSetHasExactly13Values 保证 phase 集合恰好为 13 值，防止实现与 Contract/Design 漂移。
-func TestPhaseSetHasExactly13Values(t *testing.T) {
-	if len(allPhases) != 13 {
-		t.Fatalf("phase 集合应为 13 值，实际 %d：%v", len(allPhases), allPhases)
+	"gopkg.in/yaml.v3"
+)
+
+// TestStateSchemaRoundTrip 覆盖 Design Freeze §1：完整 V2 state.yaml 能正确反序列化到全部字段。
+func TestStateSchemaRoundTrip(t *testing.T) {
+	yml := `schema_version: 2
+task_id: flash-sale-v2
+contract:
+  status: APPROVED
+  target: a1b2c3d
+resources:
+  migrations:
+    - "20261001000011"
+  error_code_domains:
+    - "12000-12999"
+review:
+  status: CLEAN
+  target: c1d2e3f
+owner:
+  status: ACCEPTED
+  review_target: c1d2e3f
+delivery:
+  status: PASS
+  review_target: c1d2e3f
+  feature_head: f1a2b3c
+  develop_base: d1e2f3a
+blocked:
+  active: false
+  by: ""
+  reason: ""
+`
+	var s State
+	if err := yaml.Unmarshal([]byte(yml), &s); err != nil {
+		t.Fatalf("解析失败: %v", err)
 	}
-	if len(phaseSet) != 13 {
-		t.Fatalf("phaseSet 大小应为 13，实际 %d", len(phaseSet))
+	if s.SchemaVersion != 2 {
+		t.Fatalf("SchemaVersion = %d, 期望 2", s.SchemaVersion)
 	}
-	seen := map[Phase]bool{}
-	for _, p := range allPhases {
-		if seen[p] {
-			t.Fatalf("phase 重复：%s", p)
-		}
-		seen[p] = true
-		if !ValidPhase(p) {
-			t.Fatalf("ValidPhase(%s) 应为 true", p)
-		}
+	if s.TaskID != "flash-sale-v2" {
+		t.Fatalf("TaskID = %q", s.TaskID)
 	}
-	if ValidPhase("NOT_A_PHASE") {
-		t.Fatal("ValidPhase(NOT_A_PHASE) 应为 false")
+	if s.Contract.Status != ContractApproved || s.Contract.Target != "a1b2c3d" {
+		t.Fatalf("Contract = %+v", s.Contract)
+	}
+	if len(s.Resources.Migrations) != 1 || s.Resources.Migrations[0] != "20261001000011" {
+		t.Fatalf("Resources.Migrations = %+v", s.Resources.Migrations)
+	}
+	if len(s.Resources.ErrorCodeDomains) != 1 || s.Resources.ErrorCodeDomains[0] != "12000-12999" {
+		t.Fatalf("Resources.ErrorCodeDomains = %+v", s.Resources.ErrorCodeDomains)
+	}
+	if s.Review.Status != ReviewClean || s.Review.Target != "c1d2e3f" {
+		t.Fatalf("Review = %+v", s.Review)
+	}
+	if s.Owner.Status != OwnerAccepted || s.Owner.ReviewTarget != "c1d2e3f" {
+		t.Fatalf("Owner = %+v", s.Owner)
+	}
+	if s.Delivery.Status != DeliveryPass || s.Delivery.ReviewTarget != "c1d2e3f" || s.Delivery.FeatureHead != "f1a2b3c" || s.Delivery.DevelopBase != "d1e2f3a" {
+		t.Fatalf("Delivery = %+v", s.Delivery)
+	}
+	if s.Blocked.Active {
+		t.Fatalf("Blocked.Active = true, 期望 false")
 	}
 }
 
-// TestTransitionAuthorityCompleteness 保证 18 条转换全部定义且端点均为合法 phase。
-func TestTransitionAuthorityCompleteness(t *testing.T) {
-	if len(transitionAuthority) != 18 {
-		t.Fatalf("Transition Authority 表应为 18 条，实际 %d", len(transitionAuthority))
+// TestEnumValidators 覆盖四个枚举的合法/非法判定。
+func TestEnumValidators(t *testing.T) {
+	for _, c := range []ContractStatus{ContractPending, ContractApproved, ContractRejected, ContractNotRequired} {
+		if !ValidContractStatus(c) {
+			t.Fatalf("ValidContractStatus(%s) 应为 true", c)
+		}
 	}
-	for i, tr := range transitionAuthority {
-		if tr.From == tr.To {
-			t.Fatalf("转换 #%d 自环非法：%s -> %s", i+1, tr.From, tr.To)
+	for _, r := range []ReviewStatus{ReviewNotRequested, ReviewPending, ReviewClean, ReviewChangesRequired} {
+		if !ValidReviewStatus(r) {
+			t.Fatalf("ValidReviewStatus(%s) 应为 true", r)
 		}
-		if !ValidPhase(tr.From) || !ValidPhase(tr.To) {
-			t.Fatalf("转换 #%d 端点非法：%s -> %s", i+1, tr.From, tr.To)
+	}
+	for _, o := range []OwnerStatus{OwnerPending, OwnerAccepted, OwnerRejected, OwnerNotRequired} {
+		if !ValidOwnerStatus(o) {
+			t.Fatalf("ValidOwnerStatus(%s) 应为 true", o)
 		}
-		if tr.DecisionAuthority == "" {
-			t.Fatalf("转换 #%d 缺少 Decision Authority", i+1)
+	}
+	for _, d := range []DeliveryStatus{DeliveryNotRun, DeliveryPass, DeliveryFail, DeliveryBlocked} {
+		if !ValidDeliveryStatus(d) {
+			t.Fatalf("ValidDeliveryStatus(%s) 应为 true", d)
 		}
-		if tr.FileWriter == "" {
-			t.Fatalf("转换 #%d 缺少 File Writer", i+1)
-		}
+	}
+
+	if ValidContractStatus("BOGUS") || ValidReviewStatus("STALE") || ValidOwnerStatus("BOGUS") || ValidDeliveryStatus("CONDITIONAL_PASS") {
+		t.Fatal("非法枚举值不应通过校验")
 	}
 }
 
-func TestPathClassification(t *testing.T) {
-	tests := []struct {
-		name        string
-		path        string
-		neutral     bool
-		substantial bool
-	}{
-		{"findings 白名单", ".agent/tasks/demo/findings.md", true, false},
-		{"core-logic 白名单", ".agent/tasks/demo/core-logic.md", true, false},
-		{"delivery 白名单", ".agent/tasks/demo/delivery.md", true, false},
-		{"state.yaml 白名单", ".agent/tasks/demo/state.yaml", true, false},
-		{"生产代码 internal", "internal/foo.go", false, true},
-		{"生产代码 api", "api/handler.go", false, true},
-		{"主入口", "main.go", false, true},
-		{"业务测试", "internal/foo_test.go", false, true},
-		{"Contract", ".agent/tasks/demo/contract.md", false, true},
-		{"Task 定义", ".agent/tasks/demo/task.md", false, true},
-		{"Design", "docs/design/foo.md", false, true},
-		{"migration SQL", "internal/migrations/sql/20261001000009_x.up.sql", false, true},
-		{"runtime config", "manifest/config/app.yaml", false, true},
-		{"Registry", ".agent/registry/migrations.md", false, true},
-		{"README（default-deny 也触发）", "README.md", false, true},
-		{"docs/agent（default-deny 也触发）", "docs/agent/coder.md", false, true},
+// TestHasRequiredResources 覆盖资源声明判定。
+func TestHasRequiredResources(t *testing.T) {
+	if (State{}).HasRequiredResources() {
+		t.Fatal("空 State 不应声明资源")
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := isReviewNeutral(tt.path); got != tt.neutral {
-				t.Fatalf("isReviewNeutral(%s) = %v, 期望 %v", tt.path, got, tt.neutral)
-			}
-			if got := isSubstantialChange(tt.path); got != tt.substantial {
-				t.Fatalf("isSubstantialChange(%s) = %v, 期望 %v", tt.path, got, tt.substantial)
-			}
-		})
+	s := State{Resources: Resources{Migrations: []string{"20261001000011"}}}
+	if !s.HasRequiredResources() {
+		t.Fatal("声明 migration 后 HasRequiredResources 应为 true")
+	}
+	s = State{Resources: Resources{ErrorCodeDomains: []string{"12000-12999"}}}
+	if !s.HasRequiredResources() {
+		t.Fatal("声明错误码域后 HasRequiredResources 应为 true")
 	}
 }

@@ -6,9 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
-// testRepo 是一个用于集成测试的临时 git 仓库。
+// testRepo 是用于集成测试的临时 git 仓库。
 type testRepo struct {
 	dir string
 	t   *testing.T
@@ -59,157 +61,318 @@ func (r *testRepo) commit(msg string) string {
 	return r.git("rev-parse", "HEAD")
 }
 
-func (r *testRepo) validator(cutover string) *Validator {
+func (r *testRepo) checkout(branch string) {
+	r.t.Helper()
+	r.git("checkout", "-q", "-b", branch)
+}
+
+// syncOrigin 把当前 HEAD 标记为 shared 远端引用 refs/remotes/origin/<branch>。
+func (r *testRepo) syncOrigin(branch string) {
+	r.t.Helper()
+	head := r.git("rev-parse", "HEAD")
+	r.git("update-ref", "refs/remotes/origin/"+branch, head)
+}
+
+func (r *testRepo) validator() *Validator {
 	return &Validator{
 		Root:       r.dir,
 		Git:        &ExecGit{Root: r.dir},
 		DevelopRef: "origin/develop",
-		Cutover:    cutover,
 	}
 }
 
-// syncOriginDevelop 把当前 HEAD 标记为 shared 远端引用 origin/develop。
-// 模拟「只改 Registry 的 commit 已落到 shared develop」。
-func (r *testRepo) syncOriginDevelop() string {
+func (r *testRepo) writeState(s State) {
 	r.t.Helper()
-	head := r.git("rev-parse", "HEAD")
-	r.git("update-ref", "refs/remotes/origin/develop", head)
-	return head
-}
-
-const cleanStateYAML = `task: demo-task
-phase: WAITING_FOR_OWNER_ACCEPTANCE
-review:
-  status: CLEAN
-  target_base: %s
-  target_paths:
-    - internal/foo.go
-    - internal/foo_test.go
-    - docs/design/foo.md
-    - .agent/tasks/demo-task/contract.md
-owner_verification:
-  status: ACCEPTED
-delivery:
-  status: NONE
-required_resources:
-  error_code_domains: []
-  migrations: []
-blocked:
-  is_blocked: false
-  reason: ""
-`
-
-// TestCleanStaleProductionCode 覆盖测试要求 6：CLEAN 后生产代码实质变化 → 判 STALE。
-func TestCleanStaleProductionCode(t *testing.T) {
-	r := newTestRepo(t)
-	r.write("internal/foo.go", "package foo\n")
-	r.write("docs/design/foo.md", "# foo\n")
-	r.write(".agent/tasks/demo-task/contract.md", "# contract\n")
-	r.write(".agent/tasks/demo-task/task.md", "# task\n")
-	base := r.commit("baseline")
-
-	r.write(".agent/tasks/demo-task/state.yaml", strings.Replace(cleanStateYAML, "%s", base, 1))
-	r.commit("clean")
-
-	// CLEAN 后修改生产代码（工作区未提交）。
-	r.write("internal/foo.go", "package foo\n// changed\n")
-
-	res, err := r.validator("").ValidateTask(".agent/tasks/demo-task")
+	b, err := yaml.Marshal(s)
 	if err != nil {
-		t.Fatalf("不应返回运行错误: %v", err)
+		r.t.Fatalf("marshal state: %v", err)
 	}
-	if res.Status != StatusFail {
-		t.Fatalf("期望 FAIL，实际 %s，issues=%v", res.Status, res.Issues)
-	}
-	if !issueCheck(t, res.Issues, "Review Validity") {
-		t.Fatalf("期望 Review Validity issue，实际 %v", res.Issues)
+	r.write(".agent/tasks/demo/state.yaml", string(b))
+}
+
+func baseState() State {
+	return State{
+		SchemaVersion: SchemaV2,
+		TaskID:        "demo",
+		Contract:      Contract{Status: ContractNotRequired, Target: ""},
+		Resources:     Resources{},
+		Review:        Review{Status: ReviewNotRequested, Target: ""},
+		Owner:         Owner{Status: OwnerPending, ReviewTarget: ""},
+		Delivery:      Delivery{Status: DeliveryNotRun, ReviewTarget: "", FeatureHead: "", DevelopBase: ""},
+		Blocked:       Blocked{Active: false, By: "", Reason: ""},
 	}
 }
 
-// TestCleanReviewNeutralNoStale 覆盖测试要求 5：Review-neutral Artifact 变化不使 CLEAN 失效。
-func TestCleanReviewNeutralNoStale(t *testing.T) {
+// setupCoderStartApproved 构建 coder-start 的 APPROVED 前置：A1 contract + A2 metadata，feature 已同步。
+func setupCoderStartApproved(t *testing.T) (*testRepo, map[string]string) {
 	r := newTestRepo(t)
+	r.write("README.md", "# base\n")
+	r.commit("baseline")
+	r.syncOrigin("develop")
+
+	r.checkout("feature/agent-workflow-v2")
+	r.write(".agent/tasks/demo/contract.md", "# contract v1\n")
+	shas := map[string]string{"A1": r.commit("contract")}
+
+	s := baseState()
+	s.Contract = Contract{Status: ContractApproved, Target: shas["A1"]}
+	r.writeState(s)
+	shas["A2"] = r.commit("contract metadata")
+	r.syncOrigin("feature/agent-workflow-v2")
+	return r, shas
+}
+
+// setupCleanerStart 构建 cleaner-start 前置：C1 implementation + C2 PENDING metadata，feature 已同步。
+func setupCleanerStart(t *testing.T) (*testRepo, map[string]string) {
+	r := newTestRepo(t)
+	r.write("README.md", "# base\n")
+	r.commit("baseline")
+	r.syncOrigin("develop")
+
+	r.checkout("feature/agent-workflow-v2")
 	r.write("internal/foo.go", "package foo\n")
-	r.write(".agent/tasks/demo-task/task.md", "# task\n")
-	base := r.commit("baseline")
+	shas := map[string]string{"C1": r.commit("implementation")}
 
-	r.write(".agent/tasks/demo-task/state.yaml", strings.Replace(cleanStateYAML, "%s", base, 1))
-	r.commit("clean")
-
-	// 修改 Review-neutral 文件。
-	r.write(".agent/tasks/demo-task/findings.md", "# findings updated\n")
-	r.write(".agent/tasks/demo-task/state.yaml", strings.Replace(cleanStateYAML, "%s", base, 1)+"# comment\n")
-
-	res, err := r.validator("").ValidateTask(".agent/tasks/demo-task")
-	if err != nil {
-		t.Fatalf("不应返回运行错误: %v", err)
-	}
-	if res.Status != StatusPass {
-		t.Fatalf("期望 PASS，实际 %s，issues=%v", res.Status, res.Issues)
-	}
+	s := baseState()
+	s.Review = Review{Status: ReviewPending, Target: shas["C1"]}
+	r.writeState(s)
+	shas["C2"] = r.commit("review metadata")
+	r.syncOrigin("feature/agent-workflow-v2")
+	return r, shas
 }
 
-// TestCleanStaleBusinessTest 覆盖测试要求 7：CLEAN 后业务测试变化 → 判 STALE。
-func TestCleanStaleBusinessTest(t *testing.T) {
+// setupMergeReady 构建 merge-ready PASS 的完整 feature 历史（contract NOT_REQUIRED、无资源）。
+func setupMergeReady(t *testing.T) (*testRepo, map[string]string) {
 	r := newTestRepo(t)
+	r.write("README.md", "# base\n")
+	r.commit("baseline")
+	r.syncOrigin("develop")
+	shas := map[string]string{"D12": r.git("rev-parse", "HEAD")}
+
+	r.checkout("feature/agent-workflow-v2")
+
+	// C1 implementation
 	r.write("internal/foo.go", "package foo\n")
-	r.write(".agent/tasks/demo-task/task.md", "# task\n")
-	base := r.commit("baseline")
-	r.write(".agent/tasks/demo-task/state.yaml", strings.Replace(cleanStateYAML, "%s", base, 1))
-	r.commit("clean")
+	shas["C1"] = r.commit("implementation")
 
-	r.write("internal/foo_test.go", "package foo\n")
-	res, _ := r.validator("").ValidateTask(".agent/tasks/demo-task")
-	if res.Status != StatusFail || !issueCheck(t, res.Issues, "Review Validity") {
-		t.Fatalf("业务测试变化应判 STALE，实际 status=%s issues=%v", res.Status, res.Issues)
+	// C2 metadata: PENDING target C1
+	s := baseState()
+	s.Review = Review{Status: ReviewPending, Target: shas["C1"]}
+	r.writeState(s)
+	shas["C2"] = r.commit("review request metadata")
+
+	// C3 clean + findings + core-logic
+	r.write(".agent/tasks/demo/findings.md", "# findings\n")
+	r.write(".agent/tasks/demo/core-logic.md", "# core logic\n")
+	s.Review = Review{Status: ReviewClean, Target: shas["C1"]}
+	r.writeState(s)
+	shas["C3"] = r.commit("clean review")
+
+	// C4 owner accepted + owner-decision
+	r.write(".agent/tasks/demo/owner-decision.md", "# decision\n")
+	s.Owner = Owner{Status: OwnerAccepted, ReviewTarget: shas["C1"]}
+	r.writeState(s)
+	shas["C4"] = r.commit("owner acceptance")
+	shas["F8"] = shas["C4"]
+
+	// F9 delivery pass + delivery.md
+	r.write(".agent/tasks/demo/delivery.md", "# delivery\n")
+	s.Delivery = Delivery{Status: DeliveryPass, ReviewTarget: shas["C1"], FeatureHead: shas["F8"], DevelopBase: shas["D12"]}
+	r.writeState(s)
+	shas["F9"] = r.commit("delivery pass")
+	r.syncOrigin("feature/agent-workflow-v2")
+
+	return r, shas
+}
+
+func expectStatus(t *testing.T, res Result, want StatusKind) {
+	t.Helper()
+	if res.Status != want {
+		t.Fatalf("期望 status=%s，实际 status=%s issues=%v error=%q", want, res.Status, res.Issues, res.Error)
 	}
 }
 
-// TestCleanStaleContractDesign 覆盖测试要求 8：Contract / Design 变化 → 判 STALE。
-func TestCleanStaleContractDesign(t *testing.T) {
+func expectCheck(t *testing.T, res Result, checkSubstr string) {
+	t.Helper()
+	if res.Status != StatusFail || !issueCheck(t, res.Issues, checkSubstr) {
+		t.Fatalf("期望 FAIL 且含 %q，实际 status=%s issues=%v error=%q", checkSubstr, res.Status, res.Issues, res.Error)
+	}
+}
+
+// --- coder-start ---
+
+func TestGateCoderStartContractApproved(t *testing.T) {
+	r, _ := setupCoderStartApproved(t)
+	expectStatus(t, r.validator().GateCoderStart(".agent/tasks/demo"), StatusPass)
+}
+
+func TestGateCoderStartContractChanged(t *testing.T) {
+	r, _ := setupCoderStartApproved(t)
+	r.write(".agent/tasks/demo/contract.md", "# contract v2 changed\n")
+	r.commit("contract changed")
+	r.syncOrigin("feature/agent-workflow-v2")
+	expectCheck(t, r.validator().GateCoderStart(".agent/tasks/demo"), "Contract")
+}
+
+func TestGateCoderStartDesignNotBound(t *testing.T) {
+	r, _ := setupCoderStartApproved(t)
+	r.write("docs/design/foo.md", "# design\n")
+	r.commit("design added")
+	r.syncOrigin("feature/agent-workflow-v2")
+	expectStatus(t, r.validator().GateCoderStart(".agent/tasks/demo"), StatusPass)
+}
+
+func TestGateCoderStartBlocked(t *testing.T) {
+	r, _ := setupCoderStartApproved(t)
+	s := baseState()
+	s.Contract = Contract{Status: ContractApproved, Target: r.git("rev-parse", "HEAD~0")}
+	s.Blocked = Blocked{Active: true, By: "Coder", Reason: "blocked"}
+	r.writeState(s)
+	r.commit("blocked state")
+	r.syncOrigin("feature/agent-workflow-v2")
+	expectCheck(t, r.validator().GateCoderStart(".agent/tasks/demo"), "Coder Start")
+}
+
+// --- cleaner-start ---
+
+func TestGateCleanerStartPendingPushed(t *testing.T) {
+	r, _ := setupCleanerStart(t)
+	expectStatus(t, r.validator().GateCleanerStart(".agent/tasks/demo"), StatusPass)
+}
+
+func TestGateCleanerStartDirty(t *testing.T) {
+	r, _ := setupCleanerStart(t)
+	r.write("internal/foo.go", "package foo\n// dirty\n")
+	expectCheck(t, r.validator().GateCleanerStart(".agent/tasks/demo"), "Handoff Ready")
+}
+
+func TestGateCleanerStartUnpushed(t *testing.T) {
+	r, _ := setupCleanerStart(t)
+	r.write(".agent/tasks/demo/findings.md", "# pre-findings\n")
+	r.commit("local commit not pushed")
+	// 不 sync，local HEAD != remote feature HEAD
+	expectCheck(t, r.validator().GateCleanerStart(".agent/tasks/demo"), "Handoff Ready")
+}
+
+func TestGateCleanerStartSubstantiveTail(t *testing.T) {
 	r := newTestRepo(t)
+	r.write("README.md", "# base\n")
+	r.commit("baseline")
+	r.syncOrigin("develop")
+	r.checkout("feature/agent-workflow-v2")
+
 	r.write("internal/foo.go", "package foo\n")
-	r.write(".agent/tasks/demo-task/task.md", "# task\n")
-	base := r.commit("baseline")
-	r.write(".agent/tasks/demo-task/state.yaml", strings.Replace(cleanStateYAML, "%s", base, 1))
-	r.commit("clean")
+	c1 := r.commit("implementation v1")
+	r.write("internal/foo.go", "package foo\n// v2\n") // 实质变化
+	s := baseState()
+	s.Review = Review{Status: ReviewPending, Target: c1}
+	r.writeState(s)
+	r.commit("metadata + substantive")
+	r.syncOrigin("feature/agent-workflow-v2")
 
-	r.write("docs/design/foo.md", "# foo changed\n")
-	res, _ := r.validator("").ValidateTask(".agent/tasks/demo-task")
-	if res.Status != StatusFail || !issueCheck(t, res.Issues, "Review Validity") {
-		t.Fatalf("Design 变化应判 STALE，实际 status=%s issues=%v", res.Status, res.Issues)
-	}
+	expectCheck(t, r.validator().GateCleanerStart(".agent/tasks/demo"), "Review Tail")
 }
 
-// TestCutoverLegacySkipAndNewTaskFail 覆盖测试要求 13/14：Legacy 跳过、新任务缺 state.yaml 判 FAIL。
-func TestCutoverLegacySkipAndNewTaskFail(t *testing.T) {
+// --- owner-gate-start / CLEAN validity ---
+
+func TestGateOwnerGateStartCleanValid(t *testing.T) {
+	r, shas := setupCleanerStart(t)
+	r.write(".agent/tasks/demo/findings.md", "# findings\n")
+	r.write(".agent/tasks/demo/core-logic.md", "# core logic\n")
+	s := baseState()
+	s.Review = Review{Status: ReviewClean, Target: shas["C1"]}
+	r.writeState(s)
+	r.commit("clean review")
+	r.syncOrigin("feature/agent-workflow-v2")
+
+	expectStatus(t, r.validator().GateOwnerGateStart(".agent/tasks/demo"), StatusPass)
+}
+
+func TestCleanValiditySubstantiveComment(t *testing.T) {
+	r, shas := setupCleanerStart(t)
+	r.write(".agent/tasks/demo/findings.md", "# findings\n")
+	s := baseState()
+	s.Review = Review{Status: ReviewClean, Target: shas["C1"]}
+	r.writeState(s)
+	r.commit("clean review")
+
+	// 只改 .go 注释，也属 substantive。
+	r.write("internal/foo.go", "package foo\n// comment only\n")
+	r.commit("comment change")
+	r.syncOrigin("feature/agent-workflow-v2")
+
+	expectCheck(t, r.validator().GateOwnerGateStart(".agent/tasks/demo"), "Review Tail")
+}
+
+// --- owner acceptance invariant ---
+
+func TestOwnerAcceptanceInvalidated(t *testing.T) {
+	r, _ := setupMergeReady(t)
+
+	// 新实现 C6：review CLEAN C6，但 owner.review_target 仍是 C1。
+	r.write("internal/foo.go", "package foo\n// reworked\n")
+	c6 := r.commit("rework")
+	s := baseState()
+	s.Review = Review{Status: ReviewClean, Target: c6}
+	r.writeState(s)
+	r.commit("re-clean")
+	r.syncOrigin("feature/agent-workflow-v2")
+
+	expectCheck(t, r.validator().GateMergeReady(".agent/tasks/demo"), "Owner Acceptance")
+}
+
+// --- merge-ready ---
+
+func TestGateMergeReadyHappyPath(t *testing.T) {
+	r, _ := setupMergeReady(t)
+	expectStatus(t, r.validator().GateMergeReady(".agent/tasks/demo"), StatusPass)
+}
+
+func TestGateMergeReadyDeliverySubstantive(t *testing.T) {
+	r, _ := setupMergeReady(t)
+	// core-logic.md 是 review-neutral 但非 delivery-neutral：验证 delivery tail 更窄白名单。
+	r.write(".agent/tasks/demo/core-logic.md", "# core logic updated after delivery\n")
+	r.commit("post-delivery review artifact")
+	r.syncOrigin("feature/agent-workflow-v2")
+	expectCheck(t, r.validator().GateMergeReady(".agent/tasks/demo"), "Delivery Freshness")
+}
+
+func TestGateMergeReadyDevelopMoved(t *testing.T) {
+	r, _ := setupMergeReady(t)
+	r.git("checkout", "-q", "develop")
+	r.write("README.md", "# base\n// advanced\n")
+	r.commit("develop advance")
+	r.syncOrigin("develop")
+	r.git("checkout", "-q", "feature/agent-workflow-v2")
+	expectCheck(t, r.validator().GateMergeReady(".agent/tasks/demo"), "Delivery Freshness")
+}
+
+// --- handoffReady ---
+
+func TestHandoffReadyDetached(t *testing.T) {
 	r := newTestRepo(t)
-	r.write(".agent/tasks/legacy-task/task.md", "# legacy\n")
-	r.write(".agent/tasks/legacy-task/findings.md", "# findings\n")
-	cutover := r.commit("cutover")
-
-	// cutover 之后新建任务，无 state.yaml。
-	r.write(".agent/tasks/new-task/task.md", "# new\n")
-	r.commit("new task")
-
-	v := r.validator(cutover)
-
-	legacyRes, err := v.ValidateTask(".agent/tasks/legacy-task")
-	if err != nil {
-		t.Fatalf("legacy 不应返回运行错误: %v", err)
-	}
-	if legacyRes.Status != StatusSkipped {
-		t.Fatalf("legacy 期望 SKIPPED，实际 %s", legacyRes.Status)
-	}
-
-	newRes, err := v.ValidateTask(".agent/tasks/new-task")
-	if err != nil {
-		t.Fatalf("new 不应返回运行错误: %v", err)
-	}
-	if newRes.Status != StatusFail || !issueCheck(t, newRes.Issues, "Cutover Rule") {
-		t.Fatalf("新任务缺 state.yaml 期望 FAIL，实际 %s issues=%v", newRes.Status, newRes.Issues)
+	r.write("README.md", "# base\n")
+	r.commit("baseline")
+	r.git("checkout", "-q", "--detach")
+	res := r.validator().handoffReady()
+	if res.Status != StatusError {
+		t.Fatalf("detached 期望 ERROR，实际 status=%s error=%q", res.Status, res.Error)
 	}
 }
+
+// --- non-V2 task ---
+
+func TestGateNonV2Error(t *testing.T) {
+	r := newTestRepo(t)
+	r.write(".agent/tasks/demo/state.yaml", "task_id: demo\nphase: NEW\n")
+	r.commit("v1 state")
+	res := r.validator().GateCoderStart(".agent/tasks/demo")
+	if res.Status != StatusError {
+		t.Fatalf("非 V2 task 期望 ERROR，实际 status=%s error=%q", res.Status, res.Error)
+	}
+}
+
+// --- resource authority ---
 
 const migrationsBase = `# migrations
 | version | title | 拥有方（任务） | 状态 | 备注 |
@@ -223,169 +386,40 @@ const errorDomainsBase = `# error-codes
 | 1000-1999 | 通用 | ACTIVE | 基线 |
 `
 
-// TestResourceAuthorityFeatureBranchReservedInvalid 覆盖测试要求 11：
-// Feature branch 自报 RESERVED，但 shared develop Registry 无记录 → FAIL。
-func TestResourceAuthorityFeatureBranchReservedInvalid(t *testing.T) {
+func TestGateCoderStartResourceAuthorized(t *testing.T) {
 	r := newTestRepo(t)
 	r.write(".agent/registry/migrations.md", migrationsBase)
 	r.write(".agent/registry/error-codes.md", errorDomainsBase)
-	r.commit("develop registry baseline")
-	r.syncOriginDevelop()
+	r.commit("registry baseline")
+	r.syncOrigin("develop")
 
-	// feature 分支：私留 RESERVED 并声明资源。
-	r.git("checkout", "-q", "-b", "feature")
-	r.write(".agent/registry/migrations.md", migrationsBase+"| 20261001000009 | foo | demo-task | RESERVED | feature 私留 |\n")
-	r.write(".agent/tasks/demo-task/state.yaml", `task: demo-task
-phase: IMPLEMENTING
-review:
-  status: NONE
-owner_verification:
-  status: PENDING
-delivery:
-  status: NONE
-required_resources:
-  migrations:
-    - "20261001000009"
-blocked:
-  is_blocked: false
-  reason: ""
-`)
-	r.commit("feature reserved")
-
-	res, err := r.validator("").ValidateTask(".agent/tasks/demo-task")
-	if err != nil {
-		t.Fatalf("不应返回运行错误: %v", err)
-	}
-	if res.Status != StatusFail || !issueCheck(t, res.Issues, "Resource Authority") {
-		t.Fatalf("feature 私留 RESERVED 应 FAIL，实际 %s issues=%v", res.Status, res.Issues)
-	}
-}
-
-// TestResourceAuthorityDevelopReservedValid 覆盖测试要求 12：
-// shared develop Registry 有合法 Reservation → PASS。
-func TestResourceAuthorityDevelopReservedValid(t *testing.T) {
-	r := newTestRepo(t)
-	r.write(".agent/registry/migrations.md", migrationsBase)
-	r.write(".agent/registry/error-codes.md", errorDomainsBase)
-	r.commit("develop registry baseline")
-
-	// develop 上落 RESERVED，并同步到 shared origin/develop。
-	r.write(".agent/registry/migrations.md", migrationsBase+"| 20261001000009 | foo | demo-task | RESERVED | 已落 develop |\n")
+	r.write(".agent/registry/migrations.md", migrationsBase+"| 20261001000009 | foo | demo | RESERVED | |\n")
 	r.commit("develop reserved")
-	r.syncOriginDevelop()
+	r.syncOrigin("develop")
 
-	// feature 分支声明同一资源。
-	r.git("checkout", "-q", "-b", "feature")
-	r.write(".agent/tasks/demo-task/state.yaml", `task: demo-task
-phase: IMPLEMENTING
-review:
-  status: NONE
-owner_verification:
-  status: PENDING
-delivery:
-  status: NONE
-required_resources:
-  migrations:
-    - "20261001000009"
-blocked:
-  is_blocked: false
-  reason: ""
-`)
+	r.checkout("feature/agent-workflow-v2")
+	s := baseState()
+	s.Resources = Resources{Migrations: []string{"20261001000009"}}
+	r.writeState(s)
 	r.commit("feature state")
+	r.syncOrigin("feature/agent-workflow-v2")
 
-	res, err := r.validator("").ValidateTask(".agent/tasks/demo-task")
-	if err != nil {
-		t.Fatalf("不应返回运行错误: %v", err)
-	}
-	if res.Status != StatusPass {
-		t.Fatalf("develop 合法 Reservation 期望 PASS，实际 %s issues=%v", res.Status, res.Issues)
-	}
+	expectStatus(t, r.validator().GateCoderStart(".agent/tasks/demo"), StatusPass)
 }
 
-// TestMissingMigrationForbiddenImplementing 覆盖测试要求 10：
-// 缺 migration Reservation → 禁止 IMPLEMENTING。
-func TestMissingMigrationForbiddenImplementing(t *testing.T) {
+func TestGateCoderStartResourceFeatureOnlyReserved(t *testing.T) {
 	r := newTestRepo(t)
 	r.write(".agent/registry/migrations.md", migrationsBase)
 	r.write(".agent/registry/error-codes.md", errorDomainsBase)
-	r.commit("develop registry")
-	r.syncOriginDevelop()
+	r.commit("registry baseline")
+	r.syncOrigin("develop")
 
-	r.write(".agent/tasks/demo-task/state.yaml", `task: demo-task
-phase: IMPLEMENTING
-review:
-  status: NONE
-owner_verification:
-  status: PENDING
-delivery:
-  status: NONE
-required_resources:
-  migrations:
-    - "20261001000077"
-blocked:
-  is_blocked: false
-  reason: ""
-`)
-	r.commit("state")
-
-	res, err := r.validator("").ValidateTask(".agent/tasks/demo-task")
-	if err != nil {
-		t.Fatalf("不应返回运行错误: %v", err)
-	}
-	if res.Status != StatusFail || !issueCheck(t, res.Issues, "Resource Authority") {
-		t.Fatalf("缺 migration Reservation 应 FAIL，实际 %s issues=%v", res.Status, res.Issues)
-	}
-}
-
-// TestResourceAuthorityLocalDevelopReservedInvalid 覆盖 CLEAN-004：
-// local develop 分支私留 RESERVED，但 shared origin/develop 无记录 → FAIL。
-// 验证 Validator 以 shared origin/develop 为权威，而不是本地 develop 分支。
-func TestResourceAuthorityLocalDevelopReservedInvalid(t *testing.T) {
-	r := newTestRepo(t)
-	r.write(".agent/registry/migrations.md", migrationsBase)
-	r.write(".agent/registry/error-codes.md", errorDomainsBase)
-	r.commit("develop registry baseline")
-	r.syncOriginDevelop() // origin/develop 停在 baseline（无 RESERVED）
-
-	// 仅本地 develop 私留 RESERVED，不同步到 origin/develop。
-	r.write(".agent/registry/migrations.md", migrationsBase+"| 20261001000009 | foo | demo-task | RESERVED | 本地 develop 私留 |\n")
-	r.commit("local develop reserved")
-
-	r.git("checkout", "-q", "-b", "feature")
-	r.write(".agent/tasks/demo-task/state.yaml", `task: demo-task
-phase: IMPLEMENTING
-review:
-  status: NONE
-owner_verification:
-  status: PENDING
-delivery:
-  status: NONE
-required_resources:
-  migrations:
-    - "20261001000009"
-blocked:
-  is_blocked: false
-  reason: ""
-`)
+	r.checkout("feature/agent-workflow-v2")
+	s := baseState()
+	s.Resources = Resources{Migrations: []string{"20261001000009"}}
+	r.writeState(s)
 	r.commit("feature state")
+	r.syncOrigin("feature/agent-workflow-v2")
 
-	res, err := r.validator("").ValidateTask(".agent/tasks/demo-task")
-	if err != nil {
-		t.Fatalf("不应返回运行错误: %v", err)
-	}
-	if res.Status != StatusFail || !issueCheck(t, res.Issues, "Resource Authority") {
-		t.Fatalf("local develop 私留 RESERVED 应 FAIL（以 origin/develop 为权威），实际 %s issues=%v", res.Status, res.Issues)
-	}
-}
-
-// TestMalformedYAMLExitError 覆盖测试要求 18：malformed YAML → 运行错误（exit 2 级）。
-func TestMalformedYAMLExitError(t *testing.T) {
-	r := newTestRepo(t)
-	r.write(".agent/tasks/demo-task/state.yaml", "phase: [unclosed\n")
-	r.commit("bad state")
-
-	_, err := r.validator("").ValidateTask(".agent/tasks/demo-task")
-	if err == nil {
-		t.Fatal("malformed YAML 应返回运行错误")
-	}
+	expectCheck(t, r.validator().GateCoderStart(".agent/tasks/demo"), "Resource Authority")
 }

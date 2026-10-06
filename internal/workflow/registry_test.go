@@ -51,6 +51,35 @@ func TestParseErrorDomains(t *testing.T) {
 	}
 }
 
+// TestValidResourceValues 覆盖 Resource 纯机器值校验。
+func TestValidResourceValues(t *testing.T) {
+	if !validMigrationValue("20261001000011") {
+		t.Fatal("纯数字 migration 应为合法")
+	}
+	if validMigrationValue("20261001000011 flash sale") {
+		t.Fatal("带说明的 migration 应为非法")
+	}
+	if validMigrationValue("") {
+		t.Fatal("空 migration 应为非法")
+	}
+	if validMigrationValue("abc") {
+		t.Fatal("非数字 migration 应为非法")
+	}
+
+	if !validDomainValue("12000-12999") {
+		t.Fatal("合法域区间应为合法")
+	}
+	if validDomainValue("12000-12999（秒杀）") {
+		t.Fatal("带说明的域区间应为非法")
+	}
+	if validDomainValue("12999-12000") {
+		t.Fatal("start>end 的域区间应为非法")
+	}
+	if validDomainValue("12000") {
+		t.Fatal("缺少 - 的域区间应为非法")
+	}
+}
+
 func TestCheckResourceAuthority(t *testing.T) {
 	reg := Registry{
 		Migrations:   mustMigrations(t),
@@ -65,52 +94,65 @@ func TestCheckResourceAuthority(t *testing.T) {
 		wantCheck string
 	}{
 		{
-			// 测试要求 12：develop Registry 有合法 Reservation → 通过。
 			name: "合法 migration Reservation",
 			task: "order-v2",
 			state: State{
-				RequiredResources: RequiredResources{Migrations: []string{"20261001000009"}},
+				Resources: Resources{Migrations: []string{"20261001000009"}},
 			},
 			wantIssue: false,
 		},
 		{
-			// 测试要求 11：develop Registry 无记录 → FAIL。
 			name: "migration 未登记",
 			task: "order-v2",
 			state: State{
-				RequiredResources: RequiredResources{Migrations: []string{"20261001000099"}},
+				Resources: Resources{Migrations: []string{"20261001000099"}},
 			},
 			wantIssue: true,
-			wantCheck: "Resource Authority (INV-006)",
+			wantCheck: "Resource Authority (INV-2)",
 		},
 		{
-			// owner 不一致 → FAIL。
 			name: "migration owner 不一致",
 			task: "other-task",
 			state: State{
-				RequiredResources: RequiredResources{Migrations: []string{"20261001000009"}},
+				Resources: Resources{Migrations: []string{"20261001000009"}},
 			},
 			wantIssue: true,
-			wantCheck: "Resource Authority (INV-006)",
+			wantCheck: "Resource Authority (INV-2)",
 		},
 		{
-			// RELEASED 状态无效 → FAIL。
 			name: "migration RELEASED 无效",
 			task: "cancelled-task",
 			state: State{
-				RequiredResources: RequiredResources{Migrations: []string{"20261001000010"}},
+				Resources: Resources{Migrations: []string{"20261001000010"}},
 			},
 			wantIssue: true,
-			wantCheck: "Resource Authority (INV-006)",
+			wantCheck: "Resource Authority (INV-2)",
 		},
 		{
-			// 错误码域合法 Reservation → 通过。
+			name: "migration 带说明非法值",
+			task: "order-v2",
+			state: State{
+				Resources: Resources{Migrations: []string{"20261001000009 flash sale"}},
+			},
+			wantIssue: true,
+			wantCheck: "Resource Schema (INV-2)",
+		},
+		{
 			name: "合法错误码域 Reservation",
 			task: "order-v2",
 			state: State{
-				RequiredResources: RequiredResources{ErrorCodeDomains: []string{"10000-10999"}},
+				Resources: Resources{ErrorCodeDomains: []string{"10000-10999"}},
 			},
 			wantIssue: false,
+		},
+		{
+			name: "错误码域带说明非法值",
+			task: "order-v2",
+			state: State{
+				Resources: Resources{ErrorCodeDomains: []string{"10000-10999（订单）"}},
+			},
+			wantIssue: true,
+			wantCheck: "Resource Schema (INV-2)",
 		},
 	}
 
