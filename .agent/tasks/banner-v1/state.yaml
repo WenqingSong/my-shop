@@ -10,7 +10,7 @@ resources:
   error_code_domains: ["14000-14999"]
 
 review:
-  status: PENDING
+  status: CLEAN
   target: "0c04cc0931f91b3f90857c3fcfc1a6234e0db8d9"
 
 owner:
