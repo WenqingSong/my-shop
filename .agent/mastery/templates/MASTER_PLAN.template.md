@@ -8,6 +8,8 @@
 |------|-----|
 | Project | <仓库 / 项目名> |
 | Learning Target | <本次要掌握的功能，一句话> |
+| Learning ID | <稳定内部英文标识，如 product-view-count> |
+| Learning Directory | <面向人的中文目录名，如 商品浏览量> |
 | Interview Target | <对应的面试场景 / 岗位 / 追问方向> |
 | Source Branch | <被学习代码所在分支> |
 | Source Snapshot | <完整 Git Commit SHA，例如 df272012781fa29120f5a1d5aec09cbde041d02b> |
@@ -67,7 +69,7 @@ Client → WebSocket Gateway → NATS → Consumer → DB
 
 | ID | Topic | Depth | Interview Value | Estimated Time | Depends On | Output |
 |----|-------|-------|-----------------|----------------|------------|--------|
-| T01 | <主题> | L1 / L2 / L3 | HIGH / MEDIUM / LOW | <N> min | - | T01-<slug>.md |
+| T01 | 功能总览与请求链路 | L1 / L2 / L3 | HIGH / MEDIUM / LOW | <N> min | - | T01-功能总览与请求链路.md |
 
 ## 8. First-Pass Critical Path
 
@@ -90,7 +92,7 @@ Estimated Total Time：<N> min
 - Interview Value: HIGH / MEDIUM / LOW
 - Estimated Time: <N> min
 - Depends On: -
-- Output: Txx-<slug>.md
+- Output: Txx-<中文标题>.md
 
 Source Scope:
 - <path> — <symbol>

@@ -38,7 +38,7 @@ PLAN → WRITE TUTORIALS → LEARN / PRACTICE
 - 锁定源码 Snapshot；
 - 决定学习范围；
 - 拆 Tutorial Tasks；
-- 生成 `MASTER_PLAN.md`。
+- 生成 `学习计划.md`。
 
 不负责写具体教程。
 
@@ -58,14 +58,18 @@ Question / Quiz / Interview / Feynman 都作为 Tutorial Content 的组成部分
 
 每一次 Mastery Plan 必须绑定一个不可变 Git Commit SHA。
 
-`MASTER_PLAN` 的 Metadata 必须记录：
+`学习计划.md` 的 Metadata 必须记录：
 
 ```text
 PROJECT
 LEARNING_TARGET
+LEARNING_ID
+LEARNING_DIRECTORY
 SOURCE_BRANCH
 SOURCE_SNAPSHOT
 ```
+
+其中 `LEARNING_ID`（机器标识）与 `LEARNING_DIRECTORY`（面向人的中文导航）的语义见 §24。
 
 其中 `SOURCE_SNAPSHOT` 必须使用完整 Git Commit SHA，例如：
 
@@ -123,7 +127,7 @@ Source Map
 
 ## 7. Scope Control
 
-`MASTER_PLAN` 必须区分：
+`学习计划` 必须区分：
 
 - **IN_SCOPE**：本轮学习直接覆盖的内容；
 - **JUST_IN_TIME_PREREQUISITE**：完成学习所必需的最小前置知识；
@@ -157,7 +161,7 @@ Source Map
 
 ## 11. First-Pass Critical Path
 
-`MASTER_PLAN` 必须定义 `FIRST_PASS_CRITICAL_PATH`：若 Owner 只有约 60～120 分钟，应优先学哪些 Task，并给出 Estimated Total Time。
+`学习计划` 必须定义 `FIRST_PASS_CRITICAL_PATH`：若 Owner 只有约 60～120 分钟，应优先学哪些 Task，并给出 Estimated Total Time。
 
 不强迫完整计划全部学完才算有价值。完整计划可以更长，但必须有最短高价值学习路径。
 
@@ -177,7 +181,7 @@ Source Map
 
 ## 13. MASTER_PLAN Contract
 
-`MASTER_PLAN.md` 是导航，不是教材。它定范围、定顺序、定深度、定时间、定源码、定完成标准；具体教学由 Tutorial Writer 完成。禁止 Analyst 在 Plan 中提前写大量解释。
+`学习计划.md` 是导航，不是教材。它定范围、定顺序、定深度、定时间、定源码、定完成标准；具体教学由 Tutorial Writer 完成。禁止 Analyst 在 Plan 中提前写大量解释。
 
 模板见 `templates/MASTER_PLAN.template.md`，核心章节：
 
@@ -214,12 +218,12 @@ T03 → 新 Tutorial Writer Session C
 
 Analyst → Writer 的上下文契约只需：
 
-1. `MASTER_PLAN.md`
+1. `学习计划.md`
 2. 一个明确 Task ID
 3. `SOURCE_SNAPSHOT`
 4. 当前仓库源码
 
-Writer 自己从 MASTER_PLAN 读取该 Task Card（Task Goal / Source Scope / Depth / Interview Value / Must Answer / Completion Criteria）。不把完整 Analyst 推理过程复制给 Writer。
+Writer 自己从学习计划读取该 Task Card（Task Goal / Source Scope / Depth / Interview Value / Must Answer / Completion Criteria）。不把完整 Analyst 推理过程复制给 Writer。
 
 ## 17. Source Excerpt Policy
 
@@ -256,7 +260,7 @@ Tutorial Writer 发现 Task Card 依赖 Analyst 未发现的关键前置知识�
 
 两个学习角色默认：Source Read-only + Learning Docs Writer。
 
-允许：read / search / `git show` / `git grep` / `git log` / inspect tests / 写 `docs/learning/*`。
+允许：read / search / `git show` / `git grep` / `git log` / inspect tests / 写 `docs/学习/*`。
 
 禁止：修改业务代码、修 bug、改 migration、改测试、改 Registry、改 Workflow V2 state、顺手优化源码。
 
@@ -264,20 +268,38 @@ Tutorial Writer 发现 Task Card 依赖 Analyst 未发现的关键前置知识�
 
 ## 23. Learning Output Location
 
-- `.agent/mastery/` = 学习 Workflow 本身的规则与模板。
-- `docs/learning/` = 真正给 Owner 阅读和学习的材料。
+- `.agent/mastery/` = 学习 Workflow 本身的规则与模板（机器 / Agent 资产，保留稳定英文文件名）。
+- `docs/学习/` = 真正给 Owner 阅读和学习的材料（面向人，默认使用中文）。
 
 不把具体教程写进 `.agent`。
 
-## 24. Plan Version / Learning ID / 文件命名
+## 24. Plan Version / Learning ID / Learning Directory / 文件命名
 
-`MASTER_PLAN` 记录 `Plan Version`（如 `1`）。Source Snapshot 改变或 Learning Scope 重大变化时不静默覆盖，产生新 Plan Version 或重新生成。P1 只定义概念，不实现版本管理系统。
+`学习计划` 记录 `Plan Version`（如 `1`）。Source Snapshot 改变或 Learning Scope 重大变化时不静默覆盖，产生新 Plan Version 或重新生成。P1 只定义概念，不实现版本管理系统。
 
-Learning Target 使用 kebab-case learning id（如 `product-view-count`、`iam-refresh-token`、`flash-sale-stock-deduction`）。目录 `docs/learning/<learning-id>/`，文件 `MASTER_PLAN.md` + `Txx-<slug>.md`（Txx 保证排序稳定，slug 简短可理解）。
+命名职责分离：
+
+- **Learning ID（机器标识）**：稳定的内部 ASCII 标识（如 `product-view-count`），用于唯一识别 Learning Target、Role Prompt 内部引用、避免同名歧义。它不直接决定磁盘目录名称。
+- **Learning Directory（面向人的导航）**：简洁中文名称（如 `商品浏览量`），决定输出目录 `docs/学习/<Learning Directory>/`。
+
+输出约定：
+
+```text
+docs/学习/<Learning Directory>/
+├── 学习计划.md
+└── Txx-<中文标题>.md
+```
+
+- 计划文件固定为 `学习计划.md`。
+- Tutorial 文件为 `Txx-<中文标题>.md`：`Txx` 是稳定 Task ID 与排序标识（保留英文前缀，不属于需要中文化的自然语言）；中文标题简短、能直接看懂、与 Task 中心问题一致，不使用 `final/new/v2` 等临时词。有自然中文表达时优先中文，稳定技术名词可保留必要英文（如 `RowsAffected`、`Atomic UPDATE`）。
+
+不再使用 `docs/learning/<learning-id>/MASTER_PLAN.md` 这类英文 slug / kebab-case 作为学习材料路径。
+
+这是简单约定，不扩展成 naming framework；不新增 index / registry / mapping service / validator。
 
 ## 25. Git 语义
 
-不引入复杂 Git Gate。当前 learning branch 由 Owner 准备。Agent 可写学习协议/模板、写 `docs/learning`、commit / push 当前 learning branch（Owner 授权后）。`SOURCE_SNAPSHOT` 永远指向被学习的业务代码 commit，即使 learning branch 后续新增教程也不前移，除非 Owner 明确开始新的 Mastery Plan Version。
+不引入复杂 Git Gate。当前 learning branch 由 Owner 准备。Agent 可写学习协议/模板、写 `docs/学习`、commit / push 当前 learning branch（Owner 授权后）。`SOURCE_SNAPSHOT` 永远指向被学习的业务代码 commit，即使 learning branch 后续新增教程也不前移，除非 Owner 明确开始新的 Mastery Plan Version。
 
 ## 26. No Heavy State Machine
 

@@ -12,7 +12,7 @@ Project Mastery Workflow 是一个独立的轻量学习体系，与生产 Workfl
 
 ## Two Roles
 
-1. **Project Mastery Analyst** — 分析项目、接收 Owner 的「这次我要掌握什么」、锁定 Source Snapshot、决定学习范围、拆 Tutorial Tasks、生成 `MASTER_PLAN.md`。不写具体教程。
+1. **Project Mastery Analyst** — 分析项目、接收 Owner 的「这次我要掌握什么」、锁定 Source Snapshot、决定学习范围、拆 Tutorial Tasks、生成 `学习计划.md`。不写具体教程。
 2. **Tutorial Writer** — 一个独立 Session 只处理一个 Tutorial Task，基于固定 Snapshot 读取真实源码，输出独立 Markdown 教程。不重新规划整个学习路线。
 
 Question / Quiz / Interview / Feynman 都作为 Tutorial Content 的组成部分，不作为独立 Agent。
@@ -24,13 +24,13 @@ Question / Quiz / Interview / Feynman 都作为 Tutorial Content 的组成部分
 
 ## Output Location
 
-学习产物写入 `docs/learning/<learning-id>/`，例如：
+学习产物写入 `docs/学习/<中文学习目录>/`，例如：
 
 ```text
-docs/learning/
-└── product-view-count/
-    ├── MASTER_PLAN.md
-    ├── T01-request-flow.md
+docs/学习/
+└── 商品浏览量/
+    ├── 学习计划.md
+    ├── T01-功能总览与请求链路.md
     └── ...
 ```
 
@@ -47,10 +47,10 @@ Owner: "我要掌握 XXX"
         ↓
 Mastery Analyst
         ↓
-MASTER_PLAN.md（范围 / 顺序 / 深度 / 时间 / 源码 / 完成标准）
+学习计划.md（范围 / 顺序 / 深度 / 时间 / 源码 / 完成标准）
         ↓
-T01 → 新 Writer Session → T01-*.md
-T02 → 新 Writer Session → T02-*.md
+T01 → 新 Writer Session → T01-<中文标题>.md
+T02 → 新 Writer Session → T02-<中文标题>.md
 ...
         ↓
 Owner 学习 / Self Test / Feynman
@@ -66,4 +66,4 @@ Interview Review
 
 - 生命周期仅 `PLAN → WRITE TUTORIALS → LEARN / PRACTICE`（可选 `REPLAN`）。
 - 无 State Machine / Gate / Registry / Validator。
-- Learning Agent 对业务源码 Read-only，只写 `docs/learning/*`。
+- Learning Agent 对业务源码 Read-only，只写 `docs/学习/*`。
