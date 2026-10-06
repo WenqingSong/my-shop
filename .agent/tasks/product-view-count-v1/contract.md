@@ -135,12 +135,12 @@ ALTER TABLE products ADD COLUMN view_count BIGINT UNSIGNED NOT NULL DEFAULT 0;
 
 | 类别 | 派生值 | 依据 | 状态 |
 | --- | --- | --- | --- |
-| migration version | `20261001000012` | `max(已记录 version)=20261001000011`（flash_sale）+1 | 待 Owner 在 `develop` 写入 `RESERVED` |
+| migration version | `20261001000012` | `max(已记录 version)=20261001000011`（flash_sale）+1 | RESERVED（已 push `origin/develop`，commit `d07ffd4`） |
 | 错误码域 | 无需新增 | 复用 4001/1001/1000 | — |
 
-Reservation Proposal（`WAITING_FOR_OWNER_ACTION`）：需 Owner 以「只改 Registry 的 commit」将以下 `RESERVED` 行写入 `develop`（Analyst 不直接改 Registry）：
+Reservation 执行（Workflow V2 Registry Authority 修复后）：Contract APPROVED 后由 Analyst 形成 Registry-only commit（仅 `.agent/registry/migrations.md` 与 `.agent/registry/error-codes.md`）并 push `origin develop` 落实 `RESERVED`，无需 Owner 手工改 Registry。
 
-- `migrations.md` 追加：`| 20261001000012 | product_view_count | product-view-count-v1 | RESERVED | products.view_count 浏览量计数字段 |`
+- `migrations.md` 已追加：`| 20261001000012 | product_view_count | product-view-count-v1 | RESERVED | products.view_count 浏览量计数字段 |`（owner = `product-view-count-v1`，状态 `RESERVED`，已在 `origin/develop` 验证通过）。
 
 （错误码域无需新增，不产生 Registry 变更。）
 
