@@ -1,0 +1,31 @@
+schema_version: 2
+task_id: product-like-v1
+
+contract:
+  status: APPROVED
+  target: "a19e27446f73f2e0956570b1e9573842f818ae20"
+
+resources:
+  migrations:
+    - "20261001000013"
+  error_code_domains:
+    - "13000-13999"
+
+review:
+  status: NOT_REQUESTED
+  target: ""
+
+owner:
+  status: PENDING
+  review_target: ""
+
+delivery:
+  status: NOT_RUN
+  review_target: ""
+  feature_head: ""
+  develop_base: ""
+
+blocked:
+  active: false
+  by: ""
+  reason: ""
