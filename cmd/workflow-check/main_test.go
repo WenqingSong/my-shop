@@ -157,6 +157,17 @@ func TestRunGateErrorNonV2(t *testing.T) {
 	}
 }
 
+func TestRunGateStrictYamlError(t *testing.T) {
+	dir := cliRepo(t, `schema_version: 3
+task_id: demo
+resources:
+  reservationss: {}
+`)
+	if code := run([]string{"gate", "coder-start", ".agent/tasks/demo", "--root", dir}); code != 2 {
+		t.Fatalf("strict YAML 未知字段 期望 exit 2，实际 %d", code)
+	}
+}
+
 func TestRunGateConfigMissing(t *testing.T) {
 	dir := cliRepoWithConfig(t, v2PassState, "")
 	if code := run([]string{"gate", "coder-start", ".agent/tasks/demo", "--root", dir}); code != 2 {

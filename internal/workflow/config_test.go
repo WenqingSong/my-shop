@@ -186,6 +186,57 @@ func TestLoadConfigDuplicateRegistryPath(t *testing.T) {
 	}
 }
 
+// TestLoadConfigStrictUnknownField 覆盖 P2.1：git / resources / 顶层结构字段 typo → ERROR。
+func TestLoadConfigStrictUnknownField(t *testing.T) {
+	tests := []struct {
+		name string
+		yml  string
+		want string
+	}{
+		{
+			"git.integration_branhc typo",
+			`schema_version: 1
+git:
+  integration_branhc: develop
+`,
+			"integration_branhc",
+		},
+		{
+			"resources.registri typo",
+			`schema_version: 1
+git:
+  integration_branch: develop
+resources:
+  migration_version:
+    registri: .agent/registry/migrations.md
+`,
+			"registri",
+		},
+		{
+			"top-level unknown field",
+			`schema_version: 1
+git:
+  integration_branch: develop
+resourcess:
+  migration_version:
+    registry: .agent/registry/migrations.md
+`,
+			"resourcess",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := LoadConfig(writeConfigFile(t, tt.yml))
+			if err == nil {
+				t.Fatalf("期望错误含 %q，实际 nil", tt.want)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("期望错误含 %q，实际 %v", tt.want, err)
+			}
+		})
+	}
+}
+
 func TestLoadConfigErrors(t *testing.T) {
 	tests := []struct {
 		name    string

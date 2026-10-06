@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"bytes"
 	"fmt"
 	"sort"
 
@@ -30,10 +31,28 @@ type stateFile struct {
 // parseState 解析 state.yaml 并 normalize 为 generic State。
 // 返回 error 属于 schema / 输入 ERROR（exit 2），不属于业务 Gate FAIL。
 func parseState(raw []byte) (State, error) {
-	var f stateFile
-	if err := yaml.Unmarshal(raw, &f); err != nil {
+	// 先解码最小 envelope 获取 schema_version，以区分 v2/v3 与 legacy/未知版本。
+	// 非 v2/v3 直接报 unsupported，保持旧语义（避免 strict decode 先于版本判定报出不同错误）。
+	var env struct {
+		SchemaVersion int `yaml:"schema_version"`
+	}
+	if err := yaml.Unmarshal(raw, &env); err != nil {
 		return State{}, fmt.Errorf("解析 state.yaml: %w", err)
 	}
+	if env.SchemaVersion != SchemaV2 && env.SchemaVersion != SchemaV3 {
+		return State{}, fmt.Errorf("不支持的 state schema_version=%d（期望 %d 或 %d）", env.SchemaVersion, SchemaV2, SchemaV3)
+	}
+
+	// strict decode：拒绝 state.yaml 顶层与嵌套结构中的未知字段（typo / 未知字段），fail closed。
+	// resources 是 map[string]yaml.Node，其 key 不受 KnownFields 限制，动态 map key
+	// 仍由 normalizeResources + validateReservations 按版本/kind 规则校验。
+	var f stateFile
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	dec.KnownFields(true)
+	if err := dec.Decode(&f); err != nil {
+		return State{}, fmt.Errorf("解析 state.yaml: %w", err)
+	}
+
 	s := State{
 		SchemaVersion: f.SchemaVersion,
 		TaskID:        f.TaskID,
@@ -65,6 +84,12 @@ func normalizeResources(schemaVersion int, raw map[string]yaml.Node) (Resources,
 		if hasLegacyMigrations || hasLegacyDomains {
 			return Resources{}, fmt.Errorf("schema_version=3 不允许 legacy 资源字段 resources.migrations / resources.error_code_domains，请使用 resources.reservations")
 		}
+		// resources 下除 reservations 外的任何 key（如 reservationss）都是 typo，fail closed。
+		for key := range raw {
+			if key != "reservations" {
+				return Resources{}, fmt.Errorf("resources 存在未知字段 %q（schema_version=3 仅允许 reservations）", key)
+			}
+		}
 		if !hasReservations {
 			return Resources{Reservations: map[string][]string{}}, nil
 		}
@@ -77,6 +102,12 @@ func normalizeResources(schemaVersion int, raw map[string]yaml.Node) (Resources,
 	case SchemaV2:
 		if hasReservations {
 			return Resources{}, fmt.Errorf("schema_version=2 不允许 generic 字段 resources.reservations，请使用 legacy migrations / error_code_domains")
+		}
+		// resources 下除 migrations / error_code_domains 外的任何 key（如 migrationss）都是 typo，fail closed。
+		for key := range raw {
+			if key != "migrations" && key != "error_code_domains" {
+				return Resources{}, fmt.Errorf("resources 存在未知字段 %q（schema_version=2 仅允许 migrations / error_code_domains）", key)
+			}
 		}
 		res := map[string][]string{}
 		if hasLegacyMigrations {

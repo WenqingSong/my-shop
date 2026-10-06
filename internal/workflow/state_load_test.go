@@ -165,6 +165,83 @@ resources:
 `, "不允许 generic")
 }
 
+// --- P2.1 Strict YAML Schema Hardening ---
+
+// TestStateV3StrictUnknownResourceKey 覆盖 schema v3 下 resources 内 typo（reservationss）→ ERROR，
+// 防止 typo 被静默忽略导致「错误跳过 Resource Authorization」。
+func TestStateV3StrictUnknownResourceKey(t *testing.T) {
+	mustParseError(t, `schema_version: 3
+task_id: demo
+resources:
+  reservationss: {}
+`, "未知字段")
+}
+
+// TestStateV3StrictTopLevelUnknownField 覆盖 schema v3 顶层未知字段（resourcess）→ ERROR。
+func TestStateV3StrictTopLevelUnknownField(t *testing.T) {
+	_, err := parseState([]byte(`schema_version: 3
+task_id: demo
+resourcess:
+  reservations: {}
+`))
+	if err == nil {
+		t.Fatal("顶层未知字段应报错")
+	}
+	if !strings.Contains(err.Error(), "resourcess") {
+		t.Fatalf("期望错误含字段名 resourcess，实际 %v", err)
+	}
+}
+
+// TestStateV3StrictNestedTypo 覆盖 contract/review/owner/delivery 内 typo → ERROR。
+func TestStateV3StrictNestedTypo(t *testing.T) {
+	tests := []struct {
+		name string
+		yml  string
+		want string
+	}{
+		{"contract.targett", "schema_version: 3\ntask_id: demo\ncontract:\n  status: NOT_REQUIRED\n  targett: \"\"\n", "targett"},
+		{"review.targett", "schema_version: 3\ntask_id: demo\nreview:\n  status: NOT_REQUESTED\n  targett: \"\"\n", "targett"},
+		{"owner.review_targett", "schema_version: 3\ntask_id: demo\nowner:\n  status: PENDING\n  review_targett: \"\"\n", "review_targett"},
+		{"delivery.feature_headd", "schema_version: 3\ntask_id: demo\ndelivery:\n  status: NOT_RUN\n  feature_headd: \"\"\n", "feature_headd"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseState([]byte(tt.yml))
+			if err == nil {
+				t.Fatalf("期望错误含 %q，实际 nil", tt.want)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("期望错误含 %q，实际 %v", tt.want, err)
+			}
+		})
+	}
+}
+
+// TestStateV3StrictArbitraryValidKind 覆盖 schema v3 任意合法 resource kind → PASS。
+func TestStateV3StrictArbitraryValidKind(t *testing.T) {
+	s := mustParse(t, `schema_version: 3
+task_id: demo
+resources:
+  reservations:
+    custom_resource:
+      - "alpha"
+`)
+	if got := s.Resources.Reservations["custom_resource"]; len(got) != 1 || got[0] != "alpha" {
+		t.Fatalf("custom_resource = %+v", got)
+	}
+}
+
+// TestStateV2StrictUnknownResourceKey 覆盖 schema v2 下 resources 内 typo（migrationss）→ ERROR，
+// 同时保持 legacy migrations / error_code_domains 合法。
+func TestStateV2StrictUnknownResourceKey(t *testing.T) {
+	mustParseError(t, `schema_version: 2
+task_id: demo
+resources:
+  migrationss:
+    - "20261001000012"
+`, "未知字段")
+}
+
 // TestStateUnsupportedSchemaVersion 覆盖不支持的 schema version → ERROR。
 func TestStateUnsupportedSchemaVersion(t *testing.T) {
 	for _, yml := range []string{

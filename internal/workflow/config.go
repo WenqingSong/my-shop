@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -52,7 +53,12 @@ func LoadConfig(root string) (*Config, error) {
 		return nil, fmt.Errorf("读取机器配置 %s: %w", DefaultConfigPath, err)
 	}
 	var c Config
-	if err := yaml.Unmarshal(raw, &c); err != nil {
+	// KnownFields(true)：拒绝 machine config 中未定义的结构字段（typo / 未知字段），
+	// fail closed 而不是静默忽略。resources.<kind> 是动态 map key，不受 KnownFields 限制，
+	// kind 与 registry 仍由 validateConfig 校验。
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	dec.KnownFields(true)
+	if err := dec.Decode(&c); err != nil {
 		return nil, fmt.Errorf("解析机器配置 %s: %w", DefaultConfigPath, err)
 	}
 	if err := validateConfig(c); err != nil {

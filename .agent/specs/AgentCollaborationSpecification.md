@@ -188,7 +188,7 @@ Feature Branch 内自行声明 `RESERVED` 不构成有效预留；`state.yaml.re
 
 状态三态：`RESERVED`（已落 develop、Feature 未合并）、`ACTIVE`（已合并，终态）、`RELEASED`（取消释放，记录保留）。
 
-复用规则：migration version 一经分配永久 tombstone、不得复用；错误码域仅纯 `RESERVED` 阶段可 `RELEASE` 后复用。
+复用规则属于当前 my-shop 的 Project Policy 示例，Generic Core 本身不规定所有 resource kind 的复用策略：migration version 一经分配永久 tombstone、不得复用；错误码域仅纯 `RESERVED` 阶段可 `RELEASE` 后复用。
 
 ### 12.4 并行竞争防护
 
