@@ -20,7 +20,7 @@ Question / Quiz / Interview / Feynman 都作为 Tutorial Content 的组成部分
 ## Role Prompts
 
 - `roles/MasteryAnalyst.md` — Project Mastery Analyst 正式执行 Prompt（P2 已实现）。
-- Tutorial Writer 正式 Prompt 由 P3 实现。
+- `roles/TutorialWriter.md` — Tutorial Writer 正式执行 Prompt（P3 已实现）。
 
 ## Output Location
 
