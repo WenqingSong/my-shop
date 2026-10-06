@@ -2,7 +2,7 @@
 
 本文件是 **migration version 分配**的权威事实源（`.agent/registry/`，位于 `develop` 上）。任何需要新增 migration 的 Task，必须在进入 Coder 前，通过一个只改 Registry 文件的 commit 把 `RESERVED` 条目提交到 `develop`，才能使用对应 version；仅在 Feature Branch 内自行声明不构成有效预留。
 
-机制、生命周期与角色职责见 `docs/agent/AgentCollaborationSpecification.md`（跨任务全局资源预留）与 `docs/agent/Five-AgentResponsibilityBoundary.md`。
+机制、生命周期与角色职责见 `.agent/specs/AgentCollaborationSpecification.md`（跨任务全局资源预留）与 `.agent/specs/Five-AgentResponsibilityBoundary.md`。
 
 ## 状态与生命周期
 
@@ -31,3 +31,9 @@
 | 20261001000006 | cart_items | db-migration | ACTIVE | 基线 |
 | 20261001000007 | orders | order-v1 | ACTIVE | orders + order_items |
 | 20261001000008 | refresh_tokens | iam-v4 | ACTIVE | IAM V4 refresh token 表（前台用户域） |
+| 20261001000009 | reviews | product-review-v1 | RESERVED | reviews 评价表 |
+| 20261001000010 | favorites | product-favorite-v1 | RESERVED | favorites 收藏表 |
+| 20261001000011 | flash_sale | flash-sale-v1 | RESERVED | flash_sale_activities + flash_sale_activity_skus + flash_sale_orders |
+| 20261001000012 | product_view_count | product-view-count-v1 | RESERVED | products.view_count 浏览量计数字段 |
+| 20261001000013 | product_likes | product-like-v1 | RESERVED | product_likes 点赞表 |
+| 20261001000014 | banners | banner-v1 | RESERVED | banners 轮播图表 |

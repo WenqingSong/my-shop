@@ -23,6 +23,7 @@
 | `detail` | TEXT | 可空 |
 | `status` | TINYINT | 非空默认 0（`0=draft`、`1=on_shelf`、`2=off_shelf`） |
 | `created_at`/`updated_at` | DATETIME | 默认 `CURRENT_TIMESTAMP` |
+| `view_count` | BIGINT UNSIGNED | 非空默认 0，累计浏览量（前台详情原子自增） |
 
 索引：`idx_category_id`、`idx_status`；FK：`fk_products_category`（`ON DELETE RESTRICT`，并发删除分类兜底）。
 
@@ -47,6 +48,15 @@
 | `2` | `"off_shelf"` |
 
 DB 存 TINYINT，API 出参用字符串枚举（具名三态，非布尔开关）。
+
+### 2.4 浏览量计数（`view_count`）
+
+- 计数粒度为 SPU（`products.id`）；V1 为总浏览量（每次前台详情访问 +1，不去重）。
+- 计数触发：仅前台公开详情 `GET /products/:id` 访问 `on_shelf` 商品时原子自增；前后台列表、后台详情均不触发。
+- 展示：`view_count` 加入共享 `Product` 结构，前台详情/列表、后台详情/列表及写接口响应均返回（只读，新建为 0）。
+- 写入：单条条件 UPDATE `SET view_count = view_count + 1, updated_at = updated_at WHERE id = ? AND status = 1` + `RowsAffected` 判定（`=0` → 404 无写入）；显式 `updated_at = updated_at` 规避 `ON UPDATE CURRENT_TIMESTAMP`。
+- 失败语义：fail-hard——计数 UPDATE 失败则详情 500；计数 UPDATE 独立提交，不与后续响应写出绑定（UPDATE 成功即视为有效浏览）。
+- 并发：原子自增（InnoDB 行锁）保证并发不丢失；无 Redis/MQ/异步。
 
 ## 3. 状态机与生命周期
 
@@ -82,6 +92,7 @@ draft ──> on_shelf ──> off_shelf
 - 创建/更新（同步、单事务）：写入 `products`（+ `product_images` 全量替换——更新时 `images` 提供则删除旧行重插，未提供则保留）；任一步失败整体回滚。
 - 状态迁移（同步、原子）：见状态机；上架前重新校验分类最新有效性（含「已禁用/已变非叶子」的再次上架拒绝）。
 - 前台可见性（每请求）：列表/详情 SQL 强制 `status=on_shelf`；不存在或非 `on_shelf` 前台返回 404。
+- 浏览量计数（同步、原子）：前台详情单条条件 UPDATE 自增，`RowsAffected=0` → 404 无写入；计数独立提交、不与响应写出绑定；fail-hard（UPDATE 失败 → 500）。
 - 分类删除保护：`存在检查 → 有子分类(3003) → 有商品(3005) → DELETE`，核对 `RowsAffected`；并发窗口下 DELETE 命中 FK 1451 → 409 `3005`（应用层检查保留、FK 兜底最终一致性）。
 - 失败语义：认证 401、授权 403、参数/业务校验 400/404/409，均无写入；DB 技术错误统一 `1000` 500，不泄漏底层细节。
 

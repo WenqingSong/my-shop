@@ -16,13 +16,14 @@ const migrationBaselineVersion = uint(20261001000001)
 
 // migrationRelatedTables 是 readiness 测试需要清空的表（含测试探针表）。
 // 注意顺序：order_items 通过外键引用 orders（ON DELETE CASCADE），故 order_items 排在 orders 之前；
-// refresh_tokens/cart_items 无外键、置前；addresses 通过外键引用 users（ON DELETE CASCADE），
+// refresh_tokens/cart_items/favorites/product_likes/banners 无外键、置前；addresses 通过外键引用 users（ON DELETE CASCADE），
 // 故 addresses 排在 users 之前；inventories/inventory_logs 通过外键引用 skus，skus 通过外键引用
 // products，products 通过外键引用 categories，因此被引用方必须排在引用方之后，
 // 否则 DROP TABLE 会因外键依赖失败。
 var migrationRelatedTables = []string{
+	"flash_sale_orders", "flash_sale_activity_skus", "flash_sale_activities",
 	"order_items", "orders",
-	"refresh_tokens", "cart_items", "role_permissions", "admin_roles", "permissions", "roles",
+	"refresh_tokens", "cart_items", "favorites", "product_likes", "banners", "reviews", "role_permissions", "admin_roles", "permissions", "roles",
 	"admins", "inventory_logs", "inventories", "skus", "product_images", "products", "categories", "addresses", "users",
 	"schema_migrations", "migration_probe",
 }

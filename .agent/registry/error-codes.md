@@ -2,7 +2,7 @@
 
 本文件是**错误码域分配**的权威事实源（`.agent/registry/`，位于 `develop` 上）。任何需要新增错误码域的 Task，必须在进入 Coder 前，通过一个只改 Registry 文件的 commit 把 `RESERVED` 条目提交到 `develop`，才能使用对应域；仅在 Feature Branch 内自行声明不构成有效预留。
 
-机制、生命周期与角色职责见 `docs/agent/AgentCollaborationSpecification.md`（跨任务全局资源预留）与 `docs/agent/Five-AgentResponsibilityBoundary.md`。
+机制、生命周期与角色职责见 `.agent/specs/AgentCollaborationSpecification.md`（跨任务全局资源预留）与 `.agent/specs/Five-AgentResponsibilityBoundary.md`。
 
 ## 状态与生命周期
 
@@ -35,3 +35,8 @@
 | 7000-7999 | address | ACTIVE | 基线 |
 | 8000-8999 | cart | ACTIVE | 基线 |
 | 9000-9999 | order | ACTIVE | order-v1 订单域（域序 9 = max(8)+1） |
+| 10000-10999 | product-review-v1 | RESERVED | product-review-v1 评价域（域序 10 = max(9)+1） |
+| 11000-11999 | product-favorite-v1 | RESERVED | product-favorite-v1 收藏域（域序 11 = max(10)+1） |
+| 12000-12999 | flash-sale-v1 | RESERVED | flash-sale-v1 秒杀域（域序 12 = max(11)+1） |
+| 13000-13999 | product-like-v1 | RESERVED | product-like-v1 点赞域（域序 13 = max(12)+1） |
+| 14000-14999 | banner-v1 | RESERVED | banner-v1 轮播图域（域序 14 = max(13)+1） |

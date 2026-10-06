@@ -4,11 +4,16 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/address"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/banner"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/cart"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/favorite"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/flashsale"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/like"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/order"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/product"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/review"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 )
 
@@ -27,8 +32,13 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	addressCtrl := address.NewV1()
 	cartCtrl := cart.NewV1()
 	orderCtrl := order.NewV1()
+	flashsaleCtrl := flashsale.NewV1()
+	reviewCtrl := review.NewV1()
+	favoriteCtrl := favorite.NewV1()
+	likeCtrl := like.NewV1()
+	bannerCtrl := banner.NewV1()
 
-	// 前台公开接口：注册、登录、刷新、分类查询、商品查询（无需 token）。
+	// 前台公开接口：注册、登录、刷新、分类查询、商品查询、轮播图列表（无需 token）。
 	root.POST("/register", iamCtrl.Register)
 	root.POST("/login", iamCtrl.Login)
 	root.POST("/refresh", iamCtrl.Refresh)
@@ -36,6 +46,12 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	root.GET("/categories/:id", categoriesCtrl.Detail)
 	root.GET("/products", productCtrl.List)
 	root.GET("/products/:id", productCtrl.Detail)
+	// 商品公开评价列表与汇总（无需 token）。
+	root.GET("/products/:id/reviews", reviewCtrl.ListProduct)
+	// 商品公开点赞数（无需 token）。
+	root.GET("/likes/count", likeCtrl.Count)
+	// 公开轮播图列表（无需 token，仅返回启用项）。
+	root.GET("/banners", bannerCtrl.List)
 
 	// 前台登录用户接口：/me、收货地址、购物车与会话管理均需要认证 + 会话有效性校验。
 	root.Group("/", func(user *ghttp.RouterGroup) {
@@ -63,6 +79,26 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 		user.POST("/orders/:id/pay", orderCtrl.Pay)
 		user.POST("/orders/:id/cancel", orderCtrl.Cancel)
 		user.POST("/orders/:id/receive", orderCtrl.Receive)
+
+		// 秒杀下单（仅登录用户，作用于本人数据）。
+		user.POST("/flash-sales/:id/orders", flashsaleCtrl.CreateOrder)
+
+		// 商品评价（仅登录用户，作用于本人数据）。
+		user.POST("/reviews", reviewCtrl.Create)
+		user.GET("/my/reviews", reviewCtrl.MyList)
+		user.PUT("/reviews/:id", reviewCtrl.Update)
+		user.DELETE("/reviews/:id", reviewCtrl.Delete)
+
+		// 商品收藏（仅登录用户，作用于本人数据）。
+		user.POST("/favorites", favoriteCtrl.Add)
+		user.DELETE("/favorites/:product_id", favoriteCtrl.Remove)
+		user.GET("/favorites", favoriteCtrl.List)
+		user.GET("/favorites/check", favoriteCtrl.Check)
+
+		// 商品点赞（仅登录用户，作用于本人数据；公开计数见上方公开路由）。
+		user.POST("/likes", likeCtrl.Like)
+		user.DELETE("/likes/:product_id", likeCtrl.Cancel)
+		user.GET("/likes/check", likeCtrl.Check)
 
 		user.GET("/sessions", iamCtrl.ListSessions)
 		user.DELETE("/sessions/:sid", iamCtrl.RevokeSession)

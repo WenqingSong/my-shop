@@ -1,0 +1,32 @@
+task: product-favorite-v1
+phase: APPROVED
+review:
+  status: CLEAN
+  target_base: "e90fc5ae36e2f3e487618f2b0c4be75384b6c4aa"
+  target_paths:
+    - "api/favorite/v1/favorite.go"
+    - "internal/controller/favorite/favorite.go"
+    - "internal/logic/favorite/favorite.go"
+    - "internal/service/favorite.go"
+    - "internal/codes/codes.go"
+    - "internal/cmd/routes_frontend.go"
+    - "internal/logic/logic.go"
+    - "internal/migrations/sql/20261001000010_favorites.up.sql"
+    - "internal/cmd/favorite_test.go"
+    - "internal/migrations/migrations_test.go"
+    - "internal/boot/boot_migration_test.go"
+    - "docs/design/favorite.md"
+    - ".agent/registry/error-codes.md"
+    - ".agent/registry/migrations.md"
+owner_verification:
+  status: ACCEPTED
+delivery:
+  status: PASS
+required_resources:
+  error_code_domains:
+    - "11000-11999"
+  migrations:
+    - "20261001000010"
+blocked:
+  is_blocked: false
+  reason: ""

@@ -17,6 +17,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
 	"cnb.cool/go-cloud-devops/my-shop/internal/service"
+	"cnb.cool/go-cloud-devops/my-shop/internal/storage"
 )
 
 // 命令结构：my-shop [serve|migrate <up|force|version>]。
@@ -86,8 +87,15 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 
 	// 启动后台超时取消扫描器：扫描 status=待支付 且 expire_at 已过的订单，逐单原子取消并恢复库存。
 	startOrderCancelScanner(ctx)
+	// 启动秒杀缓存对账扫描器：按「活动 × SKU」粒度将 Redis remaining 刷成 total_stock - sold，并回补缺失预热。
+	startFlashSaleReconcileScanner(ctx)
 
 	s := g.Server()
+	// 初始化本地图片存储：seed 轮播图占位图，并将 banner 目录映射为静态路由 /storage/banners。
+	if err := configureBannerStorage(ctx, s); err != nil {
+		return err
+	}
+
 	s.Group("/", func(root *ghttp.RouterGroup) {
 		root.Middleware(middleware.Response)
 		root.Bind(health.NewV1())
@@ -97,6 +105,26 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 	})
 	s.Run()
 	return nil
+}
+
+// configureBannerStorage 初始化轮播图图片的本地存储：seed 3 张占位图，并将 banner 目录
+// 映射为 /storage/banners 静态路由（LocalStorage 为 V1 唯一实现，后续可替换 MinIO/OSS/S3）。
+func configureBannerStorage(ctx context.Context, s *ghttp.Server) error {
+	local := storage.NewLocal(storageRoot(ctx))
+	if _, err := local.PrepareBannerPlaceholders(ctx); err != nil {
+		return err
+	}
+	s.AddStaticPath(storage.BannerURLPrefix, local.BannerDir())
+	return nil
+}
+
+// storageRoot 读取本地存储根目录（环境变量 STORAGE_LOCAL_ROOT 可覆盖），默认 ./storage。
+func storageRoot(ctx context.Context) string {
+	v, err := g.Cfg().GetEffective(ctx, "storage.local.root", "./storage")
+	if err != nil || v == nil {
+		return "./storage"
+	}
+	return v.String()
 }
 
 // orderCancelScanBatch 是每轮超时取消扫描处理的最大订单数。
@@ -120,6 +148,33 @@ func startOrderCancelScanner(ctx context.Context) {
 			case <-ticker.C:
 				if _, err := service.Order().CancelExpired(ctx, orderCancelScanBatch); err != nil {
 					glog.Warningf(ctx, "订单超时取消扫描失败: %v", err)
+				}
+			}
+		}
+	}()
+}
+
+// flashSaleReconcileScanBatch 是每轮秒杀缓存对账扫描处理的最大活动数。
+const flashSaleReconcileScanBatch = 100
+
+// startFlashSaleReconcileScanner 启动秒杀缓存对账后台扫描器（goroutine + ticker）。
+// 周期由 flash_sale.reconcile_scan_interval 配置（秒，默认 60）；对账为无状态、幂等写入
+// 权威值（remaining = total_stock - sold），多实例并发安全。
+func startFlashSaleReconcileScanner(ctx context.Context) {
+	interval := g.Cfg().MustGet(ctx, "flash_sale.reconcile_scan_interval", 60).Int()
+	if interval <= 0 {
+		interval = 60
+	}
+	go func() {
+		ticker := time.NewTicker(time.Duration(interval) * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if _, err := service.FlashSale().ReconcileCache(ctx, flashSaleReconcileScanBatch); err != nil {
+					glog.Warningf(ctx, "秒杀缓存对账扫描失败: %v", err)
 				}
 			}
 		}

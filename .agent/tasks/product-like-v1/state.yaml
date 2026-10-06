@@ -1,0 +1,31 @@
+schema_version: 2
+task_id: product-like-v1
+
+contract:
+  status: APPROVED
+  target: "a19e27446f73f2e0956570b1e9573842f818ae20"
+
+resources:
+  migrations:
+    - "20261001000013"
+  error_code_domains:
+    - "13000-13999"
+
+review:
+  status: CLEAN
+  target: "c926efef02acd993c28dae43fcae86b8327274b0"
+
+owner:
+  status: ACCEPTED
+  review_target: "c926efef02acd993c28dae43fcae86b8327274b0"
+
+delivery:
+  status: PASS
+  review_target: "c926efef02acd993c28dae43fcae86b8327274b0"
+  feature_head: "cf28dc8b59cde5afec5c468d0c05705cd1a108b0"
+  develop_base: "95909127caac44512c9a62cadaeba0ad2c949d73"
+
+blocked:
+  active: false
+  by: ""
+  reason: ""

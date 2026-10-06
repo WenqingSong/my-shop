@@ -117,6 +117,34 @@ func TestRouteTable(t *testing.T) {
 		// 订单后台写操作（AdminAuth + RequirePermission）。
 		"POST /admin/orders/:id/ship",
 		"POST /admin/orders/:id/refund",
+		// 秒杀前台下单（Auth 保护）。
+		"POST /flash-sales/:id/orders",
+		// 秒杀活动后台写操作（AdminAuth + RequirePermission）。
+		"POST /admin/flash-sales",
+		"PUT /admin/flash-sales/:id",
+		// 商品评价公开列表（无 token）。
+		"GET /products/:id/reviews",
+		// 商品评价前台用户接口（Auth 保护）。
+		"POST /reviews",
+		"GET /my/reviews",
+		"PUT /reviews/:id",
+		"DELETE /reviews/:id",
+		// 商品评价后台写操作（AdminAuth + RequirePermission）。
+		"POST /admin/reviews/:id/take-down",
+		// 商品点赞：公开计数（无 token）+ 点赞/取消/是否已点赞（Auth 保护）。
+		"GET /likes/count",
+		"POST /likes",
+		"DELETE /likes/:product_id",
+		"GET /likes/check",
+		// 公开轮播图列表（无 token）。
+		"GET /banners",
+		// 轮播图后台查询（AdminAuth，无读权限）。
+		"GET /admin/banners",
+		"GET /admin/banners/:id",
+		// 轮播图后台写操作（AdminAuth + RequirePermission）。
+		"POST /admin/banners",
+		"PUT /admin/banners/:id",
+		"DELETE /admin/banners/:id",
 	}
 	for _, w := range want {
 		if !got[w] {

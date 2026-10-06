@@ -51,7 +51,7 @@
 ## 7. 与 Global Resource Registry 的关系
 
 - `.agent/registry/error-codes.md`（`develop` 上）是域「分配状态」的权威事实源（谁 RESERVED / ACTIVE / RELEASED 了哪个域）。
-- 本文档是域「编码模型与长期规则」的结论权威；`docs/agent/*` 是工程治理流程权威。三者互补、不复制，无双事实源冲突。
+- 本文档是域「编码模型与长期规则」的结论权威；`.agent/specs/*` 是工程治理流程权威。三者互补、不复制，无双事实源冲突。
 - 新域 Reservation 规则：Task 需新增域时，Analyst 读 Registry 按 §3 派生 `domain_seq_next`，写入 Contract 全局资源清单与 Registry 的 RESERVED 条目（通过独立 Registry 变更进入 `develop`，Feature Branch 内私留不视为有效预留）；Coder 只使用已 APPROVED 的域，禁止自行推断编号（含 `max+1`）。
 
 ## 8. 各模块错误码

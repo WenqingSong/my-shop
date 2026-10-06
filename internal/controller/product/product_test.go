@@ -48,6 +48,7 @@ type productJSON struct {
 	MainImage  string   `json:"main_image"`
 	Detail     string   `json:"detail"`
 	Status     string   `json:"status"`
+	ViewCount  int64    `json:"view_count"`
 	Images     []string `json:"images"`
 }
 
@@ -290,6 +291,24 @@ func dbProductStatus(t *testing.T, id int64) int {
 		t.Fatalf("query product status: %v", err)
 	}
 	return v.Int()
+}
+
+func dbProductViewCount(t *testing.T, id int64) int64 {
+	t.Helper()
+	v, err := g.DB().Model("products").Ctx(context.Background()).Where("id", id).Value("view_count")
+	if err != nil {
+		t.Fatalf("query product view_count: %v", err)
+	}
+	return v.Int64()
+}
+
+func dbProductUpdatedAt(t *testing.T, id int64) string {
+	t.Helper()
+	v, err := g.DB().Model("products").Ctx(context.Background()).Where("id", id).Value("updated_at")
+	if err != nil {
+		t.Fatalf("query product updated_at: %v", err)
+	}
+	return v.String()
 }
 
 func dbProductCount(t *testing.T) int {
@@ -923,4 +942,145 @@ func TestProductCreateWithGrantedPermission(t *testing.T) {
 
 func intPtr(v int) *int {
 	return &v
+}
+
+// TestProductViewCount 覆盖 AC-001/AC-003/AC-004 与 INV-003/INV-004：
+// 前台详情 +1 且响应含最新 view_count；列表/后台详情/列表均返回 view_count；
+// 后台详情不计数；浏览不改变 updated_at。
+func TestProductViewCount(t *testing.T) {
+	base, token := setupProductServer(t)
+
+	leafID := createCategory(t, base, token, 0, "手机", nil)
+	id := getProductID(t, createProduct(t, base, token, map[string]any{
+		"name": "计数商品", "category_id": leafID, "price": 100,
+	}))
+	assertOK(t, doRequest(t, base, "POST", fmt.Sprintf("/admin/products/%d/on-shelf", id), nil, authHeader(token)), "on-shelf")
+	if v := dbProductViewCount(t, id); v != 0 {
+		t.Fatalf("initial view_count should be 0, got %d", v)
+	}
+
+	updatedBefore := dbProductUpdatedAt(t, id)
+
+	// AC-001/AC-003：前台详情 +1，响应含最新累计值。
+	d := getProductDetail(t, base, id)
+	if d.ViewCount != 1 {
+		t.Fatalf("detail view_count should be 1, got %d", d.ViewCount)
+	}
+	if v := dbProductViewCount(t, id); v != 1 {
+		t.Fatalf("db view_count should be 1, got %d", v)
+	}
+	d = getProductDetail(t, base, id)
+	if d.ViewCount != 2 {
+		t.Fatalf("detail view_count should be 2, got %d", d.ViewCount)
+	}
+
+	// INV-003：浏览不改变 updated_at（sleep 跨秒，确保能捕获遗漏 updated_at=updated_at 的副作用）。
+	time.Sleep(1100 * time.Millisecond)
+	_ = getProductDetail(t, base, id)
+	if got := dbProductUpdatedAt(t, id); got != updatedBefore {
+		t.Fatalf("updated_at should not change on view, before=%q after=%q", updatedBefore, got)
+	}
+
+	// AC-004：前台列表、后台列表/详情均返回 view_count（此时累计=3）。
+	var list productListData
+	res := doRequest(t, base, "GET", "/products", nil, nil)
+	assertOK(t, res, "frontend list")
+	if err := json.Unmarshal(res.Data, &list); err != nil {
+		t.Fatalf("unmarshal frontend list: %v", err)
+	}
+	if list.Items[0].ViewCount != 3 {
+		t.Fatalf("frontend list view_count should be 3, got %d", list.Items[0].ViewCount)
+	}
+	res = doRequest(t, base, "GET", "/admin/products", nil, authHeader(token))
+	assertOK(t, res, "admin list")
+	if err := json.Unmarshal(res.Data, &list); err != nil {
+		t.Fatalf("unmarshal admin list: %v", err)
+	}
+	if list.Items[0].ViewCount != 3 {
+		t.Fatalf("admin list view_count should be 3, got %d", list.Items[0].ViewCount)
+	}
+	if ad := getAdminProductDetail(t, base, token, id); ad.ViewCount != 3 {
+		t.Fatalf("admin detail view_count should be 3, got %d", ad.ViewCount)
+	}
+
+	// INV-004：后台详情不计数。
+	before := dbProductViewCount(t, id)
+	_ = getAdminProductDetail(t, base, token, id)
+	if v := dbProductViewCount(t, id); v != before {
+		t.Fatalf("admin detail should not count, before=%d after=%d", before, v)
+	}
+}
+
+// TestProductViewCountNoWriteOn404 覆盖 AC-005（INV-002）：
+// 访问不存在/draft/off_shelf 商品详情返回 404/4001 且无计数写入。
+func TestProductViewCountNoWriteOn404(t *testing.T) {
+	base, token := setupProductServer(t)
+
+	leafID := createCategory(t, base, token, 0, "手机", nil)
+	draftID := getProductID(t, createProduct(t, base, token, map[string]any{
+		"name": "draft计数", "category_id": leafID, "price": 100,
+	}))
+	offShelfID := getProductID(t, createProduct(t, base, token, map[string]any{
+		"name": "off计数", "category_id": leafID, "price": 200,
+	}))
+	assertOK(t, doRequest(t, base, "POST", fmt.Sprintf("/admin/products/%d/on-shelf", offShelfID), nil, authHeader(token)), "on-shelf")
+	assertOK(t, doRequest(t, base, "POST", fmt.Sprintf("/admin/products/%d/off-shelf", offShelfID), nil, authHeader(token)), "off-shelf")
+
+	for _, id := range []int64{draftID, offShelfID} {
+		if v := dbProductViewCount(t, id); v != 0 {
+			t.Fatalf("initial view_count for %d should be 0, got %d", id, v)
+		}
+		r := doRequest(t, base, "GET", fmt.Sprintf("/products/%d", id), nil, nil)
+		if r.Status != 404 || r.Code != 4001 {
+			t.Fatalf("frontend detail %d: status=%d code=%d", id, r.Status, r.Code)
+		}
+		if v := dbProductViewCount(t, id); v != 0 {
+			t.Fatalf("404 must not write view_count, id=%d got %d", id, v)
+		}
+	}
+
+	// 不存在商品：404 且无计数写入（无行可写，仅断言 404）。
+	r := doRequest(t, base, "GET", "/products/999999", nil, nil)
+	if r.Status != 404 || r.Code != 4001 {
+		t.Fatalf("frontend detail 999999: status=%d code=%d", r.Status, r.Code)
+	}
+}
+
+// TestProductViewCountConcurrent 覆盖 AC-002（INV-001）：
+// 并发访问同一 on_shelf 商品详情，最终 view_count = 成功请求数（不丢失）。
+func TestProductViewCountConcurrent(t *testing.T) {
+	base, token := setupProductServer(t)
+
+	leafID := createCategory(t, base, token, 0, "手机", nil)
+	id := getProductID(t, createProduct(t, base, token, map[string]any{
+		"name": "并发计数", "category_id": leafID, "price": 100,
+	}))
+	assertOK(t, doRequest(t, base, "POST", fmt.Sprintf("/admin/products/%d/on-shelf", id), nil, authHeader(token)), "on-shelf")
+
+	const n = 50
+	results := make(chan apiResult, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r, err := request(base, "GET", fmt.Sprintf("/products/%d", id), nil, nil)
+			if err != nil {
+				results <- apiResult{Code: -1}
+				return
+			}
+			results <- r
+		}()
+	}
+	wg.Wait()
+	close(results)
+
+	for res := range results {
+		if res.Code != 0 {
+			t.Fatalf("concurrent view: unexpected code %d (status=%d)", res.Code, res.Status)
+		}
+	}
+	if v := dbProductViewCount(t, id); v != n {
+		t.Fatalf("expected view_count=%d after %d concurrent views, got %d", n, n, v)
+	}
 }

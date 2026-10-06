@@ -1,0 +1,11 @@
+schema_version: 1
+
+git:
+  integration_branch: develop
+
+resources:
+  migration_version:
+    registry: .agent/registry/migrations.md
+
+  error_code_domain:
+    registry: .agent/registry/error-codes.md

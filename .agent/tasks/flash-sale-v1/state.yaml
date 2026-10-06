@@ -1,0 +1,35 @@
+task: flash-sale-v1
+phase: READY_FOR_REVIEW
+review:
+  status: CLEAN
+  target_base: "805980899e297f8bd216f66ff6937067d9b051a9"
+  target_paths:
+    - "api/flashsale/v1/flash_sale.go"
+    - "internal/controller/flashsale/flashsale.go"
+    - "internal/logic/flashsale/flashsale.go"
+    - "internal/service/flashsale.go"
+    - "internal/migrations/sql/20261001000011_flash_sale.up.sql"
+    - "internal/cmd/flashsale_test.go"
+    - "docs/design/flash-sale.md"
+    - ".agent/registry/error-codes.md"
+    - ".agent/registry/migrations.md"
+    - "internal/codes/codes.go"
+    - "internal/boot/seed.go"
+    - "internal/boot/boot_migration_test.go"
+    - "internal/cmd/routes_admin.go"
+    - "internal/cmd/routes_frontend.go"
+    - "internal/cmd/routes_test.go"
+    - "internal/logic/logic.go"
+    - "internal/migrations/migrations_test.go"
+owner_verification:
+  status: ACCEPTED
+delivery:
+  status: NONE
+required_resources:
+  error_code_domains:
+    - "12000-12999"
+  migrations:
+    - "20261001000011"
+blocked:
+  is_blocked: false
+  reason: ""
