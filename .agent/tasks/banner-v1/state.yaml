@@ -1,0 +1,29 @@
+schema_version: 2
+task_id: banner-v1
+
+contract:
+  status: PENDING
+  target: ""
+
+resources:
+  migrations: []
+  error_code_domains: []
+
+review:
+  status: NOT_REQUESTED
+  target: ""
+
+owner:
+  status: PENDING
+  review_target: ""
+
+delivery:
+  status: NOT_RUN
+  review_target: ""
+  feature_head: ""
+  develop_base: ""
+
+blocked:
+  active: false
+  by: ""
+  reason: ""
