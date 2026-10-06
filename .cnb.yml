@@ -42,7 +42,7 @@ main:
           script: make test
 
   push:
-    - name: main-ci-and-github-mirror
+    - name: main-ci
       services:
         - docker
       docker:
@@ -50,8 +50,6 @@ main:
         volumes:
           - /go/pkg/mod
           - /root/.cache/go-build
-      imports:
-        - https://cnb.cool/framework-station/my-shop-secrets/-/blob/main/github-mirror.yml
       stages:
         - name: start-dependencies
           script: |
@@ -66,7 +64,15 @@ main:
             mkdir -p bin
             go build -trimpath -o bin/my-shop .
 
-        - name: sync-all-branches-and-tags-to-github
+        - name: sync-to-github-mirror
+          # 只有原仓库（go-cloud-devops/my-shop）才执行 GitHub 镜像同步。
+          # fork 后 CNB_REPO_SLUG 会变成 fork 者的组织/仓库名，此步骤会自动跳过，
+          # 也就不会去访问私有的密钥仓库，fork 用户的 CI 不受影响。
+          if: |
+            [ "${CNB_REPO_SLUG}" = "go-cloud-devops/my-shop" ]
+          imports:
+            - https://cnb.cool/framework-station/my-shop-secrets/-/blob/main/github-mirror.yml
+          allowFailure: true
           script: |
             set -euo pipefail
 
