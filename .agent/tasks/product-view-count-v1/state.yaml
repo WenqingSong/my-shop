@@ -1,0 +1,31 @@
+schema_version: 2
+task_id: product-view-count-v1
+
+contract:
+  status: APPROVED
+  target: "a32855072375a2013307a9d3bfaa18b0ca14c229"
+
+resources:
+  # 需要：1 个 migration（products.view_count 浏览量计数字段），version 由 Analyst 读 .agent/registry/migrations.md 派生为 20261001000012。
+  migrations: [20261001000012]
+  # 无需新增错误码域（复用 4001 商品不存在、1001 参数、1000 内部）；已由 Analyst 确认。
+  error_code_domains: []
+
+review:
+  status: NOT_REQUESTED
+  target: ""
+
+owner:
+  status: PENDING
+  review_target: ""
+
+delivery:
+  status: NOT_RUN
+  review_target: ""
+  feature_head: ""
+  develop_base: ""
+
+blocked:
+  active: false
+  by: ""
+  reason: ""
