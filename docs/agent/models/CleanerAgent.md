@@ -56,13 +56,13 @@ Cleaner 不依赖 Coder 的自评，不替 Owner 最终接受，也不执行 Del
 
 在 `findings.md` 的 Review Target 记录足以复现本次对象的信息：任务基线、当前 Commit/工作区状态、相关已跟踪和新增文件、任务前已有修改的区分方式，以及关键配置或迁移版本。
 
-给出 `CLEAN` 时，必须把被审查对象同时固化到 `state.yaml` 的 `review.target_base`（CLEAN 绑定的 commit）与 `review.target_paths`（被审查文件相对路径的完整清单）。CLEAN 只对这个 target 有效；`target_base` 之后出现任何非 Review-neutral 实质变化（default-deny + 白名单豁免）时，先前 CLEAN 客观失效（`review.status → STALE`），这是 Mechanical Invalidation，不是 Cleaner 的主观决定，也不是 Validator 写状态。
+给出 `CLEAN` 时，必须把被审查对象固化到 `state.yaml` 的 `review.target`（Cleaner 真正审查的 immutable implementation Evidence Commit C1），`review.status = CLEAN`。CLEAN 只对这个 target 有效；`review.target` 之后出现任何非 Review-neutral 实质变化（default-deny + 白名单豁免，task-scoped）时，先前 CLEAN 客观失效，这是机械推导，不保存 STALE 状态。Cleaner 审 C1，不是 C2（Coder 的 metadata commit），也不是当前 working tree。
 
 不能只看默认 `git diff`；它可能遗漏新增文件。`CLEAN` 只对记录的对象有效。生产代码、测试或任务约束发生实质变化后必须复审，Owner 执行 Mutation 后也必须恢复正确实现。
 
 ## Mutation 边界
 
-Cleaner 的持久化副作用（Persistent Side Effect）仅允许落在 Cleaner-owned 证据/状态 Artifact：`findings.md`、`core-logic.md`，以及 Cleaner 拥有的审查证据与状态记录（`state.yaml` 中 `review.*` 的机械持久化，以及收到 Owner 明确 ACCEPT/REJECT 指令后对 `state.yaml.owner_verification.status` 的机械持久化）。不得永久修改 Production Code、Business Tests、`contract.md`、`task.md` 的 Requirement、`docs/design/*`、Registry。
+Cleaner 的持久化副作用（Persistent Side Effect）仅允许落在 Cleaner-owned 证据/状态 Artifact：`findings.md`、`core-logic.md`，以及 `state.yaml` 中 `review.*` 的机械持久化。不得永久修改 Production Code、Business Tests、`contract.md`、`task.md` 的 Requirement、`docs/design/*`、Registry、`owner-decision.md`、`state.owner`（Owner 状态由 OwnerGate 负责）。
 
 临时验证副作用（Ephemeral Mutation Verification，如 Mutation Testing、故障注入、临时错误实现）允许，但必须在隔离环境执行——临时 worktree、disposable checkout 或等价隔离副本。禁止在 Review Target working tree 直接做 Mutation 后再 checkout 恢复；禁止 commit Mutation；禁止遗留任何 Mutation；禁止以 Mutation 修复被审查对象。
 
@@ -185,14 +185,7 @@ P3 可以保留给 Owner 决定。`CLEAN` 不等于最终接受。
 
 只有 `CLEAN` 后才填写 `core-logic.md`。选择真正决定权限、安全、事务、库存、金额、幂等、状态流转或一致性的代码；普通 DTO、字段搬运和样板 CRUD 不列入。
 
-Owner Verification 状态的唯一机器事实源是 `state.yaml.owner_verification.status`。Cleaner 生成 `core-logic.md` 时，把初始状态机械写入 `state.yaml`：
-
-- 本次产生 ≥1 张 CL 验证卡 → `state.yaml.owner_verification.status = PENDING`；
-- 无需 Owner 核心逻辑验证（0 张 CL 卡）→ `state.yaml.owner_verification.status = NOT_REQUIRED`。
-
-`ACCEPTED` 仅在收到 Owner 明确的确认/接受指令后，由 Cleaner 机械持久化到 `state.yaml.owner_verification.status`；任何 Agent 不得因 `CLEAN`、测试通过、Owner 阅读过文件或其它间接信号自行把 `PENDING` 置为 `ACCEPTED`。这种 Owner Decision 的机械持久化是「File Writer ≠ Decision Authority」的落盘动作，不是 Cleaner 的自主决策。
-
-`core-logic.md` 只承载 Owner Core Logic 验证卡、因果说明与验证证据，不承担 Owner Verification 状态权威。
+`core-logic.md` 只承载 Owner Core Logic 验证卡、因果说明与验证证据，不承担 Owner 决策状态权威。Owner 决策状态（`state.owner.status` / `state.owner.review_target`）由 OwnerGate 在 Owner 明确决定后持久化；Cleaner 不写 `state.owner`，也不因 `CLEAN`、测试通过、Owner 阅读过文件自行推断 Owner 已接受。
 
 每项写成简短验证卡：
 

@@ -1,205 +1,176 @@
-# Agent Workflow 状态机设计（Task State Machine）
+# Agent Workflow 状态模型（Workflow V2）
 
-本文面向项目接手者，说明多 Agent 工作流的任务状态模型、Transition Authority、Review Target / CLEAN / STALE 语义、Global Registry 状态机与资源授权规则。事实来源为 `agent-workflow-state-machine-v1` 的 APPROVED Contract 与最终实现。
+本文面向项目接手者，说明 Workflow V2 的任务状态模型、Evidence Snapshot / Neutral Tail 语义、五个 Gate、Owner Authority Boundary、Global Registry 资源授权与 Handoff Contract。事实来源为 `agent-workflow-v2` 的 APPROVED Contract 与最终实现。
 
 本文是「结论」（面向接手者的长期稳定结构事实）；`contract.md` 是「过程」（单任务决策记录）；`docs/agent/*` 是「执行流程」（各角色 Prompt 与协作规范，引用本文不重复定义）。
 
 ## 1. 职责与边界
 
-- 状态机属于 **Agent Control Plane**（治理/编排事实），与 **Work Plane**（业务 `my-shop` 服务）分离。
-- 机器事实源是 `state.yaml`；人读证据 Artifact（`findings.md` / `core-logic.md` / `delivery.md` / `contract.md`）是「为什么」，不承担阶段权威。
-- 本状态机不引入 DB/MQ/BPMN/Web UI/Orchestrator；不自动派发角色。
+- 状态模型属于 **Agent Control Plane**（治理事实），与 **Work Plane**（业务 `my-shop` 服务）分离。
+- 机器事实源是 `state.yaml`；人读证据 Artifact（`findings.md` / `core-logic.md` / `owner-decision.md` / `delivery.md` / `contract.md`）是「为什么」，不承担阶段权威。
+- **Agent Autonomous Zone = Feature Branch**；**Owner Controlled Zone = Branch Lifecycle + Shared `develop`**。Agent 在 feature 内自主工程化协作，但不能替 Owner 决定任务边界，也不能控制共享主线。
+- 不引入 DB/MQ/BPMN/Web UI/Orchestrator；不自动派发角色；不代理任何 git 写操作。
 
-## 2. Artifact Authority
+## 2. 六角色模型
 
-- `state.yaml`（`.agent/tasks/<task-slug>/state.yaml`）是 Task 当前状态的**唯一机器权威源**；流程判定只读 `phase` 与子字段。
-- 不存在以 Markdown 第一行或 Git HEAD 作为唯一状态来源的判定路径。
-- Git 是持久化与审计层：每次状态转换是一次对 `state.yaml` 的文件编辑。
+```text
+TaskBuilder → Analyst → Coder → Cleaner → OwnerGate → Deliverer → Owner
+```
+
+Owner 不是第七个 Agent，而是 **Decision Authority + Shared Repository Authority**。六个 Agent 默认运行在独立 Session，通过 immutable Git snapshot、Artifact 与标准 Handoff 交接。
+
+| 角色 | 回答的问题 | 拥有的 Artifact |
+|---|---|---|
+| TaskBuilder | 交付什么、怎样判断完成 | `task.md`、`state.yaml` 初始结构 |
+| Analyst | 有哪些约束、可行方案、必须保持什么性质 | `contract.md`、`docs/design/*`、`state.contract`、`state.resources` |
+| Coder | 怎样在既定范围内完成实现 | 业务代码、测试、migration、`state.review`（发起 PENDING） |
+| Cleaner | 完整变更是否满足任务、测试是否可信 | `findings.md`、`core-logic.md`、`state.review`（CLEAN） |
+| OwnerGate | 核心机制是什么、请求 Owner 决策并持久化 | `owner-decision.md`、`state.owner` |
+| Deliverer | 能否在目标环境真实运行 | `delivery.md`、`state.delivery` |
+
+## 3. `state.yaml`（唯一机器权威源）
+
+只保存 Git 无法推导的工作流决策事实。**明确不保存** `phase`、`STALE`、`DONE`、`branch`、`HEAD`、`working_tree`、`changed_files`、`NEXT_ROLE`、`NEXT_ACTION`。
 
 ```yaml
-task: <task-slug>
-phase: <13 值之一>
-review:
-  status: NONE | CLEAN | STALE
-  target_base: <commit-hash | "">
-  target_paths: [<被审查相对路径>]
-owner_verification:
-  status: NOT_REQUIRED | PENDING | ACCEPTED
-delivery:
-  status: NONE | PASS | CONDITIONAL_PASS | FAIL
-required_resources:
-  error_code_domains: [<域区间>]
+schema_version: 2
+task_id: <task-slug>
+
+contract:
+  status: PENDING | APPROVED | REJECTED | NOT_REQUIRED
+  target: <evidence-commit-sha | "">
+
+resources:
   migrations: [<version>]
+  error_code_domains: [<区间>]
+
+review:
+  status: NOT_REQUESTED | PENDING | CLEAN | CHANGES_REQUIRED
+  target: <evidence-commit-sha | "">
+
+owner:
+  status: PENDING | ACCEPTED | REJECTED | NOT_REQUIRED
+  review_target: <review-target-sha | "">
+
+delivery:
+  status: NOT_RUN | PASS | FAIL | BLOCKED
+  review_target: <sha | "">
+  feature_head: <sha | "">
+  develop_base: <sha | "">
+
 blocked:
-  is_blocked: false
+  active: false
+  by: ""
   reason: ""
 ```
 
-## 3. 状态模型
+- `resources` 只声明「需要什么」，不自证满足；真正 Authority 永远读取 `origin/develop:.agent/registry/*`。
+- 资源值必须是纯机器值（如 `20261001000011`、`12000-12999`），带说明的非法值在 Resource Schema 层直接 FAIL。
 
-### 3.1 主 `phase`（13 值，仅表达生命周期阶段）
+## 4. 三种 Evidence Binding（核心）
 
-| phase | 含义 | 下一个有权动作的角色 |
-| --- | --- | --- |
-| `NEW` | 任务已创建，未路由 | Task Builder |
-| `READY_FOR_ANALYST` | 路由 Analyst（COMPLEX） | Analyst |
-| `READY_FOR_CODER` | 路由 Coder（NORMAL） | Coder |
-| `WAITING_FOR_OWNER_APPROVAL` | 等 Owner 批 Contract | Owner |
-| `APPROVED` | Contract 已批准 + Design 已同步 | Coder |
-| `IMPLEMENTING` | Coder 实现中 | Coder |
-| `READY_FOR_REVIEW` | Coder 自验完成 / STALE 后待复审 | Cleaner |
-| `IN_REVIEW` | Cleaner 审查中 | Cleaner |
-| `CHANGES_REQUIRED` | 回退路由：回 Coder 修复 | Coder |
-| `CONTRACT_REVISION_REQUIRED` | 回退路由：回 Analyst/Owner 修订 | Analyst |
-| `WAITING_FOR_OWNER_ACCEPTANCE` | 审查通过后 Owner 决定（核心验证 + 最终接受） | Owner |
-| `DELIVERING` | 里程碑验收中 | Deliverer |
-| `DONE` | Owner 最终接受（终态） | — |
+V2 用统一的「Evidence Snapshot + Allowed Neutral Tail = Still Valid」取代 V1 的 phase rollback / STALE / 重新推进状态。
 
-### 3.2 正交子事实（不是 phase）
+### 4.1 Contract（INV-2）
 
-| 子事实 | 取值 | 语义 |
-| --- | --- | --- |
-| `review.status` | `NONE` / `CLEAN` / `STALE` | 审查结论，绑定 `review.target` |
-| `owner_verification.status` | `NOT_REQUIRED` / `PENDING` / `ACCEPTED` | 核心逻辑验证结论 |
-| `delivery.status` | `NONE` / `PASS` / `CONDITIONAL_PASS` / `FAIL` | 里程碑验收结论 |
-| `blocked` | `is_blocked` + `reason` | 正交阻塞事实，不改 phase |
+- `contract.target` 绑定 Owner 最终批准版本 `contract.md` 的 **Evidence Commit**（A1）。
+- Analyst 采用两段式提交：A1（contract 内容）→ A2（只改 `state.yaml` 写入 `contract.status=APPROVED`、`contract.target=A1`）。
+- 有效性 = `contract.target` 为真实 commit + `contract.target` 中 `contract.md` 与当前 `contract.md` 完全一致。
+- **Design 不绑定 Owner Approval SHA**；由 Analyst 在 Coder 前完成，由 Cleaner 做 Contract/Design/Implementation 三边一致性审查。
 
-同一事实只在一处表达：CLEAN/STALE 只在 `review.status`，Owner Verification 只在 `owner_verification.status`，Delivery Result 只在 `delivery.status`，阻塞只在 `blocked`。Gate 与 Validator 用「phase + 子字段组合」表达约束。
+### 4.2 Review（INV-3 / INV-4）
 
-## 4. Transition Authority
+- `review.target` 绑定 Cleaner 真正审查的 immutable implementation **Evidence Commit**（C1）。
+- Coder 两段式提交：C1（业务代码 + 测试）→ C2（只改 `state.yaml` 写入 `review.status=PENDING`、`review.target=C1`）。Cleaner 审 C1，不是 C2。
+- CLEAN 有效性 = `review.target` 为真实 commit + `review.target..featureHEAD` 只允许**当前 task** 的 review-neutral artifacts。
+- 任何 substantive change（即使只改 `.go` 注释）都使旧 CLEAN 机械失效。**Staleness 是推导结果，不是持久状态**。
 
-每条 phase 转换有且仅有一个 **Decision Authority**；文件写入者 ≠ Decision Authority（Owner 的 ACCEPT/REJECT 由 Agent 在明确指令下机械持久化）。
+### 4.3 Delivery（INV-6）
 
-Transition Authority 与合法 Transition Table 是 State Machine V1 的**规范性协议事实**（`Normative Transition Rule`），约束各角色 Prompt 与交接行为。V1 Validator **不**在运行时校验历史 transition sequence，也不凭当前快照证明实际执行者身份（见 §8）。`Normative Transition Rule != V1 Runtime Transition Enforcement`。
+- `delivery` 绑定三个不可变 SHA：`review_target`（被验证的业务实现 C1）、`feature_head`（实际参与集成验证的 feature snapshot F8）、`develop_base`（验证时 shared develop 的 D12）。
+- `feature_head` 不要求等于当前 remote feature HEAD；它之后只允许**当前 task** 的 delivery-neutral artifacts（`delivery.md`、`state.yaml`）。
+- `origin/develop` 前进后，旧 PASS 自动失去 Merge Ready 效力。
 
-### 4.1 phase 转换
+### 4.4 白名单（task-scoped，禁止 basename-only）
 
-| # | 转换 | Decision Authority | File Writer | Gate / 说明 |
-| --- | --- | --- | --- | --- |
-| 1 | `NEW → READY_FOR_ANALYST` | Task Builder | Task Builder | COMPLEX |
-| 2 | `NEW → READY_FOR_CODER` | Task Builder | Task Builder | NORMAL |
-| 3 | `READY_FOR_ANALYST → WAITING_FOR_OWNER_APPROVAL` | Analyst | Analyst | 写 Contract + 推荐 |
-| 4 | `WAITING_FOR_OWNER_APPROVAL → APPROVED` | Owner（ACCEPT） | Analyst（机械） | — |
-| 5 | `WAITING_FOR_OWNER_APPROVAL → CONTRACT_REVISION_REQUIRED` | Owner（REJECT） | Analyst（机械） | — |
-| 6 | `APPROVED → IMPLEMENTING` | Coder | Coder | Contract APPROVED + Design 同步 + 资源 Gate |
-| 7 | `IMPLEMENTING → READY_FOR_REVIEW` | Coder | Coder | 自验完成 |
-| 8 | `READY_FOR_REVIEW → IN_REVIEW` | Cleaner | Cleaner | — |
-| 9 | `IN_REVIEW → WAITING_FOR_OWNER_ACCEPTANCE` | Cleaner | Cleaner | `review.status=CLEAN` |
-| 10 | `IN_REVIEW → CHANGES_REQUIRED` | Cleaner | Cleaner | 有可修复缺陷 |
-| 11 | `CHANGES_REQUIRED → IMPLEMENTING` | Coder | Coder | Finding 修复 |
-| 12 | `APPROVED → CONTRACT_REVISION_REQUIRED` | Analyst | Analyst | 实现期设计冲突 |
-| 13 | `WAITING_FOR_OWNER_ACCEPTANCE → DELIVERING` | Owner（主动进入） | Deliverer（机械记录） | `review.status=CLEAN` + `owner_verification ∈ {ACCEPTED,NOT_REQUIRED}` + 资源有效 |
-| 14 | `WAITING_FOR_OWNER_ACCEPTANCE → DONE` | Owner（最终接受） | Owner | `owner_verification ∈ {ACCEPTED,NOT_REQUIRED}` |
-| 15 | `DELIVERING → DONE` | Owner（最终接受） | Owner | `delivery.status=PASS` |
-| 16 | `DELIVERING → CHANGES_REQUIRED` | Deliverer（IMPLEMENTATION_DEFECT） | Deliverer | 实现缺陷 |
-| 17 | `DELIVERING → CONTRACT_REVISION_REQUIRED` | Deliverer（CONTRACT_PROBLEM） | Deliverer | 设计问题 |
-| 18 | `DELIVERING → WAITING_FOR_OWNER_ACCEPTANCE` | Deliverer（OUT_OF_SCOPE_EXISTING_ISSUE） | Deliverer | 范围外既有问题 |
+review-neutral（`review.target` 之后允许）：
 
-### 4.2 子事实转换
+```text
+.agent/tasks/<task>/state.yaml
+.agent/tasks/<task>/findings.md
+.agent/tasks/<task>/core-logic.md
+.agent/tasks/<task>/owner-decision.md
+.agent/tasks/<task>/delivery.md
+```
 
-- `review.status`：`NONE → CLEAN`（Cleaner）；`CLEAN → STALE`（Mechanical Invalidation，见 §5）；`STALE → CLEAN`（**仅 Cleaner** 复审）。
-- `owner_verification.status`：`PENDING`/`NOT_REQUIRED`（Cleaner 生成 `core-logic.md` 时写初始值）；`PENDING → ACCEPTED`（**Owner 明确指令** → Cleaner 机械记录）。
-- `delivery.status`：`NONE → PASS/CONDITIONAL_PASS/FAIL`（Deliverer）。
+delivery-neutral（`feature_head` 之后允许，更窄）：
 
-## 5. Review Target / CLEAN / STALE 语义
+```text
+.agent/tasks/<task>/state.yaml
+.agent/tasks/<task>/delivery.md
+```
 
-- `review.status=CLEAN` 绑定唯一 `review.target`（`target_base` + `target_paths`），Cleaner 在 `findings.md` 的 Review Target 同步记录可复核版本。
-- **实质变化判定（真 default-deny）**：以 `review.target_base` 为基准检查后续变化——明确属于 Review-neutral 白名单 → 不使旧 CLEAN 失效；其余**非白名单**变化 → 默认使旧 CLEAN 失效并进入 STALE。判定不以 `review.target_paths` 为界，也不依赖 must-trigger 黑名单。
-- **`review.target_paths` 定位**：仅作为 Cleaner 本轮审查范围的 **Evidence / Audit Record**；不是 STALE 判定边界、不是允许变化列表、不是隐式白名单；**「不在 `target_paths`」≠「可以忽略变化」**。
-- **白名单（Review-neutral，唯一豁免，显式有限）**：`findings.md`、`core-logic.md`、`delivery.md`、合法 `state.yaml` 机械状态持久化、Contract 明确批准的其他纯 Workflow Evidence。未明确进入白名单的变化**默认不得自动豁免**。
+其他目录、其他 task 的同名文件一律 substantive。
 
-### Mechanical Invalidation（`CLEAN → STALE`）
+## 5. 五个 Gate
 
-确定性、单向的 Mechanical Downgrade——不是 Cleaner 的主观审查决定，也不是 Validator 有权执行的写转换：
+CLI：`workflow-check gate <coder-start|cleaner-start|owner-gate-start|delivery-start|merge-ready> <task>`。Validator 只读，结果统一 `PASS / FAIL / ERROR`（exit 0 / 1 / 2）。
 
-1. 触发：`review.status` 仍为 `CLEAN` 时，自 `review.target_base` 起出现非白名单实质变化（不限于 `review.target_paths` 内）→ 先前 CLEAN 客观失效。
-2. 效果（一致的状态变化，降级包）：
-   - `review.status: CLEAN → STALE`；
-   - `phase → READY_FOR_REVIEW`；
-   - `owner_verification.status: ACCEPTED → PENDING`（旧 ACCEPTED 不再作为新版本 Gate 依据）；
-   - `delivery.status → NONE`（依赖旧 CLEAN 的交付结论失效）。
-3. 持久化：任何角色产生或发现该客观失效事实，可机械持久化上述降级；该动作不是新的 Review Decision，**只允许降级，不允许升级**。
-4. Validator **只读**：只能检测 `expected STALE, actual CLEAN` 并返回失败，**不得修改 `state.yaml`**。
-5. 恢复：**仅 Cleaner** 有权 `STALE → CLEAN`（经 `READY_FOR_REVIEW → IN_REVIEW` 复审，按新 review.target 重新生成/确认 Core Logic Verification）。
-6. 保守复审：V1 不要求 Validator 判断某次代码变化是否「语义上影响某个 CL」；凡 STALE 一律路由重新 Review，避免机器错误推断业务语义。
+| Gate | 回答的问题 | 关键前置 |
+|---|---|---|
+| `coder-start` | Coder 有资格开始实现吗？ | blocked=false + handoffReady + Contract 有效 + Resources 授权 |
+| `cleaner-start` | immutable implementation snapshot 能交 Cleaner 吗？ | review=PENDING + target 真实/在 feature 历史 + handoffReady + review tail 仅 neutral |
+| `owner-gate-start` | 当前 CLEAN snapshot 还能让 Owner 确认吗？ | blocked=false + handoffReady + review=CLEAN + cleanValidity PASS |
+| `delivery-start` | CLEAN + Owner Accepted 的 feature 能开始验收吗？ | Contract/Resources 有效 + cleanValidity + owner=ACCEPTED + owner.review_target==review.target + handoffReady |
+| `merge-ready` | Deliverer 验证结果现在仍可交 Owner 合并吗？ | 上述全部 + delivery=PASS + delivery 三个 SHA 绑定 + develop/feature 新鲜度 + handoffReady |
 
-## 6. Global Registry 状态机与资源授权
+`handoffReady`（正常 Handoff 的 Clean Exit）：非 detached HEAD、working tree clean、`origin/<current-feature>` 存在、local feature HEAD == remote feature HEAD。
 
-### 6.1 `RESERVED` / `ACTIVE` / `RELEASED` 生命周期
+## 6. Owner Authority Boundary
 
-- `RESERVED`：**Reservation 已通过「只改 Registry 的 commit」落到共享 `develop` 生效，但拥有该资源的 Feature 尚未合并进 `develop`**。
-- `ACTIVE`：已合并进 `develop`，资源在 `develop` 实际生效（终态）。
-- `RELEASED`：Task 取消释放（记录保留）。
-- 转换：`RESERVED → ACTIVE`（feature 合并进 `develop` 时由合并任务同步）；`RESERVED → RELEASED`（Task 取消时由 Analyst/Owner 标记）。
-- 复用规则：migration version 一经分配即永久 tombstone、**不得复用**（`next` 仍计入 RELEASED 的 `max`）；错误码域仅纯 `RESERVED` 阶段可 `RELEASE` 后复用，已实现/已合并不复用。
+Owner 保留四类真正需要人判断的职责：
 
-### 6.2 Resource Authority
+1. **Task / Branch Boundary**：新任务还是延续、是否开新 feature、branch 名称与基线。
+2. **Contract Decision**：Analyst 分析后请求 Owner `ACCEPT / REJECT / 继续解释`；Owner 不修改文件，Analyst 根据决定持久化。
+3. **Core Logic Decision**：OwnerGate 提炼 1~3 个核心机制，请求 Owner 决策；Owner 不修改 `state.yaml`/`owner-decision.md`，由 OwnerGate 持久化。
+4. **Shared Integration Decision**：何时/如何 merge、merge 顺序、squash 方式、并行依赖。**任何 Agent 都不得 merge/push `develop`**。
 
-`Task State records the fact; shared develop Registry authorizes the fact.`
+两个 Owner Checkpoint（`WAITING_FOR_OWNER_DECISION` / `WAITING_FOR_OWNER_ACTION`）**不是 Handoff**：不结束当前 Session、没有 NEXT_ROLE，Owner 回复后原 Agent 继续。
 
-- `state.yaml.required_resources` 只**声明**任务需要的全局资源，**不记录「已满足/SATISFIED」自证状态**。
-- 进入 `IMPLEMENTING` 前，Validator 对每个所需全局资源机械验证 shared `develop` Registry：
-  1. Reservation 的 **Registry-only commit 已进入共享 `develop`**（非仅 Feature Branch）；
-  2. Registry 中 `version`/`owner task`/`status` 与当前 Task 一致；
-  3. Feature Branch 自行写 `RESERVED` 或自行写 `resources.status: SATISFIED` 均不构成有效 Reservation。
+## 7. 核心不变量（INV-1 ~ INV-7）
 
-## 7. Gate
+- **INV-1 Shared Branch Authority**：Only Owner mutates shared develop。Agent 不创建任务 branch、不 push develop、不最终 merge。
+- **INV-2 Implement Authorization**：Coder 开始前 Contract valid + Resources 由 origin/develop 授权。
+- **INV-3 Immutable Review**：Cleaner 只能 CLEAN 明确 immutable commit，不能 CLEAN working tree。
+- **INV-4 Review Freshness**：任何 substantive change 使旧 CLEAN 自动失效；不保存 STALE。
+- **INV-5 Owner Binding**：Owner ACCEPTED 必须绑定当前 CLEAN review target。
+- **INV-6 Delivery Binding**：Delivery PASS 必须绑定 current review target + exact develop base；develop 前进后旧 PASS 不再 Merge Ready。
+- **INV-7 Evidence Snapshot Integrity**：Contract Approval、Cleaner Review、Delivery Verification 都必须绑定明确 immutable Evidence Snapshot；Evidence Snapshot 之后只允许该阶段定义的 neutral metadata tail，任何超出白名单的变化都会使对应验证结果失效。
 
-- **Deliverer Gate**：`WAITING_FOR_OWNER_ACCEPTANCE → DELIVERING` 仅当 `review.status=CLEAN` + `owner_verification ∈ {ACCEPTED, NOT_REQUIRED}` + 资源有效 + Owner 主动进入。
-- **Resource Gate**：`APPROVED → IMPLEMENTING` 仅当 Contract APPROVED + Design 同步 + 所需资源经 Registry 权威验证有效。
-- 无效状态由 Validator 拒绝：`DELIVERING + owner_verification=PENDING`、`IMPLEMENTING + 必需 migration Reservation 缺失`、`CLEAN + review.target 已改`、`DONE + delivery 未 PASS`。
+## 8. Handoff Contract
 
-## 8. Validator
+Handoff = 真正交班（当前角色完成或终止本轮职责，把控制权交给另一个角色）。正常一个 Session 只产生一次最终 Handoff。Gate 是 Handoff 前的机械出站检查。
 
-- 独立轻量 Go CLI **`cmd/workflow-check`**，与业务运行二进制 `my-shop` 分离，使用 `gopkg.in/yaml.v3` 结构化解析。
-- 只读：不修改 `state.yaml`、Registry 或任何 Workflow Artifact；不承担 Orchestrator 职责；不做角色派发。
-- **校验内容（V1，仅当前状态与 Gate）**：
-  - `state.yaml` schema 合法、`phase` 属 13 值、子字段枚举合法；
-  - 当前 phase 与正交子字段组合合法（INV-001～INV-010）；
-  - 当前 Gate 满足（Resource Gate、Deliverer Gate）；
-  - Review Validity：CLEAN 是否因 Review Target 后实质变化而客观 STALE（`expected STALE, actual CLEAN`）；
-  - Resource Authority：Reservation 是否由 shared `develop` Registry 真实授权；
-  - 非法当前状态：`DELIVERING + owner_verification=PENDING`、`DONE + delivery.status != PASS`（有 Deliverer 路径时）等；
-  - Transition Authority 表作为 Workflow Protocol 的规范一致性（存在、每条唯一 Decision Authority、`Decision Authority != File Writer`）。
-- **不负责（V1）**：不证明历史上每一次 phase transition 实际按合法顺序发生，也不根据当前状态快照证明实际执行者身份；仅凭当前 `state.yaml` 无法形成可信 Transition History / Actor Authenticity。
-- exit code：`0` = 全部合法；`1` = 无效状态 / 不变量 / Gate 不满足 / review validity 失效；`2` = 运行错误，失败原因可定位。
-- 对无 `state.yaml` 的 Legacy Task 跳过（不判违规）。
+正常 Handoff 必须：该提交的已 commit、该 push 的已 push、working tree clean、明确 Git SHA、`REMOTE_SYNCED=YES`、`NEXT_ROLE` 与 `NEXT_ACTION` 必填。仅阻塞退出可例外（`RESULT=BLOCKED`）。
 
-**规范与执行的边界**：Transition Authority 与合法 Transition Table 是 State Machine V1 的**规范事实**；V1 Validator 校验当前状态与 Gate 的合法性。对状态变化请求进行真正的 runtime transition enforcement，属于未来唯一状态写入口 / `agentctl` Orchestrator 的职责，不在本任务 Scope。
+Handoff 禁止携带：上一个 Agent 的完整思维过程、聊天历史、大量源代码、对下一角色结论的诱导。
 
-## 9. Cutover Rule
+## 9. Global Registry 资源授权
 
-- State Machine V1 生效 commit（`agent-workflow-state-machine-v1` 合入 `develop` 的 commit）之后创建的新 Task：必须包含合法 `state.yaml`。
-- 生效前已有 Task：Legacy 语义，不因缺 `state.yaml` 判违规；Validator 跳过。
-- 历史回填另立 Task。
+- 状态：`RESERVED`（Reservation 已落到共享 `develop`、Feature 未合并）/ `ACTIVE`（已合并）/ `RELEASED`（取消释放）。
+- `Task State records the fact; shared develop Registry authorizes the fact.` Feature 内私自声明 `RESERVED` 不产生全局授权。
+- Analyst 是 Reservation 的语义负责人；Owner 是 Shared Registry Mutation Authority。
+- Reservation 流程是 Owner Checkpoint（`WAITING_FOR_OWNER_ACTION`），Analyst 验证 `origin/develop` Registry 真正含 `RESERVED/ACTIVE` 且 owner 正确后才 HANDOFF Coder。
+- migration version 一经分配永久 tombstone、不得复用；错误码域仅纯 `RESERVED` 阶段可 `RELEASE` 后复用。
 
-## 10. 业务不变量
+## 10. Validator 边界
 
-- INV-001：`state.yaml.phase` 是 Task 阶段判定的唯一权威；无 Markdown 首行 / Git HEAD 唯一来源路径。
-- INV-002：每条 phase 转换有且仅有一个 Decision Authority；文件写入者 ≠ Decision Authority。（规范性规则——由各角色 Prompt 遵守，非 V1 Validator 的 runtime transition enforcement）
-- INV-003：`ACCEPTED`（Contract 与 Core Logic）只能由 Owner 明确 ACCEPT/REJECT 指令驱动 Agent 机械持久化。
-- INV-004：`review.status=CLEAN` 绑定唯一 `review.target`；Cleaner 更新 `findings.md`/`core-logic.md` 不使 CLEAN 失效。
-- INV-005：自 `review.target_base` 起出现非 Review-neutral 白名单的实质变化（default-deny，不限于 `target_paths` 内）触发 Mechanical Invalidation（`CLEAN→STALE` + `phase→READY_FOR_REVIEW` + 旧 `ACCEPTED`/`delivery` 失效）；仅 Cleaner 可 `STALE→CLEAN`；无死循环。
-- INV-006：需全局资源的 Task，进 `IMPLEMENTING` 前须经 Validator 机械验证 shared `develop` Registry；`state.yaml` 不自证；Feature Branch 私留 `RESERVED` 无效。
-- INV-007：`DELIVERING` 时 `owner_verification ∈ {ACCEPTED, NOT_REQUIRED}`。
-- INV-008：`RESERVED` = 「已在共享 `develop` 生效、Feature 未合并进 `develop`」。
-- INV-009：`DONE` 时 `delivery.status=PASS`（有 Deliverer 路径）或 Owner 已最终接受（无 Deliverer 路径）。
-- INV-010：V1 生效 commit 后新 Task 必须含合法 `state.yaml`；生效前 Legacy Task 不判违规。
-- INV-011：`CLEAN→STALE` 是单向 Mechanical Downgrade——任何角色可机械持久化降级，仅 Cleaner 可升级；Validator 只读，不写 `state.yaml`/Registry/Artifact。
+- `cmd/workflow-check` 独立只读 CLI，与业务二进制 `my-shop` 分离。
+- 只读、比较、验证、`PASS/FAIL/ERROR`；禁止自动改 YAML、自动切状态、自动选 Agent、自动 reserve、自动 merge、自动修复、自动判断业务语义。
+- **不代理任何 git 写操作**；Agent 的 git 写约束属于协议/Prompt 层，shared develop 的机器级保护交给仓库 branch protection / 外部 Git 控制能力。
+- 对 `schema_version != 2` 的任务调用 gate → `ERROR`（exit 2）。
 
-## 11. 一致性模型与失败语义
+## 11. Legacy 策略
 
-- 事实来源：`state.yaml` 是「当前状态」唯一事实源；Git 是持久化与审计层。
-- 转换成功 = `state.yaml` 更新 + Validator 通过；「部分完成」不构成转换。
-- 无效状态由 Validator 拒绝；`STALE` 由 `git diff` 机械推导（default-deny 白名单）+ 只读检测 `expected STALE, actual CLEAN`。
-- 历史转换：V1 Validator 不校验历史 transition sequence / actor authenticity，仅校验当前状态与 Gate；乱序写入若各子字段组合合法且 Gate 满足，无法凭快照识别（由 Transition Authority 规范约束、未来 `agentctl` runtime 强制）。
-- 阻塞：`blocked.is_blocked=true` 时禁止除「解除阻塞」外的 phase 转换。
-- 资源权威：Task 状态只记录「需要什么」，Registry（`develop`）授权「是否满足」，不同源杜绝自证。
-- 冲突：并行任务按 task-slug 隔离各自 `state.yaml`；全局资源竞争由 Registry（Git 提交顺序 + 冲突检测）串行化。
-
-## 12. Deferred / 已知留白
-
-- 不实现完整 `agentctl` Orchestrator、不自动派发角色；`state.yaml` + 各角色交接自检 + Validator 已足够形成确定性事实。
-- **Future Extension（本任务不实现）**：未来可引入 `agentctl / controlled transition writer`，接收（current state、requested transition、actor / authority、transition table）并真正执行 allow / deny，构成可信 Transition History 与 runtime transition enforcement。本任务不实现 `agentctl`、Event Log、Orchestrator 或自动 Transition Writer。
-- Legacy 历史任务的 `state.yaml` 回填另立独立 Task。
-- `state.yaml` 若未来需要嵌套之外的复杂约束，再评估扩展，不在 V1 引入。
+- `schema_version` 缺省 / `1` → Legacy；`2` → Workflow V2。
+- 不自动回填历史 V1 Task；已有历史保留。需要迁移某具体任务时单独显式迁移。

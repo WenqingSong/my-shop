@@ -104,7 +104,7 @@ INV-002：未授权用户不能通过修改请求参数获得管理员权限。
 # Technical Contract
 
 ## Decision Status
-WAITING_FOR_OWNER_APPROVAL
+WAITING_FOR_OWNER_DECISION
 
 ## Problem
 问题和任务边界。
@@ -162,12 +162,12 @@ RECOMMENDATION：……
 任务需要全局唯一资源（错误码域、migration version）时：
 
 - 读 `.agent/registry/*`，按规则派生：错误码域 `domain_seq_next = max(已记录域序) + 1`（域序 = `code / 1000`、域区间 `[domain_seq × 1000, domain_seq × 1000 + 999]`、大小固定 1000、域内编号逐个列出；域序为正整数、不受四位数宽度限制）；migration version `next = max(所有已记录 version, 含 RELEASED) + 1`。
-- 将派生结果写入 Contract 的全局资源清单，并在 Registry 新增对应 `RESERVED` 条目（通过独立 Registry 变更进入 `develop`，不在 Feature Branch 内私留）。
-- 不得凭空自选编号；`RESERVED → ACTIVE` 由 feature 合并进 `develop` 时同步，`RESERVED → RELEASED` 在 Task 取消时标记（migration version 一经分配永不复用，错误码域仅纯 `RESERVED` 阶段可复用）。
+- 将派生结果写入 Contract 的全局资源清单，并提出 Reservation Proposal（`WAITING_FOR_OWNER_ACTION`，不是 Handoff，同 Session 继续）：告诉 Owner 需要预留的 migration / error-code domain。真正修改 shared `develop` Registry 由 Owner 执行，Analyst 不直接改 Registry。
+- 不得凭空自选编号；Owner 完成 shared develop mutation 后，Analyst `git fetch origin` 重新读取 `origin/develop` Registry，验证资源存在、owner 正确、状态 `RESERVED/ACTIVE`，通过后才 HANDOFF Coder。`RESERVED → ACTIVE` 由 feature 合并进 `develop` 时同步，`RESERVED → RELEASED` 在 Task 取消时标记（migration version 一经分配永不复用，错误码域仅纯 `RESERVED` 阶段可复用）。
 
 ## Owner 确认
 
-`analysis` 完成后保持 `WAITING_FOR_OWNER_APPROVAL`，向 Owner 只说明推荐、关键取舍、风险和需要决定的问题，然后停止。
+`analysis` 完成后保持 `WAITING_FOR_OWNER_DECISION`（Contract Decision Checkpoint，不是 Handoff，同 Session 继续），向 Owner 只说明推荐、关键取舍、风险和需要决定的问题，然后停止。
 
 `record_owner_decision` 时：
 
@@ -180,7 +180,7 @@ RECOMMENDATION：……
 
 Owner 的决定改变 Task 时，先由 Owner 或 Task Builder 更新 Task，再批准相容的 Contract。
 
-Owner 是 Contract `ACCEPTED / REJECTED` 的唯一 Decision Authority；Analyst 只是在收到 Owner 明确指令后机械持久化（File Writer ≠ Decision Authority）。记录决定时同步更新 `state.yaml` 的 `phase`（`WAITING_FOR_OWNER_APPROVAL → APPROVED` 或 `→ CONTRACT_REVISION_REQUIRED`），不得因测试通过、Cleaner `CLEAN` 或阅读聊天上下文自行推断 Owner 已接受。状态机与 Transition Authority 见 `docs/design/agent-workflow.md`。
+Owner 是 Contract `ACCEPTED / REJECTED` 的唯一 Decision Authority；Analyst 只是在收到 Owner 明确指令后机械持久化（File Writer ≠ Decision Authority）。记录决定时采用两段式提交：先 commit 最终 `contract.md`（Evidence Commit A1），再只改 `state.yaml` 写入 `contract.status=APPROVED`、`contract.target=A1`（Metadata Commit A2）。不得因测试通过、Cleaner `CLEAN` 或阅读聊天上下文自行推断 Owner 已接受。状态模型见 `docs/design/agent-workflow.md`。
 
 ## 长期 Design（`docs/design/*`）
 
@@ -201,7 +201,7 @@ Analyst 是长期 Design 内容的主责角色。Design Artifact 沉淀项目级
 - `ENVIRONMENT_GAP`：缺少验证环境或证据，补足条件，不改设计；
 - `CONTRACT_REVISION`：原设计遗漏或错误，提出修订并等待 Owner 重新确认。
 
-修订已批准 Contract 时保留原决定记录；新方案确认前将状态恢复为 `WAITING_FOR_OWNER_APPROVAL`。未经确认不覆盖原接口、不变量或一致性承诺。
+修订已批准 Contract 时保留原决定记录；新方案确认前将状态恢复为 `WAITING_FOR_OWNER_DECISION`。未经确认不覆盖原接口、不变量或一致性承诺。
 
 ## 停止条件
 

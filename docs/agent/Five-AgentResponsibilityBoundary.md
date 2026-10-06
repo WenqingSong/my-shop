@@ -1,21 +1,24 @@
-# 五角色职责边界
+# 六角色职责边界
 
 ## 1. 总则
 
-五个角色是能力分工，不是每个任务都必须走完的组织架构。
+六个角色是能力分工，不是每个任务都必须走完的组织架构。
 
 ```text
-Task Builder：定义要做什么
+TaskBuilder：定义要做什么
 Analyst：解决关键设计选择
 Coder：实现并自测
 Cleaner：独立审查实现与测试
+OwnerGate：解释核心机制并请求 Owner 决策
 Deliverer：验证重要里程碑能否真实运行
 Owner：做决定并最终接受
 ```
 
+Owner 不是第七个 Agent，而是整个 Workflow 的 **Decision Authority + Shared Repository Authority**。
+
 共享流程、状态和文件规则见 `docs/agent/AgentCollaborationSpecification.md`。各角色 Prompt 只说明本角色怎样工作，不重复整套工程制度。
 
-Task 状态机（13 值 `phase` + 正交子事实、每条转换的 Transition Authority、Review Target/CLEAN/STALE 语义、Global Registry 状态机）见 `docs/design/agent-workflow.md`；当前状态唯一机器权威源是 `.agent/tasks/<task-slug>/state.yaml`，各角色按被授权的转换机械持久化，文件写入者 ≠ Decision Authority。
+Workflow V2 状态模型（`state.yaml` schema、Evidence Snapshot / Neutral Tail、五个 Gate、INV-1 ~ INV-7、Global Registry 状态机、Handoff Contract）见 `docs/design/agent-workflow.md`。当前状态唯一机器权威源是 `.agent/tasks/<task-slug>/state.yaml`。
 
 ## 2. Owner
 
@@ -24,18 +27,18 @@ Owner 回答：我要什么、哪些重要方案可以接受、哪些核心逻�
 Owner 负责：
 
 - 决定 Goal、Scope、Out of Scope 和 Acceptance Criteria；
-- 确认复杂任务的关键方案；
-- 在目标或验收发生变化时更新任务定义；
-- 阅读核心逻辑说明，按需执行少量 Owner 验证卡；
-- 决定 P3、里程碑验收和最终接受；
-- 决定 Commit、Merge、Push 和 Deploy；
-- 接受 / 拒绝 Reservation 方案（不手工查号、编号或编排区间）。
+- 决定 Task / Branch Boundary：新任务还是延续、是否开新 feature、branch 名称与基线；
+- 确认复杂任务的关键方案（Contract Decision）；
+- 阅读核心逻辑说明，做 Core Logic Decision（ACCEPT / REJECT / 继续询问）；
+- 决定 Shared Integration：何时/如何 merge、merge 顺序、squash 方式、并行依赖；
+- 真正修改 shared develop Registry（`.agent/registry/*`）；
+- 决定 Commit、Merge、Push 和 Deploy。
 
-Owner 不必逐行代替 Cleaner Review，也不因 Agent 给出 `CLEAN` 或 `PASS` 自动接受任务。
+Owner 不修改 `contract.md`、`owner-decision.md`、`state.yaml`（由对应角色在明确指令下机械持久化）。Owner 不必逐行代替 Cleaner Review，也不因 Agent 给出 `CLEAN` 或 `PASS` 自动接受任务。
 
-## 3. Task Builder
+## 3. TaskBuilder
 
-Task Builder 回答：本次究竟交付什么，怎样判断完成？
+TaskBuilder 回答：本次究竟交付什么，怎样判断完成？
 
 负责：
 
@@ -43,12 +46,12 @@ Task Builder 回答：本次究竟交付什么，怎样判断完成？
 - 明确 Scope、Out of Scope、AC、验证要求和 Git 基线；
 - 区分事实、合理假设和需要 Owner 决定的问题；
 - 判断 Design Impact（`NONE` / `UPDATE` / `NEW`）；当为 `NEW/UPDATE` 时在 `task.md` 声明目标 Design Artifact，并纳入 Scope、Deliverables 与 AC；
-- 判断任务直接交 Coder，还是先交 Analyst；
+- 判断任务直接交 Coder，还是先交 Analyst（Complexity）；
 - 声明全局资源需求（类型 + 语义），不写具体域号 / version 号。
 
-不负责：写生产代码、替 Analyst完成复杂设计、Review 实现，或替 Owner 创造关键业务规则。
+不负责：写生产代码、替 Analyst 完成复杂设计、Review 实现，或替 Owner 创造关键业务规则。
 
-完成结果：`READY_FOR_CODER` 或 `READY_FOR_ANALYST`。
+TaskBuilder 禁止创建、删除、重命名 feature branch；目标 branch 由 Owner 预先准备。
 
 ## 4. Analyst
 
@@ -61,14 +64,14 @@ Analyst 回答：复杂问题有哪些约束，可行方案是什么，哪些性
 - 调查当前代码、配置、数据和测试；
 - 比较少量真正可行的方案并给出推荐；
 - 明确业务不变量、错误语义和验证方法；
-- 起草 `contract.md`；
-- Owner 确认后，准确记录最终决定；
-- 作为长期 Design（`docs/design/*`）内容的主责：`Design Impact = NEW/UPDATE` 时，在 Contract 经 Owner `APPROVED` 后、Coder 实现前新增/更新对应 Design Artifact；Contract Revision 经 Owner 重新 `APPROVED` 后，检查并同步受影响的 Design；
-- 读 `.agent/registry/*` 派生 next、把 `RESERVED` 条目写入 Registry 与 Contract；不得凭空自选编号。
+- 起草 `contract.md`，请求 Owner Contract Decision；
+- Owner 确认后，准确记录最终决定（两段式提交：A1 contract 内容 → A2 写 `state.contract.status=APPROVED`、`state.contract.target=A1`）；
+- 作为长期 Design（`docs/design/*`）内容的主责：`Design Impact = NEW/UPDATE` 时，在 Contract 经 Owner `APPROVED` 后、Coder 实现前新增/更新对应 Design Artifact；
+- 读 `.agent/registry/*` 派生候选资源，提出 Reservation Proposal（`WAITING_FOR_OWNER_ACTION`），并验证 Reservation 真正进入 `origin/develop`；不得凭空自选编号。
 
-不负责：修改生产代码、测试或任务目标；不能批准自己的推荐方案；也只能沉淀 Owner `APPROVED` 的设计，不得借更新 Design 私自新增未批准设计。
+不负责：修改生产代码、测试或任务目标；不能批准自己的推荐方案；不直接修改 shared Registry（由 Owner 执行）。
 
-完成结果：`WAITING_FOR_OWNER_APPROVAL`；确认后为 `APPROVED`。
+Analyst 是 Reservation 的语义负责人；Owner 是 Shared Registry Mutation Authority。
 
 ## 5. Coder
 
@@ -82,23 +85,13 @@ Coder 回答：怎样在已确定的范围和约束内完成实现？
 - 运行适用的格式化、测试、静态检查和构建；
 - 检查本次完整变更，清理调试内容和无关修改；
 - 修复 Cleaner 指定的 Finding 并提供回归证据；
-- 只使用 APPROVED Contract 中的已分配全局资源；新增需求走 `CONTRACT_REVISION`，不得自行推断编号（含 `max+1`）。
+- 只使用 APPROVED Contract 中的已分配全局资源；新增需求走 Contract Revision，不得自行推断编号（含 `max+1`）。
 
-不负责：自行改变 Task 或已确认 Contract，修改 Finding 状态，或宣布自己的实现已经 `CLEAN`。
+发起 Review Request（两段式提交）：C1（业务代码 + 测试）→ C2（只改 `state.yaml` 写入 `review.status=PENDING`、`review.target=C1`）。Cleaner 审 C1，不是 C2。
 
-长期 Design 不是 Coder 的所有物：Coder 不作为长期 Design 内容的所有者，按 Contract 实现；不得以实现便利为由擅自改变长期架构事实；实现中发现与 Contract/Design 冲突时，走 `CONTRACT_REVISION` 交 Analyst 与 Owner，而非自行改写 Design。
+不负责：自行改变 Task 或已确认 Contract、修改 Finding 状态、宣布实现 `CLEAN`、写 `owner`/`delivery` 状态。
 
-交接给 Owner 时使用简短中文，至少说明：
-
-1. 结果和状态；
-2. 完成的用户可观察行为；
-3. 实际执行的验证；
-4. 一至三个关键代码或测试入口；
-5. 已知限制或需要 Owner 决定的事项。
-
-不重复完整 Task，不罗列所有普通文件，不替 Cleaner预先写审查结论。
-
-完成结果：`READY_FOR_REVIEW`、`BLOCKED` 或 `IMPLEMENTATION_FAILED`。
+长期 Design 不是 Coder 的所有物：Coder 按 Contract 实现，不得擅自改变长期架构事实；实现中发现与 Contract/Design 冲突时，走 Contract Revision 交 Analyst 与 Owner。
 
 ## 6. Cleaner
 
@@ -112,16 +105,29 @@ Cleaner 回答：完整相关变更是否满足任务，测试是否真的能发
 - 独立运行必要验证；
 - 为真实缺陷建立稳定 Finding，并复审修复；
 - 审查测试是否验证了结果，而不是只验证 Mock 或调用次数；
-- 通过后填写 `core-logic.md`，为 Owner 整理核心逻辑和少量验证卡；
-- 三边一致性检查 Registry ↔ Contract ↔ 实现，任一漂移 → `CHANGES_REQUIRED`；不得自行改编号或放行漂移。
+- 通过后填写 `findings.md`、`core-logic.md`，并写 `state.review.status=CLEAN`（`review.target` 保持 C1 不变）；
+- 三边一致性检查 Registry ↔ Contract ↔ 实现，任一漂移 → `CHANGES_REQUIRED`。
 
-默认不修改生产代码或测试；发现问题交 Coder 修复。Cleaner 不改变任务标准，也不替 Owner 最终接受。
-
-`Design Impact = NEW/UPDATE` 时，Design Artifact 缺失、Contract Revision 后 Design 未同步等前置事实缺失 → `BLOCKED`；Design 已存在但与 APPROVED Contract 或最终实现漂移 → `CHANGES_REQUIRED`；`NONE` 不要求 Design。
+默认不修改生产代码或测试；发现问题交 Coder 修复。Cleaner 不改变任务标准，也不替 Owner 最终接受，不写 `owner` 状态（由 OwnerGate 负责）。
 
 结果：`CLEAN`、`CHANGES_REQUIRED` 或 `BLOCKED`。
 
-## 7. Deliverer
+## 7. OwnerGate
+
+OwnerGate 回答：哪些核心机制真正决定业务正确性，怎样让 Owner 高效确认？
+
+负责：
+
+- 读取 CLEAN review，提炼 1~3 个核心机制（CL-001……）；
+- 用简短中文解释给 Owner，回答 Owner 追问；
+- 请求 Owner 决策（`WAITING_FOR_OWNER_DECISION`，非 Handoff，同 Session 继续）；
+- Owner `ACCEPT / REJECT` 后，机械持久化到 `owner-decision.md` 与 `state.owner`（`owner.status` + `owner.review_target = review.target`）。
+
+不负责：改业务代码、改 Contract、改 Review 结果、自行生成 `ACCEPTED`（必须来自 Owner 明确决定）。
+
+Owner 接受的是 Cleaner 已 CLEAN 的 **这个具体 snapshot**（`review.target`）。
+
+## 8. Deliverer
 
 Deliverer 回答：已经通过审查的里程碑，能否在要求的环境中真实运行？
 
@@ -129,46 +135,40 @@ Deliverer 回答：已经通过审查的里程碑，能否在要求的环境中�
 
 负责：
 
-- 确认交付版本与 Cleaner 的审查对象一致；
-- 确认 Cleaner = `CLEAN`，且 `Design Impact = NEW/UPDATE` 时 Design Artifact 已纳入 Cleaner 的 Review Target（最小确认，不重复 Cleaner 的 Design 审查）；
+- 确认交付版本与 Cleaner 的审查对象一致（`delivery.review_target = review.target`）；
+- 记录实际参与集成验证的 feature snapshot（`feature_head`）与当时 shared develop 基线（`develop_base`）；
 - 独立验证适用的构建、启动、API 主链路和真实依赖；
 - 核对重要数据结果，而不只看 HTTP 200；
 - 在 `delivery.md` 记录环境、结果、证据、未验证项和剩余风险。
 
-不负责：修生产代码、重新做完整 Diff Review、关闭 Cleaner Finding，或替 Owner 接受。
+Deliverer 可使用临时目录、临时 worktree、detached HEAD 等本地集成环境验证 `develop_base + feature_head`，但禁止创建/推送永久 integration branch、禁止 push develop、禁止最终 merge。
 
-结果：`PASS`、`CONDITIONAL_PASS`、`FAIL` 或 `BLOCKED`。
+不负责：修生产代码、重新做完整 Diff Review、关闭 Cleaner Finding、改 Review 或 Owner Decision、替 Owner 接受。
 
-## 8. 默认交接
+结果：`PASS`、`FAIL` 或 `BLOCKED`。
 
-普通任务：
+## 9. 默认交接与 Gate
 
-```text
-Task Builder → Coder → Cleaner → Owner
-```
-
-复杂任务：
+每一角色正常 Handoff 前运行对应出口 Gate（`workflow-check gate <name> <task>`）：
 
 ```text
-Task Builder → Analyst → Owner 确认 → Coder → Cleaner → Owner
+Analyst   → gate coder-start      → HANDOFF Coder
+Coder     → gate cleaner-start    → HANDOFF Cleaner
+Cleaner   → gate owner-gate-start → HANDOFF OwnerGate
+OwnerGate → gate delivery-start   → HANDOFF Deliverer
+Deliverer → gate merge-ready      → HANDOFF Owner
 ```
 
-重要里程碑：
+实现问题退回 Coder，设计问题交 Analyst 和 Owner，任务目标变化交 Owner 或 TaskBuilder。角色完成自己的阶段后停止，不顺手接管下一角色。
 
-```text
-Cleaner CLEAN → Owner 核心验证 → Deliverer → Owner
-```
-
-实现问题退回 Coder，设计问题交 Analyst 和 Owner，任务目标变化交 Owner 或 Task Builder。角色完成自己的阶段后停止，不顺手接管下一角色。
-
-## 9. 测试与 Owner 验证分工
+## 10. 测试与 Owner 验证分工
 
 | 角色      | 关注点                                       |
 | --------- | -------------------------------------------- |
 | Coder     | 用长期保留的测试证明实现覆盖关键行为         |
 | Cleaner   | 判断测试能否识别错误实现，并选择核心验证入口 |
+| OwnerGate | 把核心机制讲清楚，请求 Owner 决策            |
 | Owner     | 通过少量代码阅读和可逆 Mutation 理解不变量   |
 | Deliverer | 在真实运行环境核验完整交付链路               |
 
 运行同一命令不代表职责重复，因为各角色回答的问题不同。没有执行的检查必须如实说明，不能写成通过。
-

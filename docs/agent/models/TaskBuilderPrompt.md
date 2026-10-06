@@ -60,12 +60,13 @@ extra_instruction: <可选>
 ├── state.yaml
 ├── findings.md
 ├── core-logic.md
+├── owner-decision.md
 └── delivery.md
 ```
 
-`<task-slug>` 使用简短英文 kebab-case。目录已存在时不覆盖；相同目标走更新模式，不同目标使用新名称。复杂任务的 `contract.md` 由 Analyst 创建。
+`<task-slug>` 使用简短英文 kebab-case。目录已存在时不覆盖；相同目标走更新模式，不同目标使用新名称。复杂任务的 `contract.md` 由 Analyst 创建；`owner-decision.md` 由 OwnerGate 创建。
 
-`state.yaml` 是任务当前状态的唯一机器权威源，其 `phase` + 子事实 schema 见 `docs/design/agent-workflow.md`。创建任务时按 `Initial Route` 写入初始 `phase`（`READY_FOR_CODER` 或 `READY_FOR_ANALYST`），子事实初始化为 `review.status=NONE`、`owner_verification.status=PENDING`、`delivery.status=NONE`、`blocked.is_blocked=false`；`required_resources` 仅在需要全局资源时声明（只声明类型与语义，不写具体编号）。
+`state.yaml` 是任务当前决策的唯一机器权威源，schema 见 `docs/design/agent-workflow.md`（Workflow V2，无 `phase`）。创建任务时写入 `schema_version: 2`、`task_id`，子事实初始化为 `contract.status=NOT_REQUIRED`（NORMAL，直接交 Coder）或 `PENDING`（COMPLEX，交 Analyst）、`review.status=NOT_REQUESTED`、`owner.status=PENDING`、`delivery.status=NOT_RUN`、`blocked.active=false`；`resources` 仅在需要全局资源时声明（只声明类型与语义，不写具体编号）。
 
 ## `task.md` 内容
 
@@ -123,7 +124,7 @@ NORMAL / COMPLEX
 - 重叠修改的区分方式：……
 
 ## Initial Route
-READY_FOR_CODER / READY_FOR_ANALYST
+交 Coder（NORMAL） / 交 Analyst（COMPLEX）
 ```
 
 没有内容的可选小节可以省略，不填充无意义的 `N/A`。
@@ -131,9 +132,10 @@ READY_FOR_CODER / READY_FOR_ANALYST
 初始化其他文件：
 
 ```text
-findings.md   → 当前没有 Findings。
-core-logic.md → 等待 Cleaner 审查后填写。
-delivery.md   → 当前尚未进入交付验收。
+findings.md       → 当前没有 Findings。
+core-logic.md     → 等待 Cleaner 审查后填写。
+owner-decision.md → 等待 OwnerGate 决策后填写。
+delivery.md       → 当前尚未进入交付验收。
 ```
 
 ## 编写 AC
@@ -158,9 +160,9 @@ AC-002：增加 IsAdmin 判断。
 
 ## 判断复杂度
 
-默认使用 `NORMAL → READY_FOR_CODER`。
+默认使用 `NORMAL → 交 Coder`（`contract.status = NOT_REQUIRED`）。
 
-存在下列关键问题时使用 `COMPLEX → READY_FOR_ANALYST`：
+存在下列关键问题时使用 `COMPLEX → 交 Analyst`：
 
 - 重要架构、数据模型或公开协议选择；
 - 事务、库存、并发或跨系统一致性；

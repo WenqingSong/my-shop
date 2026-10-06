@@ -30,22 +30,28 @@ extra_instruction: <可选>
 
 ## 开始关口
 
-Deliverer 只消费合法 Control Plane 状态（`.agent/tasks/<task-slug>/state.yaml` + 各 Evidence Artifact），不做二次决策：不得替 Owner ACCEPT、不得要求 Owner 手工改文件、不得要求额外交付授权、不得自行解释 `owner_verification=PENDING`「其实已经通过」。Gate 不满足 → `BLOCKED`；Gate 满足 → 必须进入真正里程碑验收，不得继续以旧规则阻塞。
+Deliverer 只消费合法 Control Plane 状态（`.agent/tasks/<task-slug>/state.yaml` + 各 Evidence Artifact），不做二次决策：不得替 Owner ACCEPT、不得要求 Owner 手工改文件、不得自行解释 `owner.status=PENDING`「其实已经通过」。开始前运行出口 Gate：`workflow-check gate delivery-start <task>`。Gate 不满足 → `BLOCKED`；Gate 满足 → 必须进入真正里程碑验收。
 
-开始前必须确认（机器可判的 Deliverer Gate）：
+`delivery-start` 要求（机器可判）：
 
-- Coder 已完成当前 Task；
-- Cleaner 对当前版本给出 `CLEAN`，且无开放 P0/P1/P2；
-- `state.yaml.owner_verification.status` 为 `NOT_REQUIRED` 或 `ACCEPTED`；为 `PENDING` 时必然 `BLOCKED`（Owner 尚未完成核心逻辑确认）；
-- Owner 主动进入 Deliverer（即要求进入里程碑验收）；`milestone` 从 `task.md` 的 `Milestone` 字段稳定读取；
-- 复杂任务的 Contract 为 `APPROVED`；
-- `Design Impact = NEW/UPDATE` 时，Design Artifact 已纳入 Cleaner 的 Review Target（仅确认已纳入，不重复 Cleaner 的 Design 审查）；
-- 待验收代码、测试、配置和迁移与 Cleaner 的 Review Target 一致；
-- Owner Mutation 已恢复，工作区处于正确实现状态。
+- `blocked.active == false`；
+- Contract 有效（`APPROVED` 或 `NOT_REQUIRED`）；
+- Resources 已在 `origin/develop` 授权；
+- `review.status == CLEAN` 且 CLEAN Validity PASS；
+- `owner.status == ACCEPTED` 且 `owner.review_target == review.target`；
+- `handoffReady`：非 detached、working tree clean、`origin/<feature>` 存在、local HEAD == remote feature HEAD。
 
-当 `state.yaml.owner_verification.status = ACCEPTED` 且 `Cleaner = CLEAN` 时，Owner 主动调用 Deliverer 即进入里程碑验收，不再要求额外的交付授权（Delivery Authorization）；无需核心逻辑验证的任务（`NOT_REQUIRED`）同样直接进入验收。
+Deliverer 记录三个不可变 SHA 后构造临时集成环境验证：
 
-任一条件不满足时输出 `BLOCKED`。代码在 `CLEAN` 后发生实质变化，先交 Cleaner 复审。
+```yaml
+delivery:
+  status: PASS | FAIL | BLOCKED
+  review_target: <review.target>
+  feature_head: <实际参与集成验证的 feature snapshot>
+  develop_base: <验证时的 origin/develop>
+```
+
+Deliverer 可在临时目录 / 临时 worktree / detached HEAD 验证 `develop_base + feature_head`，但禁止创建/推送永久 integration branch、禁止 push develop、禁止最终 merge。代码在 `CLEAN` 后发生实质变化，先交 Cleaner 复审。
 
 ## 成功标准
 
@@ -129,7 +135,7 @@ HTTP 200 本身不证明业务成功。根据 Task 检查实际写入、拒绝�
 
 区分 Deliverer 本次执行的证据、Cleaner 的审查结论、Coder 的自验和无法验证的推断。
 
-没有执行的适用检查记录为 `NOT_EXECUTED`，说明原因和风险。若缺失的是核心交付要求，不能使用 `PASS` 或 `CONDITIONAL_PASS` 掩盖。
+没有执行的适用检查记录为 `NOT_EXECUTED`，说明原因和风险。若缺失的是核心交付要求，不能使用 `PASS` 掩盖。
 
 ## 失败分类
 
@@ -143,11 +149,10 @@ Deliverer 不建立第二套 Finding 台账，不通过降低验收标准或改�
 ## 结果状态
 
 - `PASS`：所有关键交付检查都有本次证据并通过，无已知阻塞问题。
-- `CONDITIONAL_PASS`：核心验收全部通过，只剩明确非阻塞检查因客观条件未执行；列出风险交 Owner 决定。
 - `FAIL`：已有证据证明交付物不满足里程碑要求。
 - `BLOCKED`：开始条件、环境、权限或关键证据不足，无法形成可靠结论。
 
-以上状态都不等于 Owner 最终接受项目。
+以上状态都不等于 Owner 最终接受项目。未执行的检查记录为 `NOT_EXECUTED`，不引入 `CONDITIONAL_PASS` 掩盖核心检查缺失。
 
 ## `delivery.md`
 
@@ -183,7 +188,7 @@ Deliverer 不建立第二套 Finding 台账，不通过降低验收标准或改�
 - ……
 
 ## Result
-PASS / CONDITIONAL_PASS / FAIL / BLOCKED
+PASS / FAIL / BLOCKED
 ```
 
 不涉及的依赖和检查不要填空表。未演练的恢复或回滚不能写成已验证。
@@ -205,7 +210,7 @@ PASS / CONDITIONAL_PASS / FAIL / BLOCKED
 使用中文，结论先行，只保留 Owner 决策所需内容：
 
 ```markdown
-## 交付结果：通过 / 条件通过 / 失败 / 阻塞
+## 交付结果：通过 / 失败 / 阻塞
 
 - 交付对象：<版本或制品>
 - 已验证：<构建、主链路和最终数据的关键结果>
@@ -214,7 +219,7 @@ PASS / CONDITIONAL_PASS / FAIL / BLOCKED
 - 证据：已写入 delivery.md
 - 下一步：Owner 最终决定 / 返回 Coder-Cleaner / 交 Analyst-Owner / 补足环境
 
-状态：PASS / CONDITIONAL_PASS / FAIL / BLOCKED
+状态：PASS / FAIL / BLOCKED
 ```
 
 不要在聊天中复制完整测试日志、全部请求响应或整个 `delivery.md`。完成报告后停止，不替 Owner 宣布接受、Commit、Merge、Push 或 Deploy。
