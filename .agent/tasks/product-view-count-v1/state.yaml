@@ -3,7 +3,7 @@ task_id: product-view-count-v1
 
 contract:
   status: APPROVED
-  target: "a32855072375a2013307a9d3bfaa18b0ca14c229"
+  target: "edfa74c3aebd2231c52fc1f0ce98014f16842fc3"
 
 resources:
   # 需要：1 个 migration（products.view_count 浏览量计数字段），version 由 Analyst 读 .agent/registry/migrations.md 派生为 20261001000012。
