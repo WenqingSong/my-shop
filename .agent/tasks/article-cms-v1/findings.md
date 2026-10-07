@@ -10,6 +10,11 @@
 - 关键资源：错误码域 `16000-16999`（域序 16，article-cms-v1）；migration `20261001000017_articles.up.sql`（articles + article_likes + article_favorites 三表）。
 - Registry 权威态：`origin/develop` 已含 `16000-16999 | article-cms-v1 | RESERVED` 与 `20261001000017 | articles | article-cms-v1 | RESERVED`（本地 feature 分支 registry 文件为基线的陈旧态，非漂移）。
 
+### 复审（CLEAN-001）
+
+- 复审对象：Coder 修复 commit `496dcd060832b17d2f27bf0232e22199e1b32e75`（「修正迁移测试表数量注释」），仅改 `internal/migrations/migrations_test.go` 3 处注释。
+- 复审结论：修复正确（表数 27、`expectedSchema` 描述 19 表与实际一致）；无代码逻辑/断言/迁移变更；`go test ./internal/migrations/...` 通过；属 review-neutral 修复，`review.target` 保持 `f4411fc` 不变，先前 `CLEAN` 仍有效。
+
 ## Result
 
 CLEAN
@@ -50,7 +55,7 @@ CLEAN
 ### CLEAN-001：migrations_test.go 表数量注释过时
 
 - Severity：P3
-- Status：OPEN
+- Status：CLOSED
 - Location：`internal/migrations/migrations_test.go:19`（注释写「23 张业务表」，实际 27）、`:145`（「21 张业务表」）、`:365`（`expectedSchema` 说明未提及 articles）
 - AC / Invariant：无（不影响行为）
 - Trigger：阅读注释
@@ -59,3 +64,4 @@ CLEAN
 - Impact：仅误导维护者，不影响测试断言或运行
 - Evidence：`businessTables` 含 27 项，注释写 23/21
 - Required Fix Boundary：同步注释中的表数（可由 Owner 决定是否处理，不阻塞 CLEAN）
+- 复审结论（commit `496dcd0`）：修复仅改 3 处注释——`businessTables` 23→27、`TestUpCreatesSchemaAndIsIdempotent` 21→27、`expectedSchema` 描述补全为「baseline 7 表 + orders/order_items + reviews + flash_sale 3 表 + favorites/product_likes/banners + articles 3 表」（合计 19，与实际 `tableSpec` 一致）。无代码逻辑、断言或迁移变更；`go test ./internal/migrations/...` 通过。属 review-neutral 修复，`review.target` 保持 `f4411fc` 不变，先前 `CLEAN` 仍有效。
