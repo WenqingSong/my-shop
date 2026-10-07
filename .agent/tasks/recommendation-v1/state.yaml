@@ -1,0 +1,32 @@
+schema_version: 3
+task_id: recommendation-v1
+
+contract:
+  status: APPROVED
+  target: "0f54b9306a0d9bba6900177495fb87453b90f1af"
+
+resources:
+  reservations:
+    migration_version:
+      - "20261001000016"
+    error_code_domain:
+      - "15000-15999"
+
+review:
+  status: NOT_REQUESTED
+  target: ""
+
+owner:
+  status: PENDING
+  review_target: ""
+
+delivery:
+  status: NOT_RUN
+  review_target: ""
+  feature_head: ""
+  develop_base: ""
+
+blocked:
+  active: false
+  by: ""
+  reason: ""
