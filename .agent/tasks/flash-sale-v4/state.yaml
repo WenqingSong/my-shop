@@ -12,7 +12,7 @@ resources:
 
 review:
   status: PENDING
-  target: "ef200bda5defb6a79541a631dfdf0fa87f2abbcf"
+  target: "e2a4617a601b87cd5dd6a80ea448ce61bff9716e"
 
 owner:
   status: PENDING
