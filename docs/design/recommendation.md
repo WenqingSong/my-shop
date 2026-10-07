@@ -45,6 +45,8 @@
 
 前台查询 `ORDER BY sort ASC, id ASC`：`sort` 升序为主序，同值按 `id` 升序兜底，保证稳定确定性排序。`sort` 允许重复，无需唯一约束。
 
+后台调整排序为**全量重排**：`PUT /admin/recommend-positions/:id/items/sort` 提交的有序 `product_ids` 必须恰好覆盖该推荐位全部已加入商品（集合相等，无缺漏/多余/重复），按提交顺序全量写入 `sort`；不一致返回 15006。
+
 ## 3. 商品可售性与过滤规则
 
 - 添加推荐商品时仅校验「商品存在」（`service.Product().Exists`，不存在 → 4001 404、无写入），不限制商品状态；`draft`/`off_shelf` 商品可提前配置进推荐位。
@@ -59,6 +61,7 @@
 - INV-004（商品加入有效性）：添加推荐商品前仅校验「商品存在」，不存在被拒（复用 4001）且无写入；前台只展示 on_shelf。
 - INV-005（下架不物理删除关系）：商品下架后 `recommend_items` 关系保留，前台查询过滤、后台查询仍可见。
 - INV-006（删除级联）：物理删除推荐位后，其全部 `recommend_items` 一并删除（FK CASCADE），不留孤儿。
+- INV-007（全量重排覆盖）：调整排序提交的 `product_ids` 必须恰好覆盖该推荐位全部已加入商品（集合相等、无缺漏/多余/重复），否则被拒（15006）且不产生任何 `sort` 写入；成功时按提交顺序全量写入 `sort`（原子）。
 
 ## 5. 一致性模型与失败语义
 
@@ -67,8 +70,9 @@
 - 添加商品成功 = 单条 `INSERT recommend_items`；先校验商品存在（复用 4001）→ 写关系；重复（1062 on uk_position_product）→ 15005。
 - 更新推荐位：先按 `id` 查存在性（不存在 → 15001 404），不依据 `RowsAffected` 判断存在性（幂等保存），`code` 不可变。
 - 删除推荐位：条件删除 + 核对 `RowsAffected`（=0 → 15001 404）；级联删除 items 由 FK CASCADE 保证。
+- 调整排序：先校验推荐位存在（不存在 → 15001 404），再校验提交的 `product_ids` 集合与推荐位现有商品集合相等（缺漏/多余/重复 → 15006 409），通过后在同一事务内按提交顺序全量写入 `sort`（原子，不产生部分写入）；空推荐位提交空列表 → 幂等成功（no-op）。
 - 前台查询：推荐位不存在或 `status=0` → 返回空 items（`code:0`、`items:[]`，不区分「不存在」与「禁用」，避免向公开接口泄露内部状态）；DB 技术错误 → 1000（500）。
-- 失败语义：未认证 401、无权限 403、不存在 404（15001/15004）、重复 409（15002/15005）、非法输入 400（15003），均无写入；DB 技术错误统一 1000（500），不泄漏底层细节。
+- 失败语义：未认证 401、无权限 403、不存在 404（15001/15004）、重复/冲突 409（15002/15005/15006）、非法输入 400（15003），均无写入；DB 技术错误统一 1000（500），不泄漏底层细节。
 
 ## 6. 安全与权限边界
 
@@ -80,7 +84,7 @@
   - `DELETE /admin/recommend-positions/:id` → `recommend:delete`（物理删除 + 级联）
   - `POST /admin/recommend-positions/:id/items` → `recommend:item`（添加商品）
   - `DELETE /admin/recommend-positions/:id/items/:product_id` → `recommend:item`（移除商品）
-  - `PUT /admin/recommend-positions/:id/items/sort` → `recommend:item`（调整排序）
+  - `PUT /admin/recommend-positions/:id/items/sort` → `recommend:item`（全量重排，`product_ids` 必须覆盖全部已加入商品）
 - 权限 code（seed 登记 `internal/boot/seed.go`）：`recommend:create`、`recommend:update`、`recommend:delete`、`recommend:item`。
 - 身份信任：后台写仅管理员（含超管 `IsSuper` 放行），经 `RequirePermission`；前台公开接口无需身份。
 
@@ -93,6 +97,7 @@
 | 15003 | RECOMMEND_INVALID_INPUT（code/name/sort/status/product_id 非法） | 400 |
 | 15004 | RECOMMEND_ITEM_NOT_FOUND（推荐商品关系不存在） | 404 |
 | 15005 | RECOMMEND_ITEM_DUPLICATE（同一推荐位重复添加同一商品） | 409 |
+| 15006 | RECOMMEND_ITEM_SORT_MISMATCH（排序商品列表与现有商品集合不一致，须覆盖全部已加入商品） | 409 |
 
 复用：`4001`（商品不存在，404）、`1001`（参数格式兜底，400）、`1002`（401）、`1003`（403）、`1000`（500）。
 
