@@ -38,14 +38,15 @@ RECOMMENDATION：沿 `banner-v1`（单表 CRUD/权限/排序语义）+ `flash_sa
 
 ## Selected Design
 
-Owner 已确认（2026-10-07）四项关键设计，作为本任务权威约束：
+Owner 已确认（2026-10-07）五项关键设计，作为本任务权威约束：
 
 1. **商品加入边界**：添加推荐商品时仅校验「商品存在」（复用 `CodeProductNotFound` 4001），不限制 on_shelf；`draft`/`off_shelf` 商品可提前配置进推荐位。前台 `GET /recommendations/:code` 永远只返回 `products.status=on_shelf` 的商品。
 2. **删除语义**：推荐位支持物理删除（`DELETE`，FK `ON DELETE CASCADE` 清空 `recommend_items`）；同时保留 `status=0` 禁用用于临时下线（关系保留、前台不返回、后台可见）。
 3. **权限粒度**：`recommend:update` 管理推荐位本身（名称/状态，不改变 code）；`recommend:item` 管理推荐商品（添加/移除/调整排序）；另有 `recommend:create`、`recommend:delete`。后台读沿用「仅 AdminAuth、无读权限」。
 4. **前台返回结构**：`GET /recommendations/:code` 返回推荐位元信息（`code`/`name`）+ 商品实时快照列表（JOIN `products`，快照 `product_id`/`name`/`main_image`/`price`/`sort`），仅 on_shelf，按 `sort,id` 稳定排序。
+5. **调整排序（全量重排）**：`PUT /admin/recommend-positions/:id/items/sort` 提交的有序 `product_ids` **必须覆盖该推荐位全部已加入商品**（集合相等，无缺漏/多余/重复），按提交顺序全量写入 `sort`；不一致 → 15006 409。
 
-数据模型、API 契约、错误码域（15000-15999，5 个 code）、权限 seed 与全局资源见 `Interfaces and Data` 与 `Business Invariants`。
+数据模型、API 契约、错误码域（15000-15999，6 个 code）、权限 seed 与全局资源见 `Interfaces and Data` 与 `Business Invariants`。
 
 ## Interfaces and Data
 
@@ -94,7 +95,7 @@ CREATE TABLE recommend_items (
 - `DELETE /admin/recommend-positions/:id`（`recommend:delete`，物理删除 + 级联 items）
 - `POST /admin/recommend-positions/:id/items`（`recommend:item`，添加商品，body `{product_id, sort?}`）
 - `DELETE /admin/recommend-positions/:id/items/:product_id`（`recommend:item`，移除商品）
-- `PUT /admin/recommend-positions/:id/items/sort`（`recommend:item`，调整排序，body 有序 `product_id` 列表）
+- `PUT /admin/recommend-positions/:id/items/sort`（`recommend:item`，全量重排，body `{product_ids: []}` 有序列表，**必须覆盖该推荐位全部已加入商品**：集合相等、无缺漏/多余/重复，按提交顺序写入 `sort`）
 
 ### 错误码域（15000-15999，域序 15）
 
@@ -105,6 +106,7 @@ CREATE TABLE recommend_items (
 | 15003 | CodeRecommendInvalidInput | 参数非法（code/name/sort/status/product_id） | 400 |
 | 15004 | CodeRecommendItemNotFound | 推荐商品关系不存在 | 404 |
 | 15005 | CodeRecommendItemDuplicate | 同一推荐位重复添加同一商品 | 409 |
+| 15006 | CodeRecommendItemSortMismatch | 排序商品列表与推荐位现有商品集合不一致（未覆盖全部已加入商品/含多余/含重复） | 409 |
 
 复用：`4001`（商品不存在）、`1001`（参数格式兜底）、`1002`（401）、`1003`（403）、`1000`（500）。
 
@@ -125,6 +127,7 @@ CREATE TABLE recommend_items (
 - INV-004（商品加入有效性）：添加推荐商品前仅校验「商品存在」（draft/on_shelf/off_shelf 均可加入），不存在被拒（复用 4001）且无写入；前台只展示 on_shelf。
 - INV-005（下架不物理删除关系）：商品下架后 `recommend_items` 关系保留，前台查询过滤、后台查询仍可见。
 - INV-006（删除级联）：物理删除推荐位后，其全部 `recommend_items` 一并删除（FK CASCADE），不留孤儿。
+- INV-007（全量重排覆盖）：调整排序提交的 `product_ids` 必须恰好覆盖该推荐位全部已加入商品（集合相等、无缺漏/多余/重复），否则被拒（15006）且不产生任何 `sort` 写入；成功时按提交顺序全量写入 `sort`（原子）。
 
 ## Failure and Consistency Semantics
 
@@ -133,8 +136,9 @@ CREATE TABLE recommend_items (
 - 添加商品成功 = 单条 `INSERT recommend_items`；校验商品存在（复用 4001）→ 写关系；重复（1062 on uk_position_product）→ 15005。
 - 更新推荐位：先按 `id` 查存在性（不存在 → 15001 404），不依据 `RowsAffected` 判断存在性（幂等保存），`code` 不可变。
 - 删除推荐位：条件删除 + 核对 `RowsAffected`（=0 → 15001 404）；级联删除 items 由 FK CASCADE 保证。
+- 调整排序：先校验推荐位存在（不存在 → 15001 404），再校验提交的 `product_ids` 集合与推荐位现有商品集合相等（缺漏/多余/重复 → 15006 409），通过后在同一事务内按提交顺序全量写入 `sort`（原子，不产生部分写入）；空推荐位提交空列表 → 幂等成功（no-op）。
 - 前台查询：推荐位不存在或 `status=0` → 返回空 items（`code:0`、`items:[]`，不区分「不存在」与「禁用」，避免向公开接口泄露内部状态）；DB 技术错误 → 1000（500）。
-- 失败语义：未认证 401、无权限 403、不存在 404（15001/15004）、重复 409（15002/15005）、非法输入 400（15003），均无写入；DB 技术错误统一 1000（500），不泄漏底层细节。
+- 失败语义：未认证 401、无权限 403、不存在 404（15001/15004）、重复/冲突 409（15002/15005/15006）、非法输入 400（15003），均无写入；DB 技术错误统一 1000（500），不泄漏底层细节。
 
 ## Allowed / Forbidden Changes
 
@@ -151,6 +155,7 @@ CREATE TABLE recommend_items (
 - INV-004 → 集成（MySQL）：添加不存在商品被拒（4001）且无写入；draft/off_shelf 商品可加入但前台不展示。
 - INV-005 → 集成（MySQL）：商品下架后关系保留、前台不返回、后台仍可见。
 - INV-006 → 集成（MySQL）：删除推荐位后 `recommend_items` 级联删除。
+- INV-007 → 集成（MySQL）：提交不全/多余/重复的 `product_ids` 排序列表被拒（15006）且无 `sort` 写入；提交恰好覆盖全部商品的列表后，前台按新顺序返回。
 - AC-001/AC-009 → 迁移幂等 + `migrations_test.go`（`latestMigrationVersion`/`businessTables`/`expectedSchema`）+ `docs/design/recommendation.md` 与实现一致。
 - 通用：`gofmt`、`go build ./...`、`go vet ./...`、`go test -p 1 ./...`；MySQL/Redis 容器就绪。
 
@@ -167,5 +172,7 @@ CREATE TABLE recommend_items (
   2. 删除语义 → 支持物理删除；FK CASCADE 清推荐关系；同时保留 disabled 用于临时下线。
   3. 权限 → `recommend:update` 管推荐位本身，`recommend:item` 管推荐商品。
   4. 前台接口 → 返回推荐位元信息 + 商品实时快照。
+- 2026-10-07，Owner 追加第五项（Contract Revision）：
+  5. 调整排序 → 提交的 `product_ids` 必须覆盖该推荐位全部已加入商品（全量重排），校验语义与错误码已固化（15006 `CodeRecommendItemSortMismatch`，409）。
 - 适用范围：本任务 recommendation-v1 全部实现；不改变既有模块公开接口与错误语义。
-- 与 Task 兼容性：四项均落在 Task AC 允许范围内（AC-002 删除/禁用、AC-005 存在性校验、AC-008 权限、AC-006 前台查询），无需修改 Task。
+- 与 Task 兼容性：五项均落在 Task AC 允许范围内（AC-002 删除/禁用、AC-005 存在性校验、AC-008 权限、AC-006 前台查询、AC-003 调整排序），无需修改 Task。
