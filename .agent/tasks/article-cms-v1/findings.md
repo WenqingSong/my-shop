@@ -13,7 +13,8 @@
 ### 复审（CLEAN-001）
 
 - 复审对象：Coder 修复 commit `496dcd060832b17d2f27bf0232e22199e1b32e75`（「修正迁移测试表数量注释」），仅改 `internal/migrations/migrations_test.go` 3 处注释。
-- 复审结论：修复正确（表数 27、`expectedSchema` 描述 19 表与实际一致）；无代码逻辑/断言/迁移变更；`go test ./internal/migrations/...` 通过；属 review-neutral 修复，`review.target` 保持 `f4411fc` 不变，先前 `CLEAN` 仍有效。
+- 复审结论：修复正确（表数 27、`expectedSchema` 描述 19 表与实际一致）；无代码逻辑/断言/迁移变更；`go test ./internal/migrations/...` 通过。
+- `review.target` 前移：因 `migrations_test.go` 属测试文件、不在 review-neutral 白名单内（INV-4 default-deny），`review.target` 由 `f4411fc` 前移至 `496dcd0`（= C1 实现 + 注释修复的最终实现证据），使 `496dcd0..HEAD` 之间仅剩 review-neutral artifacts。
 
 ## Result
 
@@ -64,4 +65,4 @@ CLEAN
 - Impact：仅误导维护者，不影响测试断言或运行
 - Evidence：`businessTables` 含 27 项，注释写 23/21
 - Required Fix Boundary：同步注释中的表数（可由 Owner 决定是否处理，不阻塞 CLEAN）
-- 复审结论（commit `496dcd0`）：修复仅改 3 处注释——`businessTables` 23→27、`TestUpCreatesSchemaAndIsIdempotent` 21→27、`expectedSchema` 描述补全为「baseline 7 表 + orders/order_items + reviews + flash_sale 3 表 + favorites/product_likes/banners + articles 3 表」（合计 19，与实际 `tableSpec` 一致）。无代码逻辑、断言或迁移变更；`go test ./internal/migrations/...` 通过。属 review-neutral 修复，`review.target` 保持 `f4411fc` 不变，先前 `CLEAN` 仍有效。
+- 复审结论（commit `496dcd0`）：修复仅改 3 处注释——`businessTables` 23→27、`TestUpCreatesSchemaAndIsIdempotent` 21→27、`expectedSchema` 描述补全为「baseline 7 表 + orders/order_items + reviews + flash_sale 3 表 + favorites/product_likes/banners + articles 3 表」（合计 19，与实际 `tableSpec` 一致）。无代码逻辑、断言或迁移变更；`go test ./internal/migrations/...` 通过。`migrations_test.go` 不在 review-neutral 白名单内，故 `review.target` 前移至 `496dcd0`（最终实现证据），先前 `CLEAN` 结论对此新 target 继续有效。
