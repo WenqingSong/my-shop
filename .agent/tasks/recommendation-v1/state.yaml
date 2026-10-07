@@ -13,7 +13,7 @@ resources:
       - "15000-15999"
 
 review:
-  status: PENDING
+  status: CLEAN
   target: "777212983e7ce43974cba9b0b65ada9d2dc88cc1"
 
 owner:
