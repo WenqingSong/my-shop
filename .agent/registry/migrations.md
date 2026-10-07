@@ -40,3 +40,4 @@
 | 20261001000015 | flash_sale_order_requests | flash-sale-v3 | RESERVED | flash_sale_order_requests 异步下单请求表 |
 | 20261001000016 | recommend | recommendation-v1 | RESERVED | recommend_positions + recommend_items 推荐位两表 |
 | 20261001000017 | articles | article-cms-v1 | RESERVED | articles + article_likes + article_favorites 文章三表 |
+| 20261001000018 | flash_sale_request_audits | flash-sale-v4 | RESERVED | flash_sale_request_audits 秒杀请求人工修复审计表 |
