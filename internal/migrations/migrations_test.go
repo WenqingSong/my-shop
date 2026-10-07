@@ -276,7 +276,7 @@ func TestUpFailsFastAndMarksDirty(t *testing.T) {
 	db := setupCleanDB(t)
 
 	migrationFS = sourceWithExtra(map[string]string{
-		"20261001000014_broken.up.sql": "THIS IS NOT VALID SQL;",
+		"20261001000015_broken.up.sql": "THIS IS NOT VALID SQL;",
 	})
 
 	if err := Up(ctx); err == nil {
@@ -292,7 +292,7 @@ func TestUpFailsFastAndMarksDirty(t *testing.T) {
 	}
 
 	// force 恢复 dirty。
-	if err := Force(ctx, uint(20261001000014)); err != nil {
+	if err := Force(ctx, uint(20261001000015)); err != nil {
 		t.Fatalf("force recover: %v", err)
 	}
 	if dirtyState(t, db) {
