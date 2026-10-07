@@ -4,6 +4,7 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/address"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/article"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/banner"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/cart"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
@@ -37,6 +38,7 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	favoriteCtrl := favorite.NewV1()
 	likeCtrl := like.NewV1()
 	bannerCtrl := banner.NewV1()
+	articleCtrl := article.NewV1()
 
 	// 前台公开接口：注册、登录、刷新、分类查询、商品查询、轮播图列表（无需 token）。
 	root.POST("/register", iamCtrl.Register)
@@ -52,6 +54,10 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	root.GET("/likes/count", likeCtrl.Count)
 	// 公开轮播图列表（无需 token，仅返回启用项）。
 	root.GET("/banners", bannerCtrl.List)
+	// 公开文章列表/详情/点赞数（无需 token）。
+	root.GET("/articles", articleCtrl.List)
+	root.GET("/articles/:id", articleCtrl.Detail)
+	root.GET("/articles/:id/like/count", articleCtrl.LikeCount)
 
 	// 前台登录用户接口：/me、收货地址、购物车与会话管理均需要认证 + 会话有效性校验。
 	root.Group("/", func(user *ghttp.RouterGroup) {
@@ -99,6 +105,19 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 		user.POST("/likes", likeCtrl.Like)
 		user.DELETE("/likes/:product_id", likeCtrl.Cancel)
 		user.GET("/likes/check", likeCtrl.Check)
+
+		// 文章（仅登录用户，作用于本人数据；公开列表/详情/点赞数见上方公开路由）。
+		user.POST("/articles", articleCtrl.Create)
+		user.PUT("/articles/:id", articleCtrl.Update)
+		user.DELETE("/articles/:id", articleCtrl.Delete)
+		user.GET("/my/articles", articleCtrl.MyList)
+		user.POST("/articles/:id/like", articleCtrl.Like)
+		user.DELETE("/articles/:id/like", articleCtrl.Unlike)
+		user.GET("/articles/:id/like/check", articleCtrl.LikeCheck)
+		user.POST("/articles/:id/favorite", articleCtrl.Favorite)
+		user.DELETE("/articles/:id/favorite", articleCtrl.Unfavorite)
+		user.GET("/articles/:id/favorite/check", articleCtrl.FavoriteCheck)
+		user.GET("/my/articles/favorites", articleCtrl.MyFavorites)
 
 		user.GET("/sessions", iamCtrl.ListSessions)
 		user.DELETE("/sessions/:sid", iamCtrl.RevokeSession)

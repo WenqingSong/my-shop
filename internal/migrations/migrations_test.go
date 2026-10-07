@@ -13,8 +13,8 @@ import (
 // baselineVersion 是内嵌 baseline 迁移的版本号（14 位时间戳）。
 const baselineVersion = uint(20261001000001)
 
-// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + products + skus + inventory + addresses + cart_items + orders + refresh_tokens + reviews + favorites + flash_sale + product_view_count + product_likes + banners）。
-const latestMigrationVersion = uint(20261001000014)
+// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + products + skus + inventory + addresses + cart_items + orders + refresh_tokens + reviews + favorites + flash_sale + product_view_count + product_likes + banners + articles）。
+const latestMigrationVersion = uint(20261001000017)
 
 // businessTables 是 migration 应建立的 23 张业务表。
 // 注意顺序：order_items 通过外键引用 orders（ON DELETE CASCADE），故 order_items 排在 orders 之前；
@@ -25,7 +25,7 @@ const latestMigrationVersion = uint(20261001000014)
 // 即 inventories/inventory_logs 排在 skus 之前、skus 排在 products 之前、products 排在 categories 之前，
 // 否则 DROP TABLE 会因外键依赖失败。
 var businessTables = []string{
-	"favorites", "product_likes", "banners", "flash_sale_orders", "flash_sale_activity_skus", "flash_sale_activities",
+	"article_favorites", "article_likes", "articles", "favorites", "product_likes", "banners", "flash_sale_orders", "flash_sale_activity_skus", "flash_sale_activities",
 	"order_items", "orders", "refresh_tokens", "cart_items", "reviews", "addresses", "users", "inventory_logs", "inventories", "skus", "products", "product_images", "categories", "admins", "roles", "permissions", "admin_roles", "role_permissions",
 }
 
@@ -255,14 +255,14 @@ func TestUpAppliesOnlyPendingMigration(t *testing.T) {
 	}
 
 	migrationFS = sourceWithExtra(map[string]string{
-		"20261001000015_probe.up.sql": "CREATE TABLE migration_probe (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)) ENGINE=InnoDB;",
+		"20261001000018_probe.up.sql": "CREATE TABLE migration_probe (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)) ENGINE=InnoDB;",
 	})
 
 	if err := Up(ctx); err != nil {
 		t.Fatalf("incremental up: %v", err)
 	}
-	if v := currentVersion(t, db); v != uint(20261001000015) {
-		t.Errorf("expected current version %d after incremental up, got %d", uint(20261001000015), v)
+	if v := currentVersion(t, db); v != uint(20261001000018) {
+		t.Errorf("expected current version %d after incremental up, got %d", uint(20261001000018), v)
 	}
 	if !tableExists(t, db, "migration_probe") {
 		t.Errorf("expected migration_probe table created by incremental migration")
@@ -276,7 +276,7 @@ func TestUpFailsFastAndMarksDirty(t *testing.T) {
 	db := setupCleanDB(t)
 
 	migrationFS = sourceWithExtra(map[string]string{
-		"20261001000015_broken.up.sql": "THIS IS NOT VALID SQL;",
+		"20261001000018_broken.up.sql": "THIS IS NOT VALID SQL;",
 	})
 
 	if err := Up(ctx); err == nil {
@@ -292,7 +292,7 @@ func TestUpFailsFastAndMarksDirty(t *testing.T) {
 	}
 
 	// force 恢复 dirty。
-	if err := Force(ctx, uint(20261001000015)); err != nil {
+	if err := Force(ctx, uint(20261001000018)); err != nil {
 		t.Fatalf("force recover: %v", err)
 	}
 	if dirtyState(t, db) {
@@ -676,6 +676,54 @@ var expectedSchema = []tableSpec{
 		Indexes: []indexSpec{
 			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
 			{Name: "idx_status_sort", Unique: false, Columns: []string{"status", "sort"}},
+		},
+	},
+	{
+		Name:      "articles",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "author_id", Type: "bigint unsigned"},
+			{Name: "title", Type: "varchar(64)"},
+			{Name: "content", Type: "text"},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "idx_author_id", Unique: false, Columns: []string{"author_id"}},
+		},
+	},
+	{
+		Name:      "article_likes",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "user_id", Type: "bigint unsigned"},
+			{Name: "article_id", Type: "bigint unsigned"},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "uk_user_article", Unique: true, Columns: []string{"user_id", "article_id"}},
+			{Name: "idx_article_id", Unique: false, Columns: []string{"article_id"}},
+		},
+	},
+	{
+		Name:      "article_favorites",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "user_id", Type: "bigint unsigned"},
+			{Name: "article_id", Type: "bigint unsigned"},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "uk_user_article", Unique: true, Columns: []string{"user_id", "article_id"}},
 		},
 	},
 }
