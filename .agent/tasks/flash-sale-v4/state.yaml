@@ -6,7 +6,9 @@ contract:
   target: "754226b968e4ac2be327582121306de46cf40f1c"
 
 resources:
-  reservations: {}
+  reservations:
+    migration_version:
+      - "20261001000018"
 
 review:
   status: NOT_REQUESTED
