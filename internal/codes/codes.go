@@ -111,6 +111,13 @@ const (
 	// 轮播图域（Banner）14000-14999。
 	CodeBannerNotFound     Code = 14001 // 轮播图不存在 → 404
 	CodeBannerInvalidInput Code = 14002 // 轮播图参数非法（标题/图片/跳转/状态）→ 400
+
+	// 推荐位域（Recommendation）15000-15999。
+	CodeRecommendPositionNotFound   Code = 15001 // 推荐位不存在 → 404
+	CodeRecommendPositionCodeExists Code = 15002 // 推荐位 code 已存在 → 409
+	CodeRecommendInvalidInput       Code = 15003 // 参数非法（code/name/sort/status/product_id）→ 400
+	CodeRecommendItemNotFound       Code = 15004 // 推荐商品关系不存在 → 404
+	CodeRecommendItemDuplicate      Code = 15005 // 同一推荐位重复添加同一商品 → 409
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -195,6 +202,12 @@ var codeTable = map[Code]codeInfo{
 
 	CodeBannerNotFound:     {http.StatusNotFound, "轮播图不存在"},
 	CodeBannerInvalidInput: {http.StatusBadRequest, "轮播图参数非法"},
+
+	CodeRecommendPositionNotFound:   {http.StatusNotFound, "推荐位不存在"},
+	CodeRecommendPositionCodeExists: {http.StatusConflict, "推荐位标识已存在"},
+	CodeRecommendInvalidInput:       {http.StatusBadRequest, "推荐位参数非法"},
+	CodeRecommendItemNotFound:       {http.StatusNotFound, "推荐商品关系不存在"},
+	CodeRecommendItemDuplicate:      {http.StatusConflict, "该商品已加入此推荐位"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。

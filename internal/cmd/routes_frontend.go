@@ -13,6 +13,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/like"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/order"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/product"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/recommendation"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/review"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 )
@@ -37,6 +38,7 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	favoriteCtrl := favorite.NewV1()
 	likeCtrl := like.NewV1()
 	bannerCtrl := banner.NewV1()
+	recommendationCtrl := recommendation.NewV1()
 
 	// 前台公开接口：注册、登录、刷新、分类查询、商品查询、轮播图列表（无需 token）。
 	root.POST("/register", iamCtrl.Register)
@@ -52,6 +54,8 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	root.GET("/likes/count", likeCtrl.Count)
 	// 公开轮播图列表（无需 token，仅返回启用项）。
 	root.GET("/banners", bannerCtrl.List)
+	// 公开推荐位查询（无需 token，仅返回启用位中的可售商品）。
+	root.GET("/recommendations/:code", recommendationCtrl.Frontend)
 
 	// 前台登录用户接口：/me、收货地址、购物车与会话管理均需要认证 + 会话有效性校验。
 	root.Group("/", func(user *ghttp.RouterGroup) {
