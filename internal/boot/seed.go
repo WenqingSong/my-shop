@@ -55,6 +55,7 @@ var seedPermissionList = []permissionSeed{
 	{Code: "order:refund", Name: "订单退款"},
 	{Code: "flash_sale:create", Name: "创建秒杀活动"},
 	{Code: "flash_sale:update", Name: "更新秒杀活动"},
+	{Code: "flash_sale:repair", Name: "修复秒杀请求"},
 	{Code: "review:take_down", Name: "下架评价"},
 	{Code: "banner:create", Name: "创建轮播图"},
 	{Code: "banner:update", Name: "更新轮播图"},

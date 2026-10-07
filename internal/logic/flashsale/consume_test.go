@@ -38,7 +38,7 @@ func setupConsumeTest(t *testing.T) {
 		t.Fatalf("bootstrap: %v", err)
 	}
 	for _, table := range []string{
-		"flash_sale_order_requests", "flash_sale_orders", "flash_sale_activity_skus", "flash_sale_activities",
+		"flash_sale_request_audits", "flash_sale_order_requests", "flash_sale_orders", "flash_sale_activity_skus", "flash_sale_activities",
 		"skus", "product_images", "products", "categories",
 	} {
 		if _, err := g.DB().Exec(ctx, "DELETE FROM "+table); err != nil {

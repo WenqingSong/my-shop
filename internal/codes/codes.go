@@ -100,13 +100,14 @@ const (
 	CodeLikeProductUnavailable Code = 13001 // 商品不在售/不可点赞 → 409
 
 	// 秒杀域（FlashSale）12000-12999。
-	CodeFlashSaleActivityNotFound    Code = 12001 // 秒杀活动不存在或已下架 → 404
-	CodeFlashSaleNotInTimeWindow     Code = 12002 // 活动未开始或已结束 → 409
-	CodeFlashSaleStockInsufficient   Code = 12003 // 秒杀库存不足 → 409
-	CodeFlashSaleAlreadyPurchased    Code = 12004 // 一人一单，已购买 → 409
-	CodeFlashSaleIdempotencyConflict Code = 12005 // 同幂等键不同请求内容 → 409
-	CodeFlashSaleSkuUnavailable      Code = 12006 // 下单时 SKU 禁用或商品下架 → 409
-	CodeFlashSaleInvalidArgument     Code = 12007 // 活动参数非法（秒杀价/库存/时间/状态）→ 400
+	CodeFlashSaleActivityNotFound     Code = 12001 // 秒杀活动不存在或已下架 → 404
+	CodeFlashSaleNotInTimeWindow      Code = 12002 // 活动未开始或已结束 → 409
+	CodeFlashSaleStockInsufficient    Code = 12003 // 秒杀库存不足 → 409
+	CodeFlashSaleAlreadyPurchased     Code = 12004 // 一人一单，已购买 → 409
+	CodeFlashSaleIdempotencyConflict  Code = 12005 // 同幂等键不同请求内容 → 409
+	CodeFlashSaleSkuUnavailable       Code = 12006 // 下单时 SKU 禁用或商品下架 → 409
+	CodeFlashSaleInvalidArgument      Code = 12007 // 活动参数非法（秒杀价/库存/时间/状态）→ 400
+	CodeFlashSaleRequestNotRepairable Code = 12008 // 秒杀请求当前状态不可修复（仅 dead 可修复）→ 409
 
 	// 轮播图域（Banner）14000-14999。
 	CodeBannerNotFound     Code = 14001 // 轮播图不存在 → 404
@@ -195,15 +196,16 @@ var codeTable = map[Code]codeInfo{
 	CodeReviewAlreadyExists: {http.StatusConflict, "该订单项已评价"},
 	CodeReviewInvalidInput:  {http.StatusBadRequest, "评价内容非法"},
 
-	CodeFavoriteProductUnavailable:   {http.StatusConflict, "商品不可收藏"},
-	CodeLikeProductUnavailable:       {http.StatusConflict, "商品不可点赞"},
-	CodeFlashSaleActivityNotFound:    {http.StatusNotFound, "秒杀活动不存在"},
-	CodeFlashSaleNotInTimeWindow:     {http.StatusConflict, "秒杀活动不在进行中"},
-	CodeFlashSaleStockInsufficient:   {http.StatusConflict, "秒杀库存不足"},
-	CodeFlashSaleAlreadyPurchased:    {http.StatusConflict, "已参与该秒杀"},
-	CodeFlashSaleIdempotencyConflict: {http.StatusConflict, "幂等键冲突"},
-	CodeFlashSaleSkuUnavailable:      {http.StatusConflict, "秒杀商品不可购买"},
-	CodeFlashSaleInvalidArgument:     {http.StatusBadRequest, "秒杀活动参数非法"},
+	CodeFavoriteProductUnavailable:    {http.StatusConflict, "商品不可收藏"},
+	CodeLikeProductUnavailable:        {http.StatusConflict, "商品不可点赞"},
+	CodeFlashSaleActivityNotFound:     {http.StatusNotFound, "秒杀活动不存在"},
+	CodeFlashSaleNotInTimeWindow:      {http.StatusConflict, "秒杀活动不在进行中"},
+	CodeFlashSaleStockInsufficient:    {http.StatusConflict, "秒杀库存不足"},
+	CodeFlashSaleAlreadyPurchased:     {http.StatusConflict, "已参与该秒杀"},
+	CodeFlashSaleIdempotencyConflict:  {http.StatusConflict, "幂等键冲突"},
+	CodeFlashSaleSkuUnavailable:       {http.StatusConflict, "秒杀商品不可购买"},
+	CodeFlashSaleInvalidArgument:      {http.StatusBadRequest, "秒杀活动参数非法"},
+	CodeFlashSaleRequestNotRepairable: {http.StatusConflict, "秒杀请求不可修复"},
 
 	CodeBannerNotFound:     {http.StatusNotFound, "轮播图不存在"},
 	CodeBannerInvalidInput: {http.StatusBadRequest, "轮播图参数非法"},

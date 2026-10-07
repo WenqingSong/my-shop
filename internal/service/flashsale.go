@@ -21,8 +21,13 @@ type IFlashSale interface {
 	ConsumeQueued(ctx context.Context, limit int) (int, error)
 	// SyncCache 同步指定活动缓存到 Redis（预热或失效），供管理端、后台扫描器与测试复用。
 	SyncCache(ctx context.Context, activityID int64) error
-	// ReconcileCache 对账/回补（供后台扫描器复用）：扫描启用且未结束的活动，将 Redis remaining 刷成 total_stock - sold - inflight_queued。
+	// ReconcileCache 对账/回补（供后台扫描器复用）：扫描启用且未结束的活动，将 Redis remaining 刷成 total_stock - sold - inflight_queued；
+	// 并覆盖「已结束、尚在 grace 窗口」活动的终态收敛（remaining = total_stock - sold + 失效缓存）。
 	ReconcileCache(ctx context.Context, limit int) (int, error)
+	// RepairRequest 人工修复异常请求（仅 dead→queued），与审计记录同事务写入 flash_sale_request_audits（append-only）。
+	RepairRequest(ctx context.Context, adminID int64, req *v1.RepairRequestReq) (*v1.RepairRequestRes, error)
+	// ListRequestAudits 查询请求的修复审计记录（append-only）。
+	ListRequestAudits(ctx context.Context, requestID int64) (*v1.ListRequestAuditsRes, error)
 }
 
 var localFlashSale IFlashSale

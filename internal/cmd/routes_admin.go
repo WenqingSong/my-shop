@@ -115,6 +115,9 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 		// 秒杀活动后台写操作（AdminAuth + RequirePermission）。
 		require("flash_sale:create").POST("/admin/flash-sales", flashsaleAdminCtrl.Create)
 		require("flash_sale:update").PUT("/admin/flash-sales/:id", flashsaleAdminCtrl.Update)
+		// 秒杀请求人工修复 + 审计查询（AdminAuth + RequirePermission("flash_sale:repair")）。
+		require("flash_sale:repair").POST("/admin/flash-sales/requests/:id/repair", flashsaleAdminCtrl.RepairRequest)
+		require("flash_sale:repair").GET("/admin/flash-sales/requests/:id/audits", flashsaleAdminCtrl.ListRequestAudits)
 
 		// 商品评价后台写操作（AdminAuth + RequirePermission）。
 		require("review:take_down").POST("/admin/reviews/:id/take-down", reviewAdminCtrl.TakeDown)

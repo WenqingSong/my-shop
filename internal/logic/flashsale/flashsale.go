@@ -277,9 +277,11 @@ func (s *sFlashSale) CreateOrder(ctx context.Context, userID, activityID int64, 
 	case gateSoldOut:
 		return nil, codes.New(codes.CodeFlashSaleStockInsufficient)
 	case gateAlreadyPurchased:
-		return nil, codes.New(codes.CodeFlashSaleAlreadyPurchased)
+		// 一人一单命中：先经 MySQL 校验区分「真已购」与「崩溃窗口孤儿标记」，孤儿则自愈后继续入队。
+		return s.handleAlreadyPurchased(ctx, userID, activityID, skuID, idempotencyKey, hash)
 	case gateIdempotentHit:
-		return s.resultForExistingRequest(ctx, userID, idempotencyKey, hash)
+		// 幂等命中：先经 MySQL 校验区分「既有请求」与「崩溃窗口孤儿标记」，孤儿则自愈后继续入队。
+		return s.handleIdempotentHit(ctx, userID, activityID, skuID, idempotencyKey, hash)
 	case gateIdempotentConflict:
 		return nil, codes.New(codes.CodeFlashSaleIdempotencyConflict)
 	case gateSkuNotBound:
@@ -293,6 +295,65 @@ func (s *sFlashSale) CreateOrder(ctx context.Context, userID, activityID int64, 
 	// enqueue 内部处理，此处直接透传结果，不再二次补偿——否则「幂等键存在 + 内容冲突 + 经入队
 	// 重复键」路径会重复回补 remaining，造成超预扣。
 	return s.enqueue(ctx, userID, activityID, skuID, idempotencyKey, hash)
+}
+
+// handleIdempotentHit 处理闸门「幂等命中」：幂等标记存在且 hash 匹配，但可能是崩溃窗口孤儿标记
+// （闸门已预扣/写标记、request 落库失败）。经 MySQL 校验：请求存在则返回既有状态；不存在则清除孤儿标记
+// 并继续入队（预扣已在原 GATE_PASSED 发生，无需再跑闸门；uk_request_idempotency 兜底），消除入队崩溃导致的 503。
+func (s *sFlashSale) handleIdempotentHit(ctx context.Context, userID, activityID, skuID int64, idempotencyKey, hash string) (*v1.CreateOrderRes, error) {
+	r, err := s.findRequestByIdempotencyKey(ctx, userID, idempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+	if r == nil {
+		// 孤儿幂等标记：清除 idem/bought 标记后继续入队。
+		s.clearMarkers(ctx, activityID, skuID, userID, idempotencyKey)
+		return s.enqueue(ctx, userID, activityID, skuID, idempotencyKey, hash)
+	}
+	if r.RequestHash != hash {
+		return nil, codes.New(codes.CodeFlashSaleIdempotencyConflict)
+	}
+	return &v1.CreateOrderRes{
+		Status:         requestStatusString(r.Status),
+		IdempotencyKey: r.IdempotencyKey,
+		ActivityId:     r.ActivityId,
+		SkuId:          r.SkuId,
+	}, nil
+}
+
+// handleAlreadyPurchased 处理闸门「一人一单命中」：bought 标记存在，但可能是崩溃窗口孤儿标记。
+// 经 MySQL 校验：存在对应成功订单或未终态请求则真已购（12004）；否则清除孤儿 bought 标记并继续入队
+// （预扣已在原 GATE_PASSED 发生，无需再跑闸门），消除入队崩溃导致的错误 12004。
+func (s *sFlashSale) handleAlreadyPurchased(ctx context.Context, userID, activityID, skuID int64, idempotencyKey, hash string) (*v1.CreateOrderRes, error) {
+	purchased, err := s.hasPurchaseEvidence(ctx, userID, activityID, skuID)
+	if err != nil {
+		return nil, err
+	}
+	if purchased {
+		return nil, codes.New(codes.CodeFlashSaleAlreadyPurchased)
+	}
+	s.clearBoughtMarker(ctx, activityID, skuID, userID)
+	return s.enqueue(ctx, userID, activityID, skuID, idempotencyKey, hash)
+}
+
+// hasPurchaseEvidence 判断用户对该活动×SKU 是否已有成功订单或未达终态的请求（一人一单事实校验），
+// 用于区分「真已购」与「崩溃窗口孤儿 bought 标记」。
+func (s *sFlashSale) hasPurchaseEvidence(ctx context.Context, userID, activityID, skuID int64) (bool, error) {
+	n, err := g.DB().Model("flash_sale_orders").Ctx(ctx).
+		Where("activity_id", activityID).Where("sku_id", skuID).Where("user_id", userID).Count()
+	if err != nil {
+		return false, codes.Wrap(codes.CodeInternalError, fmt.Errorf("查询秒杀订单: %w", err))
+	}
+	if n > 0 {
+		return true, nil
+	}
+	m, err := g.DB().Model("flash_sale_order_requests").Ctx(ctx).
+		Where("activity_id", activityID).Where("sku_id", skuID).Where("user_id", userID).
+		WhereIn("status", []int{requestStatusQueued, requestStatusSuccess}).Count()
+	if err != nil {
+		return false, codes.Wrap(codes.CodeInternalError, fmt.Errorf("查询秒杀请求: %w", err))
+	}
+	return m > 0, nil
 }
 
 // resolveSku 校验 SKU 存在且 enabled、商品 on_shelf，并捕获下单快照（名称/主图）。
@@ -500,6 +561,19 @@ func (s *sFlashSale) findBindings(ctx context.Context, activityID int64) ([]*act
 		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("查询秒杀绑定: %w", err))
 	}
 	return rows, nil
+}
+
+// findBinding 查询指定活动×SKU 绑定（非锁读，供对账/权威值收敛使用），未命中返回 nil。
+func (s *sFlashSale) findBinding(ctx context.Context, activityID, skuID int64) (*activitySkuRow, error) {
+	var rows []*activitySkuRow
+	if err := g.DB().Model("flash_sale_activity_skus").Ctx(ctx).
+		Where("activity_id", activityID).Where("sku_id", skuID).Scan(&rows); err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("查询秒杀绑定: %w", err))
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return rows[0], nil
 }
 
 // loadActivity 加载完整活动（含 SKU 绑定列表）。

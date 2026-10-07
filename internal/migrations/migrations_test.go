@@ -13,10 +13,10 @@ import (
 // baselineVersion 是内嵌 baseline 迁移的版本号（14 位时间戳）。
 const baselineVersion = uint(20261001000001)
 
-// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + products + skus + inventory + addresses + cart_items + orders + refresh_tokens + reviews + favorites + flash_sale + product_view_count + product_likes + banners + flash_sale_order_requests + recommend + articles）。
-const latestMigrationVersion = uint(20261001000017)
+// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + products + skus + inventory + addresses + cart_items + orders + refresh_tokens + reviews + favorites + flash_sale + product_view_count + product_likes + banners + flash_sale_order_requests + recommend + articles + flash_sale_request_audits）。
+const latestMigrationVersion = uint(20261001000018)
 
-// businessTables 是 migration 应建立的 30 张业务表。
+// businessTables 是 migration 应建立的 31 张业务表。
 // 注意顺序：order_items 通过外键引用 orders（ON DELETE CASCADE），故 order_items 排在 orders 之前；
 // flash_sale_activity_skus 通过外键引用 flash_sale_activities（ON DELETE CASCADE），故排在它之前；
 // recommend_items 通过外键引用 recommend_positions（ON DELETE CASCADE），故排在它之前；
@@ -28,7 +28,7 @@ const latestMigrationVersion = uint(20261001000017)
 var businessTables = []string{
 	"article_favorites", "article_likes", "articles",
 	"recommend_items", "recommend_positions",
-	"favorites", "product_likes", "banners", "flash_sale_order_requests", "flash_sale_orders", "flash_sale_activity_skus", "flash_sale_activities",
+	"favorites", "product_likes", "banners", "flash_sale_request_audits", "flash_sale_order_requests", "flash_sale_orders", "flash_sale_activity_skus", "flash_sale_activities",
 	"order_items", "orders", "refresh_tokens", "cart_items", "reviews", "addresses", "users", "inventory_logs", "inventories", "skus", "products", "product_images", "categories", "admins", "roles", "permissions", "admin_roles", "role_permissions",
 }
 
@@ -663,6 +663,27 @@ var expectedSchema = []tableSpec{
 			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
 			{Name: "uk_request_idempotency", Unique: true, Columns: []string{"user_id", "idempotency_key"}},
 			{Name: "idx_dequeue", Unique: false, Columns: []string{"status", "next_attempt_at", "id"}},
+		},
+	},
+	{
+		Name:      "flash_sale_request_audits",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "request_id", Type: "bigint unsigned"},
+			{Name: "operator_admin_id", Type: "bigint unsigned"},
+			{Name: "operator_username", Type: "varchar(64)"},
+			{Name: "action", Type: "varchar(32)"},
+			{Name: "before_status", Type: "tinyint"},
+			{Name: "after_status", Type: "tinyint"},
+			{Name: "reason", Type: "varchar(255)"},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "idx_request_id", Unique: false, Columns: []string{"request_id"}},
+			{Name: "idx_operator", Unique: false, Columns: []string{"operator_admin_id"}},
 		},
 	},
 	{

@@ -129,3 +129,41 @@ type GetOrderResultRes struct {
 	Order    *FlashOrder `json:"order,omitempty" dc:"success 时的秒杀订单"`
 	FailCode int         `json:"fail_code,omitempty" dc:"失败码（failed/dead 时的最近失败码，观测用）"`
 }
+
+// RepairRequestReq 人工修复秒杀请求请求（后台，需 flash_sale:repair；仅 dead→queued）。
+type RepairRequestReq struct {
+	g.Meta       `path:"/admin/flash-sales/requests/:id/repair" method:"post" tags:"秒杀" summary:"修复秒杀请求（dead→queued）"`
+	Id           int64  `json:"id" in:"path" v:"required" dc:"请求 id"`
+	TargetStatus string `json:"target_status" dc:"目标状态（仅支持 queued）"`
+	Reason       string `json:"reason" dc:"修复原因（必填）"`
+}
+
+// RepairRequestRes 人工修复秒杀请求响应。
+type RepairRequestRes struct {
+	Id     int64  `json:"id" dc:"请求 id"`
+	Status string `json:"status" dc:"修复后状态：queued"`
+}
+
+// ListRequestAuditsReq 查询秒杀请求审计记录请求（后台，需 flash_sale:repair）。
+type ListRequestAuditsReq struct {
+	g.Meta `path:"/admin/flash-sales/requests/:id/audits" method:"get" tags:"秒杀" summary:"查询秒杀请求审计记录"`
+	Id     int64 `json:"id" in:"path" v:"required" dc:"请求 id"`
+}
+
+// RequestAudit 秒杀请求修复审计记录（append-only，不可修改删除）。
+type RequestAudit struct {
+	Id               int64       `json:"id" dc:"审计记录 id"`
+	RequestId        int64       `json:"request_id" dc:"请求 id"`
+	OperatorAdminId  int64       `json:"operator_admin_id" dc:"操作者管理员 id"`
+	OperatorUsername string      `json:"operator_username" dc:"操作者用户名快照"`
+	Action           string      `json:"action" dc:"动作（如 dead_to_queued）"`
+	BeforeStatus     int         `json:"before_status" dc:"迁移前请求状态"`
+	AfterStatus      int         `json:"after_status" dc:"迁移后请求状态"`
+	Reason           string      `json:"reason" dc:"修复原因"`
+	CreatedAt        *gtime.Time `json:"created_at" dc:"创建时间"`
+}
+
+// ListRequestAuditsRes 查询秒杀请求审计记录响应。
+type ListRequestAuditsRes struct {
+	Items []*RequestAudit `json:"items" dc:"审计记录列表（按时间升序）"`
+}

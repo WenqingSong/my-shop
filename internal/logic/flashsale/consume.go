@@ -104,7 +104,8 @@ func (s *sFlashSale) consumeOne(ctx context.Context) (bool, error) {
 		return processed, err
 	}
 	if outcome.terminalFailure {
-		s.compensatePreDeductAndMarkers(ctx, outcome.activityID, outcome.skuID, outcome.userID, outcome.idempotencyKey)
+		// 终态失败（failed/dead）在事务提交后权威值收敛（幂等）+ 清除标记，释放预扣、无半成品。
+		s.convergeStockAndMarkers(ctx, outcome.activityID, outcome.skuID, outcome.userID, outcome.idempotencyKey)
 	}
 	return processed, nil
 }
