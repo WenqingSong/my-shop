@@ -1,0 +1,28 @@
+schema_version: 3
+task_id: object-storage-upload
+
+contract:
+  status: APPROVED
+  target: "9f558f58fe1546f7ab2d42938f8f9b584e2f9a89"
+
+resources:
+  reservations: {}
+
+review:
+  status: NOT_REQUESTED
+  target: ""
+
+owner:
+  status: PENDING
+  review_target: ""
+
+delivery:
+  status: NOT_RUN
+  review_target: ""
+  feature_head: ""
+  develop_base: ""
+
+blocked:
+  active: false
+  by: ""
+  reason: ""
