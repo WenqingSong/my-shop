@@ -17,8 +17,8 @@ review:
   target: "496dcd060832b17d2f27bf0232e22199e1b32e75"
 
 owner:
-  status: PENDING
-  review_target: ""
+  status: ACCEPTED
+  review_target: "496dcd060832b17d2f27bf0232e22199e1b32e75"
 
 delivery:
   status: NOT_RUN
