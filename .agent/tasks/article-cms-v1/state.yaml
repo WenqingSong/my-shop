@@ -7,8 +7,10 @@ contract:
 
 resources:
   reservations:
-    error_code_domain: "16000-16999"
-    migration_version: "20261001000017"
+    error_code_domain:
+      - "16000-16999"
+    migration_version:
+      - "20261001000017"
 
 review:
   status: NOT_REQUESTED
