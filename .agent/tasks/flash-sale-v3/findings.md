@@ -6,16 +6,17 @@
 - 分支：`feat/flash-sale-v3`
 - 任务基线 Base Commit：`d8438b4938a9b6b2e2f82fb87d9c6c9a60b6662b`（合并 main #17，working tree clean，无既有未提交修改）
 - Contract target（A1，APPROVED）：`d1d594cd01c4b82febc2809b9f70512d4e914d8f`
-- **Implementation Evidence Commit（C1，本次审查对象）**：`129ddb227c7563f08f4c05de7bca448c7fd9a51a`
-- C2（Coder metadata commit，非审查对象）：`93f8677b231433f0fb915bd467800f06f1888779`（仅 `review.status=PENDING` / `review.target=C1`）
-- 审查范围：C1 相对 Base 的完整变更（含新增文件），非默认 `git diff`。
+- 首次 Implementation Evidence Commit（C1，已 CLEAN）：`129ddb227c7563f08f4c05de7bca448c7fd9a51a`
+- **复审 Implementation Evidence Commit（C1'，本次复审对象）**：`8f0db1137d78505368f855830a15f0adf8833935`（修复 CLEAN-001）
+- C2'（Coder metadata commit，非审查对象）：`f187d4fc28154cd28308b2f8e2e93f13cacf2fb2`（仅 `review.status=PENDING` / `review.target=C1'`）
+- 审查范围：C1' 相对 C1 的修复变更（`internal/logic/flashsale/flashsale.go`、`request.go`、`consume_test.go` 三个文件），非默认 `git diff`。
 - 全局资源：migration `20261001000015`（title `flash_sale_order_requests`）；无新增错误码（复用秒杀域 12001~12007 与通用 1004/1005）。
 
 C1 变更文件清单（18 个）：`api/flashsale/v1/flash_sale.go`、`internal/boot/boot_migration_test.go`、`internal/cmd/cmd.go`、`internal/cmd/flashsale_test.go`、`internal/cmd/flashsale_v2_test.go`、`internal/cmd/flashsale_v3_test.go`、`internal/cmd/routes_frontend.go`、`internal/cmd/routes_test.go`、`internal/controller/flashsale/flashsale.go`、`internal/logic/flashsale/consume.go`、`internal/logic/flashsale/consume_test.go`、`internal/logic/flashsale/flashsale.go`、`internal/logic/flashsale/redis.go`、`internal/logic/flashsale/request.go`、`internal/migrations/migrations_test.go`、`internal/migrations/sql/20261001000015_flash_sale_order_requests.up.sql`、`internal/service/flashsale.go`、`manifest/config/config.yaml`。
 
 ## Result
 
-CLEAN（无开放 P0/P1/P2；保留 1 项 P3 供 Owner 决定）
+CLEAN（复审通过：CLEAN-001 已修复并关闭；无开放 P0/P1/P2/P3）
 
 ## Acceptance Criteria
 
@@ -52,7 +53,7 @@ CLEAN（无开放 P0/P1/P2；保留 1 项 P3 供 Owner 决定）
 ### CLEAN-001：入队撞幂等键且内容冲突时可能重复补偿 Redis 预扣
 
 - Severity：P3
-- Status：OPEN
+- Status：CLOSED
 - Location：`internal/logic/flashsale/flashsale.go` `CreateOrder`（`enqueue` 出错后再次 `compensatePreDeductAndMarkers`）与 `internal/logic/flashsale/request.go` `enqueue`（撞 `uk_request_idempotency` 时已内部补偿一次）
 - AC / Invariant：AC-006 / INV-013（失败补偿无残留、预扣计数准确）
 - Trigger：闸门 `GATE_PASSED`（已 DECR 预扣 + 写 `idem` 标记）后，`enqueue` INSERT 命中 `uk_request_idempotency` 重复键（Redis `idem` 标记因 TTL/Flush 缺失但 MySQL 请求行仍在），且 `resultForExistingRequest` 读到既有请求 `request_hash` 与新请求不同 → 返回 12005。
@@ -61,5 +62,6 @@ CLEAN（无开放 P0/P1/P2；保留 1 项 P3 供 Owner 决定）
 - Impact：仅 Redis 预扣计数短暂虚高（多 +1），可能在该窗口多放行若干请求（最终在消费侧以 12003 落 `failed` 并补偿）；**不影响 MySQL 正确性**（条件扣减 + 唯一约束兜底不超卖），且对账扫描器（`remaining = total - sold - inflight_queued`）在 60s 内收敛修正。
 - Evidence：代码路径 `CreateOrder`→`enqueue`（duplicate 分支内部补偿）→`resultForExistingRequest`（hash 不符→12005）→`CreateOrder` 再次补偿；当前无测试覆盖「幂等键存在 + 内容冲突 + 经入队重复键」这一窄路径。
 - Required Fix Boundary：保证「一次预扣只补偿一次」——可在 `enqueue` 已内部补偿的幂等冲突路径上让 `CreateOrder` 不再二次补偿（例如 `enqueue` 返回带「已补偿」语义的哨兵，或把补偿统一收敛到 `CreateOrder` 单点），不改变其它路径行为、不改变 MySQL 不变量。
+- 复审（re_review）：Coder 提交 C1'（`8f0db11`）修复——`CreateOrder` 直接透传 `enqueue` 结果（不再二次补偿），`enqueue` 在入队失败分支最前统一补偿一次（撞幂等键/DB 故障各一次）。新增回归测试 `TestCreateOrderIdempotencyConflictCompensatesOnce` 覆盖「幂等键已存在 + 内容冲突 + 经入队重复键」窄路径。Mutation 验证（隔离 worktree 把 `CreateOrder` 临时改回二次补偿）：该测试 FAIL（`sku2 remaining="11" want 10`），恢复后 PASS，证明测试能区分修复前后。独立验证 `go build ./...`、`go vet ./...`、`go test -race ./internal/logic/flashsale/...`、`go test -race -run TestFlashSale ./internal/cmd/...` 全绿。→ CLOSED。
 
 其余：No actionable findings（P0/P1/P2 无）。
