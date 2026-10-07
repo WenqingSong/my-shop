@@ -82,6 +82,8 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 
 		// 秒杀下单（仅登录用户，作用于本人数据）。
 		user.POST("/flash-sales/:id/orders", flashsaleCtrl.CreateOrder)
+		// 秒杀下单结果查询（仅登录用户，作用于本人数据）。
+		user.GET("/flash-sales/:id/orders/result", flashsaleCtrl.GetOrderResult)
 
 		// 商品评价（仅登录用户，作用于本人数据）。
 		user.POST("/reviews", reviewCtrl.Create)

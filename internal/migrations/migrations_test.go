@@ -13,8 +13,8 @@ import (
 // baselineVersion 是内嵌 baseline 迁移的版本号（14 位时间戳）。
 const baselineVersion = uint(20261001000001)
 
-// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + products + skus + inventory + addresses + cart_items + orders + refresh_tokens + reviews + favorites + flash_sale + product_view_count + product_likes + banners）。
-const latestMigrationVersion = uint(20261001000014)
+// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + products + skus + inventory + addresses + cart_items + orders + refresh_tokens + reviews + favorites + flash_sale + product_view_count + product_likes + banners + flash_sale_order_requests）。
+const latestMigrationVersion = uint(20261001000015)
 
 // businessTables 是 migration 应建立的 23 张业务表。
 // 注意顺序：order_items 通过外键引用 orders（ON DELETE CASCADE），故 order_items 排在 orders 之前；
@@ -25,7 +25,7 @@ const latestMigrationVersion = uint(20261001000014)
 // 即 inventories/inventory_logs 排在 skus 之前、skus 排在 products 之前、products 排在 categories 之前，
 // 否则 DROP TABLE 会因外键依赖失败。
 var businessTables = []string{
-	"favorites", "product_likes", "banners", "flash_sale_orders", "flash_sale_activity_skus", "flash_sale_activities",
+	"favorites", "product_likes", "banners", "flash_sale_order_requests", "flash_sale_orders", "flash_sale_activity_skus", "flash_sale_activities",
 	"order_items", "orders", "refresh_tokens", "cart_items", "reviews", "addresses", "users", "inventory_logs", "inventories", "skus", "products", "product_images", "categories", "admins", "roles", "permissions", "admin_roles", "role_permissions",
 }
 
@@ -121,24 +121,50 @@ func dirtyState(t *testing.T, db *sql.DB) bool {
 	return dirty
 }
 
-// sourceWithExtra 构造一个包含全部内嵌迁移 + 额外迁移的测试用文件系统。
-// 用于覆盖「增量迁移」与「失败迁移」场景，不修改生产内嵌文件。
-func sourceWithExtra(extra map[string]string) fs.FS {
+// syntheticMigrationFS 构造一个与生产内嵌迁移完全隔离的合成迁移源。
+// 用于覆盖「失败迁移 fail-fast/dirty」与「仅应用 pending 迁移」两个场景，
+// 使合成迁移的版本号不与生产 namespace（含真实 20261001000015）冲突——
+// 从而无需随真实迁移版本持续手工 bump 合成版本号（Contract D-005 强制前置）。
+func syntheticMigrationFS(files map[string]string) fs.FS {
 	m := fstest.MapFS{}
-	entries, err := fs.ReadDir(embeddedMigrations, migrationDir)
-	if err == nil {
-		for _, e := range entries {
-			data, rerr := fs.ReadFile(embeddedMigrations, migrationDir+"/"+e.Name())
-			if rerr != nil {
-				continue
-			}
-			m[migrationDir+"/"+e.Name()] = &fstest.MapFile{Data: data}
-		}
-	}
-	for name, content := range extra {
+	for name, content := range files {
 		m[migrationDir+"/"+name] = &fstest.MapFile{Data: []byte(content)}
 	}
 	return m
+}
+
+// syntheticTables 是合成迁移测试可能建立的表，用于测试前后的隔离清理。
+var syntheticTables = []string{"migration_synthetic_base", "migration_probe"}
+
+// setupSyntheticMigrationDB 建立一个只清空全部业务表、schema_migrations 与合成测试表的隔离库：
+// 使合成迁移从空库、空版本号开始执行（生产业务表不参与合成 namespace），
+// 清理时再恢复为干净的生产 baseline 已迁移状态。
+func setupSyntheticMigrationDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db := openTestDB(t)
+	drop := append(append([]string{}, allTables...), syntheticTables...)
+	dropAll := func() error {
+		for _, table := range drop {
+			if _, err := db.ExecContext(context.Background(), "DROP TABLE IF EXISTS `"+table+"`"); err != nil {
+				return fmt.Errorf("drop %s: %w", table, err)
+			}
+		}
+		return nil
+	}
+	if err := dropAll(); err != nil {
+		t.Fatalf("drop all tables: %v", err)
+	}
+	t.Cleanup(func() {
+		migrationFS = embeddedMigrations
+		if err := dropAll(); err != nil {
+			t.Errorf("cleanup drop tables: %v", err)
+			return
+		}
+		if err := Up(context.Background()); err != nil {
+			t.Errorf("cleanup restore baseline: %v", err)
+		}
+	})
+	return db
 }
 
 // TestUpCreatesSchemaAndIsIdempotent 覆盖 AC-001/AC-002（INV-001 幂等按序一次）：
@@ -243,26 +269,31 @@ func TestForceBaselineDoesNotExecuteSQL(t *testing.T) {
 
 // TestUpAppliesOnlyPendingMigration 覆盖 AC-003（INV-001 增量）：
 // 已有库上新增一个合法迁移后 Up，仅新增迁移被执行（版本前进），旧迁移不重跑。
+// 使用独立合成迁移源（版本 1/2），与生产迁移 namespace（含真实 00015）彻底隔离。
 func TestUpAppliesOnlyPendingMigration(t *testing.T) {
 	ctx := context.Background()
-	db := setupCleanDB(t)
+	db := setupSyntheticMigrationDB(t)
 
+	const base = "0001_synthetic_base.up.sql"
+	migrationFS = syntheticMigrationFS(map[string]string{
+		base: "CREATE TABLE migration_synthetic_base (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)) ENGINE=InnoDB;",
+	})
 	if err := Up(ctx); err != nil {
 		t.Fatalf("baseline up: %v", err)
 	}
-	if v := currentVersion(t, db); v != latestMigrationVersion {
-		t.Fatalf("expected latest version %d, got %d", latestMigrationVersion, v)
+	if v := currentVersion(t, db); v != 1 {
+		t.Fatalf("expected version 1 after baseline up, got %d", v)
 	}
 
-	migrationFS = sourceWithExtra(map[string]string{
-		"20261001000015_probe.up.sql": "CREATE TABLE migration_probe (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)) ENGINE=InnoDB;",
+	migrationFS = syntheticMigrationFS(map[string]string{
+		base:                "CREATE TABLE migration_synthetic_base (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)) ENGINE=InnoDB;",
+		"0002_probe.up.sql": "CREATE TABLE migration_probe (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)) ENGINE=InnoDB;",
 	})
-
 	if err := Up(ctx); err != nil {
 		t.Fatalf("incremental up: %v", err)
 	}
-	if v := currentVersion(t, db); v != uint(20261001000015) {
-		t.Errorf("expected current version %d after incremental up, got %d", uint(20261001000015), v)
+	if v := currentVersion(t, db); v != 2 {
+		t.Errorf("expected current version 2 after incremental up, got %d", v)
 	}
 	if !tableExists(t, db, "migration_probe") {
 		t.Errorf("expected migration_probe table created by incremental migration")
@@ -271,12 +302,14 @@ func TestUpAppliesOnlyPendingMigration(t *testing.T) {
 
 // TestUpFailsFastAndMarksDirty 覆盖 AC-004（INV-002 fail-fast 与 dirty 恢复）：
 // 失败迁移使 Up 返回错误、置 dirty；dirty 下再次 Up 拒绝执行；force 后恢复。
+// 使用独立合成迁移源（版本 1/2），与生产迁移 namespace（含真实 00015）彻底隔离。
 func TestUpFailsFastAndMarksDirty(t *testing.T) {
 	ctx := context.Background()
-	db := setupCleanDB(t)
+	db := setupSyntheticMigrationDB(t)
 
-	migrationFS = sourceWithExtra(map[string]string{
-		"20261001000015_broken.up.sql": "THIS IS NOT VALID SQL;",
+	migrationFS = syntheticMigrationFS(map[string]string{
+		"0001_synthetic_base.up.sql": "CREATE TABLE migration_synthetic_base (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)) ENGINE=InnoDB;",
+		"0002_broken.up.sql":         "THIS IS NOT VALID SQL;",
 	})
 
 	if err := Up(ctx); err == nil {
@@ -292,7 +325,7 @@ func TestUpFailsFastAndMarksDirty(t *testing.T) {
 	}
 
 	// force 恢复 dirty。
-	if err := Force(ctx, uint(20261001000015)); err != nil {
+	if err := Force(ctx, uint(2)); err != nil {
 		t.Fatalf("force recover: %v", err)
 	}
 	if dirtyState(t, db) {
@@ -602,6 +635,31 @@ var expectedSchema = []tableSpec{
 			{Name: "uk_flash_one_per_user", Unique: true, Columns: []string{"activity_id", "sku_id", "user_id"}},
 			{Name: "idx_activity", Unique: false, Columns: []string{"activity_id"}},
 			{Name: "idx_user", Unique: false, Columns: []string{"user_id"}},
+		},
+	},
+	{
+		Name:      "flash_sale_order_requests",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "user_id", Type: "bigint unsigned"},
+			{Name: "activity_id", Type: "bigint unsigned"},
+			{Name: "sku_id", Type: "bigint unsigned"},
+			{Name: "idempotency_key", Type: "varchar(64)"},
+			{Name: "request_hash", Type: "varchar(64)"},
+			{Name: "status", Type: "tinyint", Default: strPtr("0")},
+			{Name: "retry_count", Type: "int unsigned", Default: strPtr("0")},
+			{Name: "next_attempt_at", Type: "datetime", Nullable: true},
+			{Name: "last_error_code", Type: "int", Nullable: true},
+			{Name: "flash_order_id", Type: "bigint unsigned", Nullable: true},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "uk_request_idempotency", Unique: true, Columns: []string{"user_id", "idempotency_key"}},
+			{Name: "idx_dequeue", Unique: false, Columns: []string{"status", "next_attempt_at", "id"}},
 		},
 	},
 	{

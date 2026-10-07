@@ -139,6 +139,8 @@ func TestFlashSaleV2SoldOutFastFail(t *testing.T) {
 	if !fsRedisExists(t, fsSoldoutKey(activityID, skuID)) {
 		t.Fatalf("soldout marker should be set after stock exhausted")
 	}
+	// 消费后最终落单数 = 初始库存。
+	flashConsume(t, totalStock)
 	if n := flashOrderCount(t, activityID); n != totalStock {
 		t.Fatalf("order count=%d want %d", n, totalStock)
 	}
@@ -188,6 +190,8 @@ func TestFlashSaleV2RedisPreDeductNoOversell(t *testing.T) {
 	if success != totalStock {
 		t.Fatalf("success=%d want %d", success, totalStock)
 	}
+	// 消费后最终 sold = 初始库存（预扣不超预热库存）。
+	flashConsume(t, n)
 	if _, sold := flashBindingStock(t, activityID, skuID); sold != totalStock {
 		t.Fatalf("sold=%d want %d", sold, totalStock)
 	}
@@ -228,6 +232,7 @@ func TestFlashSaleV2Reconcile(t *testing.T) {
 			t.Fatalf("order %d: status=%d code=%d", i, res.Status, res.Code)
 		}
 	}
+	flashConsume(t, 10)
 	if _, sold := flashBindingStock(t, activityID, skuID); sold != 2 {
 		t.Fatalf("sold=%d want 2", sold)
 	}
@@ -242,9 +247,10 @@ func TestFlashSaleV2Reconcile(t *testing.T) {
 	}
 }
 
-// TestFlashSaleV2Degrade 覆盖 AC-007：
-// Lua 执行失败（活动 key 类型错误导致 EVAL 报错）时降级走 V1 纯 MySQL 路径，下单仍正确落库、不破坏不变量。
-func TestFlashSaleV2Degrade(t *testing.T) {
+// TestFlashSaleV3FailClosed 覆盖 AC-007（降级语义，D-004）：
+// Redis 闸门 Lua 执行失败（活动 key 类型错误导致 EVAL 报错）时 fail-closed 返回 5xx/1005，
+// 不创建 request、不预扣、不直接同步落单（不绕过闸门）。
+func TestFlashSaleV3FailClosed(t *testing.T) {
 	base := setupFlashSaleServer(t)
 	skuID := flashSetupSku(t, "SKU-V2-DEG", 5000, 1)
 	userToken := flashMintUserToken(t, 830000)
@@ -253,19 +259,23 @@ func TestFlashSaleV2Degrade(t *testing.T) {
 	flashInsertBinding(t, activityID, skuID, 1000, 10)
 	flashSyncCache(t, activityID)
 
-	// 将活动 key 改为 string 类型，使 Lua HGETALL 返回 WRONGTYPE 错误，模拟 Lua 执行失败。
+	// 将活动 key 改为 string 类型，使 Lua HGETALL 返回 WRONGTYPE 错误，模拟 Redis 闸门失败。
 	if _, err := g.Redis().Do(context.Background(), "SET", fsActivityKey(activityID), "not-a-hash"); err != nil {
 		t.Fatalf("corrupt activity key: %v", err)
 	}
 
 	res := flashOrderCall(t, base, activityID, userToken, map[string]any{"sku_id": skuID, "idempotency_key": "k-deg"})
-	if res.Status != 200 || res.Code != 0 {
-		t.Fatalf("degrade order: status=%d code=%d msg=%q", res.Status, res.Code, res.Message)
+	if res.Status != 503 || res.Code != 1005 {
+		t.Fatalf("fail closed: status=%d code=%d want 503/1005", res.Status, res.Code)
 	}
-	if n := flashOrderCount(t, activityID); n != 1 {
-		t.Fatalf("order count=%d want 1", n)
+	// 不落 request、不建单、不预扣。
+	if n, _ := g.DB().Model("flash_sale_order_requests").Ctx(context.Background()).Count(); n != 0 {
+		t.Fatalf("fail closed must not create request, count=%d", n)
 	}
-	if _, sold := flashBindingStock(t, activityID, skuID); sold != 1 {
-		t.Fatalf("sold=%d want 1", sold)
+	if n := flashOrderCount(t, activityID); n != 0 {
+		t.Fatalf("fail closed must not create order, count=%d", n)
+	}
+	if _, sold := flashBindingStock(t, activityID, skuID); sold != 0 {
+		t.Fatalf("fail closed must not deduct stock, sold=%d", sold)
 	}
 }
