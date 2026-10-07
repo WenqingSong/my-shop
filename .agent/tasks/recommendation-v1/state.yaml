@@ -3,7 +3,7 @@ task_id: recommendation-v1
 
 contract:
   status: APPROVED
-  target: "0f54b9306a0d9bba6900177495fb87453b90f1af"
+  target: "2e4412f9da47ede7ffc2fb44b4b262c848c40295"
 
 resources:
   reservations:
