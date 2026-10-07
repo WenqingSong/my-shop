@@ -15,8 +15,8 @@ review:
   target: "e2a4617a601b87cd5dd6a80ea448ce61bff9716e"
 
 owner:
-  status: PENDING
-  review_target: ""
+  status: ACCEPTED
+  review_target: "e2a4617a601b87cd5dd6a80ea448ce61bff9716e"
 
 delivery:
   status: NOT_RUN
