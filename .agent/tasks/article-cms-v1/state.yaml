@@ -1,0 +1,30 @@
+schema_version: 3
+task_id: article-cms-v1
+
+contract:
+  status: APPROVED
+  target: "450631c640aa7bfed2ca3cdde10d84333f245854"
+
+resources:
+  reservations:
+    error_code_domain: "16000-16999"
+    migration_version: "20261001000017"
+
+review:
+  status: NOT_REQUESTED
+  target: ""
+
+owner:
+  status: PENDING
+  review_target: ""
+
+delivery:
+  status: NOT_RUN
+  review_target: ""
+  feature_head: ""
+  develop_base: ""
+
+blocked:
+  active: false
+  by: ""
+  reason: ""
