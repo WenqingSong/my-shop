@@ -289,13 +289,10 @@ func (s *sFlashSale) CreateOrder(ctx context.Context, userID, activityID int64, 
 	}
 
 	// 入队：持久受理（status=queued）。
-	res, err := s.enqueue(ctx, userID, activityID, skuID, idempotencyKey, hash)
-	if err != nil {
-		// DB 故障：补偿 Redis 预扣 + 清除 bought/idem 标记，避免「已预扣但无 request」残留。
-		s.compensatePreDeductAndMarkers(ctx, activityID, skuID, userID, idempotencyKey)
-		return nil, err
-	}
-	return res, nil
+	// 注意：闸门已预扣/写标记，入队失败（撞幂等键或 DB 故障）时的预扣/标记补偿统一收敛在
+	// enqueue 内部处理，此处直接透传结果，不再二次补偿——否则「幂等键存在 + 内容冲突 + 经入队
+	// 重复键」路径会重复回补 remaining，造成超预扣。
+	return s.enqueue(ctx, userID, activityID, skuID, idempotencyKey, hash)
 }
 
 // resolveSku 校验 SKU 存在且 enabled、商品 on_shelf，并捕获下单快照（名称/主图）。

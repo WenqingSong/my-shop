@@ -15,7 +15,9 @@ import (
 
 	"github.com/gogf/gf/v2/frame/g"
 
+	v1 "cnb.cool/go-cloud-devops/my-shop/api/flashsale/v1"
 	"cnb.cool/go-cloud-devops/my-shop/internal/boot"
+	"cnb.cool/go-cloud-devops/my-shop/internal/codes"
 	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
 	// 触发 sku/product logic 的 init，注册 service.Sku / service.Product（resolveSku 依赖）。
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/product"
@@ -63,24 +65,25 @@ func consumeMySQLNow(t *testing.T) time.Time {
 }
 
 // consumeTestSku 建立一个可售 SKU（商品 on_shelf、SKU enabled），返回 skuID。
-func consumeTestSku(t *testing.T) int64 {
+// name 用于派生分类/商品/SKU 名，保证同一测试内多次建 SKU 不撞唯一约束。
+func consumeTestSku(t *testing.T, name string) int64 {
 	t.Helper()
 	ctx := context.Background()
 	categoryID, err := g.DB().Model("categories").Ctx(ctx).Data(g.Map{
-		"parent_id": 0, "name": "consume-cat", "sort": 0, "status": 1,
+		"parent_id": 0, "name": "cat-" + name, "sort": 0, "status": 1,
 	}).InsertAndGetId()
 	if err != nil {
 		t.Fatalf("insert category: %v", err)
 	}
 	productID, err := g.DB().Model("products").Ctx(ctx).Data(g.Map{
-		"name": "consume-product", "brand": "", "category_id": categoryID,
+		"name": "prod-" + name, "brand": "", "category_id": categoryID,
 		"price": 10000, "main_image": "http://img.example/x.png", "status": 1,
 	}).InsertAndGetId()
 	if err != nil {
 		t.Fatalf("insert product: %v", err)
 	}
 	skuID, err := g.DB().Model("skus").Ctx(ctx).Data(g.Map{
-		"product_id": productID, "name": "consume-sku", "price": 10000, "status": 1,
+		"product_id": productID, "name": name, "price": 10000, "status": 1,
 	}).InsertAndGetId()
 	if err != nil {
 		t.Fatalf("insert sku: %v", err)
@@ -88,8 +91,8 @@ func consumeTestSku(t *testing.T) int64 {
 	return skuID
 }
 
-// consumeTestActivity 建立启用且时间窗内的活动 + 绑定，返回 activityID。
-func consumeTestActivity(t *testing.T, skuID int64) int64 {
+// consumeTestActivity 建立启用且时间窗内的活动并绑定给定 SKU（各 total_stock=10），返回 activityID。
+func consumeTestActivity(t *testing.T, skuIDs ...int64) int64 {
 	t.Helper()
 	ctx := context.Background()
 	now := consumeMySQLNow(t)
@@ -102,10 +105,12 @@ func consumeTestActivity(t *testing.T, skuID int64) int64 {
 	if err != nil {
 		t.Fatalf("insert activity: %v", err)
 	}
-	if _, err := g.DB().Model("flash_sale_activity_skus").Ctx(ctx).Data(g.Map{
-		"activity_id": activityID, "sku_id": skuID, "flash_price": 1000, "total_stock": 10, "sold": 0,
-	}).Insert(); err != nil {
-		t.Fatalf("insert binding: %v", err)
+	for _, skuID := range skuIDs {
+		if _, err := g.DB().Model("flash_sale_activity_skus").Ctx(ctx).Data(g.Map{
+			"activity_id": activityID, "sku_id": skuID, "flash_price": 1000, "total_stock": 10, "sold": 0,
+		}).Insert(); err != nil {
+			t.Fatalf("insert binding: %v", err)
+		}
 	}
 	return activityID
 }
@@ -146,7 +151,7 @@ func TestConsumeRetryThenDeadLetter(t *testing.T) {
 	setupConsumeTest(t)
 	ctx := context.Background()
 	s := New()
-	skuID := consumeTestSku(t)
+	skuID := consumeTestSku(t, "consume-sku")
 	activityID := consumeTestActivity(t, skuID)
 
 	const userID = int64(881000)
@@ -231,5 +236,53 @@ func TestConsumeRetryThenDeadLetter(t *testing.T) {
 	}
 	if _, sold := consumeBindingStock(t, activityID, skuID); sold != 1 {
 		t.Fatalf("reprocessed sold=%d want 1", sold)
+	}
+}
+
+// TestCreateOrderIdempotencyConflictCompensatesOnce 回归「CreateOrder/enqueue 重复补偿」：
+// 在「幂等键已存在 + 内容冲突 + 经入队重复键」窄路径下（idem 标记 TTL 过期但请求仍落库，
+// 第二次请求内容不同），闸门会再次预扣并写标记，enqueue 撞 uk_request_idempotency 后须补偿
+// 恰好一次（INCR remaining + 清标记）；若 CreateOrder 对 enqueue 返回的 12005 再补偿一次，
+// 则 remaining 多回补（超预扣）。断言第二次请求返回 12005 且 sku2 remaining 回补到预热值。
+func TestCreateOrderIdempotencyConflictCompensatesOnce(t *testing.T) {
+	setupConsumeTest(t)
+	ctx := context.Background()
+	s := New()
+
+	sku1 := consumeTestSku(t, "sku-dup-a")
+	sku2 := consumeTestSku(t, "sku-dup-b")
+	activityID := consumeTestActivity(t, sku1, sku2)
+	if err := s.SyncCache(ctx, activityID); err != nil {
+		t.Fatalf("sync cache: %v", err)
+	}
+
+	const (
+		userID = int64(882000)
+		key    = "k-dup"
+	)
+
+	// 第一次入队（sku1）成功：落库 request_hash=H1，sku1 预扣。
+	if res, err := s.CreateOrder(ctx, userID, activityID, &v1.CreateOrderReq{SkuId: sku1, IdempotencyKey: key}); err != nil || res.Status != v1.RequestStatusQueued {
+		t.Fatalf("first create order: res=%+v err=%v", res, err)
+	}
+
+	// 删除 idem 标记，模拟其 TTL 过期，使第二次请求走闸门预扣（而非幂等快速命中）。
+	if _, err := g.Redis().Del(ctx, flashSaleIdemKey(userID, key)); err != nil {
+		t.Fatalf("del idem marker: %v", err)
+	}
+
+	// 第二次入队（sku2，同 key，内容冲突）：闸门预扣 sku2（10→9）→ enqueue 撞 uk_request_idempotency → 补偿 → 12005。
+	_, err := s.CreateOrder(ctx, userID, activityID, &v1.CreateOrderReq{SkuId: sku2, IdempotencyKey: key})
+	if code := codes.FromError(err); code != codes.CodeFlashSaleIdempotencyConflict {
+		t.Fatalf("expected 12005 idempotency conflict, got code=%d err=%v", code, err)
+	}
+
+	// 关键断言：sku2 remaining 应回补到预热值 10（仅补偿一次），若为 11 说明被重复补偿（超预扣）。
+	v, err := g.Redis().Get(ctx, flashSaleStockKey(activityID, sku2))
+	if err != nil {
+		t.Fatalf("get sku2 remaining: %v", err)
+	}
+	if got := v.String(); got != "10" {
+		t.Fatalf("sku2 remaining=%q want 10（重复补偿导致超预扣）", got)
 	}
 }

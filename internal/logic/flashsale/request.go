@@ -53,8 +53,10 @@ func requestStatusString(s int) string {
 }
 
 // enqueue 插入秒杀请求（status=queued）并返回排队受理结果。
-// 撞 uk_request_idempotency 时补偿本次预扣/标记并读回既有请求结果（同 hash 返回既有状态，异 hash 12005）；
-// 其余 DB 错误返回内部错误，由调用方补偿预扣/标记。
+// 入队失败（撞 uk_request_idempotency 或其余 DB 错误）时，闸门已预扣/写标记，
+// 补偿（INCR remaining + 清 bought/idem 标记）统一收敛在此处执行一次，调用方不得再次补偿，
+// 否则「幂等键存在 + 内容冲突 + 经入队重复键」路径会重复回补 remaining 造成超预扣。
+// 撞幂等键时读回既有请求结果（同 hash 返回既有状态，异 hash 12005）。
 func (s *sFlashSale) enqueue(ctx context.Context, userID, activityID, skuID int64, idempotencyKey, hash string) (*v1.CreateOrderRes, error) {
 	_, err := g.DB().Model("flash_sale_order_requests").Ctx(ctx).Data(g.Map{
 		"user_id":         userID,
@@ -65,9 +67,10 @@ func (s *sFlashSale) enqueue(ctx context.Context, userID, activityID, skuID int6
 		"status":          requestStatusQueued,
 	}).InsertAndGetId()
 	if err != nil {
+		// 入队失败：补偿本次闸门预扣 + 清除 bought/idem 标记（避免「已预扣但无 request」残留）。
+		s.compensatePreDeductAndMarkers(ctx, activityID, skuID, userID, idempotencyKey)
 		if key := duplicateKeyName(err); key != "" && strings.Contains(key, "uk_request_idempotency") {
-			// 幂等键已存在（idem 标记 TTL 过期但请求仍落库）：补偿本次闸门的预扣/标记，再读回既有结果。
-			s.compensatePreDeductAndMarkers(ctx, activityID, skuID, userID, idempotencyKey)
+			// 幂等键已存在（idem 标记 TTL 过期但请求仍落库）：读回既有请求，同 hash 返回既有状态、异 hash 12005。
 			return s.resultForExistingRequest(ctx, userID, idempotencyKey, hash)
 		}
 		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("写入秒杀请求: %w", err))
