@@ -463,6 +463,48 @@ func TestRecommendationItemManagement(t *testing.T) {
 	}
 }
 
+// TestRecommendationUpdateSortIncomplete 回归「排序列表必须覆盖全部已加入商品」：
+// 缺漏任一已加入商品 → 409/15006；完整列表 → 成功。
+func TestRecommendationUpdateSortIncomplete(t *testing.T) {
+	base := setupRecommendationServer(t)
+	adminToken, _ := isoAdminLogin(t, base, isoSuperUsername, isoAdminPassword)
+
+	cat := recInsertCategory(t, "排序完整性分类")
+	p1 := recInsertProduct(t, "排序完整商品1", cat, 100, 1)
+	p2 := recInsertProduct(t, "排序完整商品2", cat, 200, 1)
+	posID := recCreatePosition(t, base, adminToken, "sortfull", "排序完整性位", 1)
+	for _, pid := range []int64{p1, p2} {
+		res := recCall(t, base, "POST", fmt.Sprintf("/admin/recommend-positions/%d/items", posID), adminToken, map[string]any{"product_id": pid})
+		if res.Status != 200 || res.Code != 0 {
+			t.Fatalf("add item %d: status=%d code=%d", pid, res.Status, res.Code)
+		}
+	}
+
+	// 缺漏 p2 → 409/15006。
+	res := recCall(t, base, "PUT", fmt.Sprintf("/admin/recommend-positions/%d/items/sort", posID), adminToken, map[string]any{
+		"product_ids": []int64{p1},
+	})
+	if res.Status != 409 || res.Code != 15006 {
+		t.Fatalf("incomplete sort: status=%d code=%d want 409/15006", res.Status, res.Code)
+	}
+
+	// 缺漏且混入未加入商品 → 先命中 15004（未加入商品）。
+	res = recCall(t, base, "PUT", fmt.Sprintf("/admin/recommend-positions/%d/items/sort", posID), adminToken, map[string]any{
+		"product_ids": []int64{p1, 999999},
+	})
+	if res.Status != 404 || res.Code != 15004 {
+		t.Fatalf("unknown product in sort: status=%d code=%d want 404/15004", res.Status, res.Code)
+	}
+
+	// 完整列表 → 成功。
+	ok := recCall(t, base, "PUT", fmt.Sprintf("/admin/recommend-positions/%d/items/sort", posID), adminToken, map[string]any{
+		"product_ids": []int64{p2, p1},
+	})
+	if ok.Status != 200 || ok.Code != 0 {
+		t.Fatalf("full sort: status=%d code=%d msg=%q", ok.Status, ok.Code, ok.Message)
+	}
+}
+
 // TestRecommendationDuplicateRejected 覆盖 AC-004 与 INV-002：
 // 同一商品重复加入同一推荐位被拒（15005）且不产生重复关系。
 func TestRecommendationDuplicateRejected(t *testing.T) {

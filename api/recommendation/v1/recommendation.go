@@ -139,7 +139,7 @@ type RemoveItemRes struct{}
 type UpdateSortReq struct {
 	g.Meta     `path:"/admin/recommend-positions/:id/items/sort" method:"put" tags:"推荐位" summary:"调整推荐商品排序"`
 	Id         int64   `json:"id" in:"path" v:"required" dc:"推荐位 id"`
-	ProductIds []int64 `json:"product_ids" dc:"按目标顺序排列的商品 id 列表（非空、无重复、须为已加入该推荐位的商品）"`
+	ProductIds []int64 `json:"product_ids" dc:"按目标顺序排列的商品 id 列表（非空、无重复，必须恰好覆盖该推荐位全部已加入商品）"`
 }
 
 // UpdateSortRes 调整推荐商品排序响应。

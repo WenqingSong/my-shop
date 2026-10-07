@@ -315,7 +315,8 @@ func (s *sRecommendation) RemoveItem(ctx context.Context, req *v1.RemoveItemReq)
 }
 
 // UpdateSort 按给定商品顺序调整排序：product_ids 的顺序即目标顺序（sort=下标）。
-// 每个 product_id 必须已加入该推荐位（否则 15004）；推荐位不存在 → 15001；列表非法（空/重复/非法 id）→ 15003。
+// 推荐位不存在 → 15001；列表非法（空/重复/非法 id）→ 15003；含未加入该推荐位的商品 → 15004；
+// 未覆盖全部已加入商品（缺漏）→ 15006。
 func (s *sRecommendation) UpdateSort(ctx context.Context, req *v1.UpdateSortReq) (*v1.UpdateSortRes, error) {
 	pos, err := s.findOne(ctx, req.Id)
 	if err != nil {
@@ -351,6 +352,12 @@ func (s *sRecommendation) UpdateSort(ctx context.Context, req *v1.UpdateSortReq)
 	for _, pid := range req.ProductIds {
 		if !existingSet[pid] {
 			return nil, codes.New(codes.CodeRecommendItemNotFound)
+		}
+	}
+	// 校验列表覆盖全部已加入商品：缺漏任一已加入商品 → 15006，避免部分更新导致排序语义不完整。
+	for _, r := range existing {
+		if !seen[r.ProductId] {
+			return nil, codes.New(codes.CodeRecommendItemSortMismatch)
 		}
 	}
 
