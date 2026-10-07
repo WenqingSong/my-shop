@@ -17,8 +17,8 @@ review:
   target: "777212983e7ce43974cba9b0b65ada9d2dc88cc1"
 
 owner:
-  status: PENDING
-  review_target: ""
+  status: ACCEPTED
+  review_target: "777212983e7ce43974cba9b0b65ada9d2dc88cc1"
 
 delivery:
   status: NOT_RUN
