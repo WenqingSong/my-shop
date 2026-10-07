@@ -119,6 +119,8 @@ func TestRouteTable(t *testing.T) {
 		"POST /admin/orders/:id/refund",
 		// 秒杀前台下单（Auth 保护）。
 		"POST /flash-sales/:id/orders",
+		// 秒杀下单结果查询（Auth 保护）。
+		"GET /flash-sales/:id/orders/result",
 		// 秒杀活动后台写操作（AdminAuth + RequirePermission）。
 		"POST /admin/flash-sales",
 		"PUT /admin/flash-sales/:id",
@@ -138,6 +140,8 @@ func TestRouteTable(t *testing.T) {
 		"GET /likes/check",
 		// 公开轮播图列表（无 token）。
 		"GET /banners",
+		// 公开推荐位查询（无 token）。
+		"GET /recommendations/:code",
 		// 轮播图后台查询（AdminAuth，无读权限）。
 		"GET /admin/banners",
 		"GET /admin/banners/:id",
@@ -145,6 +149,16 @@ func TestRouteTable(t *testing.T) {
 		"POST /admin/banners",
 		"PUT /admin/banners/:id",
 		"DELETE /admin/banners/:id",
+		// 推荐位后台查询（AdminAuth，无读权限）。
+		"GET /admin/recommend-positions",
+		"GET /admin/recommend-positions/:id",
+		// 推荐位后台写操作（AdminAuth + RequirePermission）。
+		"POST /admin/recommend-positions",
+		"PUT /admin/recommend-positions/:id",
+		"DELETE /admin/recommend-positions/:id",
+		"POST /admin/recommend-positions/:id/items",
+		"DELETE /admin/recommend-positions/:id/items/:product_id",
+		"PUT /admin/recommend-positions/:id/items/sort",
 	}
 	for _, w := range want {
 		if !got[w] {

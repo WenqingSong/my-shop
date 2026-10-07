@@ -1,0 +1,32 @@
+schema_version: 3
+task_id: recommendation-v1
+
+contract:
+  status: APPROVED
+  target: "70672bee1558d5b2ae6b53dcab930a955270cd5a"
+
+resources:
+  reservations:
+    migration_version:
+      - "20261001000016"
+    error_code_domain:
+      - "15000-15999"
+
+review:
+  status: CLEAN
+  target: "777212983e7ce43974cba9b0b65ada9d2dc88cc1"
+
+owner:
+  status: ACCEPTED
+  review_target: "777212983e7ce43974cba9b0b65ada9d2dc88cc1"
+
+delivery:
+  status: PASS
+  review_target: "777212983e7ce43974cba9b0b65ada9d2dc88cc1"
+  feature_head: "72d531e19f15e0063222591021eb91bcbe72697c"
+  develop_base: "27843b4148333e0a01148286a31b2db8074120d8"
+
+blocked:
+  active: false
+  by: ""
+  reason: ""

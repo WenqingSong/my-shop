@@ -22,12 +22,12 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/service"
 )
 
-// flashOrderEnvelope 是秒杀下单接口的统一响应封装。
+// flashOrderEnvelope 是秒杀下单接口的统一响应封装（V3 起 Data 为排队受理结果 CreateOrderRes）。
 type flashOrderEnvelope struct {
 	Status  int
 	Code    int
 	Message string
-	Data    *v1.FlashOrder
+	Data    *v1.CreateOrderRes
 }
 
 // setupFlashSaleServer 建立隔离的秒杀测试环境：复用身份隔离初始化后，清空秒杀域与商品域相关业务表。
@@ -38,7 +38,7 @@ func setupFlashSaleServer(t *testing.T) string {
 	ctx := context.Background()
 	// 按外键依赖顺序清空（子表先于父表）。
 	for _, table := range []string{
-		"flash_sale_orders", "flash_sale_activity_skus", "flash_sale_activities",
+		"flash_sale_order_requests", "flash_sale_orders", "flash_sale_activity_skus", "flash_sale_activities",
 		"order_items", "orders", "cart_items",
 		"inventory_logs", "inventories",
 		"skus", "product_images", "products",
@@ -51,7 +51,7 @@ func setupFlashSaleServer(t *testing.T) string {
 	return base
 }
 
-// flashOrderCall 发起秒杀下单请求并解码响应中的秒杀订单结构。
+// flashOrderCall 发起秒杀下单请求并解码响应中的排队受理结果（V3 起 Data 为 CreateOrderRes）。
 func flashOrderCall(t *testing.T, base string, activityID int64, token string, body map[string]any) flashOrderEnvelope {
 	t.Helper()
 	res := isoDo(t, base, "POST", fmt.Sprintf("/flash-sales/%d/orders", activityID), body, isoAuthHeader(token))
@@ -61,13 +61,21 @@ func flashOrderCall(t *testing.T, base string, activityID int64, token string, b
 		if err != nil {
 			t.Fatalf("marshal flash order data: %v", err)
 		}
-		var o v1.FlashOrder
+		var o v1.CreateOrderRes
 		if err := json.Unmarshal(b, &o); err != nil {
 			t.Fatalf("unmarshal flash order data: %v", err)
 		}
 		env.Data = &o
 	}
 	return env
+}
+
+// flashConsume 消费秒杀异步请求队列（消费全部可处理请求），供异步模型测试在入队后驱动落单。
+func flashConsume(t *testing.T, limit int) {
+	t.Helper()
+	if _, err := service.FlashSale().ConsumeQueued(context.Background(), limit); err != nil {
+		t.Fatalf("consume queued: %v", err)
+	}
 }
 
 // flashMintUserToken 为指定 user_id 直接签发有效 token + 会话（绕过 bcrypt 登录），
@@ -211,6 +219,39 @@ func flashOrderFlashPrice(t *testing.T, orderID int64) int64 {
 	return v.Int64()
 }
 
+// flashRequestOrderID 查询指定 (user_id, idempotency_key) 异步请求成功落单后的 flash_order_id。
+func flashRequestOrderID(t *testing.T, userID int64, key string) int64 {
+	t.Helper()
+	rec, err := g.DB().Model("flash_sale_order_requests").Ctx(context.Background()).
+		Fields("flash_order_id").
+		Where("user_id", userID).Where("idempotency_key", key).One()
+	if err != nil {
+		t.Fatalf("query flash request: %v", err)
+	}
+	if rec == nil || rec.IsEmpty() {
+		t.Fatalf("flash request (%d,%q) not found", userID, key)
+	}
+	if rec["flash_order_id"].IsNil() {
+		t.Fatalf("flash request (%d,%q) has no flash_order_id", userID, key)
+	}
+	return rec["flash_order_id"].Int64()
+}
+
+// flashRequestStatus 查询指定 (user_id, idempotency_key) 异步请求的状态（DB TINYINT）。
+func flashRequestStatus(t *testing.T, userID int64, key string) int {
+	t.Helper()
+	rec, err := g.DB().Model("flash_sale_order_requests").Ctx(context.Background()).
+		Fields("status").
+		Where("user_id", userID).Where("idempotency_key", key).One()
+	if err != nil {
+		t.Fatalf("query flash request status: %v", err)
+	}
+	if rec == nil || rec.IsEmpty() {
+		t.Fatalf("flash request (%d,%q) not found", userID, key)
+	}
+	return rec["status"].Int()
+}
+
 // TestFlashSaleCreateActivityAndPermission 覆盖 AC-001/INV-008：
 // 超管经真实路由创建活动，断言活动/SKU/秒杀价/秒杀库存/起止时间落库；无权限管理员 403 且无写入。
 func TestFlashSaleCreateActivityAndPermission(t *testing.T) {
@@ -326,13 +367,13 @@ func TestFlashSaleOrderPricingSnapshot(t *testing.T) {
 	if env.Status != 200 || env.Code != 0 {
 		t.Fatalf("order: status=%d code=%d msg=%q", env.Status, env.Code, env.Message)
 	}
-	if env.Data == nil {
-		t.Fatalf("order: empty data")
+	if env.Data == nil || env.Data.Status != v1.RequestStatusQueued {
+		t.Fatalf("enqueue should return queued, got %+v", env.Data)
 	}
-	if env.Data.FlashPrice != 1000 {
-		t.Fatalf("flash price=%d want 1000", env.Data.FlashPrice)
-	}
-	orderID := env.Data.Id
+
+	// 消费后落单，成交价 = 消费时秒杀价快照 1000（非普通 SKU 价 5000）。
+	flashConsume(t, 10)
+	orderID := flashRequestOrderID(t, 500002, "k-snap")
 
 	// 改秒杀价后，已生成订单快照不变。
 	if _, err := g.DB().Model("flash_sale_activity_skus").Ctx(context.Background()).
@@ -366,7 +407,8 @@ func TestFlashSaleOnePerUser(t *testing.T) {
 	if second.Status != 409 || second.Code != 12004 {
 		t.Fatalf("second order: status=%d code=%d want 409/12004", second.Status, second.Code)
 	}
-	// 仍只有一个订单、库存只扣一次。
+	// 消费后仍只有一个订单、库存只扣一次。
+	flashConsume(t, 10)
 	if n := flashOrderCount(t, activityID); n != 1 {
 		t.Fatalf("order count=%d want 1", n)
 	}
@@ -376,7 +418,7 @@ func TestFlashSaleOnePerUser(t *testing.T) {
 }
 
 // TestFlashSaleIdempotency 覆盖 AC-005/INV-005：
-// 同幂等键重复提交只产生一个订单、库存只扣一次、返回既有订单；同键不同内容返回 12005。
+// 同幂等键重复提交只产生一个订单、库存只扣一次、返回既有请求状态；同键不同内容返回 12005。
 func TestFlashSaleIdempotency(t *testing.T) {
 	base := setupFlashSaleServer(t)
 	skuID := flashSetupSku(t, "SKU-IDEM", 5000, 1)
@@ -397,9 +439,12 @@ func TestFlashSaleIdempotency(t *testing.T) {
 	if second.Status != 200 || second.Code != 0 {
 		t.Fatalf("idempotent retry: status=%d code=%d", second.Status, second.Code)
 	}
-	if second.Data.Id != first.Data.Id {
-		t.Fatalf("idempotent retry should return same order, got %d vs %d", second.Data.Id, first.Data.Id)
+	if second.Data == nil || second.Data.Status != v1.RequestStatusQueued {
+		t.Fatalf("idempotent retry should return queued status, got %+v", second.Data)
 	}
+
+	// 消费后仍只有一个订单、库存只扣一次。
+	flashConsume(t, 10)
 	if n := flashOrderCount(t, activityID); n != 1 {
 		t.Fatalf("order count=%d want 1", n)
 	}
@@ -459,8 +504,10 @@ func TestFlashSaleConcurrentNoOversell(t *testing.T) {
 		}
 	}
 	if success != totalStock {
-		t.Fatalf("successful orders=%d want %d", success, totalStock)
+		t.Fatalf("successful enqueues=%d want %d", success, totalStock)
 	}
+	// 消费后最终 MySQL 落单：成功订单数 = sold = 初始库存，不超卖。
+	flashConsume(t, n)
 	total, sold := flashBindingStock(t, activityID, skuID)
 	if total != totalStock {
 		t.Fatalf("total_stock=%d want %d", total, totalStock)
@@ -498,6 +545,8 @@ func TestFlashSaleOrderFailures(t *testing.T) {
 	if insufficient.Status != 409 || insufficient.Code != 12003 {
 		t.Fatalf("insufficient: status=%d code=%d want 409/12003", insufficient.Status, insufficient.Code)
 	}
+	// 消费后仅 1 单落单、库存只扣 1；不足/非法请求不产生订单。
+	flashConsume(t, 10)
 	if n := flashOrderCount(t, active); n != 1 {
 		t.Fatalf("insufficient should not create order, count=%d want 1", n)
 	}
@@ -616,6 +665,7 @@ func TestFlashSaleUpdateCannotAddOrRemoveBindings(t *testing.T) {
 			t.Fatalf("order %d: status=%d code=%d", i, res.Status, res.Code)
 		}
 	}
+	flashConsume(t, 10)
 	if _, sold := flashBindingStock(t, activityID, skuA); sold != 6 {
 		t.Fatalf("skuA sold=%d want 6", sold)
 	}

@@ -37,3 +37,6 @@
 | 20261001000012 | product_view_count | product-view-count-v1 | RESERVED | products.view_count 浏览量计数字段 |
 | 20261001000013 | product_likes | product-like-v1 | RESERVED | product_likes 点赞表 |
 | 20261001000014 | banners | banner-v1 | RESERVED | banners 轮播图表 |
+| 20261001000015 | flash_sale_order_requests | flash-sale-v3 | RESERVED | flash_sale_order_requests 异步下单请求表 |
+| 20261001000016 | recommend | recommendation-v1 | RESERVED | recommend_positions + recommend_items 推荐位两表 |
+| 20261001000017 | articles | article-cms-v1 | RESERVED | articles + article_likes + article_favorites 文章三表 |

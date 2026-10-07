@@ -87,8 +87,10 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 
 	// 启动后台超时取消扫描器：扫描 status=待支付 且 expire_at 已过的订单，逐单原子取消并恢复库存。
 	startOrderCancelScanner(ctx)
-	// 启动秒杀缓存对账扫描器：按「活动 × SKU」粒度将 Redis remaining 刷成 total_stock - sold，并回补缺失预热。
+	// 启动秒杀缓存对账扫描器：按「活动 × SKU」粒度将 Redis remaining 刷成 total_stock - sold - inflight_queued，并回补缺失预热。
 	startFlashSaleReconcileScanner(ctx)
+	// 启动秒杀异步消费扫描器：出队 queued 请求并事务落单/失败/重试/死信。
+	startFlashSaleConsumeScanner(ctx)
 
 	s := g.Server()
 	// 初始化本地图片存储：seed 轮播图占位图，并将 banner 目录映射为静态路由 /storage/banners。
@@ -156,6 +158,33 @@ func startOrderCancelScanner(ctx context.Context) {
 
 // flashSaleReconcileScanBatch 是每轮秒杀缓存对账扫描处理的最大活动数。
 const flashSaleReconcileScanBatch = 100
+
+// flashSaleConsumeScanBatch 是每轮秒杀异步消费扫描处理的最大请求数。
+const flashSaleConsumeScanBatch = 100
+
+// startFlashSaleConsumeScanner 启动秒杀异步消费后台扫描器（goroutine + ticker）。
+// 周期由 flash_sale.consume_scan_interval 配置（秒，默认 1，保证低延迟落单）；
+// 出队依赖 FOR UPDATE SKIP LOCKED + 状态原子更新保证同一请求只被处理一次，多实例并发安全。
+func startFlashSaleConsumeScanner(ctx context.Context) {
+	interval := g.Cfg().MustGet(ctx, "flash_sale.consume_scan_interval", 1).Int()
+	if interval <= 0 {
+		interval = 1
+	}
+	go func() {
+		ticker := time.NewTicker(time.Duration(interval) * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if _, err := service.FlashSale().ConsumeQueued(ctx, flashSaleConsumeScanBatch); err != nil {
+					glog.Warningf(ctx, "秒杀异步消费扫描失败: %v", err)
+				}
+			}
+		}
+	}()
+}
 
 // startFlashSaleReconcileScanner 启动秒杀缓存对账后台扫描器（goroutine + ticker）。
 // 周期由 flash_sale.reconcile_scan_interval 配置（秒，默认 60）；对账为无状态、幂等写入

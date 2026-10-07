@@ -111,6 +111,18 @@ const (
 	// 轮播图域（Banner）14000-14999。
 	CodeBannerNotFound     Code = 14001 // 轮播图不存在 → 404
 	CodeBannerInvalidInput Code = 14002 // 轮播图参数非法（标题/图片/跳转/状态）→ 400
+
+	// 推荐位域（Recommendation）15000-15999。
+	CodeRecommendPositionNotFound   Code = 15001 // 推荐位不存在 → 404
+	CodeRecommendPositionCodeExists Code = 15002 // 推荐位 code 已存在 → 409
+	CodeRecommendInvalidInput       Code = 15003 // 参数非法（code/name/sort/status/product_id）→ 400
+	CodeRecommendItemNotFound       Code = 15004 // 推荐商品关系不存在 → 404
+	CodeRecommendItemDuplicate      Code = 15005 // 同一推荐位重复添加同一商品 → 409
+	CodeRecommendItemSortMismatch   Code = 15006 // 排序商品列表未覆盖全部已加入商品（缺漏）→ 409
+
+	// 文章域（Article）16000-16999。
+	CodeArticleNotFound     Code = 16001 // 文章不存在或非本人（防枚举）；点赞/收藏目标不存在亦复用 → 404
+	CodeArticleInvalidInput Code = 16002 // 标题/内容为空或超长 → 400
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -195,6 +207,16 @@ var codeTable = map[Code]codeInfo{
 
 	CodeBannerNotFound:     {http.StatusNotFound, "轮播图不存在"},
 	CodeBannerInvalidInput: {http.StatusBadRequest, "轮播图参数非法"},
+
+	CodeRecommendPositionNotFound:   {http.StatusNotFound, "推荐位不存在"},
+	CodeRecommendPositionCodeExists: {http.StatusConflict, "推荐位标识已存在"},
+	CodeRecommendInvalidInput:       {http.StatusBadRequest, "推荐位参数非法"},
+	CodeRecommendItemNotFound:       {http.StatusNotFound, "推荐商品关系不存在"},
+	CodeRecommendItemDuplicate:      {http.StatusConflict, "该商品已加入此推荐位"},
+	CodeRecommendItemSortMismatch:   {http.StatusConflict, "排序商品列表未覆盖全部已加入商品"},
+
+	CodeArticleNotFound:     {http.StatusNotFound, "文章不存在"},
+	CodeArticleInvalidInput: {http.StatusBadRequest, "文章内容非法"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。

@@ -1,0 +1,32 @@
+schema_version: 3
+task_id: article-cms-v1
+
+contract:
+  status: APPROVED
+  target: "450631c640aa7bfed2ca3cdde10d84333f245854"
+
+resources:
+  reservations:
+    error_code_domain:
+      - "16000-16999"
+    migration_version:
+      - "20261001000017"
+
+review:
+  status: CLEAN
+  target: "496dcd060832b17d2f27bf0232e22199e1b32e75"
+
+owner:
+  status: ACCEPTED
+  review_target: "496dcd060832b17d2f27bf0232e22199e1b32e75"
+
+delivery:
+  status: PASS
+  review_target: "496dcd060832b17d2f27bf0232e22199e1b32e75"
+  feature_head: "eaa916d5fcbfabd4de8a0d45b47abffabdd4b79b"
+  develop_base: "44d8461dd488543d37603eff024d763581661ee3"
+
+blocked:
+  active: false
+  by: ""
+  reason: ""

@@ -61,10 +61,12 @@ order:
   cancel_scan_interval: 60
 
 # 秒杀配置（以下均为开发默认值，可通过环境变量覆盖）
-# 对应环境变量：FLASH_SALE_RECONCILE_SCAN_INTERVAL
+# 对应环境变量：FLASH_SALE_RECONCILE_SCAN_INTERVAL / FLASH_SALE_CONSUME_SCAN_INTERVAL
 flash_sale:
   # 秒杀缓存对账/回补的后台扫描周期（秒）。
   reconcile_scan_interval: 60
+  # 秒杀异步下单的消费扫描周期（秒），保证排队请求低延迟落单。
+  consume_scan_interval: 1
 
 # 本地存储配置（以下均为开发默认值，可通过环境变量覆盖）
 # 对应环境变量：STORAGE_LOCAL_ROOT
