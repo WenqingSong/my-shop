@@ -21,3 +21,13 @@
 - 可选 Mutation：临时把 `AddItem` 里 `if isDuplicateKeyError(err) { return 15005 }` 这段去掉（让 1062 落进 `CodeInternalError`）。
 - 预期失败：`TestRecommendationDuplicateRejected` 会失败——第二次添加期望 409/15005，实际返回 500（或内部错误码），证明「错误码翻译」是关键行为而非无关样板。
 - 恢复确认：恢复该段后重新运行同一命令，应重新 PASS。并发场景下「唯一约束兜底」的机制由 `uk_position_product` 索引存在性（`TestSchemaStructureMatchesBaseline`）间接证明。
+
+## CL-003：调整排序必须覆盖全部已加入商品（全量重排），缺漏被拒
+
+- Owner 需要理解：`PUT /admin/recommend-positions/:id/items/sort` 提交的有序 `product_ids` 必须**恰好覆盖该推荐位全部已加入商品**。若允许「部分列表」，未提交的商品会保留旧 `sort`，与新赋值的 `sort=0..n-1` 交错，导致排序语义不完整、运营预期混乱。因此缺漏被拒（15006）、含未加入商品被拒（15004）、重复/空被拒（15003），只有完整列表才原子写入全部 `sort`。
+- 生产代码：`internal/logic/recommendation/recommendation.go` `UpdateSort`（L320-389）。缺漏校验在 L357-362（`for _, r := range existing { if !seen[r.ProductId] → 15006 }`）；多余校验在 L352-356（`15004`）；重复/空在 L328-340（`15003`）；全部校验通过后 L364-375 事务内按序写入。错误码 `15006 CodeRecommendItemSortMismatch`（`internal/codes/codes.go`，409）。
+- 关键测试：`TestRecommendationUpdateSortIncomplete`（`internal/cmd/recommendation_test.go`）：缺漏 `[p1]`→409/15006、多余 `[p1,999999]`→404/15004、完整 `[p2,p1]`→200。
+- 基线验证：`go test ./internal/cmd -run TestRecommendationUpdateSortIncomplete -count=1` → 预期 PASS。
+- 可选 Mutation：临时删除 L357-362 的缺漏校验循环（`for _, r := range existing { ... }`）。
+- 预期失败：`TestRecommendationUpdateSortIncomplete` 的缺漏用例会失败——提交 `[p1]` 期望 409/15006，实际会通过校验并返回 200，证明「缺漏拒绝」是关键业务规则而非无关样板。
+- 恢复确认：恢复该循环后重新运行同一命令，应重新 PASS。
