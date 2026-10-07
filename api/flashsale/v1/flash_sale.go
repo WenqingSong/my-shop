@@ -15,6 +15,14 @@ const (
 	StatusDisabled = "disabled"
 )
 
+// 异步请求状态枚举（API 出参为字符串枚举；DB 存 TINYINT 0/1/2/3）。
+const (
+	RequestStatusQueued  = "queued"  // 已受理/排队中（含退避重试）
+	RequestStatusSuccess = "success" // 落单成功（与成功订单创建同事务）
+	RequestStatusFailed  = "failed"  // 业务失败终态（库存不足/时间窗结束/已购等）
+	RequestStatusDead    = "dead"    // 技术失败重试超限（死信/待修复）
+)
+
 // ActivitySku 秒杀活动 × SKU 绑定（秒杀价 + 秒杀库存）。
 type ActivitySku struct {
 	Id         int64 `json:"id" dc:"绑定 id"`
@@ -97,10 +105,27 @@ type CreateOrderReq struct {
 	g.Meta         `path:"/flash-sales/:id/orders" method:"post" tags:"秒杀" summary:"秒杀下单"`
 	Id             int64  `json:"id" in:"path" v:"required" dc:"活动 id"`
 	SkuId          int64  `json:"sku_id" dc:"SKU id（必须为该活动绑定的 SKU）"`
-	IdempotencyKey string `json:"idempotency_key" dc:"幂等键（同键同内容幂等返回既有订单，同键不同内容 12005）"`
+	IdempotencyKey string `json:"idempotency_key" dc:"幂等键（同键同内容幂等返回既有请求状态，同键不同内容 12005）"`
 }
 
-// CreateOrderRes 秒杀下单响应。
+// CreateOrderRes 秒杀下单响应：V3 起为「排队受理结果」，不再同步返回已创建订单。
 type CreateOrderRes struct {
-	FlashOrder
+	Status         string `json:"status" dc:"受理状态：queued（已受理/排队中，或幂等命中时返回既有请求状态）"`
+	IdempotencyKey string `json:"idempotency_key" dc:"幂等键"`
+	ActivityId     int64  `json:"activity_id" dc:"活动 id"`
+	SkuId          int64  `json:"sku_id" dc:"SKU id"`
+}
+
+// GetOrderResultReq 查询秒杀下单结果请求（前台登录用户，作用于 Principal.UserID）。
+type GetOrderResultReq struct {
+	g.Meta         `path:"/flash-sales/:id/orders/result" method:"get" tags:"秒杀" summary:"查询秒杀下单结果"`
+	Id             int64  `json:"id" in:"path" v:"required" dc:"活动 id"`
+	IdempotencyKey string `json:"idempotency_key" in:"query" dc:"幂等键"`
+}
+
+// GetOrderResultRes 查询秒杀下单结果响应。
+type GetOrderResultRes struct {
+	Status   string      `json:"status" dc:"处理状态：queued/success/failed/dead"`
+	Order    *FlashOrder `json:"order,omitempty" dc:"success 时的秒杀订单"`
+	FailCode int         `json:"fail_code,omitempty" dc:"失败码（failed/dead 时的最近失败码，观测用）"`
 }

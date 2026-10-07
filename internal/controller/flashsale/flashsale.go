@@ -27,6 +27,15 @@ func (c *ControllerV1) CreateOrder(ctx context.Context, req *v1.CreateOrderReq) 
 	return service.FlashSale().CreateOrder(ctx, userID, req.Id, req)
 }
 
+// GetOrderResult 处理查询秒杀下单结果：归属取自已认证 Principal，仅本人可查。
+func (c *ControllerV1) GetOrderResult(ctx context.Context, req *v1.GetOrderResultReq) (res *v1.GetOrderResultRes, err error) {
+	userID, err := currentUserID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return service.FlashSale().GetOrderResult(ctx, userID, req.Id, req.IdempotencyKey)
+}
+
 // AdminControllerV1 实现秒杀后台 v1 API。
 type AdminControllerV1 struct{}
 

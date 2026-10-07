@@ -39,8 +39,6 @@ const (
 	maxNameLen = 64
 	// maxPrice 秒杀价上限（整数分，= ¥999,999.99）。
 	maxPrice = 99_999_999
-	// maxOrderNoRetry 秒杀订单号撞号重试次数（uk_flash_order_no 兜底，撞号概率极低）。
-	maxOrderNoRetry = 3
 )
 
 type sFlashSale struct{}
@@ -249,10 +247,11 @@ func (s *sFlashSale) UpdateActivity(ctx context.Context, req *v1.UpdateReq) (*v1
 	return &v1.UpdateRes{Activity: *a}, nil
 }
 
-// CreateOrder 秒杀下单（V2）：先经 Redis Lua 闸门快速失败（售罄/穿透/已购/幂等命中），
-// 通过后在同请求内继续 V1 的 MySQL 事务落单（活动校验/时间窗/条件扣库存/建单）；
-// MySQL 失败补偿 Redis 预扣；一人一单/幂等标记在 MySQL 提交成功后写入。
-// 幂等键命中（uk_flash_idempotency）回滚扣减后读回既有订单；一人一单命中（uk_flash_one_per_user）回滚并返回 12004。
+// CreateOrder 秒杀下单（V3 异步）：先经 Redis Lua 闸门快速失败（售罄/穿透/已购/幂等命中），
+// 通过闸门（GATE_PASSED，已预扣 + 写入一人一单/幂等标记）后，将请求持久入队（status=queued）
+// 并快速返回「已受理/排队中」，不在同请求内同步落单；后台消费者异步完成订单创建。
+// Redis 不可用或 Lua 执行失败 → fail-closed（503），不落 request、不预扣、不直接同步落单。
+// 幂等/一人一单/请求级幂等由 DB 唯一约束兜底。
 func (s *sFlashSale) CreateOrder(ctx context.Context, userID, activityID int64, req *v1.CreateOrderReq) (*v1.CreateOrderRes, error) {
 	skuID := req.SkuId
 	if skuID <= 0 {
@@ -265,87 +264,35 @@ func (s *sFlashSale) CreateOrder(ctx context.Context, userID, activityID int64, 
 
 	hash := requestHash(activityID, skuID)
 
-	// V2 闸门：Redis 不可用或 Lua 执行失败时降级走 V1 纯 MySQL 路径（正确性由 MySQL 保证）。
-	preDeducted := false
-	if gate, err := s.runGate(ctx, activityID, skuID, userID, idempotencyKey, hash); err != nil {
-		glog.Warningf(ctx, "秒杀闸门执行失败，降级纯 MySQL 路径: %v", err)
-	} else {
-		switch gate {
-		case gateNotFound:
-			return nil, codes.New(codes.CodeFlashSaleActivityNotFound)
-		case gateNotInWindow:
-			return nil, codes.New(codes.CodeFlashSaleNotInTimeWindow)
-		case gateSoldOut:
-			return nil, codes.New(codes.CodeFlashSaleStockInsufficient)
-		case gateAlreadyPurchased:
-			return nil, codes.New(codes.CodeFlashSaleAlreadyPurchased)
-		case gateIdempotentHit:
-			return s.handleIdempotency(ctx, userID, idempotencyKey, hash)
-		case gateIdempotentConflict:
-			return nil, codes.New(codes.CodeFlashSaleIdempotencyConflict)
-		case gatePassed:
-			preDeducted = true
-		case gateSkuNotBound:
-			// SKU 未绑定该活动：透传 MySQL，由 V1 路径返回 1001（参数非法）。
-		}
-	}
-
-	// SKU/商品可用性校验 + 快照（事务外，与普通订单 resolveLine 一致；服务端定价不信任客户端）。
-	snap, err := s.resolveSku(ctx, skuID)
+	gate, err := s.runGate(ctx, activityID, skuID, userID, idempotencyKey, hash)
 	if err != nil {
-		if preDeducted {
-			s.compensatePreDeduct(ctx, activityID, skuID)
-		}
-		return nil, err
+		glog.Warningf(ctx, "秒杀闸门执行失败，快速失败(503): %v", err)
+		return nil, codes.New(codes.CodeServiceUnavailable)
+	}
+	switch gate {
+	case gateNotFound:
+		return nil, codes.New(codes.CodeFlashSaleActivityNotFound)
+	case gateNotInWindow:
+		return nil, codes.New(codes.CodeFlashSaleNotInTimeWindow)
+	case gateSoldOut:
+		return nil, codes.New(codes.CodeFlashSaleStockInsufficient)
+	case gateAlreadyPurchased:
+		return nil, codes.New(codes.CodeFlashSaleAlreadyPurchased)
+	case gateIdempotentHit:
+		return s.resultForExistingRequest(ctx, userID, idempotencyKey, hash)
+	case gateIdempotentConflict:
+		return nil, codes.New(codes.CodeFlashSaleIdempotencyConflict)
+	case gateSkuNotBound:
+		return nil, codes.New(codes.CodeInvalidArgument)
+	case gatePassed:
+		// 闸门通过，继续入队。
 	}
 
-	var createdID int64
-	for attempt := 0; attempt < maxOrderNoRetry; attempt++ {
-		orderNo := generateOrderNo()
-		createdID, err = s.insertOrder(ctx, userID, activityID, skuID, snap, idempotencyKey, hash, orderNo)
-		if err == nil {
-			break
-		}
-		var dk *duplicateKeyErr
-		if errors.As(err, &dk) {
-			switch {
-			case strings.Contains(dk.key, "uk_flash_idempotency"):
-				if preDeducted {
-					s.compensatePreDeduct(ctx, activityID, skuID)
-				}
-				return s.handleIdempotency(ctx, userID, idempotencyKey, hash)
-			case strings.Contains(dk.key, "uk_flash_one_per_user"):
-				if preDeducted {
-					s.compensatePreDeduct(ctx, activityID, skuID)
-				}
-				return nil, codes.New(codes.CodeFlashSaleAlreadyPurchased)
-			case strings.Contains(dk.key, "uk_flash_order_no"):
-				continue // 撞号重试（事务已整体回滚，预扣保留待最终结果统一处理）
-			}
-		}
-		if preDeducted {
-			s.compensatePreDeduct(ctx, activityID, skuID)
-		}
-		return nil, err
-	}
-	if createdID == 0 {
-		if preDeducted {
-			s.compensatePreDeduct(ctx, activityID, skuID)
-		}
-		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("生成秒杀订单号重试失败"))
-	}
-
-	// MySQL 下单成功：写入一人一单/幂等标记（无孤儿标记）；Redis 失败仅记录日志（MySQL 唯一约束兜底）。
-	s.markOrderSuccess(ctx, activityID, skuID, userID, idempotencyKey, hash)
-
-	o, err := s.loadOrder(ctx, userID, createdID)
-	if err != nil {
-		return nil, err
-	}
-	if o == nil {
-		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("创建秒杀订单后未找到记录"))
-	}
-	return &v1.CreateOrderRes{FlashOrder: *o}, nil
+	// 入队：持久受理（status=queued）。
+	// 注意：闸门已预扣/写标记，入队失败（撞幂等键或 DB 故障）时的预扣/标记补偿统一收敛在
+	// enqueue 内部处理，此处直接透传结果，不再二次补偿——否则「幂等键存在 + 内容冲突 + 经入队
+	// 重复键」路径会重复回补 remaining，造成超预扣。
+	return s.enqueue(ctx, userID, activityID, skuID, idempotencyKey, hash)
 }
 
 // resolveSku 校验 SKU 存在且 enabled、商品 on_shelf，并捕获下单快照（名称/主图）。
@@ -379,101 +326,90 @@ func (s *sFlashSale) resolveSku(ctx context.Context, skuID int64) (*skuSnapshot,
 	}, nil
 }
 
-// insertOrder 在单事务内完成：活动存在性与状态校验 → 时间窗校验（MySQL NOW()）→ 锁定并读取
-// 秒杀绑定（秒杀价快照）→ 条件扣减秒杀库存（防超卖）→ 插入秒杀订单（幂等/一人一单唯一约束兜底）。
-func (s *sFlashSale) insertOrder(
-	ctx context.Context,
+// insertOrderInTx 在给定事务内完成：活动存在性与状态校验 → 时间窗校验（MySQL NOW()）→ 锁定并读取
+// 秒杀绑定（秒杀价快照 + 行锁下判库存）→ 插入秒杀订单（幂等/一人一单唯一约束兜底）→ 条件扣减秒杀库存（防超卖）。
+// 先建单后扣库存 + 行锁预检，保证任一失败（撞号/已购/幂等/库存不足）都不残留「已扣库存但无订单」或「有订单但未扣库存」。
+// 命中唯一约束返回 *duplicateKeyErr 供调用方分流；其余为业务或技术错误（随外层事务回滚）。
+// 供异步消费者复用：消费者在「出队行锁 + 落单」的同一事务内调用本方法。
+func (s *sFlashSale) insertOrderInTx(
+	ctx context.Context, tx gdb.TX,
 	userID, activityID, skuID int64,
 	snap *skuSnapshot,
 	idempotencyKey, hash, orderNo string,
 ) (int64, error) {
-	var orderID int64
-	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		// 1. 活动存在性 + 状态：不存在或已下架 → 12001。
-		activity, e := loadActivityInTx(ctx, tx, activityID)
-		if e != nil {
-			return e
-		}
-		if activity == nil || activity.Status != statusEnabled {
-			return codes.New(codes.CodeFlashSaleActivityNotFound)
-		}
-
-		// 2. 时间窗：同一事务内用 MySQL NOW() 判定（左闭右开 start_time <= NOW() < end_time），
-		//    避免 Go 进程与 MySQL 时区漂移导致的边界误判。
-		inWindow, e := isInTimeWindow(ctx, tx, activityID)
-		if e != nil {
-			return e
-		}
-		if !inWindow {
-			return codes.New(codes.CodeFlashSaleNotInTimeWindow)
-		}
-
-		// 3. 锁定并读取活动 SKU 绑定：秒杀价在此重读并快照（非客户端提交价、非普通 SKU 价）。
-		binding, e := loadBindingForUpdate(ctx, tx, activityID, skuID)
-		if e != nil {
-			return e
-		}
-		if binding == nil {
-			return codes.New(codes.CodeInvalidArgument)
-		}
-
-		// 4. 条件扣减秒杀库存：UPDATE ... SET sold = sold + 1 WHERE sold < total_stock，
-		//    RowsAffected 判定，防负库存、防超卖（并发下单由行锁串行化）。
-		result, e := tx.Model("flash_sale_activity_skus").Ctx(ctx).
-			Where("id", binding.Id).
-			Where("sold < total_stock").
-			Data(g.Map{"sold": gdb.Raw("sold + 1")}).
-			Update()
-		if e != nil {
-			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("扣减秒杀库存: %w", e))
-		}
-		if affected, _ := result.RowsAffected(); affected == 0 {
-			return codes.New(codes.CodeFlashSaleStockInsufficient)
-		}
-
-		// 5. 插入秒杀订单：命中唯一约束时回滚整个事务（含上述扣减）并返回 duplicateKeyErr 供上层分流。
-		id, e := tx.Model("flash_sale_orders").Ctx(ctx).Data(g.Map{
-			"order_no":           orderNo,
-			"user_id":            userID,
-			"activity_id":        activityID,
-			"sku_id":             skuID,
-			"product_id":         snap.ProductId,
-			"sku_name":           snap.SkuName,
-			"product_name":       snap.ProductName,
-			"product_main_image": snap.ProductMainImage,
-			"flash_price":        binding.FlashPrice,
-			"quantity":           1,
-			"idempotency_key":    idempotencyKey,
-			"request_hash":       hash,
-		}).InsertAndGetId()
-		if e != nil {
-			if key := duplicateKeyName(e); key != "" {
-				return &duplicateKeyErr{key: key}
-			}
-			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("写入秒杀订单: %w", e))
-		}
-		orderID = id
-		return nil
-	})
+	// 1. 活动存在性 + 状态：不存在或已下架 → 12001。
+	activity, err := loadActivityInTx(ctx, tx, activityID)
 	if err != nil {
 		return 0, err
 	}
-	return orderID, nil
-}
+	if activity == nil || activity.Status != statusEnabled {
+		return 0, codes.New(codes.CodeFlashSaleActivityNotFound)
+	}
 
-// handleIdempotency 读回既有秒杀订单：同请求指纹返回既有订单（幂等成功），否则 12005。
-func (s *sFlashSale) handleIdempotency(ctx context.Context, userID int64, key, hash string) (*v1.CreateOrderRes, error) {
-	row, err := s.findByIdempotencyKey(ctx, userID, key)
+	// 2. 时间窗：同一事务内用 MySQL NOW() 判定（左闭右开 start_time <= NOW() < end_time），
+	//    避免 Go 进程与 MySQL 时区漂移导致的边界误判。
+	inWindow, err := isInTimeWindow(ctx, tx, activityID)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	if row == nil {
-		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("幂等键命中但未找到既有秒杀订单"))
+	if !inWindow {
+		return 0, codes.New(codes.CodeFlashSaleNotInTimeWindow)
 	}
-	if row.RequestHash != hash {
-		return nil, codes.New(codes.CodeFlashSaleIdempotencyConflict)
+
+	// 3. 锁定并读取活动 SKU 绑定：秒杀价在此重读并快照（非客户端提交价、非普通 SKU 价）。
+	binding, err := loadBindingForUpdate(ctx, tx, activityID, skuID)
+	if err != nil {
+		return 0, err
 	}
-	return &v1.CreateOrderRes{FlashOrder: *toOrder(row)}, nil
+	if binding == nil {
+		return 0, codes.New(codes.CodeInvalidArgument)
+	}
+
+	// 4. 行锁下先判库存（sold < total_stock），不足则提前失败，
+	//    避免「先插入订单再发现库存不足」产生半成品（后续条件扣减仅为防御，行锁下不可达失败）。
+	if binding.Sold >= binding.TotalStock {
+		return 0, codes.New(codes.CodeFlashSaleStockInsufficient)
+	}
+
+	// 5. 插入秒杀订单：命中唯一约束时整体回滚并返回 duplicateKeyErr 供上层分流。
+	//    先建单后扣库存，保证订单插入失败（撞号/一人一单/幂等）时库存尚未扣减，
+	//    随事务整体回滚，不残留「已扣库存但无订单」。
+	id, err := tx.Model("flash_sale_orders").Ctx(ctx).Data(g.Map{
+		"order_no":           orderNo,
+		"user_id":            userID,
+		"activity_id":        activityID,
+		"sku_id":             skuID,
+		"product_id":         snap.ProductId,
+		"sku_name":           snap.SkuName,
+		"product_name":       snap.ProductName,
+		"product_main_image": snap.ProductMainImage,
+		"flash_price":        binding.FlashPrice,
+		"quantity":           1,
+		"idempotency_key":    idempotencyKey,
+		"request_hash":       hash,
+	}).InsertAndGetId()
+	if err != nil {
+		if key := duplicateKeyName(err); key != "" {
+			return 0, &duplicateKeyErr{key: key}
+		}
+		return 0, codes.Wrap(codes.CodeInternalError, fmt.Errorf("写入秒杀订单: %w", err))
+	}
+
+	// 6. 条件扣减秒杀库存：UPDATE ... SET sold = sold + 1 WHERE sold < total_stock，
+	//    RowsAffected 判定，防负库存、防超卖（并发消费由绑定行锁串行化）。
+	//    行锁 + 第 4 步预检已保证 sold < total_stock，此处 RowsAffected=0 为不可达防御分支。
+	result, err := tx.Model("flash_sale_activity_skus").Ctx(ctx).
+		Where("id", binding.Id).
+		Where("sold < total_stock").
+		Data(g.Map{"sold": gdb.Raw("sold + 1")}).
+		Update()
+	if err != nil {
+		return 0, codes.Wrap(codes.CodeInternalError, fmt.Errorf("扣减秒杀库存: %w", err))
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return 0, codes.New(codes.CodeFlashSaleStockInsufficient)
+	}
+	return id, nil
 }
 
 // updateBindings 仅更新活动已存在 SKU 绑定的秒杀价/库存，不新增、不删除绑定。
@@ -580,18 +516,6 @@ func (s *sFlashSale) loadActivity(ctx context.Context, activityID int64) (*v1.Ac
 		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("查询秒杀绑定: %w", err))
 	}
 	return toActivity(row, skuRows), nil
-}
-
-// findByIdempotencyKey 按 user_id + idempotency_key 查询秒杀订单行，未命中返回 nil。
-func (s *sFlashSale) findByIdempotencyKey(ctx context.Context, userID int64, key string) (*orderRow, error) {
-	var rows []*orderRow
-	if err := g.DB().Model("flash_sale_orders").Ctx(ctx).Where("user_id", userID).Where("idempotency_key", key).Scan(&rows); err != nil {
-		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("按幂等键查询秒杀订单: %w", err))
-	}
-	if len(rows) == 0 {
-		return nil, nil
-	}
-	return rows[0], nil
 }
 
 // loadOrder 按 id + user_id 加载秒杀订单，未命中返回 nil。
@@ -753,8 +677,9 @@ func requestHash(activityID, skuID int64) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// generateOrderNo 生成秒杀订单号：FS 前缀 + 毫秒时间戳 + 随机段（12 hex），uk_flash_order_no 兜底撞号重试。
-func generateOrderNo() string {
+// generateOrderNo 生成秒杀订单号：FS 前缀 + 毫秒时间戳 + 随机段（12 hex），uk_flash_order_no 兜底。
+// 定义为变量以便测试注入固定值，确定性触发「订单号撞号 → 技术失败重试/死信」路径。
+var generateOrderNo = func() string {
 	var b [6]byte
 	_, _ = rand.Read(b[:])
 	return "FS" + strconv.FormatInt(time.Now().UnixMilli(), 10) + hex.EncodeToString(b[:])

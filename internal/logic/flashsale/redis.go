@@ -55,12 +55,13 @@ const (
 
 // flashSaleGateScript 是抢购热路径 Lua 脚本：原子完成空值标记检查 → 活动存在/启用/时间窗检查 →
 // 售罄检查 → 幂等检查 → 一人一单检查 → 剩余库存检查与 DECR 预扣。
-// 幂等检查先于一人一单：同幂等键重试（同 hash）应返回既有订单（200），而非已购（12004），与 V1 语义一致。
+// 幂等检查先于一人一单：同幂等键重试（同 hash）应返回既有请求状态（200），而非已购（12004），与 V1 语义一致。
 // KEYS：1=null 2=activity 3=stock 4=bought 5=idem 6=soldout
 // ARGV：1=now(unix 秒) 2=request_hash 3=grace(秒)
 //
 // 注意：SKU 未绑定（活动已预热但无该 SKU 库存 key）时返回 SKU_NOT_BOUND，透传 MySQL 走既有 1001 语义；
 // 预扣成功（GATE_PASSED）≠ 下单成功，MySQL 事务失败时由调用方补偿预扣。
+// V3：GATE_PASSED 时原子写入一人一单/幂等标记（去重并发入队），消费/入队失败时由调用方清除。
 const flashSaleGateScript = `
 local function field(t, name)
   for i = 1, #t, 2 do
@@ -129,6 +130,13 @@ if after < 0 then
   markSoldout()
   return 'SOLD_OUT'
 end
+
+-- GATE_PASSED（V3）：预扣成功时原子写入一人一单/幂等标记，去重并发入队；
+-- 消费失败或入队失败时由调用方清除标记 + 补偿预扣，避免孤儿标记。
+local ttl = finish - now + grace
+if ttl < 1 then ttl = 1 end
+redis.call('SET', KEYS[4], '1', 'EX', ttl)
+redis.call('SET', KEYS[5], ARGV[2], 'EX', ttl)
 return 'GATE_PASSED'
 `
 
@@ -226,6 +234,11 @@ func (s *sFlashSale) syncActivityCache(ctx context.Context, activityID int64) er
 	if err != nil {
 		return err
 	}
+	// 在途预扣统计（status=queued 的请求数）：对账/预热须计入，避免把在途预扣错误回补导致超预扣。
+	inflight, err := s.findInflightQueued(ctx, activityID)
+	if err != nil {
+		return err
+	}
 	now := time.Now().Unix()
 	if a.Status != statusEnabled || a.EndTs <= now {
 		return s.invalidateActivityCache(ctx, activityID, skus)
@@ -243,7 +256,7 @@ func (s *sFlashSale) syncActivityCache(ctx context.Context, activityID int64) er
 		return fmt.Errorf("设置活动 TTL: %w", err)
 	}
 	for _, b := range skus {
-		remaining := b.TotalStock - b.Sold
+		remaining := b.TotalStock - b.Sold - inflight[b.SkuId]
 		if remaining < 0 {
 			remaining = 0
 		}
@@ -282,23 +295,7 @@ func (s *sFlashSale) setNullMarker(ctx context.Context, activityID int64) error 
 	return nil
 }
 
-// markOrderSuccess 在下单成功（MySQL 提交）后写入一人一单与幂等标记（无孤儿标记）。
-// Redis 失败仅记录日志不阻断响应（MySQL 唯一约束是永久兜底，标记仅为快速失败优化）。
-func (s *sFlashSale) markOrderSuccess(ctx context.Context, activityID, skuID, userID int64, idempotencyKey, hash string) {
-	ttl := int64(flashSaleGraceTTL)
-	if a, err := s.findActivityCache(ctx, activityID); err == nil && a != nil {
-		ttl = flashSaleActivityTTL(time.Now().Unix(), a.EndTs)
-	}
-	if err := g.Redis().SetEX(ctx, flashSaleBoughtKey(activityID, skuID, userID), "1", ttl); err != nil {
-		glog.Warningf(ctx, "写入一人一单标记失败(activity=%d sku=%d user=%d): %v", activityID, skuID, userID, err)
-		return
-	}
-	if err := g.Redis().SetEX(ctx, flashSaleIdemKey(userID, idempotencyKey), hash, ttl); err != nil {
-		glog.Warningf(ctx, "写入幂等标记失败(user=%d): %v", userID, err)
-	}
-}
-
-// compensatePreDeduct 在 MySQL 下单失败时补偿 Redis 预扣（INCR remaining），
+// compensatePreDeduct 在 MySQL 落单失败时补偿 Redis 预扣（INCR remaining），
 // 并清除售罄标记，避免「预扣最后一单 → 并发请求置售罄 → 该单 MySQL 失败补偿」序列下
 // 残留伪售罄（库存已回补却仍快速失败，最长一个对账周期）。Redis 失败仅记录日志
 // （残留预扣/售罄由对账兜底收敛，不破坏不变量）。
@@ -312,13 +309,26 @@ func (s *sFlashSale) compensatePreDeduct(ctx context.Context, activityID, skuID 
 	}
 }
 
+// compensatePreDeductAndMarkers 在「入队失败」或「消费终态失败」时补偿 Redis：
+// INCR remaining + 清除售罄标记 + 清除一人一单/幂等标记（GATE_PASSED 时原子写入，失败须清除避免孤儿）。
+// Redis 失败仅记录日志（MySQL 唯一约束兜底、对账收敛，不破坏不变量）。
+func (s *sFlashSale) compensatePreDeductAndMarkers(ctx context.Context, activityID, skuID, userID int64, idempotencyKey string) {
+	s.compensatePreDeduct(ctx, activityID, skuID)
+	if _, err := g.Redis().Del(ctx, flashSaleBoughtKey(activityID, skuID, userID)); err != nil {
+		glog.Warningf(ctx, "清除一人一单标记失败(activity=%d sku=%d user=%d): %v", activityID, skuID, userID, err)
+	}
+	if _, err := g.Redis().Del(ctx, flashSaleIdemKey(userID, idempotencyKey)); err != nil {
+		glog.Warningf(ctx, "清除幂等标记失败(user=%d): %v", userID, err)
+	}
+}
+
 // SyncCache 同步指定活动缓存（预热或失效），供管理端、后台扫描器与测试复用。
 func (s *sFlashSale) SyncCache(ctx context.Context, activityID int64) error {
 	return s.syncActivityCache(ctx, activityID)
 }
 
 // ReconcileCache 对账/回补（供后台扫描器复用）：扫描启用且未结束的活动，
-// 将 Redis remaining 刷成 total_stock - sold、回补缺失预热。返回本次处理的活动数。
+// 将 Redis remaining 刷成 total_stock - sold - inflight_queued、回补缺失预热。返回本次处理的活动数。
 func (s *sFlashSale) ReconcileCache(ctx context.Context, limit int) (int, error) {
 	if limit <= 0 {
 		limit = 100

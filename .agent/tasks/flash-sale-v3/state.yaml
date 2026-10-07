@@ -1,0 +1,30 @@
+schema_version: 3
+task_id: flash-sale-v3
+
+contract:
+  status: APPROVED
+  target: "d1d594cd01c4b82febc2809b9f70512d4e914d8f"
+
+resources:
+  reservations:
+    migration_version:
+      - "20261001000015"
+
+review:
+  status: CLEAN
+  target: "8f0db1137d78505368f855830a15f0adf8833935"
+
+owner:
+  status: ACCEPTED
+  review_target: "8f0db1137d78505368f855830a15f0adf8833935"
+
+delivery:
+  status: NOT_RUN
+  review_target: ""
+  feature_head: ""
+  develop_base: ""
+
+blocked:
+  active: false
+  by: ""
+  reason: ""
