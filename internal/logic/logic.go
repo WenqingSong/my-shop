@@ -6,6 +6,7 @@ package logic
 import (
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/address"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/admin"
+	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/article"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/banner"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/cart"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/categories"

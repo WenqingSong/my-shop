@@ -25,7 +25,7 @@ var migrationRelatedTables = []string{
 	"recommend_items", "recommend_positions",
 	"flash_sale_orders", "flash_sale_activity_skus", "flash_sale_activities",
 	"order_items", "orders",
-	"refresh_tokens", "cart_items", "favorites", "product_likes", "banners", "reviews", "role_permissions", "admin_roles", "permissions", "roles",
+	"refresh_tokens", "cart_items", "article_favorites", "article_likes", "articles", "favorites", "product_likes", "banners", "reviews", "role_permissions", "admin_roles", "permissions", "roles",
 	"admins", "inventory_logs", "inventories", "skus", "product_images", "products", "categories", "addresses", "users",
 	"schema_migrations", "migration_probe",
 }
