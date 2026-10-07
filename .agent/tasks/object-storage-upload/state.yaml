@@ -6,7 +6,9 @@ contract:
   target: "9f558f58fe1546f7ab2d42938f8f9b584e2f9a89"
 
 resources:
-  reservations: {}
+  reservations:
+    error_code_domain:
+      - "17000-17999"
 
 review:
   status: NOT_REQUESTED
