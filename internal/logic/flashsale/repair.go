@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
@@ -18,6 +19,9 @@ import (
 
 // repairActionDeadToQueued 是「死信 → 重排队」修复动作（audit.action）。
 const repairActionDeadToQueued = "dead_to_queued"
+
+// maxRepairReasonLen 是修复原因的最大字符数（与 flash_sale_request_audits.reason VARCHAR(255) 对齐）。
+const maxRepairReasonLen = 255
 
 // requestAuditRow 是 flash_sale_request_audits 表的一条记录。
 type requestAuditRow struct {
@@ -40,6 +44,10 @@ func (s *sFlashSale) RepairRequest(ctx context.Context, adminID int64, req *v1.R
 	}
 	reason := strings.TrimSpace(req.Reason)
 	if reason == "" {
+		return nil, codes.New(codes.CodeInvalidArgument)
+	}
+	if utf8.RuneCountInString(reason) > maxRepairReasonLen {
+		// 超长原因在落库时会命中 VARCHAR(255) 数据过长错误，故前置稳定拒绝。
 		return nil, codes.New(codes.CodeInvalidArgument)
 	}
 	if req.TargetStatus != v1.RequestStatusQueued {

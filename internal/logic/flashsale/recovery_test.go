@@ -5,6 +5,7 @@ package flashsale
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -116,13 +117,8 @@ func TestRepairRequestDeadToQueuedAndAudit(t *testing.T) {
 		t.Fatalf("insert dead request: %v", err)
 	}
 
-	// 预置一个操作者管理员。
-	adminID, err := g.DB().Model("admins").Ctx(ctx).Data(g.Map{
-		"username": "repairer", "password_hash": "x", "status": 1, "is_super": 0,
-	}).InsertAndGetId()
-	if err != nil {
-		t.Fatalf("insert admin: %v", err)
-	}
+	// 复用 bootstrap 已 seed 的超级管理员作为操作者（admins 表不被 setupConsumeTest 清理，避免固定用户名撞唯一键）。
+	adminID, adminUsername := consumeSuperAdmin(t)
 
 	res, err := s.RepairRequest(ctx, adminID, &v1.RepairRequestReq{
 		Id: reqID, TargetStatus: v1.RequestStatusQueued, Reason: "故障排除后重投",
@@ -157,7 +153,7 @@ func TestRepairRequestDeadToQueuedAndAudit(t *testing.T) {
 	a := audits.Items[0]
 	if a.Action != repairActionDeadToQueued || a.BeforeStatus != requestStatusDead ||
 		a.AfterStatus != requestStatusQueued || a.OperatorAdminId != adminID ||
-		a.OperatorUsername != "repairer" || a.Reason != "故障排除后重投" {
+		a.OperatorUsername != adminUsername || a.Reason != "故障排除后重投" {
 		t.Fatalf("unexpected audit: %+v", a)
 	}
 
@@ -305,6 +301,36 @@ func TestReconcileCacheConvergesEndedActivity(t *testing.T) {
 	if n, err := g.Redis().Exists(ctx, flashSaleNullKey(activityID)); err != nil || n != 1 {
 		t.Fatalf("ended null marker should be set after reconcile, exists=%d err=%v", n, err)
 	}
+}
+
+// TestRepairRequestRejectsOverlongReason 覆盖 CLEAN-003（AC-007 参数校验）：
+// reason 超长（>255）应稳定返回 1001（400），而非落库时命中 VARCHAR(255) 数据过长错误返回 500。
+func TestRepairRequestRejectsOverlongReason(t *testing.T) {
+	setupConsumeTest(t)
+	ctx := context.Background()
+	s := New()
+
+	adminID, _ := consumeSuperAdmin(t)
+
+	overlong := strings.Repeat("a", maxRepairReasonLen+1)
+	_, err := s.RepairRequest(ctx, adminID, &v1.RepairRequestReq{
+		Id: 1, TargetStatus: v1.RequestStatusQueued, Reason: overlong,
+	})
+	if code := codes.FromError(err); code != codes.CodeInvalidArgument {
+		t.Fatalf("overlong reason: code=%d want 1001, err=%v", code, err)
+	}
+}
+
+// consumeSuperAdmin 查询 bootstrap 已 seed 的超级管理员（is_super=1），返回 (adminID, username)。
+// admins 表不被 setupConsumeTest 清理，故直接复用既有超管，避免测试固定用户名插入撞唯一键。
+func consumeSuperAdmin(t *testing.T) (int64, string) {
+	t.Helper()
+	rec, err := g.DB().Model("admins").Ctx(context.Background()).
+		Fields("id", "username").Where("is_super", 1).One()
+	if err != nil || rec == nil || rec.IsEmpty() {
+		t.Fatalf("query super admin: %v", err)
+	}
+	return rec["id"].Int64(), rec["username"].String()
 }
 
 // consumeRequestRowByID 按 id 查询异步请求行。

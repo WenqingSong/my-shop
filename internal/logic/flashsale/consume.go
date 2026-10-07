@@ -23,6 +23,11 @@ const (
 	consumeBackoffBaseSeconds = 5
 )
 
+// consumeBeforeCommitHook 是消费事务提交前注入故障的测试钩子（生产环境恒为 nil）。
+// 返回非 nil 使当前消费事务整体回滚，模拟「消费者领取请求后、事务提交前崩溃」，
+// 用于验证 AC-003/INV-015「回滚后重投只产生一次业务效果」。测试使用后须复原为 nil。
+var consumeBeforeCommitHook func(ctx context.Context, r *orderRequestRow) error
+
 // ConsumeQueued 消费秒杀异步请求队列（供后台扫描器复用）。
 // 出队 status=queued 且可重试的请求，逐条单事务落单/失败/重试/死信；返回本轮处理的请求数。
 func (s *sFlashSale) ConsumeQueued(ctx context.Context, limit int) (int, error) {
@@ -97,6 +102,13 @@ func (s *sFlashSale) consumeOne(ctx context.Context) (bool, error) {
 				return s.failRequestInTx(ctx, tx, r, code)
 			}
 			return s.retryOrDeadRequestInTx(ctx, tx, r, code, &outcome)
+		}
+		// 测试故障注入点：在「订单已写入、状态未更新」处返回 error → 整个事务回滚，
+		// 模拟「消费者领取请求后、事务提交前崩溃」。生产环境 hook 恒为 nil，不改变事务边界。
+		if consumeBeforeCommitHook != nil {
+			if err := consumeBeforeCommitHook(ctx, r); err != nil {
+				return err
+			}
 		}
 		return s.successRequestInTx(ctx, tx, r, orderID)
 	})

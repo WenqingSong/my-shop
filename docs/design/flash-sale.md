@@ -176,7 +176,7 @@ V3/V4 异步一致性（队列 vs MySQL，V4 起补偿改为权威值收敛）�
 - 后台扫描器（`goroutine + ticker`，复用订单超时取消扫描范式，非 MQ、非 gcron）按「活动 × SKU」粒度，周期将 Redis `remaining` 刷成 `total_stock - MySQL sold - inflight_queued`（`inflight_queued` = 该活动×SKU 下 `status=queued` 的请求数），并回补缺失的活跃活动预热。
 - 修正为无状态、幂等（写入权威值）、多实例并发安全。
 - V4 补偿与对账统一为「权威值收敛」：`remaining` 不再依赖非幂等 `INCR`，改由「读 MySQL 快照（`total_stock`/`sold`/`inflight_queued`）+ 幂等 `SET`」收敛；标记清理由幂等 `DEL` 完成。无持久化补偿/对账记录表；不一致通过「把 Redis 刷成 MySQL 事实」收敛，观测依赖日志。
-- V4 活动结束终态收敛：对账扫描器覆盖「已结束、尚在 grace 窗口（`end_time > NOW()-grace`）」的活动；终态判定 = `COUNT(status=queued)=0`；清空后写 `remaining = total_stock - sold`（`inflight=0`）并清理活动域缓存（DEL activity/stock/bought/idem/soldout + 置 null 标记），使收敛可观测、无残留。
+- V4 活动结束终态收敛：对账扫描器覆盖「已结束、尚在 grace 窗口（`end_time > NOW()-grace`）」的活动；终态判定 = `COUNT(status=queued)=0`；清空后写 `remaining = total_stock - sold`（`inflight=0`）并失效活动域缓存（DEL activity 元数据/soldout 标记 + 置 null 标记；stock key 保留 `remaining` 供观测、靠 TTL 过期；bought/idem 标记靠 TTL 过期），使收敛可观测、无残留。
 - V4 新增后台消费者扫描器（`goroutine + ticker`）：`FOR UPDATE SKIP LOCKED` 出队 `queued` 请求 → 消费落单；与对账扫描器并列，复用同一后台扫描范式。
 
 ### 5.6 崩溃窗口与故障恢复（V4）
