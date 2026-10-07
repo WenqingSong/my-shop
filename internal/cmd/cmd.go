@@ -84,6 +84,11 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 	if err := boot.Bootstrap(ctx); err != nil {
 		return err
 	}
+	// 校验七牛云非机密结构配置（region/ttl/大小/白名单），格式非法启动 fail-fast。
+	// 凭据（AK/SK）与 bucket/domain 缺失不在此阻塞，签发时返回稳定 17002。
+	if err := service.Upload().ValidateConfig(ctx); err != nil {
+		return err
+	}
 
 	// 启动后台超时取消扫描器：扫描 status=待支付 且 expire_at 已过的订单，逐单原子取消并恢复库存。
 	startOrderCancelScanner(ctx)

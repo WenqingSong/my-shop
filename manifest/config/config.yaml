@@ -73,6 +73,30 @@ storage:
     # 本地文件存储根目录（轮播图占位图等运行时静态资源写入此目录）。
     root: "./storage"
 
+# 七牛云对象存储（文件上传直传凭证签发）配置
+# 对应环境变量：QINIU_ACCESS_KEY / QINIU_SECRET_KEY / QINIU_BUCKET / QINIU_DOMAIN /
+#              QINIU_REGION / QINIU_TOKEN_TTL / QINIU_MAX_FILE_SIZE /
+#              QINIU_ALLOWED_EXTENSIONS / QINIU_ALLOWED_MIME_TYPES
+qiniu:
+  # 七牛 AccessKey（非机密，建议环境变量注入）。无开发默认值：未配置时签发接口返回 17002。
+  access_key: ""
+  # 七牛 SecretKey（机密）。⚠️ 仅经环境变量 QINIU_SECRET_KEY 注入，禁止写死/提交/进日志响应。
+  secret_key: ""
+  # 对象存储空间名（必填）。无默认值：未配置时签发接口返回 17002。
+  bucket: ""
+  # 对外访问域名（拼接 final_url = domain/key）。无默认值：未配置时签发接口返回 17002。
+  domain: ""
+  # 七牛区域，映射上传主机（z0/z1/z2/na0/as0）。
+  region: "z2"
+  # 上传凭证有效期（秒），必须大于 0。
+  token_ttl: 3600
+  # 单文件大小上限（字节），固化进 token fsizeLimit，必须大于 0。
+  max_file_size: 10485760
+  # 后端扩展名预校验白名单（filename 声明）。
+  allowed_extensions: ["jpg", "jpeg", "png", "gif", "webp"]
+  # 固化进 token mimeLimit 的 MIME 白名单。
+  allowed_mime_types: ["image/jpeg", "image/png", "image/gif", "image/webp"]
+
 # 启动配置（以下均为开发默认值，可通过环境变量覆盖）
 # 对应环境变量：STARTUP_DEPENDENCY_TIMEOUT
 startup:

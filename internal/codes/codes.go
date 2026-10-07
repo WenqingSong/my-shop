@@ -123,6 +123,11 @@ const (
 	// 文章域（Article）16000-16999。
 	CodeArticleNotFound     Code = 16001 // 文章不存在或非本人（防枚举）；点赞/收藏目标不存在亦复用 → 404
 	CodeArticleInvalidInput Code = 16002 // 标题/内容为空或超长 → 400
+
+	// 文件上传/对象存储域（Upload）17000-17999。
+	CodeUploadInvalidInput  Code = 17001 // 扩展名/MIME 不在白名单 → 400
+	CodeUploadConfigInvalid Code = 17002 // 七牛云配置缺失/非法（安全语义失败）→ 500
+	CodeUploadTokenFailed   Code = 17003 // 签发上传凭证失败 → 500
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -217,6 +222,10 @@ var codeTable = map[Code]codeInfo{
 
 	CodeArticleNotFound:     {http.StatusNotFound, "文章不存在"},
 	CodeArticleInvalidInput: {http.StatusBadRequest, "文章内容非法"},
+
+	CodeUploadInvalidInput:  {http.StatusBadRequest, "文件类型或参数非法"},
+	CodeUploadConfigInvalid: {http.StatusInternalServerError, "上传服务配置错误"},
+	CodeUploadTokenFailed:   {http.StatusInternalServerError, "签发上传凭证失败"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。

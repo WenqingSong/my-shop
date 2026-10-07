@@ -16,6 +16,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/product"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/recommendation"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/review"
+	uploadCtrl "cnb.cool/go-cloud-devops/my-shop/internal/controller/upload"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 )
 
@@ -41,6 +42,7 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	bannerCtrl := banner.NewV1()
 	recommendationCtrl := recommendation.NewV1()
 	articleCtrl := article.NewV1()
+	uploadCtrlV1 := uploadCtrl.NewV1()
 
 	// 前台公开接口：注册、登录、刷新、分类查询、商品查询、轮播图列表（无需 token）。
 	root.POST("/register", iamCtrl.Register)
@@ -127,6 +129,9 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 		user.DELETE("/sessions/:sid", iamCtrl.RevokeSession)
 		user.POST("/sessions/revoke-others", iamCtrl.RevokeOthers)
 		user.POST("/sessions/revoke-all", iamCtrl.RevokeAll)
+
+		// 文件上传（仅登录用户，签发七牛云直传凭证）。
+		user.GET("/qiniu/upload/token", uploadCtrlV1.FrontendToken)
 	})
 
 	// 前台登出：仅验签（幂等撤销，即使 session 已撤销/缺失也能到达 handler）。
