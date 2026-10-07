@@ -32,17 +32,18 @@ RECOMMENDATION（已获批）：**后端签发七牛 upload token、客户端直
 2. **上传主体 = 后台管理员 + 前台登录用户**。`GET /admin/qiniu/upload/token`（`AdminAuth`）与 `GET /qiniu/upload/token`（`Auth`）两个端点，共用同一签发核心；未认证 401、token type 不符 403，均不签发、不产生上传。不新增独立权限 code（签发凭证为低敏感操作，scope 已限制；前台仅需登录）。
 3. **不落库**。直传模型下后端在签发时刻无法感知最终上传结果；落库需七牛回调或客户端回传 key，属后续任务。V1 仅无状态签发，**不新增 migration**。
 4. **引入官方 `qiniu/go-sdk`**。上传签名属第三方认证协议，使用官方 SDK 签发 upload token（`auth.Credentials` + `storage.PutPolicy`），降低协议实现与安全维护风险，不自行实现签名细节（Owner D3 决定）。
-5. **配置懒加载校验**。`secret_key` 仅环境变量注入、无默认值；签发时校验缺失/非法并返回稳定错误码（17002），服务启动不因无七牛凭据而 fail-fast（保证无凭据的 CI/开发环境可启动、其它模块测试不受阻）。非机密结构配置（bucket/domain/ttl/大小/白名单）若格式非法，启动时 fail-fast。
+5. **配置模型与校验时机**（Contract Revision D4）。项目统一采用「`config.yaml` 存非敏感结构默认值 + 环境变量注入真实凭据」模式：本地 `.env`（gitignore）经 `scripts/lib.sh` 加载，CI/生产经平台 Secret/环境变量注入，**不引入 dotenv**。校验分两类：① 启动 fail-fast——`region` 合法、`token_ttl>0`、`max_file_size>0`、白名单非空（纯结构、有安全默认值）；② 签发时校验（返回 17002）——`access_key`/`secret_key`/`bucket`/`domain` 缺失/非法（依赖外部七牛环境、无通用默认值）。`access_key`/`secret_key` 仅环境变量注入、config.yaml 保持空值；`bucket`/`domain` 为非敏感配置，可写 config.yaml 或经环境变量覆盖，不要求 env-only。
 
 关键取舍：**直传模型下，后端在签发时刻无法强制校验真实文件内容**——大小与 MIME 上限只能「后端基于客户端声明参数预校验（400 拒绝）+ 固化进 token scope 由七牛服务端执行」，真实的文件级强制依赖七牛与客户端协作，这是用「后端不承载流量、贴合前端」换来的固有边界（详见 Open Risks）。
 
 ## Selected Design
 
-Owner 已确认（D1/D2/D3）：
+Owner 已确认（D1/D2/D3/D4）：
 
 - D1（上传主体）：支持后台管理员（`AdminAuth`）+ 前台登录用户（`Auth`）两个端点，共用同一签发核心。
 - D2（落库）：V1 不落库，仅无状态签发上传凭证，不新增 migration。
 - D3（七牛依赖）：改用官方 `qiniu/go-sdk`，不自行实现上传 Token 签名协议。
+- D4（Secret 配置模型，Contract Revision）：项目级统一采用「config.yaml 存非敏感默认值 + 环境变量注入真实凭据」，新增 `.env.example`、`.env` 本地加载、CI/生产平台注入，不引入 dotenv；`access_key`/`secret_key` 仅环境变量（config.yaml 空值），`bucket`/`domain` 非敏感可写 config.yaml 或 env 覆盖；`bucket`/`domain` 与 `AK/SK` 一并归入「签发时校验（17002）」，不启动 fail-fast。
 
 其余设计（直传模型、key 预生成、类型/大小白名单、错误码域 17000-17999、配置模型）按本 Contract 执行。
 
@@ -64,15 +65,21 @@ Owner 已确认（D1/D2/D3）：
 
 | 字段 | 环境变量 | 类型/默认 | 说明 |
 | --- | --- | --- | --- |
-| `access_key` | `QINIU_ACCESS_KEY` | string，无默认 | 非机密，建议环境变量注入 |
-| `secret_key` | `QINIU_SECRET_KEY` | string，无默认 | **机密**，仅环境变量、不进日志/响应/仓库 |
-| `bucket` | `QINIU_BUCKET` | string，无默认 | 必填 |
-| `domain` | `QINIU_DOMAIN` | string，无默认 | 对外访问域名（拼接 final_url） |
+| `access_key` | `QINIU_ACCESS_KEY` | string，config.yaml 空值 | 凭据标识，非机密，**仅环境变量注入**（与 secret_key 成对） |
+| `secret_key` | `QINIU_SECRET_KEY` | string，config.yaml 空值 | **机密**，仅环境变量、不进日志/响应/仓库 |
+| `bucket` | `QINIU_BUCKET` | string，无默认 | 非敏感，可写 config.yaml 或经环境变量覆盖 |
+| `domain` | `QINIU_DOMAIN` | string，无默认 | 非敏感，可写 config.yaml 或经环境变量覆盖 |
 | `region` | `QINIU_REGION` | string，默认 `z2` | 七牛区域，映射 upload host |
 | `token_ttl` | `QINIU_TOKEN_TTL` | int，默认 3600（秒） | 凭证有效期，必须 > 0 |
 | `max_file_size` | `QINIU_MAX_FILE_SIZE` | int，默认 10485760（10MB） | 单文件大小上限（字节），必须 > 0 |
 | `allowed_extensions` | `QINIU_ALLOWED_EXTENSIONS` | []string | 后端扩展名预校验白名单 |
 | `allowed_mime_types` | `QINIU_ALLOWED_MIME_TYPES` | []string | 固化进 token `mimeLimit` |
+
+### Secret 注入模型（项目级统一，D4）
+
+- `.env.example`：变量名 + 安全示例/占位，**可提交**；`.env`：本地真实值，**被 `.gitignore` 忽略、绝不提交**。
+- 本地：`cp .env.example .env` 后经 `scripts/lib.sh` 加载；CI/生产：平台 Secret / 环境变量注入。
+- 不引入 dotenv；沿用现有 `g.Cfg().GetEffective`（环境变量覆盖 config.yaml）机制。
 
 ### 全局资源预留
 
@@ -86,12 +93,12 @@ Owner 已确认（D1/D2/D3）：
 
 - INV-001（授权边界）：未认证请求访问任一签发接口返回 401，token type 不符返回 403，均不签发凭证、不产生任何上传与 DB 写入。
 - INV-002（文件边界）：签发请求中声明的扩展名/MIME 不在白名单内、或大小超上限，返回 400（17001），不签发凭证；最终文件级强制由 token 的 `mimeLimit`/`fsizeLimit` 由七牛服务端执行。
-- INV-003（凭据安全）：`secret_key` 不落 config 默认值、不提交仓库、不进日志/响应；凭据缺失/非法时签发接口返回稳定 17002，不泄漏任何凭据细节。
+- INV-003（凭据安全）：`access_key`/`secret_key` 仅经环境变量注入、config.yaml 保持空值、不提交仓库、不进日志/响应；凭据或 bucket/domain 缺失/非法时签发接口返回稳定 17002，不泄漏任何凭据细节。
 - INV-004（key 唯一可控）：上传 key 由后端预生成（`upload/{yyyyMMdd}/{随机}.{ext}`）并写入 token scope，客户端不能任意指定 key，避免覆盖与越界。
 
 ## Failure and Consistency Semantics
 
-- 事实来源：上传凭证与配置来自 `manifest/config`（七牛 AK/SK/bucket/domain），无 DB 写入、无 Redis 参与、无 MQ。直传本身发生在七牛侧，后端不感知上传是否最终成功。
+- 事实来源：上传凭证与配置来自 `manifest/config/config.yaml`（非敏感结构）叠加环境变量（AK/SK 等凭据），无 DB 写入、无 Redis 参与、无 MQ。直传本身发生在七牛侧，后端不感知上传是否最终成功。
 - 签发成功 = 返回一份受 scope 约束、带有效期（ttl）的七牛 upload token 与对应 key/URL；**不代表文件已上传**，仅代表「获得在限制内直传的资格」。
 - 失败语义：未认证 401、type 不符 403、非法扩展名/类型/大小 400（17001）、配置缺失/非法 500（17002）、签名/签发内部错误 500（17003）；均不产生上传与写入，且不泄漏凭据/内部路径/堆栈。
 - 无跨系统事务、无并发写入、无幂等键、无重试语义（每次签发独立、幂等生成新 token + 新 key）。
@@ -105,7 +112,7 @@ Owner 已确认（D1/D2/D3）：
 
 - INV-001 → 启动服务：无 token 请求 → 401；user token 访问 `/admin/qiniu/upload/token` 或 admin token 访问 `/qiniu/upload/token` → 403；断言不签发、无 DB 写入。
 - INV-002 → 启动服务：`filename=evil.exe` / 非法 `content_type` / 超大小声明 → 400（17001），不签发；断言 token scope 含 `mimeLimit`/`fsizeLimit` 与配置一致。
-- INV-003 → 启动服务：缺 `QINIU_SECRET_KEY` 时签发 → 500（17002），响应/日志不含凭据；`secret_key` 不在 config 默认值、不在 git 变更中。
+- INV-003 → 启动服务：缺 `QINIU_SECRET_KEY`（或 access_key/bucket/domain）时签发 → 500（17002），响应/日志不含凭据；`access_key`/`secret_key` 不在 config 默认值（保持空串）、不在 git 变更中。
 - INV-004 → 启动服务：连续两次签发返回不同 key；key 符合 `upload/{yyyyMMdd}/{随机}.{ext}` 且被写入 token scope。
 - AC-001 → 需启动服务：已认证客户端请求签发接口，断言返回可用凭证及 bucket/域名/key/expires_at 等最小必要信息，token 过期时间 = 签发时间 + ttl。
 - AC-002 → 需真实七牛凭据：用返回凭证实际上传小文件，断言取得可访问 URL、HTTP 200、Content-Type 一致；无凭据则 NOT_VERIFIED 并说明影响。
@@ -123,3 +130,4 @@ Owner 已确认（D1/D2/D3）：
 ## Owner Decision Record
 
 - 2026-10-07：Owner 确认 D1（上传主体 = 后台管理员 + 前台登录用户）、D2（V1 不落库、仅无状态签发）、D3（改用官方 `qiniu/go-sdk`，不自行实现上传 Token 签名协议，理由：签名属第三方认证协议，优先用官方 SDK 降低协议实现与安全维护风险）。其余设计按 Contract 执行。
+- 2026-10-07（Contract Revision D4）：Owner 确认项目级 Secret 配置方案——新增 `.env.example`（仅变量名/安全示例）、本地真实凭据放 `.env`（gitignore，经 `scripts/lib.sh`/Docker Compose 加载，不引入 dotenv）、CI/生产经平台 Secret/环境变量注入；`qiniu.access_key`/`qiniu.secret_key` 保持 config.yaml 空值、不提交真实值；`bucket`/`domain` 为非敏感配置，可写 config.yaml 并允许环境变量覆盖（不要求 env-only）；清理 config.yaml 已写入的真实七牛凭据；同步修订 Contract、`docs/design/storage.md`、`README.md`。同时确认 `bucket`/`domain` 与 `AK/SK` 一并归入「签发时校验（17002）」，启动仅 fail-fast 校验 region/ttl/大小/白名单。

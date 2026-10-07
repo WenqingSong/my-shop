@@ -78,13 +78,15 @@ storage:
 #              QINIU_REGION / QINIU_TOKEN_TTL / QINIU_MAX_FILE_SIZE /
 #              QINIU_ALLOWED_EXTENSIONS / QINIU_ALLOWED_MIME_TYPES
 qiniu:
-  # 七牛 AccessKey（非机密，建议环境变量注入）。无开发默认值：未配置时签发接口返回 17002。
+  # 七牛 AccessKey（凭据标识，非机密）。⚠️ 仅经环境变量 QINIU_ACCESS_KEY 注入，禁止写死/提交。
   access_key: ""
-  # 七牛 SecretKey（机密）。⚠️ 仅经环境变量 QINIU_SECRET_KEY 注入，禁止写死/提交/进日志响应。
+  # 七牛 SecretKey（机密）。⚠️ 仅经环境变量 QINIU_SECRET_KEY 注入，禁止写死/提交/进日志/响应。
   secret_key: ""
-  # 对象存储空间名（必填）。无默认值：未配置时签发接口返回 17002。
+  # 对象存储空间名（非敏感）。无默认值：可在本文件填写，或经环境变量 QINIU_BUCKET 覆盖；
+  # 缺失时签发接口返回 17002。
   bucket: ""
-  # 对外访问域名（拼接 final_url = domain/key）。无默认值：未配置时签发接口返回 17002。
+  # 对外访问域名（非敏感，拼接 final_url = domain/key）。可在本文件填写，或经环境变量 QINIU_DOMAIN
+  # 覆盖；缺失时签发接口返回 17002。
   domain: ""
   # 七牛区域，映射上传主机（z0/z1/z2/na0/as0）。
   region: "z2"

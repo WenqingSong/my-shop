@@ -33,17 +33,19 @@
 
 | 字段 | 环境变量 | 类型/默认 | 说明 |
 | --- | --- | --- | --- |
-| `access_key` | `QINIU_ACCESS_KEY` | string，无默认 | 非机密，建议环境变量注入 |
-| `secret_key` | `QINIU_SECRET_KEY` | string，无默认 | **机密**，仅环境变量、不进日志/响应/仓库 |
-| `bucket` | `QINIU_BUCKET` | string，无默认 | 必填 |
-| `domain` | `QINIU_DOMAIN` | string，无默认 | 对外访问域名（拼接 final_url） |
+| `access_key` | `QINIU_ACCESS_KEY` | string，config.yaml 空值 | 凭据标识，非机密，**仅环境变量注入**（与 secret_key 成对） |
+| `secret_key` | `QINIU_SECRET_KEY` | string，config.yaml 空值 | **机密**，仅环境变量、不进日志/响应/仓库 |
+| `bucket` | `QINIU_BUCKET` | string，无默认 | 非敏感，可写 config.yaml 或经环境变量覆盖 |
+| `domain` | `QINIU_DOMAIN` | string，无默认 | 非敏感，可写 config.yaml 或经环境变量覆盖 |
 | `region` | `QINIU_REGION` | string，默认 `z2` | 七牛区域，映射 upload host |
 | `token_ttl` | `QINIU_TOKEN_TTL` | int，默认 3600（秒） | 凭证有效期，必须 > 0 |
 | `max_file_size` | `QINIU_MAX_FILE_SIZE` | int，默认 10485760（10MB） | 单文件大小上限（字节），必须 > 0 |
 | `allowed_extensions` | `QINIU_ALLOWED_EXTENSIONS` | []string | 后端扩展名预校验白名单 |
 | `allowed_mime_types` | `QINIU_ALLOWED_MIME_TYPES` | []string | 固化进 token `mimeLimit` |
 
-配置校验语义：`secret_key` 仅环境变量注入、无默认值；签发时校验缺失/非法并返回稳定错误码（17002），服务启动不因无七牛凭据而 fail-fast（保证无凭据的 CI/开发环境可启动、其它模块测试不受阻）。非机密结构配置（bucket/domain/ttl/大小/白名单）若格式非法，启动时 fail-fast。
+配置校验语义：分两类。① 启动 fail-fast（纯结构、有安全默认值）：`region` 合法、`token_ttl>0`、`max_file_size>0`、白名单非空。② 签发时校验（返回 17002，依赖外部七牛环境、无通用默认值）：`access_key`/`secret_key`/`bucket`/`domain` 缺失/非法。`access_key`/`secret_key` 仅环境变量注入、config.yaml 保持空值；`bucket`/`domain` 非敏感，可写 config.yaml 或经环境变量覆盖，不要求 env-only。服务启动不因无七牛凭据/桶/域名而 fail-fast（保证无七牛凭据的 CI/开发环境可启动、其它模块测试不受阻）。
+
+Secret 注入模型（项目级统一）：`.env.example` 保存变量名/安全示例（可提交），`.env` 保存本地真实值（gitignore、绝不提交）；本地经 `scripts/lib.sh` 加载，CI/生产经平台 Secret/环境变量注入；不引入 dotenv，沿用 `g.Cfg().GetEffective` 环境变量覆盖机制。
 
 ## 4. 公开 API 契约
 
@@ -62,7 +64,7 @@
 - 后台端点：`GET /admin/qiniu/upload/token` 需 `AdminAuth`（所有已启用管理员，含超管 `IsSuper` 放行）；不新增独立权限 code（签发凭证为低敏感操作，scope 已限制）。
 - 前台端点：`GET /qiniu/upload/token` 需 `Auth`（登录用户）。
 - 未认证 401、token type 不符 403，均不签发、不产生上传。
-- 凭据安全：`secret_key` 不落 config 默认值、不提交仓库、不进日志/响应；凭据缺失/非法时签发接口返回稳定 17002，不泄漏任何凭据细节。
+- 凭据安全：`access_key`/`secret_key` 仅经环境变量注入、config.yaml 保持空值、不提交仓库、不进日志/响应；凭据或 bucket/domain 缺失/非法时签发接口返回稳定 17002，不泄漏任何凭据细节。
 
 ## 6. 业务不变量
 
