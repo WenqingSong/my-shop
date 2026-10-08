@@ -61,7 +61,8 @@ setup_users() {
   log "注册并登录 $USERS 个用户 ..."
   : > "$TOKENS"
   for i in $(seq 1 "$USERS"); do
-    local u="fslt_${ACTIVITY_ID}_${i}"
+    # 用户名必须匹配 IAM 校验 ^[a-zA-Z0-9]{3,24}$（纯字母数字，不含下划线），故用 fslt{activity}{i}。
+    local u="fslt${ACTIVITY_ID}${i}"
     local p="pass_${i}_x"
     curl -s -o /dev/null -X POST "$BASE_URL/register" -H 'Content-Type: application/json' \
       -d "{\"username\":\"$u\",\"password\":\"$p\"}" || true
@@ -77,27 +78,30 @@ setup_users() {
 
 # ---------------------------------------------------------------------------
 # 2) 并发下单：每个用户以唯一幂等键下单，记录时延（curl time_total）、HTTP 状态与业务 code。
+#    用独立 worker 脚本 + xargs 并发执行（避免 export -f 函数跨进程的环境传递问题）。
 # ---------------------------------------------------------------------------
-fire_order() {
-  local token="$1" idx="$2"
-  local key="lt_${SCENARIO}_${ACTIVITY_ID}_${idx}"
-  local out
-  out="$(curl -s -w '|%{http_code}|%{time_total}' -X POST "$BASE_URL/flash-sales/$ACTIVITY_ID/orders" \
-    -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
-    -d "{\"sku_id\":$SKU_ID,\"idempotency_key\":\"$key\"}")"
-  local body http_code time_total code
-  body="${out%|*|*}"
-  time_total="${out##*|}"
-  http_code="${out#*|}"; http_code="${http_code%|*}"
-  code="$(printf '%s' "$body" | sed -n 's/.*"code":\([-0-9]*\).*/\1/p')"
-  [[ -n "$code" ]] || code="-1"
-  echo "$time_total,$http_code,$code" >> "$RESULTS"
-}
-export -f fire_order
-
 run_orders() {
   log "开始下单：$(( USERS * REQUESTS_PER_USER )) 请求，并发 $CONCURRENCY ..."
   : > "$RESULTS"
+
+  local worker="$WORK/worker.sh"
+  cat > "$worker" <<'EOF'
+#!/usr/bin/env bash
+token="$1"
+idx="$2"
+key="lt_${SCENARIO}_${ACTIVITY_ID}_${idx}"
+out="$(curl -s -w '|%{http_code}|%{time_total}' -X POST "${BASE_URL}/flash-sales/${ACTIVITY_ID}/orders" \
+  -H "Authorization: Bearer ${token}" -H 'Content-Type: application/json' \
+  -d "{\"sku_id\":${SKU_ID},\"idempotency_key\":\"${key}\"}" 2>/dev/null || echo '||-1|0')"
+body="${out%|*|*}"
+time_total="${out##*|}"
+http_code="${out#*|}"; http_code="${http_code%|*}"
+code="$(printf '%s' "$body" | sed -n 's/.*"code":\([-0-9]*\).*/\1/p')"
+[ -n "$code" ] || code="-1"
+echo "$time_total,$http_code,$code" >> "$RESULTS"
+EOF
+  chmod +x "$worker"
+
   local -a jobs=()
   local i=1
   while read -r token; do
@@ -107,7 +111,10 @@ run_orders() {
     done
     i=$((i+1))
   done < "$TOKENS"
-  printf '%s\n' "${jobs[@]}" | xargs -P "$CONCURRENCY" -n 2 bash -c 'fire_order "$1" "$2"' _
+
+  # 通过环境变量把运行参数传给 worker（worker 是独立进程，仅继承环境变量）。
+  export SCENARIO ACTIVITY_ID SKU_ID BASE_URL RESULTS
+  printf '%s\n' "${jobs[@]}" | xargs -P "$CONCURRENCY" -n 2 "$worker"
   log "下单完成"
 }
 
@@ -143,7 +150,7 @@ analyze() {
 时延 p50/p95/p99: ${p50}s / ${p95}s / ${p99}s
 ================================
 EOF
-  printf '%s %s %s %s %s %s %s %s' "$total" "$queued" "$rejected" "$error" "$p50" "$p95" "$p99" "$throughput" > "$STATS"
+  printf '%s %s %s %s %s %s %s %s\n' "$total" "$queued" "$rejected" "$error" "$p50" "$p95" "$p99" "$throughput" > "$STATS"
 }
 
 # ---------------------------------------------------------------------------
@@ -161,7 +168,11 @@ verify() {
   MAX_CONNS="$(mysql_q "SHOW STATUS LIKE 'Max_used_connections'" | awk '{print $2}')"
 
   local verdict="PASS"
-  if [[ "$SOLD" -gt "$TOTAL_STOCK" || "$ORDERS" -ne "$SOLD" || "$DUP_ONE" -ne 0 || "$DUP_IDEM" -ne 0 ]]; then
+  if [[ -z "$TOTAL_STOCK" || -z "$SOLD" ]]; then
+    # 活动或绑定不存在时无法核对，不得判定通过（避免空值被当作 0 造成假 PASS）。
+    echo "错误：未查询到活动/绑定（activity=$ACTIVITY_ID sku=$SKU_ID），无法核对正确性" >&2
+    verdict="FAIL"
+  elif [[ "$SOLD" -gt "$TOTAL_STOCK" || "$ORDERS" -ne "$SOLD" || "$DUP_ONE" -ne 0 || "$DUP_IDEM" -ne 0 ]]; then
     verdict="FAIL"
   fi
 
