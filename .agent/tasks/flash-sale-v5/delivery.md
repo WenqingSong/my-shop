@@ -3,9 +3,9 @@
 ## Milestone and Target
 
 - Milestone：秒杀 V5 容量保护与压测闭环
-- Delivery Target：`feat/flash-sale-v5` 的 CLEAN 实现 snapshot
-- Cleaner Review Target：`35498b0340b7e8688f18e47dd3e64c11fdb9b3a7`
-- Target Match：YES（`feature_head=57156db8` 为 `35498b0` + review-neutral tail `97b4d18`/`70e3a14`/`57156db8`，仅含 review/owner 元数据，生产代码未变）
+- Delivery Target：`feat/flash-sale-v5` 的 CLEAN 实现 snapshot（复审后）
+- Cleaner Review Target：`2deecfda31d8f7effd8512d21fd68eb90d67ea35`
+- Target Match：YES（`feature_head=f461f98` 为 `2deecfd` + review-neutral tail `a8caaba`/`f461f98`，仅含 review/owner 元数据；`2deecfd` 仅改 `scripts/flashsale-loadtest/run.sh`，未改 Go 生产代码）
 
 ## Environment
 
@@ -16,49 +16,50 @@
 - Docker：29.6.2 / Compose v5.3.1
 - 交付对象：`go build ./...` 源码构建产物 `bin/my-shop`，无未提交文件 / 本机绝对路径依赖
 - 配置来源：`manifest/config/config.yaml` + 环境变量（`ADMIN_SUPER_PASSWORD`、`FLASH_SALE_*` 容量保护开关）
-- 隔离与清理：每次验收前清空 `flash_sale_*`/`users`/`skus`/`products`/`categories` 等表 + `redis FLUSHDB`，未触碰共享/生产数据
-- 时区说明：Go 进程 +08:00、MySQL UTC；秒杀时间窗代码用 `UNIX_TIMESTAMP`/`NOW()` 规避漂移（非 V5 引入）；验收脚本用固定宽时间窗规避换算歧义
+- 隔离与清理：验收前清空 `flash_sale_*`/`users`/`skus`/`products`/`categories` 等表 + `redis FLUSHDB`，未触碰共享/生产数据；压测基线为 gitignore 的运行时产物
+
+## Re-verification（本次复审背景）
+
+上次 `delivery.status=FAIL`：`run.sh` 用户名含下划线被 IAM 拒绝导致 AC-007/008/009 无法执行。Coder 在 `2deecfd` 修复 4 处（用户名 `fslt{activity}{i}`、worker.sh 并发、`printf` 换行、空值假 PASS），Cleaner 复审 CLEAN、Owner 重新 ACCEPT。本次重跑原失败场景及受影响主链路。
 
 ## Verification
 
 | Check | Result | Evidence |
 |---|---|---|
-| gofmt / go build ./... / go vet ./... | PASS | exit 0，无输出 |
-| go test -p 1 ./... | PASS | 全部 package ok（含 internal/logic/flashsale、internal/cmd） |
-| go test -race（容量保护测试） | PASS | TestRateLimit/TestQueueCapacity/TestCircuitBreaker/TestMetrics 无竞态 |
-| 服务启动 + 健康检查 | PASS | 多次以不同容量保护配置重启，/health 返回 200 |
-| 配置加载（四特性 env 开关） | PASS | rate_limit/queue_capacity/circuit_breaker/metrics 经 env 开启后真实生效 |
-| AC-001 用户级限流 | PASS | 同用户第 3 次请求 429/12009，remaining/sold/requests 均不变（无副作用） |
-| AC-002 活动级限流 | PASS | 单活动第 3 个用户 429/12009，另一活动不受影响（按活动维度计数） |
-| AC-003 排队软上限 | PASS | 第 3 个入队请求 429/12010，MySQL `queued=2≤上限`、Redis 计数=2，无副作用 |
-| AC-004 熔断降级 | PASS | 闸门连续 2 次 503 → 熔断 Open 快速失败（不预扣/不排队，remaining=10/requests=0）→ 恢复后半开探测自动关闭 |
-| AC-005 指标 | PASS | /metrics 返回 Prometheus 文本，queued/rate_limited/gate_rejected/queue_full/error/success 与真实结果对账一致 |
-| AC-006 热点 Key | NOT_EXECUTED | 脚本可运行(exit 0)，但 Redis 默认 noeviction 未启用 LFU，无法产出热点结果（CLEAN-002 P3） |
-| AC-007 逐级压测脚本 | FAIL | `run.sh` 生成用户名 `fslt_{activity}_{i}` 含下划线，被 IAM 用户名校验 `^[a-zA-Z0-9]{3,24}$` 拒绝，脚本在 `setup_users` 即退出 |
-| AC-008 正确性核对 | FAIL（部分） | 手动核对 sold≤total_stock、订单数=sold、无一人一单/幂等违例均通过；但 run.sh verify() 无法执行（被 AC-007 阻塞） |
-| AC-009 基线保存 | FAIL（阻塞） | run.sh 无法执行，无法保存基线 JSON |
-| AC-010 长期设计 | PASS | docs/design/flash-sale.md §11 与 APPROVED Contract、最终实现一致 |
+| `delivery-start` Gate | PASS | `.agent/bin/workflow-check gate delivery-start` exit 0 |
+| gofmt / go build ./... / go vet ./... | PASS | exit 0（Go 代码未变，复验） |
+| 服务启动 + 健康检查 + 容量保护配置加载 | PASS | 多次以不同容量保护 env 重启，/health 返回 200 |
+| AC-007 逐级压测（重验） | PASS | normal(60 请求全受理)/low_stock(5 受理+55 售罄)/flood(50 受理+100 售罄)，脚本可重复执行，输出吞吐与 p50/p95/p99 |
+| AC-008 正确性核对（重验） | PASS | 消费后 sold≤total_stock、订单数=sold、无一人一单/幂等违例、queued 归零、Max_used_connections=50 远低于上限 |
+| AC-009 基线与对比（重验） | PASS | 4 份 JSON 基线已保存；compare.sh 对比输出正常；限流参数调整前后对比（无限流 rejected=100 售罄 vs 有限流 rejected=50 限流） |
+| AC-001 用户级限流（本轮新证据） | PASS | 限流对比场景 user max=1，每个用户第 2 请求 429/12009，`rate_limited` 指标=50 与拒绝数对账一致 |
+| AC-002 活动级限流 | PASS | 上轮已验（单活动第 3 用户 12009，跨活动独立）；Go 代码未变 |
+| AC-003 排队软上限 | PASS | 上轮已验（12010，queued=2≤上限，无副作用）；Go 代码未变 |
+| AC-004 熔断降级 | PASS | 上轮已验（连续失败→Open 快速失败无副作用→半开探测自动关闭）；Go 代码未变 |
+| AC-005 指标 | PASS | 上轮已验 + 本轮 `/metrics` 与 MySQL/拒绝数对账（queued/rate_limited 等） |
+| AC-006 热点 Key | NOT_EXECUTED | 脚本可运行，但 Redis 默认 `noeviction` 未启用 LFU，无法产出热点结果（CLEAN-002 P3） |
+| AC-010 长期设计 | PASS | `docs/design/flash-sale.md` §11 与 Contract/实现一致（Go 代码未变，复验） |
 
 ## Acceptance Evidence
 
-- INV-018（限流无副作用）：12009 请求不预扣库存、不写 `flash_sale_order_requests`（sold/requests 不变）——HTTP 验证通过。
-- INV-019（排队软上限）：12010 请求无副作用，`status=queued` 计数 ≤ 上限，无超卖/无重复——HTTP 验证通过。
-- INV-020（熔断不破坏不变量）：熔断 Open 快速失败，remaining=10、requests=0 无副作用，恢复后半开探测自动关闭——HTTP 验证通过。
-- INV-021（指标可对账）：`/metrics` 计数与 MySQL 订单数、queued/拒绝数对账一致——HTTP 验证通过。
+- AC-007/008/009（原失败项，本次重验通过）：
+  - 三级压测脚本 `run.sh` 正常注册用户、并发下单、输出吞吐/时延分布、保存基线，无用户名/并发/换行/假 PASS 缺陷。
+  - 消费完成后数据核对：`sold ≤ total_stock`（60≤100、5≤5、50≤50）、订单数=`sold`、一人一单/幂等违例均为 0、`queued` 归零、`Max_used_connections=50`。
+  - 基线 4 份 JSON 可查询、`compare.sh` 可对比；限流参数调整前后对比成功（`rate_limited=50` 与拒绝数对账一致）。
+- INV-018/019/020/021 在上轮 HTTP 验证已通过，本轮未改动相关 Go 代码，结论保持。
 
 ## Not Executed
 
 | Check | Reason | Risk |
 |---|---|---|
 | AC-006 热点 Key 实际产出 | Redis 默认 `noeviction` 未启用 LFU（CLEAN-002 P3） | 无法产出热点结果，需环境显式启用 LFU |
-| AC-007/008/009 三级压测与基线 | `run.sh` 用户名含下划线被 IAM 拒绝，脚本无法执行 | 阻塞容量保护压测闭环 |
 
 ## Remaining Risks
 
-- 压测脚本 `scripts/flashsale-loadtest/run.sh` 存在阻断性实现缺陷（用户名非法），AC-007/008/009 未闭环（失败分类：`IMPLEMENTATION_DEFECT`）。
-- 配置注释与实现不一致：`consume_scan_interval`/`reconcile_scan_interval` 用 `MustGet` 读取（非 env-aware），而 config.yaml 注释声称支持 `FLASH_SALE_CONSUME_SCAN_INTERVAL`/`FLASH_SALE_RECONCILE_SCAN_INTERVAL` 环境变量覆盖——V3/V4 既有，非 V5 引入，不影响 V5 验收结论，供后续知悉。
-- 热点 Key 分析依赖 Redis LFU，默认 docker-compose 未启用（CLEAN-002 P3，Owner 已接受为非阻塞）。
+- CLEAN-001（P3，OPEN）：`run.sh` `verify()` 未将「queued 有界 / 连接数阈值」纳入自动判定，本次由 Deliverer 人工核对（queued 归零、连接数=50 远低于上限）；不影响正确性，自动化闭环不完整。
+- CLEAN-002（P3，OPEN）：热点 Key 分析依赖 Redis LFU，默认 docker-compose 未启用。
+- 容量保护四特性默认 `enabled: false`，压测/生产需显式开启（部署/配置决策）。
 
 ## Result
 
-FAIL
+PASS

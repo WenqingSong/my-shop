@@ -17,9 +17,9 @@ owner:
   review_target: "2deecfda31d8f7effd8512d21fd68eb90d67ea35"
 
 delivery:
-  status: FAIL
-  review_target: "35498b0340b7e8688f18e47dd3e64c11fdb9b3a7"
-  feature_head: "57156db82031323a61cdb756f31b8f52b5aa2de5"
+  status: PASS
+  review_target: "2deecfda31d8f7effd8512d21fd68eb90d67ea35"
+  feature_head: "f461f9888c0c3ff5c11bd58eb21552f7da8639d7"
   develop_base: "d2dd5d5deb4f8e48c6b35feca283686f7887c378"
 
 blocked:
