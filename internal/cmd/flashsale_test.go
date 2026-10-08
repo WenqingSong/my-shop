@@ -38,7 +38,7 @@ func setupFlashSaleServer(t *testing.T) string {
 	ctx := context.Background()
 	// 按外键依赖顺序清空（子表先于父表）。
 	for _, table := range []string{
-		"flash_sale_order_requests", "flash_sale_orders", "flash_sale_activity_skus", "flash_sale_activities",
+		"flash_sale_request_audits", "flash_sale_order_requests", "flash_sale_orders", "flash_sale_activity_skus", "flash_sale_activities",
 		"order_items", "orders", "cart_items",
 		"inventory_logs", "inventories",
 		"skus", "product_images", "products",
@@ -637,6 +637,118 @@ func TestFlashSaleUpdateActivity(t *testing.T) {
 	}
 	if b["flash_price"].Int64() != 2000 || b["total_stock"].Int64() != 20 || b["sold"].Int64() != 0 {
 		t.Fatalf("unexpected binding after update: %+v", b)
+	}
+}
+
+// flashInsertDeadRequest 直接写入一个 dead（死信）请求，供人工修复/审计测试使用。返回请求 id。
+func flashInsertDeadRequest(t *testing.T, userID, activityID, skuID int64, key string) int64 {
+	t.Helper()
+	id, err := g.DB().Model("flash_sale_order_requests").Ctx(context.Background()).Data(g.Map{
+		"user_id":         userID,
+		"activity_id":     activityID,
+		"sku_id":          skuID,
+		"idempotency_key": key,
+		"request_hash":    "dead-hash",
+		"status":          3, // dead
+		"retry_count":     4,
+		"last_error_code": 1000,
+	}).InsertAndGetId()
+	if err != nil {
+		t.Fatalf("insert dead request: %v", err)
+	}
+	return id
+}
+
+// TestFlashSaleRepairAndAudit 覆盖 AC-007/INV-017 完整链路：
+// 超管经真实路由修复 dead→queued 且产生审计；普通管理员 403、未登录 401、非 dead 请求 12008，均无副作用。
+func TestFlashSaleRepairAndAudit(t *testing.T) {
+	base := setupFlashSaleServer(t)
+	skuID := flashSetupSku(t, "SKU-REPAIR", 5000, 1)
+	activityID := flashInsertActivity(t, "修复", 1, flashMySQLNow(t).Add(-time.Hour), flashMySQLNow(t).Add(time.Hour))
+	flashInsertBinding(t, activityID, skuID, 1000, 10)
+
+	deadID := flashInsertDeadRequest(t, 500006, activityID, skuID, "k-repair")
+
+	superToken, _ := isoAdminLogin(t, base, isoSuperUsername, isoAdminPassword)
+
+	// 超管修复 dead→queued。
+	repair := isoDo(t, base, "POST", fmt.Sprintf("/admin/flash-sales/requests/%d/repair", deadID),
+		map[string]any{"target_status": "queued", "reason": "故障排除后重投"}, isoAuthHeader(superToken))
+	if repair.Status != 200 || repair.Code != 0 {
+		t.Fatalf("repair: status=%d code=%d msg=%q", repair.Status, repair.Code, repair.Message)
+	}
+	if s, _ := repair.Data["status"].(string); s != "queued" {
+		t.Fatalf("repair status=%q want queued", s)
+	}
+	// 请求状态迁移为 queued、retry 清零。
+	rec, err := g.DB().Model("flash_sale_order_requests").Ctx(context.Background()).
+		Fields("status", "retry_count", "next_attempt_at").Where("id", deadID).One()
+	if err != nil || rec == nil || rec.IsEmpty() {
+		t.Fatalf("query request: %v", err)
+	}
+	if rec["status"].Int() != 0 || rec["retry_count"].Int() != 0 {
+		t.Fatalf("after repair status=%d retry=%d want 0/0", rec["status"].Int(), rec["retry_count"].Int())
+	}
+
+	// 审计记录可查询且字段正确（操作者为超管 admin）。
+	audits := isoDo(t, base, "GET", fmt.Sprintf("/admin/flash-sales/requests/%d/audits", deadID), nil, isoAuthHeader(superToken))
+	if audits.Status != 200 || audits.Code != 0 {
+		t.Fatalf("list audits: status=%d code=%d msg=%q", audits.Status, audits.Code, audits.Message)
+	}
+	items, ok := audits.Data["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("audit items=%v want 1 record", audits.Data)
+	}
+	first := items[0].(map[string]any)
+	if first["action"] != "dead_to_queued" || first["operator_username"] != isoSuperUsername {
+		t.Fatalf("unexpected audit: %+v", first)
+	}
+	if before, _ := first["before_status"].(float64); int(before) != 3 {
+		t.Fatalf("audit before_status=%v want 3", first["before_status"])
+	}
+	if after, _ := first["after_status"].(float64); int(after) != 0 {
+		t.Fatalf("audit after_status=%v want 0", first["after_status"])
+	}
+
+	// 非 dead 请求（已修复为 queued）再次修复 → 12008，且不新增审计。
+	again := isoDo(t, base, "POST", fmt.Sprintf("/admin/flash-sales/requests/%d/repair", deadID),
+		map[string]any{"target_status": "queued", "reason": "again"}, isoAuthHeader(superToken))
+	if again.Status != 409 || again.Code != 12008 {
+		t.Fatalf("repair non-dead: status=%d code=%d want 409/12008", again.Status, again.Code)
+	}
+	audits = isoDo(t, base, "GET", fmt.Sprintf("/admin/flash-sales/requests/%d/audits", deadID), nil, isoAuthHeader(superToken))
+	if items, _ := audits.Data["items"].([]any); len(items) != 1 {
+		t.Fatalf("rejected repair must not append audit, items=%d want 1", len(items))
+	}
+
+	// 目标状态非法 → 400/1001。
+	badTarget := isoDo(t, base, "POST", fmt.Sprintf("/admin/flash-sales/requests/%d/repair", deadID),
+		map[string]any{"target_status": "failed", "reason": "x"}, isoAuthHeader(superToken))
+	if badTarget.Status != 400 || badTarget.Code != 1001 {
+		t.Fatalf("repair bad target: status=%d code=%d want 400/1001", badTarget.Status, badTarget.Code)
+	}
+
+	// 请求不存在 → 404/1004。
+	notFound := isoDo(t, base, "POST", "/admin/flash-sales/requests/999999999/repair",
+		map[string]any{"target_status": "queued", "reason": "x"}, isoAuthHeader(superToken))
+	if notFound.Status != 404 || notFound.Code != 1004 {
+		t.Fatalf("repair not found: status=%d code=%d want 404/1004", notFound.Status, notFound.Code)
+	}
+
+	// 普通管理员（无 flash_sale:repair）→ 403，无副作用。
+	isoInsertAdmin(t, "flashrepairplain", "flashrepair123")
+	plainToken, _ := isoAdminLogin(t, base, "flashrepairplain", "flashrepair123")
+	forbidden := isoDo(t, base, "POST", fmt.Sprintf("/admin/flash-sales/requests/%d/repair", deadID),
+		map[string]any{"target_status": "queued", "reason": "x"}, isoAuthHeader(plainToken))
+	if forbidden.Status != 403 || forbidden.Code != 1003 {
+		t.Fatalf("plain admin repair: status=%d code=%d want 403/1003", forbidden.Status, forbidden.Code)
+	}
+
+	// 未登录 → 401。
+	unauth := isoDo(t, base, "POST", fmt.Sprintf("/admin/flash-sales/requests/%d/repair", deadID),
+		map[string]any{"target_status": "queued", "reason": "x"}, nil)
+	if unauth.Status != 401 || unauth.Code != 1002 {
+		t.Fatalf("unauthenticated repair: status=%d code=%d want 401/1002", unauth.Status, unauth.Code)
 	}
 }
 

@@ -42,3 +42,4 @@
 | 14000-14999 | banner-v1 | RESERVED | banner-v1 轮播图域（域序 14 = max(13)+1） |
 | 15000-15999 | recommendation-v1 | RESERVED | recommendation-v1 推荐位域（域序 15 = max(14)+1） |
 | 16000-16999 | article-cms-v1 | RESERVED | article-cms-v1 文章域（域序 16 = max(15)+1） |
+| 17000-17999 | object-storage-upload | RESERVED | object-storage-upload 上传/存储域（域序 17 = max(16)+1） |

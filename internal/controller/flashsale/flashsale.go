@@ -60,6 +60,24 @@ func (c *AdminControllerV1) Update(ctx context.Context, req *v1.UpdateReq) (res 
 	return service.FlashSale().UpdateActivity(ctx, req)
 }
 
+// RepairRequest 处理人工修复秒杀请求（经 RequirePermission("flash_sale:repair")；仅 dead→queued）。
+// 操作者 id 取自已认证 AdminPrincipal，不信任请求体身份。
+func (c *AdminControllerV1) RepairRequest(ctx context.Context, req *v1.RepairRequestReq) (res *v1.RepairRequestRes, err error) {
+	p, ok := middleware.AdminPrincipalFromContext(ctx)
+	if !ok {
+		return nil, codes.New(codes.CodeUnauthorized)
+	}
+	return service.FlashSale().RepairRequest(ctx, p.AdminID, req)
+}
+
+// ListRequestAudits 处理查询秒杀请求审计记录（经 RequirePermission("flash_sale:repair")）。
+func (c *AdminControllerV1) ListRequestAudits(ctx context.Context, req *v1.ListRequestAuditsReq) (res *v1.ListRequestAuditsRes, err error) {
+	if _, ok := middleware.AdminPrincipalFromContext(ctx); !ok {
+		return nil, codes.New(codes.CodeUnauthorized)
+	}
+	return service.FlashSale().ListRequestAudits(ctx, req.Id)
+}
+
 // currentUserID 从认证中间件注入的 Principal 取当前用户 id；缺失返回 401。
 func currentUserID(ctx context.Context) (int64, error) {
 	p, ok := middleware.PrincipalFromContext(ctx)

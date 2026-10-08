@@ -1,6 +1,6 @@
 # 秒杀设计（Flash Sale）
 
-本文面向项目接手者，说明「秒杀核心闭环」的架构、数据模型、并发/一致性、权限边界与错误码域。V1 以单一 MySQL 证明正确性；V2 在其上引入 Redis + Lua 抢购热路径（活动/库存预热、Lua 原子预扣、售罄/穿透快速失败、对账与降级）；V3 在 V2 基础上把「下单」拆成「入队快速响应 + 后台消费落单」两阶段（MySQL 出队表 + `goroutine+ticker` 消费者），异步化不改变五个业务不变量及其 MySQL 事实来源兜底。MySQL 始终是最终事实来源与正确性兜底。事实来源为 `flash-sale-v1`/`flash-sale-v2`/`flash-sale-v3` 的最终 APPROVED Contract 与最终实现。
+本文面向项目接手者，说明「秒杀核心闭环」的架构、数据模型、并发/一致性、权限边界与错误码域。V1 以单一 MySQL 证明正确性；V2 在其上引入 Redis + Lua 抢购热路径（活动/库存预热、Lua 原子预扣、售罄/穿透快速失败、对账与降级）；V3 在 V2 基础上把「下单」拆成「入队快速响应 + 后台消费落单」两阶段（MySQL 出队表 + `goroutine+ticker` 消费者），异步化不改变五个业务不变量及其 MySQL 事实来源兜底。V4 在 V3 基础上补齐故障恢复：以「MySQL 权威值收敛」替代非幂等 `INCR` 补偿，实现幂等补偿、崩溃重投、活动结束终态收敛、重启恢复与人工修复/审计。MySQL 始终是最终事实来源与正确性兜底。事实来源为 `flash-sale-v1`/`flash-sale-v2`/`flash-sale-v3`/`flash-sale-v4` 的最终 APPROVED Contract 与最终实现。
 
 ## 1. 职责与边界
 
@@ -12,7 +12,7 @@ V1 只用 MySQL 证明正确性。V2 引入 Redis + Lua 作为**加速闸门**�
 
 ## 2. 数据模型
 
-V2 不新增、不修改表结构与索引；V3 新增 `flash_sale_order_requests`（异步请求生命周期表，§2.4）。以下三表为 V1 已建、V2/V3 复用。
+V2 不新增、不修改表结构与索引；V3 新增 `flash_sale_order_requests`（异步请求生命周期表，§2.4）；V4 新增 `flash_sale_request_audits`（人工修复审计表，§2.5）。以下三表为 V1 已建、V2/V3/V4 复用。
 
 ### 2.1 `flash_sale_activities`（秒杀活动）
 
@@ -87,16 +87,34 @@ V3 把「下单」拆成「入队快速响应 + 消费落单」，本表承载�
 
 消费者出队：`WHERE status=queued AND (next_attempt_at IS NULL OR next_attempt_at <= NOW()) ORDER BY id LIMIT N FOR UPDATE SKIP LOCKED`，靠行锁 + 状态原子更新保证同一行只被领取一次。
 
+### 2.5 `flash_sale_request_audits`（V4 人工修复审计，append-only）
+
+V4 新增人工修复审计表：记录管理员对异常请求的修复动作，只追加、不可修改删除（无 UPDATE/DELETE 接口）。
+
+| 字段 | 类型 | 约束/说明 |
+| --- | --- | --- |
+| `id` | BIGINT UNSIGNED | 主键，自增 |
+| `request_id` | BIGINT UNSIGNED | 非空，软引用 → `flash_sale_order_requests.id` |
+| `operator_admin_id` | BIGINT UNSIGNED | 非空，软引用 → `admins.id` |
+| `operator_username` | VARCHAR(64) | 非空，操作时用户名快照（抗 admin 删除） |
+| `action` | VARCHAR(32) | 非空，动作（如 `dead_to_queued`） |
+| `before_status` | TINYINT | 非空，迁移前请求状态 |
+| `after_status` | TINYINT | 非空，迁移后请求状态 |
+| `reason` | VARCHAR(255) | 非空，操作者填写的修复原因 |
+| `created_at` | DATETIME | 默认 `CURRENT_TIMESTAMP` |
+
+索引：`idx_request_id(request_id)`、`idx_operator(operator_admin_id)`。修复与审计记录写入同一 MySQL 事务。
+
 ## 3. 状态机与生命周期
 
 - 活动 `status`：二态 `enabled`（默认）/`disabled`（下架），创建默认 `enabled`，写接口直接设置与校验；「已结束」由 `end_time` 派生，不存冗余终态、无后台状态翻转任务。
 - 秒杀订单（`flash_sale_orders`）无状态机：下单事务提交即成功（行存在 = 成功订单），无待支付/取消/退款。V3 异步下该口径不变：`flash_sale_orders` 行存在仍是「成功订单」唯一业务事实。
-- 异步请求（`flash_sale_order_requests.status`）四态状态机：`queued`（排队中，含退避重试）→ `success`（与成功订单创建同事务）或 `failed`（业务失败终态，不自动重试）或 `dead`（技术失败重试超限，死信/待修复，可 `dead→queued` 重新处理）。`success` 与成功订单创建必须在同一 MySQL 事务。
+- 异步请求（`flash_sale_order_requests.status`）四态状态机：`queued`（排队中，含退避重试）→ `success`（与成功订单创建同事务）或 `failed`（业务失败终态，不自动重试）或 `dead`（技术失败重试超限，死信/待修复）。V4：`dead→queued` 经后台人工修复接口（`flash_sale:repair`）完成，且与审计记录同事务；`failed` 为业务终态，不提供人工重新排队。`success` 与成功订单创建必须在同一 MySQL 事务。
 - 可售判定（下单时，同事务 MySQL 条件写入）：`status=enabled` 且 `start_time <= NOW() < end_time`（左闭右开）。
 
 ## 4. 业务不变量
 
-V1 五个核心不变量（INV-001~005）在 V2/V3 下依然成立，最终由 MySQL 兜底；V2 额外引入 Redis 闸门不变量（INV-010~011）；V3 异步化**不改变** INV-001~005 的事实来源（仍为 MySQL 条件扣减 + 唯一约束），仅把「下单」拆成「入队 + 消费落单」，并新增请求生命周期不变量（INV-012~013）。
+V1 五个核心不变量（INV-001~005）在 V2/V3/V4 下依然成立，最终由 MySQL 兜底；V2 额外引入 Redis 闸门不变量（INV-010~011）；V3 异步化**不改变** INV-001~005 的事实来源（仍为 MySQL 条件扣减 + 唯一约束），仅把「下单」拆成「入队 + 消费落单」，并新增请求生命周期不变量（INV-012~013）；V4 故障恢复新增补偿幂等/崩溃重投/结束收敛/修复审计不变量（INV-014~017）。
 
 - INV-001（库存不为负）：任何成功下单后 `total_stock - sold ≥ 0`，并发下单亦不例外（条件更新 `sold < total_stock` 兜底 + `INT UNSIGNED` 类型兜底）；Redis 侧 `remaining ≥ 0`（Lua 原子 DECR 兜底）。
 - INV-002（成功订单数 ≤ 初始库存）：`sold ≤ total_stock` 且 `COUNT(flash_sale_orders) = sold`（同事务保证订单数与扣减一致）。
@@ -111,12 +129,16 @@ V1 五个核心不变量（INV-001~005）在 V2/V3 下依然成立，最终由 M
 - INV-011（对账收敛）：对账后 Redis `remaining = total_stock - MySQL sold - inflight_queued`（`inflight_queued` = 该活动×SKU 下 `status=queued` 的请求数，计入在途预扣，避免把在途预扣错误回补导致超预扣），Redis 预扣计数与 MySQL 最终一致。
 - INV-012（请求级幂等）：同一 `(user_id, idempotency_key)` 至多一个异步请求（`uk_request_idempotency` 兜底）；重复消费不重复扣库存、不重复建单。
 - INV-013（请求状态与成功订单一致）：`requests.status=success` 必须与成功订单创建同事务；`requests.status=failed/dead` 时不存在对应成功订单、不扣减 `sold`、Redis 预扣与标记已补偿、无残留。
+- INV-014（补偿幂等/不重不漏，V4）：任意时刻 Redis `remaining ≤ total_stock - sold`（MySQL 条件扣减兜底，绝不超卖）；补偿/收敛重复执行或崩溃重放不改变收敛结果（不多补、不漏补，崩溃后 ≤ 一个对账周期收敛）。活动进行中收敛目标为 `remaining = total_stock - sold - inflight_queued`，但因「Redis 预扣已发生、request 未持久化」短窗口，DB snapshot + SET 允许瞬时高估，不宣称并发 admission 下始终精确；精确终态 `remaining = total_stock - sold` 在活动结束、停止新 admission 后达成。
+- INV-015（崩溃重投幂等，V4）：消费者领取后、事务提交前崩溃，请求回到 `queued` 被重新领取重处理，只产生一次业务效果（成功订单数、`sold` 扣减各一次），由 `FOR UPDATE SKIP LOCKED` + 事务回滚 + 唯一约束兜底。
+- INV-016（活动结束收敛清理，V4）：活动结束且该活动 `status=queued` 计数归零后，Redis `remaining = total_stock - sold`（`inflight=0`），活动域缓存被清理，无残留脏数据。
+- INV-017（人工修复授权与审计原子性，V4）：仅持有 `flash_sale:repair`（或超管）可修复，且仅 `dead→queued`；修复与审计记录同一事务提交；审计只追加、不可修改删除；越权/未授权稳定拒绝且无副作用。
 
 ## 5. 一致性模型与失败语义
 
 ### 5.1 事实来源
 
-- **MySQL 为权威事实来源**：`flash_sale_activities`/`flash_sale_activity_skus`（活动与秒杀库存事实）、`flash_sale_orders`（秒杀订单事实，软引用快照自足）、`flash_sale_order_requests`（V3 异步请求生命周期与排队/失败/死信状态）、`skus`/`products`（下单时存在性与可用性事实来源，读后快照）。
+- **MySQL 为权威事实来源**：`flash_sale_activities`/`flash_sale_activity_skus`（活动与秒杀库存事实）、`flash_sale_orders`（秒杀订单事实，软引用快照自足）、`flash_sale_order_requests`（V3 异步请求生命周期与排队/失败/死信状态）、`flash_sale_request_audits`（V4 人工修复审计）、`skus`/`products`（下单时存在性与可用性事实来源，读后快照）。
 - **Redis 为加速闸门与派生缓存**（非权威）：活动元数据、剩余库存预扣计数、一人一单/幂等标记、售罄标记、空值标记。最终经对账收敛到 MySQL。V3 下 Redis 仅承担闸门/预扣快路径，不承担请求生命周期（排队/失败/死信状态落在 MySQL `flash_sale_order_requests`）。
 
 ### 5.2 成功与失败语义
@@ -135,10 +157,10 @@ V1 五个核心不变量（INV-001~005）在 V2/V3 下依然成立，最终由 M
   - 异常路径：进程崩溃于「Lua 预扣成功、MySQL 未提交/未消费」之间 → 残留预扣计数，由对账修正（`remaining = total - sold - inflight_queued`）。
 - 重复/重试：幂等键重复（同 hash）经 Redis 快速命中 → 读 MySQL 既有订单返回；一人一单重复经 Redis 快速拒绝 → `12004`；均不重复扣库存。
 
-V3 异步一致性（队列 vs MySQL）：
+V3/V4 异步一致性（队列 vs MySQL，V4 起补偿改为权威值收敛）：
 
-- 入队（HTTP 内）：Redis Lua 闸门（预扣 `remaining--` + 原子写 `bought`/`idem` 标记）→ `INSERT flash_sale_order_requests(status=queued)`。这两步非跨系统原子：若 INSERT 失败，补偿 Redis（`INCR remaining` + 清标记）并返回 5xx，不残留「已预扣但无 request」。
-- 消费（后台）：出队 `FOR UPDATE SKIP LOCKED` → 单事务「活动校验 + 时间窗 + 条件扣 `sold` + `INSERT flash_sale_orders` + `requests.status=success`」。失败分两类：业务失败（12001~12007）落 `failed`；技术失败 `retry_count+1` + 退避 `next_attempt_at`，超上限落 `dead`。两类失败都补偿 Redis（`INCR remaining` + 清标记）。
+- 入队（HTTP 内）：Redis Lua 闸门（预扣 `remaining--` + 原子写 `bought`/`idem` 标记）→ `INSERT flash_sale_order_requests(status=queued)`。这两步非跨系统原子：若 INSERT 失败，收敛 Redis（`SET remaining = total_stock - sold - inflight_queued` + `DEL` 清标记）并返回 5xx，不残留「已预扣但无 request」。
+- 消费（后台）：出队 `FOR UPDATE SKIP LOCKED` → 单事务「活动校验 + 时间窗 + 条件扣 `sold` + `INSERT flash_sale_orders` + `requests.status=success`」。失败分两类：业务失败（12001~12007）落 `failed`；技术失败 `retry_count+1` + 退避 `next_attempt_at`，超上限落 `dead`。两类终态失败在提交后触发一次权威值收敛（释放预扣）+ `DEL` 清标记，幂等（执行次数无关）。
 - 消费幂等：请求级由 `uk_request_idempotency` 兜底（同一幂等键至多一个请求）；落单级由 `uk_flash_idempotency`/`uk_flash_one_per_user` 兜底；出队行由「`FOR UPDATE SKIP LOCKED` + 状态原子更新」保证只被领取一次。
 - 乱序/部分完成：秒杀请求无顺序语义，乱序无影响；消费事务原子，`success` 要么全有要么全无。
 
@@ -153,8 +175,19 @@ V3 异步一致性（队列 vs MySQL）：
 
 - 后台扫描器（`goroutine + ticker`，复用订单超时取消扫描范式，非 MQ、非 gcron）按「活动 × SKU」粒度，周期将 Redis `remaining` 刷成 `total_stock - MySQL sold - inflight_queued`（`inflight_queued` = 该活动×SKU 下 `status=queued` 的请求数），并回补缺失的活跃活动预热。
 - 修正为无状态、幂等（写入权威值）、多实例并发安全。
-- 无持久化补偿/对账记录表；不一致通过「把 Redis 刷成 MySQL 事实」收敛，观测依赖日志。
-- V3 新增后台消费者扫描器（`goroutine + ticker`）：`FOR UPDATE SKIP LOCKED` 出队 `queued` 请求 → 消费落单；与对账扫描器并列，复用同一后台扫描范式。
+- V4 补偿与对账统一为「权威值收敛」：`remaining` 不再依赖非幂等 `INCR`，改由「读 MySQL 快照（`total_stock`/`sold`/`inflight_queued`）+ 幂等 `SET`」收敛；标记清理由幂等 `DEL` 完成。无持久化补偿/对账记录表；不一致通过「把 Redis 刷成 MySQL 事实」收敛，观测依赖日志。
+- V4 活动结束终态收敛：对账扫描器覆盖「已结束、尚在 grace 窗口（`end_time > NOW()-grace`）」的活动；终态判定 = `COUNT(status=queued)=0`；清空后写 `remaining = total_stock - sold`（`inflight=0`）并失效活动域缓存（DEL activity 元数据/soldout 标记 + 置 null 标记；stock key 保留 `remaining` 供观测、靠 TTL 过期；bought/idem 标记靠 TTL 过期），使收敛可观测、无残留。
+- V4 新增后台消费者扫描器（`goroutine + ticker`）：`FOR UPDATE SKIP LOCKED` 出队 `queued` 请求 → 消费落单；与对账扫描器并列，复用同一后台扫描范式。
+
+### 5.6 崩溃窗口与故障恢复（V4）
+
+三个关键崩溃窗口与恢复方式：
+
+1. **闸门预扣 → 入队**（`GATE_PASSED` 后、`INSERT request` 前崩溃）：Redis 已预扣 + 写标记，request 未落库。恢复：对账/收敛把 `remaining` 刷回 `total_stock - sold - inflight_queued`（该未持久化预扣不计入 `inflight`，自然释放）；孤儿 `bought`/`idem` 标记由「命中时 MySQL 校验」自愈（`IDEMPOTENT_HIT`/`ALREADY_PURCHASED` 命中但对应 request/订单不存在 → 清除标记并继续入队），`uk_request_idempotency` 兜底。
+2. **消费领取 → 事务提交**（出队锁行后、提交前崩溃）：`FOR UPDATE SKIP LOCKED` 行锁随事务回滚释放，请求回到 `queued` 被重新领取，唯一约束保证只产生一次业务效果。
+3. **终态提交 → 收敛**（`failed`/`dead` 提交后、收敛前崩溃）：收敛丢失由对账扫描器 ≤ 一个周期（60s）兜底，幂等 `SET` 保证不重复补偿。
+
+并发语义：活动进行中 active reconciliation 是「读 MySQL 快照 + `SET` Redis」的无事务两步，与并发 admission 存在竞态——若收敛发生在「预扣已发生、request 未持久化」窗口，`inflight_queued` 少计，`SET` 会瞬时高估 `remaining`（相当于回补该在途预扣）。该高估不破坏 MySQL 安全边界（条件扣减 `sold < total_stock` + 唯一约束杜绝超卖），并随 request 持久化/下一周期自愈；真正精确终态收敛仅在活动结束、停止新 admission 后（`inflight=0`）达成。
 
 ## 6. Redis 热路径设计
 
@@ -202,13 +235,15 @@ V3 异步一致性（队列 vs MySQL）：
 - 后台写（`routes_admin.go` `AdminAuth` + `RequirePermission`）：
   - `POST /admin/flash-sales` → `flash_sale:create`
   - `PUT /admin/flash-sales/:id` → `flash_sale:update`
-- V1/V2 不新增前台活动列表/详情、不新增后台活动列表（非 AC 必需）。
-- 权限 code：`flash_sale:create`、`flash_sale:update`（`internal/boot/seed.go` 登记）。
+  - `POST /admin/flash-sales/requests/:id/repair` → `flash_sale:repair`（V4 新增，仅 `dead→queued`，body `{target_status:"queued", reason:"..."}`，与审计记录同事务）
+  - `GET /admin/flash-sales/requests/:id/audits` → `flash_sale:repair`（V4 新增，查询修复审计，append-only）
+- V1/V2/V3/V4 不新增前台活动列表/详情、不新增后台活动列表（非 AC 必需）。
+- 权限 code：`flash_sale:create`、`flash_sale:update`、`flash_sale:repair`（`internal/boot/seed.go` 登记）。
 - 身份信任：用户身份取自 `Principal.UserID`，管理员经 `RequirePermission`；均不信任请求自带身份。
 
 ## 8. 错误码域
 
-V2/V3 复用 V1 域 12000-12999，不新增错误码（V3 结果查询复用 `1004`、fail-closed 复用 `1005`）：
+V2/V3/V4 复用 V1 域 12000-12999；V4 新增 12008（V3 结果查询复用 `1004`、fail-closed 复用 `1005`）：
 
 | code | 语义 | HTTP |
 | --- | --- | --- |
@@ -219,8 +254,9 @@ V2/V3 复用 V1 域 12000-12999，不新增错误码（V3 结果查询复用 `10
 | 12005 | FLASH_SALE_IDEMPOTENCY_CONFLICT（同幂等键不同请求内容） | 409 |
 | 12006 | FLASH_SALE_SKU_UNAVAILABLE（下单时 SKU 禁用或商品下架） | 409 |
 | 12007 | FLASH_SALE_INVALID_ARGUMENT（活动参数非法：秒杀价/库存/时间/状态） | 400 |
+| 12008 | FLASH_SALE_REQUEST_NOT_REPAIRABLE（请求状态不可修复，仅 dead 可修复） | 409 |
 
-复用：`1001`（400）、`1002`（401）、`1003`（403）、`4001`（商品不存在）、`5001`（SKU 不存在）。
+复用：`1001`（400）、`1002`（401）、`1003`（403）、`1004`（请求不存在）、`4001`（商品不存在）、`5001`（SKU 不存在）。
 
 ## 9. 跨模块关系
 
@@ -229,13 +265,13 @@ V2/V3 复用 V1 域 12000-12999，不新增错误码（V3 结果查询复用 `10
 - 秒杀库存与普通 `inventories` 的关系：秒杀库存是普通可售库存的预分配配额（语义预留），V1/V2 运行时独立、不联动、不自动划拨（见 INV-009）。
 - 秒杀订单不复用 `orders`/`order_items`、不进入普通订单列表/支付/取消/退款流程。
 - Redis：秒杀缓存使用独立 `flashsale:` 前缀，与会话 `iam:*` 隔离；秒杀后台扫描器复用订单超时取消扫描的 `goroutine + ticker` 范式，不引入 MQ/gcron。
-- 建表经 golang-migrate 迁移（`20261001000011_flash_sale.up.sql` 建三表；`20261001000015_flash_sale_order_requests.up.sql` 建异步请求表，V3 新增），见 `migration.md`。
+- 建表经 golang-migrate 迁移（`20261001000011_flash_sale.up.sql` 建三表；`20261001000015_flash_sale_order_requests.up.sql` 建异步请求表，V3 新增；`20261001000018_flash_sale_request_audits.up.sql` 建人工修复审计表，V4 新增），见 `migration.md`。
 
 ## 10. Deferred / 已知留白
 
 - 自动划拨/预留：不实现秒杀配额从普通库存的自动划拨，依赖运营前置预留；后续任务应实现并在配额耗尽/普通库存侧扣减上形成机械不变量。
 - 取消/退款/超时未支付与库存恢复：明确不做，后续需重新定义「成功订单」口径与库存恢复语义（`CONTRACT_REVISION`）。
-- 死信/待修复管理接口：V3 死信（`status=dead`）修复仅提供运维 SQL/日志最小满足，管理接口（`dead→queued` 重处理）属后续按需扩展。
+- 死信修复的人工复核（`failed→queued`）：V4 已提供 `dead→queued` 后台修复接口 + 审计（`flash_sale:repair`）；`failed`（业务终态）的人工复核重排队仍属后续按需扩展，本任务不做。
 - Redis outage fallback（Redis 不可用时的容量保护/降级）：V3 采用 fail-closed，如需后续支持应作为独立容量保护/降级设计处理。
 - 前台活动列表/详情、后台活动列表/统计：非 AC 必需，后续按需扩展。
 - 秒杀 SKU 绑定为软引用：SKU 被删除后活动绑定悬空，下单时由 `ISku.GetByID` 校验拒绝（`5001`），属可接受边界。

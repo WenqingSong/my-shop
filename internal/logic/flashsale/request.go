@@ -67,8 +67,8 @@ func (s *sFlashSale) enqueue(ctx context.Context, userID, activityID, skuID int6
 		"status":          requestStatusQueued,
 	}).InsertAndGetId()
 	if err != nil {
-		// 入队失败：补偿本次闸门预扣 + 清除 bought/idem 标记（避免「已预扣但无 request」残留）。
-		s.compensatePreDeductAndMarkers(ctx, activityID, skuID, userID, idempotencyKey)
+		// 入队失败：权威值收敛（幂等）+ 清除 bought/idem 标记（避免「已预扣但无 request」残留）。
+		s.convergeStockAndMarkers(ctx, activityID, skuID, userID, idempotencyKey)
 		if key := duplicateKeyName(err); key != "" && strings.Contains(key, "uk_request_idempotency") {
 			// 幂等键已存在（idem 标记 TTL 过期但请求仍落库）：读回既有请求，同 hash 返回既有状态、异 hash 12005。
 			return s.resultForExistingRequest(ctx, userID, idempotencyKey, hash)

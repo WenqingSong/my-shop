@@ -124,6 +124,9 @@ func TestRouteTable(t *testing.T) {
 		// 秒杀活动后台写操作（AdminAuth + RequirePermission）。
 		"POST /admin/flash-sales",
 		"PUT /admin/flash-sales/:id",
+		// 秒杀请求人工修复 + 审计查询（AdminAuth + RequirePermission）。
+		"POST /admin/flash-sales/requests/:id/repair",
+		"GET /admin/flash-sales/requests/:id/audits",
 		// 商品评价公开列表（无 token）。
 		"GET /products/:id/reviews",
 		// 商品评价前台用户接口（Auth 保护）。

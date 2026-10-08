@@ -7,6 +7,7 @@ package flashsale
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -38,7 +39,7 @@ func setupConsumeTest(t *testing.T) {
 		t.Fatalf("bootstrap: %v", err)
 	}
 	for _, table := range []string{
-		"flash_sale_order_requests", "flash_sale_orders", "flash_sale_activity_skus", "flash_sale_activities",
+		"flash_sale_request_audits", "flash_sale_order_requests", "flash_sale_orders", "flash_sale_activity_skus", "flash_sale_activities",
 		"skus", "product_images", "products", "categories",
 	} {
 		if _, err := g.DB().Exec(ctx, "DELETE FROM "+table); err != nil {
@@ -284,5 +285,72 @@ func TestCreateOrderIdempotencyConflictCompensatesOnce(t *testing.T) {
 	}
 	if got := v.String(); got != "10" {
 		t.Fatalf("sku2 remaining=%q want 10（重复补偿导致超预扣）", got)
+	}
+}
+
+// TestConsumeCrashBeforeCommitRedeliversOnce 覆盖 AC-003/INV-015（崩溃重投幂等）：
+// 消费者领取请求后、事务提交前崩溃（经 consumeBeforeCommitHook 注入 error → 整个事务回滚），
+// 断言请求回到 queued、无订单、不扣库存；清除故障点后重投，只产生一次业务效果（订单数/库存扣减各一次）。
+// 若事务边界被破坏（如「建单/扣库存」与「状态更新」被拆成多个已提交事务），本测试会因残留订单/扣减而失败。
+func TestConsumeCrashBeforeCommitRedeliversOnce(t *testing.T) {
+	setupConsumeTest(t)
+	ctx := context.Background()
+	s := New()
+	skuID := consumeTestSku(t, "crash-sku")
+	activityID := consumeTestActivity(t, skuID)
+
+	const (
+		userID = int64(883000)
+		key    = "k-crash"
+	)
+
+	// 直接写入 queued 请求（测试消费者，不经过闸门）。
+	if _, err := g.DB().Model("flash_sale_order_requests").Ctx(ctx).Data(g.Map{
+		"user_id":         userID,
+		"activity_id":     activityID,
+		"sku_id":          skuID,
+		"idempotency_key": key,
+		"request_hash":    requestHash(activityID, skuID),
+		"status":          requestStatusQueued,
+	}).InsertAndGetId(); err != nil {
+		t.Fatalf("insert request: %v", err)
+	}
+
+	// 注入提交前崩溃：落单后、状态更新前返回 error → 消费事务整体回滚。
+	consumeBeforeCommitHook = func(ctx context.Context, r *orderRequestRow) error {
+		return errors.New("simulated crash before commit")
+	}
+	defer func() { consumeBeforeCommitHook = nil }()
+
+	if _, err := s.ConsumeQueued(ctx, 1); err == nil {
+		t.Fatalf("expected consume to fail (simulated crash)")
+	}
+
+	// 回滚后：请求仍 queued、无订单、不扣库存。
+	req := consumeRequestRow(t, userID, key)
+	if req.Status != requestStatusQueued {
+		t.Fatalf("after rollback status=%d want queued", req.Status)
+	}
+	if n, _ := g.DB().Model("flash_sale_orders").Ctx(ctx).Where("activity_id", activityID).Count(); n != 0 {
+		t.Fatalf("rollback must not leave order, count=%d want 0", n)
+	}
+	if _, sold := consumeBindingStock(t, activityID, skuID); sold != 0 {
+		t.Fatalf("rollback must not deduct stock, sold=%d want 0", sold)
+	}
+
+	// 清除故障点，重投：只产生一次业务效果。
+	consumeBeforeCommitHook = nil
+	if n, err := s.ConsumeQueued(ctx, 1); err != nil || n != 1 {
+		t.Fatalf("redeliver consume: n=%d err=%v", n, err)
+	}
+	req = consumeRequestRow(t, userID, key)
+	if req.Status != requestStatusSuccess {
+		t.Fatalf("after redeliver status=%d want success", req.Status)
+	}
+	if n, _ := g.DB().Model("flash_sale_orders").Ctx(ctx).Where("activity_id", activityID).Count(); n != 1 {
+		t.Fatalf("redelivered order count=%d want 1", n)
+	}
+	if _, sold := consumeBindingStock(t, activityID, skuID); sold != 1 {
+		t.Fatalf("redelivered sold=%d want 1", sold)
 	}
 }
