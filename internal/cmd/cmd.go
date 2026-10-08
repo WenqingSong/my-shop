@@ -84,8 +84,9 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 	if err := boot.Bootstrap(ctx); err != nil {
 		return err
 	}
-	// 校验七牛云非机密结构配置（region/ttl/大小/白名单），格式非法启动 fail-fast。
-	// 凭据（AK/SK）与 bucket/domain 缺失不在此阻塞，签发时返回稳定 17002。
+	// 七牛云为启动 required dependency：结构（region/ttl/大小/白名单）、存在性（AK/SK/bucket/domain）
+	// 与真实可用性（GetBucketInfo 最小权限只读）任一失败即启动 fail-fast（非零退出）。
+	// 运行期签发路径仍由 17002 防御性守卫，不承担启动错误表达。
 	if err := service.Upload().ValidateConfig(ctx); err != nil {
 		return err
 	}

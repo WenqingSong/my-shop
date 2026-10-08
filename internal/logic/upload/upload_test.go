@@ -2,6 +2,7 @@ package upload
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -175,4 +176,67 @@ func TestValidateConfigFromConfig(t *testing.T) {
 	if !strings.Contains(err.Error(), "qiniu.region") {
 		t.Fatalf("错误信息应指出 region，实际: %v", err)
 	}
+}
+
+// TestValidateRequired 覆盖启动必填校验（INV-006）：AK/SK/bucket/domain 任一缺失即失败，
+// 且错误信息指认缺失字段名、不泄漏凭据值。
+func TestValidateRequired(t *testing.T) {
+	if err := (qiniuConfig{}).validateRequired(); err == nil {
+		t.Fatal("空配置应返回错误")
+	}
+	base := qiniuConfig{accessKey: "ak", secretKey: "sk", bucket: "b", domain: "https://cdn.example.com"}
+	if err := base.validateRequired(); err != nil {
+		t.Fatalf("完整配置应通过: %v", err)
+	}
+	cases := []struct {
+		name      string
+		mutate    func(*qiniuConfig)
+		wantField string
+	}{
+		{"缺 access_key", func(c *qiniuConfig) { c.accessKey = "" }, "qiniu.access_key"},
+		{"缺 secret_key", func(c *qiniuConfig) { c.secretKey = "" }, "qiniu.secret_key"},
+		{"缺 bucket", func(c *qiniuConfig) { c.bucket = "" }, "qiniu.bucket"},
+		{"缺 domain", func(c *qiniuConfig) { c.domain = "" }, "qiniu.domain"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := base
+			c.mutate(&cfg)
+			err := cfg.validateRequired()
+			if err == nil {
+				t.Fatal("缺失字段应返回错误")
+			}
+			if !strings.Contains(err.Error(), c.wantField) {
+				t.Fatalf("错误信息应指认 %s，实际: %v", c.wantField, err)
+			}
+		})
+	}
+}
+
+// TestValidateConfigAvailabilityWiring 覆盖启动真实可用性检查接线（INV-006）：注入假实现验证
+// 「检查失败 → ValidateConfig 失败」「检查成功 + 配置齐全 → ValidateConfig 通过」。
+// 真实网络验证（GetBucketInfo 对真实 bucket）属 E2E（AC-010），此处不发起网络请求。
+func TestValidateConfigAvailabilityWiring(t *testing.T) {
+	setValidQiniuEnv(t)
+
+	ok := &sUpload{checkBucket: func(context.Context, qiniuConfig) error { return nil }}
+	if err := ok.ValidateConfig(context.Background()); err != nil {
+		t.Fatalf("配置齐全且可用性检查成功应通过: %v", err)
+	}
+
+	fail := &sUpload{checkBucket: func(context.Context, qiniuConfig) error {
+		return fmt.Errorf("bucket 不存在")
+	}}
+	if err := fail.ValidateConfig(context.Background()); err == nil {
+		t.Fatal("可用性检查失败应使 ValidateConfig 失败")
+	}
+}
+
+// setValidQiniuEnv 为测试注入结构合法、required 齐全的七牛环境变量。
+func setValidQiniuEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("QINIU_ACCESS_KEY", "ak")
+	t.Setenv("QINIU_SECRET_KEY", "sk")
+	t.Setenv("QINIU_BUCKET", "b")
+	t.Setenv("QINIU_DOMAIN", "https://cdn.example.com")
 }

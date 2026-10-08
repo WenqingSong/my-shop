@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	qauth "github.com/qiniu/go-sdk/v7/auth"
+	qclient "github.com/qiniu/go-sdk/v7/client"
 	qstorage "github.com/qiniu/go-sdk/v7/storage"
 
 	v1 "cnb.cool/go-cloud-devops/my-shop/api/upload/v1"
@@ -30,6 +32,11 @@ const (
 
 	// keyRandomBytes 是存储 key 随机段的字节数（hex 编码后长度翻倍）。
 	keyRandomBytes = 16
+
+	// bucketCheckTimeout 是启动时七牛 bucket 可用性检查的单次 HTTP 超时上限。
+	// SDK 的 GetBucketInfo 内部使用 context.Background()、不接受外部 ctx，
+	// 因此通过注入带 Timeout 的 http.Client 约束超时。
+	bucketCheckTimeout = 10 * time.Second
 )
 
 // 白名单默认值（与 config.yaml 一致）。测试环境不加载 config.yaml，靠代码默认值兜底。
@@ -38,7 +45,11 @@ var (
 	defaultAllowedMimeTypes  = []string{"image/jpeg", "image/png", "image/gif", "image/webp"}
 )
 
-type sUpload struct{}
+type sUpload struct {
+	// checkBucket 是启动时七牛 bucket 真实可用性检查的薄函数，测试可注入假实现验证接线；
+	// 生产默认 checkBucketAvailable（GetBucketInfo，指定 bucket 最小权限只读）。
+	checkBucket func(ctx context.Context, cfg qiniuConfig) error
+}
 
 func init() {
 	service.RegisterUpload(New())
@@ -46,12 +57,13 @@ func init() {
 
 // New 创建并返回文件上传服务实现。
 func New() *sUpload {
-	return &sUpload{}
+	return &sUpload{checkBucket: checkBucketAvailable}
 }
 
 // qiniuConfig 是 qiniu 段配置的运行时快照。
-// access_key/secret_key/bucket/domain 无默认值，缺失由 validateCredentials 在签发时拒绝；
-// region/token_ttl/max_file_size 与白名单有安全默认值，格式非法由 validateStructural 在启动时拒绝。
+// access_key/secret_key/bucket/domain 无默认值，为启动 required dependency，缺失由
+// validateRequired 在启动 fail-fast；region/token_ttl/max_file_size 与白名单有安全默认值，
+// 格式非法由 validateStructural 在启动拒绝。签发路径另有 validateCredentials 运行期守卫（17002）。
 type qiniuConfig struct {
 	accessKey         string
 	secretKey         string
@@ -64,10 +76,19 @@ type qiniuConfig struct {
 	allowedMimeTypes  []string
 }
 
-// ValidateConfig 校验七牛云非机密结构配置（region/ttl/大小/白名单），供启动时 fail-fast。
-// 凭据（AK/SK）与 bucket/domain 属运行时懒校验，缺失不阻塞启动（见 IssueToken）。
+// ValidateConfig 在 serve 启动时校验七牛云 required dependency（fail-fast）：
+// 结构校验（region/ttl/大小/白名单）→ 存在性校验（AK/SK/bucket/domain）→
+// 对指定 bucket 的真实只读可用性检查（GetBucketInfo）。任一失败返回错误，进程非零退出。
+// 错误信息只指认字段名/失败原因，不泄漏凭据值、内部路径或堆栈。
 func (s *sUpload) ValidateConfig(ctx context.Context) error {
-	return loadConfig(ctx).validateStructural()
+	cfg := loadConfig(ctx)
+	if err := cfg.validateStructural(); err != nil {
+		return err
+	}
+	if err := cfg.validateRequired(); err != nil {
+		return err
+	}
+	return s.checkBucket(ctx, cfg)
 }
 
 // IssueToken 校验请求声明（扩展名/MIME）并签发七牛云直传凭证。
@@ -132,8 +153,8 @@ func loadConfig(ctx context.Context) qiniuConfig {
 	}
 }
 
-// validateStructural 校验非机密结构配置的格式，供启动 fail-fast。
-// bucket/domain 与凭据不在此校验（属运行时懒校验，见 validateCredentials）。
+// validateStructural 校验非机密结构配置（region/ttl/大小/白名单）的格式，供启动 fail-fast。
+// 凭据与 bucket/domain 的存在性由 validateRequired 在启动校验，签发路径由 validateCredentials 守卫。
 func (c qiniuConfig) validateStructural() error {
 	if _, ok := qstorage.GetRegionByID(qstorage.RegionID(c.region)); !ok {
 		return fmt.Errorf("qiniu.region %q 不是有效的七牛区域", c.region)
@@ -153,7 +174,45 @@ func (c qiniuConfig) validateStructural() error {
 	return nil
 }
 
-// validateCredentials 校验签发所需的凭据与桶/域名是否齐全；缺失返回稳定 17002（不泄漏细节）。
+// validateRequired 校验启动 required dependency 的七牛配置存在性（AK/SK/bucket/domain）。
+// 与 validateCredentials（运行期 17002 守卫）不同：它直接指认缺失字段名，用于启动 fail-fast，
+// 不返回业务错误码、不泄漏凭据值。
+func (c qiniuConfig) validateRequired() error {
+	switch {
+	case c.accessKey == "":
+		return fmt.Errorf("qiniu.access_key 未配置")
+	case c.secretKey == "":
+		return fmt.Errorf("qiniu.secret_key 未配置")
+	case c.bucket == "":
+		return fmt.Errorf("qiniu.bucket 未配置")
+	case c.domain == "":
+		return fmt.Errorf("qiniu.domain 未配置")
+	}
+	return nil
+}
+
+// checkBucketAvailable 用七牛 SDK 对指定 bucket 做最小权限只读可用性检查：BucketManager.GetBucketInfo(bucket)
+// （POST /v2/bucketInfo?bucket=），仅验证「bucket 存在 + AK/SK 可访问」，不使用 Buckets() 以避免
+// 「列出整个账户全部 bucket」的额外权限。SDK 内部使用 context.Background()、不接受外部 ctx，
+// 这里通过带 Timeout 的 http.Client 约束单次请求超时上限；错误只保留 bucket 名，不泄漏凭据值。
+func checkBucketAvailable(_ context.Context, cfg qiniuConfig) error {
+	clt := &qclient.Client{Client: &http.Client{
+		Transport: qclient.DefaultTransport,
+		Timeout:   bucketCheckTimeout,
+	}}
+	manager := qstorage.NewBucketManagerEx(
+		qauth.New(cfg.accessKey, cfg.secretKey),
+		&qstorage.Config{UseHTTPS: true},
+		clt,
+	)
+	if _, err := manager.GetBucketInfo(cfg.bucket); err != nil {
+		return fmt.Errorf("七牛 bucket %q 可用性检查失败: %w", cfg.bucket, err)
+	}
+	return nil
+}
+
+// validateCredentials 是签发路径的运行期防御性守卫：校验签发所需凭据与桶/域名是否齐全；
+// 缺失返回稳定 17002（不泄漏细节）。启动阶段的必填校验见 validateRequired（fail-fast）。
 func (c qiniuConfig) validateCredentials() error {
 	if c.accessKey == "" || c.secretKey == "" || c.bucket == "" || c.domain == "" {
 		return codes.New(codes.CodeUploadConfigInvalid)
