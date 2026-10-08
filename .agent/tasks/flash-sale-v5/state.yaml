@@ -14,7 +14,7 @@ review:
 
 owner:
   status: ACCEPTED
-  review_target: "35498b0340b7e8688f18e47dd3e64c11fdb9b3a7"
+  review_target: "2deecfda31d8f7effd8512d21fd68eb90d67ea35"
 
 delivery:
   status: FAIL

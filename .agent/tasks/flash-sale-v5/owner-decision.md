@@ -2,7 +2,7 @@
 
 ## Review Target
 
-`35498b0340b7e8688f18e47dd3e64c11fdb9b3a7`（Cleaner 已 CLEAN 的实现 snapshot，`feat(flash-sale-v5): 秒杀容量保护与可观测性（限流/排队软上限/熔断/指标）`）
+`2deecfda31d8f7effd8512d21fd68eb90d67ea35`（Cleaner 复审 CLEAN 的实现 snapshot，`fix(flash-sale-v5): 修复压测脚本用户名非法并补齐并发下单与基线保存缺陷`）
 
 ## Core Logic
 
@@ -15,9 +15,9 @@ ACCEPTED
 
 ## Decision Evidence
 
-Owner 明确接受 Cleaner 已 CLEAN 的具体 Review Target `35498b0340b7e8688f18e47dd3e64c11fdb9b3a7`：
+Owner 明确接受 Cleaner 复审 CLEAN 的新 Review Target `2deecfda31d8f7effd8512d21fd68eb90d67ea35`：
 
-- 接受 CL-001 的无副作用拒绝顺序设计。
-- 接受 CL-002 的 Redis 闸门 fail-closed 熔断设计（不降级到同步 MySQL 路径）。
-- 已知 P3 风险（`CLEAN-001` 压测 `verify()` 未自动判定 queued 有界/连接数阈值、`CLEAN-002` 热点 Key 分析依赖 Redis LFU 且默认未启用、`CLEAN-003` `setupConsumeTest` 清理缺 `inventories` 表）接受为非阻塞项。
-- 附加要求（传递 Deliverer）：容量保护相关里程碑验证时须显式启用对应配置（`flash_sale.rate_limit.enabled` / `queue_capacity.enabled` / `circuit_breaker.enabled` / `metrics.enabled`），不得以默认 `enabled: false` 状态替代实际容量保护验收。
+- 复审背景：上一轮 `ACCEPT` 的 `35498b0` 经 Deliverer 交付验证 FAIL（`scripts/flashsale-loadtest/run.sh` 用户名 `fslt_{activity}_{i}` 含下划线被 IAM `^[a-zA-Z0-9]{3,24}$` 拒绝，脚本在 `setup_users` 即退出，AC-007/008/009 被阻塞）。Coder 在 `2deecfd` 修复 4 处压测脚本缺陷（用户名、worker 机制、printf 尾换行、空值假 PASS），Cleaner 复审 CLEAN，`review.target` 前移。
+- CL-001/CL-002 核心机制未变：`2deecfd` 仅改 `scripts/flashsale-loadtest/run.sh`，未改动任何 Go 生产代码、测试或业务约束，接受本次压测脚本修复。
+- 剩余 P3 风险（`CLEAN-001` `verify()` 未自动判定 queued 有界/连接数阈值、`CLEAN-002` 热点 Key 分析依赖 Redis LFU 且默认未启用、`CLEAN-003` `setupConsumeTest` 清理缺 `inventories` 表）接受为非阻塞项。
+- 附加要求（传递 Deliverer）：脚本语法检查与模拟测试不能替代实际压测，须真实执行三级压测并核对数据结果；若再次失败，按 Workflow 返回修复。容量保护相关里程碑验证须显式启用对应配置（`flash_sale.rate_limit.enabled` / `queue_capacity.enabled` / `circuit_breaker.enabled` / `metrics.enabled`），不得以默认 `enabled: false` 状态替代实际容量保护验收。
