@@ -68,6 +68,48 @@ flash_sale:
   # 秒杀异步下单的消费扫描周期（秒），保证排队请求低延迟落单。
   consume_scan_interval: 1
 
+  # 秒杀容量保护——限流（Redis 固定窗口计数器，窗口边界有毛刺，容量保护可接受）。
+  # 仅聚焦秒杀下单链路；Redis 计数失败 fail-open（放行到闸门，闸门 fail-closed 兜底）。
+  rate_limit:
+    # 是否启用用户级/活动级限流。开发默认关闭；压测/生产建议开启。
+    enabled: false
+    user:
+      # 用户级限流窗口（秒）。
+      window_seconds: 1
+      # 用户级限流阈值（单位窗口内最大请求数，<=0 表示不限）。
+      max_requests: 0
+    activity:
+      # 活动级限流窗口（秒）。
+      window_seconds: 1
+      # 活动级限流阈值（单位窗口内最大请求数，<=0 表示不限）。
+      max_requests: 0
+
+  # 秒杀容量保护——排队软上限（activity×SKU 维度，Redis 近似计数 + MySQL 权威收敛）。
+  queue_capacity:
+    # 是否启用排队软上限。开发默认关闭；压测/生产建议开启。
+    enabled: false
+    # 单 activity×SKU 的 queued 请求软上限（<=0 表示不限）。
+    max_queued_per_sku: 0
+    # 排队计数 key 的兜底 TTL（秒），对账扫描器会按活动 TTL 刷新。
+    counter_ttl_seconds: 86400
+
+  # 秒杀容量保护——Redis 闸门熔断器（进程内状态机，多实例各自独立）。
+  # 降级行为 = 快速失败（复用 1005/503，不降级到同步 MySQL 路径）。
+  circuit_breaker:
+    # 是否启用熔断。开发默认关闭；压测/生产建议开启。
+    enabled: false
+    # 连续失败达到该阈值后进入 Open。
+    failure_threshold: 5
+    # Open 持续该时长（秒）后进入 Half-Open 探测。
+    open_timeout_seconds: 10
+    # Half-Open 阶段允许放行的最大探测数。
+    half_open_max_probes: 1
+
+  # 秒杀可观测性——指标（Prometheus）。
+  metrics:
+    # 是否启用指标采集并暴露 GET /metrics（需内网/监控网段可达，避免泄漏流量与业务维度信息）。
+    enabled: false
+
 # 本地存储配置（以下均为开发默认值，可通过环境变量覆盖）
 # 对应环境变量：STORAGE_LOCAL_ROOT
 storage:
