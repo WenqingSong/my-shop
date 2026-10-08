@@ -3,7 +3,7 @@ task_id: object-storage-upload
 
 contract:
   status: APPROVED
-  target: "011662159729efcbb78d194940f1242fab3f8cea"
+  target: "8abdec2f92ffef7900e7a88bd949b08394537f33"
 
 resources:
   reservations:
