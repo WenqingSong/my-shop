@@ -43,7 +43,9 @@
 | `allowed_extensions` | `QINIU_ALLOWED_EXTENSIONS` | []string | 后端扩展名预校验白名单 |
 | `allowed_mime_types` | `QINIU_ALLOWED_MIME_TYPES` | []string | 固化进 token `mimeLimit` |
 
-配置校验语义（D5 修订后，七牛为启动 required dependency）：`serve` 启动 fail-fast 校验全部——结构（`region` 合法、`token_ttl>0`、`max_file_size>0`、白名单非空）+ 存在性（`access_key`/`secret_key`/`bucket`/`domain` 非空）+ 真实可用性（对指定 bucket 执行 `BucketManager.GetBucketInfo` 最小权限只读验证，带超时上限，不使用 `Buckets()` 全账户列举）。任一失败进程非零退出，错误指认字段名、不泄漏凭据。`17002` 仅在签发路径作为运行期防御性守卫，不承担启动错误表达。`access_key`/`secret_key` 仅环境变量注入、config.yaml 保持空值；`bucket`/`domain` 非敏感，可写 config.yaml 或经环境变量覆盖。`go build`/`go test` 不依赖七牛凭据（集成测试经 `boot.Bootstrap()` 装配、不经过 `serve()`）。
+配置校验语义（D5/D7 修订后，七牛为启动 required dependency）：`serve` 启动 fail-fast 校验全部——结构（`region` 合法、`token_ttl>0`、`max_file_size>0`、白名单非空）+ 存在性（`access_key`/`secret_key`/`bucket`/`domain` 非空）+ 真实可用性（对指定 bucket 执行 `BucketManager.GetBucketInfo` 最小权限只读验证，带超时上限，不使用 `Buckets()` 全账户列举）。任一失败进程非零退出，错误指认字段名、不泄漏凭据。`17002` 仅在签发路径作为运行期防御性守卫，不承担启动错误表达。`access_key`/`secret_key` 仅环境变量注入、config.yaml 保持空值；`bucket`/`domain` 非敏感，可写 config.yaml 或经环境变量覆盖。`go build`/`go test` 不依赖七牛凭据（集成测试经 `boot.Bootstrap()` 装配、不经过 `serve()`）。
+
+此外新增 Go 子命令 `my-shop qiniu check`（复用 `service.Upload().ValidateConfig`）作为 `make up` 的启动前预检载体，与 `serve` 自身 fail-fast 双保险；两入口共用同一校验事实源，`make up` 路径下最多触发两次 `GetBucketInfo`（一次性启动成本）。
 
 Secret 注入模型（项目级统一）：`.env.example` 保存变量名/安全示例（可提交），`.env` 保存本地真实值（gitignore、绝不提交）；本地经 `scripts/lib.sh` 加载，CI/生产经平台 Secret/环境变量注入；不引入 dotenv，沿用 `g.Cfg().GetEffective` 环境变量覆盖机制。
 
@@ -80,6 +82,8 @@ Secret 注入模型（项目级统一）：`.env.example` 保存变量名/安全
 - 事实来源：单一配置源（`manifest/config` 的七牛段），无 DB 写入、无 Redis 参与、无 MQ。
 - 签发成功 = 返回一份受 scope 约束、带有效期（ttl）的 upload token 与对应 key/URL；**不代表文件已上传**，仅代表「获得在限制内直传的资格」。
 - 启动失败语义（D5）：`serve()` 在 `boot.Bootstrap()` 之后执行七牛启动校验，任一失败（结构非法/凭据或桶域名缺失/`GetBucketInfo` 真实可用性失败/超时）→ 进程非零退出；错误指认缺失/非法字段名，不泄漏凭据值。
+- `make up` 预检失败语义（D7）：`qiniu check` 预检失败 → `make up` 非零退出、不启动后端、打印不含凭据的明确原因；与 `serve` 自身 fail-fast 双保险。
+- `make test-storage` 语义（D8/D9）：走真实 HTTP 链路（登录鉴权 → 请求签发接口 → 上传真实最小 PNG → 验证 `final_url` 200 + image/png → 删除测试对象）；缺真实凭据或任一环节失败/无法完成验证 → 非零退出（NOT_VERIFIED 以非零退出表达，不以退出 0 冒充通过）。
 - 运行期失败语义：未认证 401、type 不符 403、非法扩展名/类型/大小 400（17001）、配置缺失/非法 500（17002，防御性守卫）、签名/签发内部错误 500（17003）；均不产生上传与写入，且不泄漏凭据/内部路径/堆栈。
 - 无跨系统事务、无并发写入、无幂等键、无重试语义。
 
@@ -100,7 +104,15 @@ Secret 注入模型（项目级统一）：`.env.example` 保存变量名/安全
 - 错误码域 `17000-17999` 的编码模型与分配规则见 `error-codes.md`，分配状态以 `.agent/registry/error-codes.md` 为权威。
 - 官方 `qiniu/go-sdk` 为新增第三方依赖（`go.mod`）。
 
-## 10. Deferred / 已知留白
+## 10. 本地开发环境与验证入口
+
+两阶段初始化 + 独立真实 E2E 入口（D7/D8/D9）：
+
+- `make init`（第一阶段，`scripts/init.sh`）：检查 docker/docker compose → 启动 MySQL/Redis 容器 → 检查根目录 `.env`（不存在则从 `.env.example` 复制生成，已存在保留绝不覆盖）→ 提示编辑 `.env` 填七牛 AK/SK/Bucket/Domain 并执行 `make up`。不要求七牛凭据、不启动 Go 后端、不在终端交互输入 Secret；幂等。
+- `make up`（第二阶段，`scripts/up.sh`）：`source lib.sh`（加载 `.env`）→ 启动并等待 MySQL/Redis → `build_app` → `my-shop qiniu check` 预检（结构 + 存在性 + `GetBucketInfo`）→ `migrate_app` → `start_app`（serve 自身再次 fail-fast）。
+- `make test-storage`（独立真实 HTTP E2E，`scripts/test-storage.sh` + build-tagged Go 测试 `//go:build storage_e2e`）：校验 `QINIU_*` 四变量非空（缺任一非零退出）→ 确保 MySQL/Redis 就绪 → 运行 `go test -tags storage_e2e -run TestStorageE2E`。E2E 走真实 HTTP 链路：`POST /register` → `POST /login` → `GET /qiniu/upload/token`（带 Bearer）→ SDK `FormUploader` 直传真实 1×1 PNG → HTTP GET `final_url` 断言 200 + image/png → SDK `BucketManager.Delete` 删除测试对象；**不直接调用 `IssueToken`**。
+
+## 11. Deferred / 已知留白
 
 - 文件记录落库（`files`/`uploads` 表）与业务实体关联，属后续任务（需七牛回调或客户端回传 key 才能可靠追踪直传结果）。
 - 服务端强制内容校验：直传模型下后端无法在签发时强制校验真实文件内容；`mimeLimit` 依赖七牛对客户端上报 Content-Type 的执行，客户端可伪造声明。若需服务端强制校验，转后端代理上传或七牛回调，属后续 Contract Revision。
