@@ -43,7 +43,7 @@
 | `allowed_extensions` | `QINIU_ALLOWED_EXTENSIONS` | []string | 后端扩展名预校验白名单 |
 | `allowed_mime_types` | `QINIU_ALLOWED_MIME_TYPES` | []string | 固化进 token `mimeLimit` |
 
-配置校验语义：分两类。① 启动 fail-fast（纯结构、有安全默认值）：`region` 合法、`token_ttl>0`、`max_file_size>0`、白名单非空。② 签发时校验（返回 17002，依赖外部七牛环境、无通用默认值）：`access_key`/`secret_key`/`bucket`/`domain` 缺失/非法。`access_key`/`secret_key` 仅环境变量注入、config.yaml 保持空值；`bucket`/`domain` 非敏感，可写 config.yaml 或经环境变量覆盖，不要求 env-only。服务启动不因无七牛凭据/桶/域名而 fail-fast（保证无七牛凭据的 CI/开发环境可启动、其它模块测试不受阻）。
+配置校验语义（D5 修订后，七牛为启动 required dependency）：`serve` 启动 fail-fast 校验全部——结构（`region` 合法、`token_ttl>0`、`max_file_size>0`、白名单非空）+ 存在性（`access_key`/`secret_key`/`bucket`/`domain` 非空）+ 真实可用性（对指定 bucket 执行 `BucketManager.GetBucketInfo` 最小权限只读验证，带超时上限，不使用 `Buckets()` 全账户列举）。任一失败进程非零退出，错误指认字段名、不泄漏凭据。`17002` 仅在签发路径作为运行期防御性守卫，不承担启动错误表达。`access_key`/`secret_key` 仅环境变量注入、config.yaml 保持空值；`bucket`/`domain` 非敏感，可写 config.yaml 或经环境变量覆盖。`go build`/`go test` 不依赖七牛凭据（集成测试经 `boot.Bootstrap()` 装配、不经过 `serve()`）。
 
 Secret 注入模型（项目级统一）：`.env.example` 保存变量名/安全示例（可提交），`.env` 保存本地真实值（gitignore、绝不提交）；本地经 `scripts/lib.sh` 加载，CI/生产经平台 Secret/环境变量注入；不引入 dotenv，沿用 `g.Cfg().GetEffective` 环境变量覆盖机制。
 
@@ -64,7 +64,7 @@ Secret 注入模型（项目级统一）：`.env.example` 保存变量名/安全
 - 后台端点：`GET /admin/qiniu/upload/token` 需 `AdminAuth`（所有已启用管理员，含超管 `IsSuper` 放行）；不新增独立权限 code（签发凭证为低敏感操作，scope 已限制）。
 - 前台端点：`GET /qiniu/upload/token` 需 `Auth`（登录用户）。
 - 未认证 401、token type 不符 403，均不签发、不产生上传。
-- 凭据安全：`access_key`/`secret_key` 仅经环境变量注入、config.yaml 保持空值、不提交仓库、不进日志/响应；凭据或 bucket/domain 缺失/非法时签发接口返回稳定 17002，不泄漏任何凭据细节。
+- 凭据安全：`access_key`/`secret_key` 仅经环境变量注入、config.yaml 保持空值、不提交仓库、不进日志/响应；启动 fail-fast 与运行期 17002 均不泄漏凭据值、内部路径或堆栈。
 
 ## 6. 业务不变量
 
@@ -72,12 +72,15 @@ Secret 注入模型（项目级统一）：`.env.example` 保存变量名/安全
 - INV-002（文件边界）：声明扩展名/MIME 不在白名单、或大小超上限 → 400（17001），不签发；最终文件级强制由 token 的 `mimeLimit`/`fsizeLimit` 由七牛服务端执行。
 - INV-003（凭据安全）：`secret_key` 不落默认值、不进日志/响应/仓库，缺失/非法返回稳定 17002。
 - INV-004（key 唯一可控）：key 由后端预生成并写入 token scope，客户端不可任意指定。
+- INV-005（Secret 不落仓库/跨环境不传播）：真实 AK/SK 只存在于运行环境（本地 `.env` / 平台 Secret），不进入任何受跟踪提交物；`.env` 为未跟踪本地文件，不随 Git/分支/worktree/容器传播。
+- INV-006（启动 fail-fast）：正常 `serve` 启动时，七牛 required 配置缺失/非法，或对指定 bucket 的 `GetBucketInfo` 真实只读可用性检查失败 → 进程非零退出；`17002` 仅在签发路径作为运行期守卫。
 
 ## 7. 一致性模型与失败语义
 
 - 事实来源：单一配置源（`manifest/config` 的七牛段），无 DB 写入、无 Redis 参与、无 MQ。
 - 签发成功 = 返回一份受 scope 约束、带有效期（ttl）的 upload token 与对应 key/URL；**不代表文件已上传**，仅代表「获得在限制内直传的资格」。
-- 失败语义：未认证 401、type 不符 403、非法扩展名/类型/大小 400（17001）、配置缺失/非法 500（17002）、签名/签发内部错误 500（17003）；均不产生上传与写入，且不泄漏凭据/内部路径/堆栈。
+- 启动失败语义（D5）：`serve()` 在 `boot.Bootstrap()` 之后执行七牛启动校验，任一失败（结构非法/凭据或桶域名缺失/`GetBucketInfo` 真实可用性失败/超时）→ 进程非零退出；错误指认缺失/非法字段名，不泄漏凭据值。
+- 运行期失败语义：未认证 401、type 不符 403、非法扩展名/类型/大小 400（17001）、配置缺失/非法 500（17002，防御性守卫）、签名/签发内部错误 500（17003）；均不产生上传与写入，且不泄漏凭据/内部路径/堆栈。
 - 无跨系统事务、无并发写入、无幂等键、无重试语义。
 
 ## 8. 错误码域（17000-17999）
@@ -85,7 +88,7 @@ Secret 注入模型（项目级统一）：`.env.example` 保存变量名/安全
 | code | 语义 | HTTP |
 | --- | --- | --- |
 | 17001 | UPLOAD_INVALID_INPUT（扩展名/MIME/参数非法） | 400 |
-| 17002 | UPLOAD_CONFIG_INVALID（七牛配置缺失/非法，安全语义失败） | 500 |
+| 17002 | UPLOAD_CONFIG_INVALID（运行期七牛配置缺失/非法防御性守卫） | 500 |
 | 17003 | UPLOAD_TOKEN_FAILED（签发凭证失败） | 500 |
 
 复用：`1002`（401）、`1003`（403）、`1001`（参数格式错误兜底）、`1000`（500）。
