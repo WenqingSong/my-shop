@@ -115,6 +115,8 @@ func TestUploadTokenHappyPath(t *testing.T) {
 	t.Setenv("QINIU_SECRET_KEY", "test-secret-key")
 	t.Setenv("QINIU_BUCKET", "test-bucket")
 	t.Setenv("QINIU_DOMAIN", "https://cdn.example.com")
+	// 隔离 region：本用例断言默认 z2 映射到 up-z2，避免运行时 .env 里的 QINIU_REGION=z1 干扰。
+	t.Setenv("QINIU_REGION", "z2")
 
 	base := setupIsolationServer(t)
 	isoInsertUser(t, "uploaduser2", "uploadpass123")
@@ -214,6 +216,13 @@ func TestUploadTokenInvalidInput(t *testing.T) {
 // TestUploadTokenMissingConfig 覆盖 INV-003/AC-005：无七牛凭据时签发返回 500/17002，
 // 且响应不含凭据细节。
 func TestUploadTokenMissingConfig(t *testing.T) {
+	// 隔离真实 QINIU_* 环境变量（如本地 .env 注入），置空以确保本用例稳定验证
+	// 「无凭据 → 17002」，不依赖运行时是否加载了 .env（否则 `make test` 会因读到真实凭据而误判）。
+	t.Setenv("QINIU_ACCESS_KEY", "")
+	t.Setenv("QINIU_SECRET_KEY", "")
+	t.Setenv("QINIU_BUCKET", "")
+	t.Setenv("QINIU_DOMAIN", "")
+
 	base := setupIsolationServer(t)
 	isoInsertUser(t, "uploaduser4", "uploadpass123")
 	userToken, _ := isoFrontendLogin(t, base, "uploaduser4", "uploadpass123")
