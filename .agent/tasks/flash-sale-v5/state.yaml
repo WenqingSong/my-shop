@@ -2,8 +2,8 @@ schema_version: 3
 task_id: flash-sale-v5
 
 contract:
-  status: PENDING
-  target: ""
+  status: APPROVED
+  target: "0e8089f189e275df8407d91e793996cfe0789147"
 
 resources:
   reservations: {}
