@@ -2,7 +2,7 @@
 
 ## Decision Status
 
-WAITING_FOR_OWNER_DECISION
+APPROVED
 
 ## Problem
 
@@ -40,7 +40,14 @@ RECOMMENDATION（聚焦秒杀链路、复用 V4 权威值收敛范式、控制 S
 
 ## Selected Design
 
-等待 Owner 确认。
+Owner 已确认推荐方案，并补充「排队容量采用软上限语义」。最终设计：
+
+1. 限流：Redis 固定窗口计数器（`INCR`+`EXPIRE`，单次往返）；用户级 key `flashsale:rl:user:{userID}`、活动级 key `flashsale:rl:activity:{activityID}`；窗口与阈值取配置；多实例经 Redis 天然全局一致；Redis 故障 fail-open（放行到闸门，由闸门 fail-closed 兜底）。检查位于 `CreateOrder` 入口、`runGate` 之前，秒杀专用。
+2. 熔断降级：熔断对象 = Redis 闸门；进程内状态机 Closed→Open→Half-Open（连续失败阈值 + 时间窗 + 半开探测）；降级行为 = **快速失败**（503/1005，不预扣、不建单、不排队），不降级到同步 MySQL 路径，保持 V3 fail-closed 语义。
+3. 排队容量：维度 = activity×SKU；**软上限语义**——Redis 近似计数快速拒绝超限（429/12010），并发下允许短暂小幅超限，由权威 MySQL `COUNT(status=queued)` 收敛；MySQL 仍是最终正确性边界。不改变 `flash_sale_order_requests` 状态机与消费语义。
+4. 指标：引入 `prometheus/client_golang`，暴露 `GET /metrics`（Prometheus 文本格式）；Counter + Histogram 覆盖 QPS/成功率/拒绝率/p95/p99，标签维度：接口/活动/结果（success/queued/gate_rejected/rate_limited/queue_full/error），覆盖下单接口与排队消费链路。
+5. 热点 Key：**可观测分析**（`redis-cli --hotkeys`/`OBJECT FREQ` 识别并输出秒杀热点 Key），不做热点防护（打散/本地缓存）。
+6. 压测与基线：自研压测脚本（`scripts/flashsale-loadtest/`），覆盖正常库存/少库存/瞬时洪峰三级；基线存 JSON 文件（`scripts/flashsale-loadtest/baselines/`），不新增 DB 表/migration；优化前后对比 = 调整限流/熔断开关或参数后重跑对比 JSON。
 
 ## Interfaces and Data
 
@@ -59,7 +66,7 @@ RECOMMENDATION（聚焦秒杀链路、复用 V4 权威值收敛范式、控制 S
 ## Business Invariants
 
 - INV-018（限流无副作用）：被用户级 / 活动级限流拒绝的请求，不进入 Redis 闸门、不预扣库存、不写入 `flash_sale_order_requests`，返回 12009；未超限用户不受影响。
-- INV-019（排队有界）：任意时刻某活动×SKU 下 `status=queued` 请求数 ≤ 配置的队列容量上限；超限请求被拒绝（12010）不新增 queued；消费释放容量后后续请求可继续入队。
+- INV-019（排队软上限）：入队前以 Redis 近似计数快速拒绝超限请求（12010，无副作用）；软上限语义——并发下允许短暂小幅超限，由权威 MySQL `COUNT(status=queued)` 收敛；不超卖、不重复订单仍由 MySQL 唯一约束兜底（最终正确性边界不变）；消费释放容量后后续请求可继续入队。
 - INV-020（熔断降级不破坏不变量）：熔断 Open 期间秒杀下单快速失败（不预扣、不建单、不排队），不产生超卖、不产生重复订单；Redis 恢复后经半开探测自动关闭、恢复正常。
 - INV-021（指标可对账）：指标中成功 / 拒绝 / 失败计数与真实请求结果一致（可与 MySQL 订单数、`status=queued` 数、拒绝数对账）。
 
@@ -68,7 +75,7 @@ RECOMMENDATION（聚焦秒杀链路、复用 V4 权威值收敛范式、控制 S
 - 事实来源：MySQL 仍是权威（订单 `flash_sale_orders`、库存 `flash_sale_activity_skus`、请求状态 `flash_sale_order_requests`）；Redis 是闸门 + 限流 / 排队近似计数（派生，非权威）；指标为进程内观测计数（非业务事实）。
 - 限流计数 Redis 故障 → fail-open（放行到闸门），闸门 Redis 亦故障则 fail-closed 503——净效果仍安全（不预扣、不建单、不排队）。
 - 熔断状态为进程内（多实例各自独立，不共享）；熔断 Open 快速失败，半开探测用真实请求（或探测请求）验证 Redis 恢复后关闭。
-- 排队计数（Redis 计数器）在「计数已增、request 未落库」崩溃窗口可能漂移，由对账扫描器以 MySQL `COUNT(status=queued)` 权威收敛（复用 V4 收敛周期，≤1 周期）。
+- 排队计数（Redis 计数器）为软上限近似：在「计数已增、request 未落库」崩溃窗口或并发瞬时可能漂移（短暂小幅超限），由对账扫描器以 MySQL `COUNT(status=queued)` 权威收敛（复用 V4 收敛周期，≤1 周期）；MySQL 唯一约束仍是最终正确性边界（不超卖、不重复订单）。
 - 成功响应含义不变：入队成功仍代表「已受理排队」，不代表下单成功；下单成功仍发生在消费事务内。限流 / 队列满拒绝为「无副作用快速拒绝」，不产生任何写入。
 
 ## Allowed / Forbidden Changes
@@ -94,4 +101,11 @@ RECOMMENDATION（聚焦秒杀链路、复用 V4 权威值收敛范式、控制 S
 
 ## Owner Decision Record
 
-等待 Owner 确认。
+- 2026-10-08 Owner 确认：按推荐方案全量接受，并补充排队容量采用软上限语义。
+  - 熔断降级 = 快速失败 / fail-closed（不降到同步 MySQL 路径）。
+  - 热点 Key = 仅可观测分析（不做打散/本地缓存）。
+  - 指标 = 引入 `prometheus/client_golang`。
+  - 压测基线 = JSON 文件（不新增 DB 表/migration）。
+  - 限流 = Redis 固定窗口，用户级 + 活动级。
+  - 排队容量 = 软上限语义（并发下允许短暂小幅超限，权威计数收敛；MySQL 仍是最终正确性边界）。
+  - 决策范围：覆盖本 Contract 全部推荐项与 INV-018~021；无 Scope/AC 变更，无需新增全局资源。
