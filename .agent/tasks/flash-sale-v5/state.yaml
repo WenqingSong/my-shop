@@ -17,10 +17,10 @@ owner:
   review_target: "35498b0340b7e8688f18e47dd3e64c11fdb9b3a7"
 
 delivery:
-  status: NOT_RUN
-  review_target: ""
-  feature_head: ""
-  develop_base: ""
+  status: FAIL
+  review_target: "35498b0340b7e8688f18e47dd3e64c11fdb9b3a7"
+  feature_head: "57156db82031323a61cdb756f31b8f52b5aa2de5"
+  develop_base: "d2dd5d5deb4f8e48c6b35feca283686f7887c378"
 
 blocked:
   active: false
