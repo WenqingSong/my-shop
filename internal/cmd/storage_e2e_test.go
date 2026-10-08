@@ -74,6 +74,9 @@ func TestStorageE2E(t *testing.T) {
 	if !ok {
 		t.Fatalf("QINIU_REGION=%q 不是有效七牛区域", region)
 	}
+	mac := qauth.New(accessKey, secretKey)
+	bm := qstorage.NewBucketManager(mac, &qstorage.Config{Region: &r, UseHTTPS: true})
+
 	var putRet qstorage.PutRet
 	if err := qstorage.NewFormUploader(&qstorage.Config{Region: &r, UseHTTPS: true}).Put(
 		context.Background(),
@@ -86,6 +89,17 @@ func TestStorageE2E(t *testing.T) {
 	); err != nil {
 		t.Fatalf("直传真实 1×1 PNG 到七牛失败: %v", err)
 	}
+
+	// 直传成功后注册清理：即使后续 final_url 校验失败，也删除本次测试对象，避免残留（INV-009）。
+	deleted := false
+	t.Cleanup(func() {
+		if deleted {
+			return
+		}
+		if err := bm.Delete(bucket, d.Key); err != nil {
+			t.Errorf("清理测试对象 %s 失败: %v", d.Key, err)
+		}
+	})
 
 	// 5. 校验 final_url HTTP 200 且 Content-Type=image/png。
 	httpClient := &http.Client{Timeout: 15 * time.Second}
@@ -101,9 +115,9 @@ func TestStorageE2E(t *testing.T) {
 		t.Fatalf("final_url Content-Type=%q，期望 image/png", ct)
 	}
 
-	// 6. 用返回 key 经七牛 SDK 删除本次测试对象（尽力清理，失败也报告）。
-	mac := qauth.New(accessKey, secretKey)
-	if err := qstorage.NewBucketManager(mac, &qstorage.Config{Region: &r, UseHTTPS: true}).Delete(bucket, d.Key); err != nil {
+	// 6. 显式删除并校验（AC-014 删除步骤），成功后标记已删除避免清理阶段重复删除。
+	if err := bm.Delete(bucket, d.Key); err != nil {
 		t.Fatalf("删除测试对象 %s 失败: %v", d.Key, err)
 	}
+	deleted = true
 }
