@@ -5,14 +5,40 @@
 - 任务：`flash-sale-v5`（秒杀 V5 容量保护与可观测性）
 - 任务基线（Base）：`d05fc74611dd490015bb286feb59771983842089`（分支 `feat/flash-sale-v5`，任务开始时 working tree clean）
 - APPROVED Contract target（A1）：`0e8089f189e275df8407d91e793996cfe0789147`
-- **Implementation Evidence Commit（C1，本次审查对象）**：`35498b0340b7e8688f18e47dd3e64c11fdb9b3a7`（`feat(flash-sale-v5): 秒杀容量保护与可观测性（限流/排队软上限/熔断/指标）`）
-- 审查范围：`0e8089f..35498b0`（Coder 生产代码 + 测试，共 20 文件，+1420/-9）；`docs/design/flash-sale.md`（Analyst 在 A1 更新，Cleaner 校验一致性）
+- **Implementation Evidence Commit（C1，初次审查对象）**：`35498b0340b7e8688f18e47dd3e64c11fdb9b3a7`（`feat(flash-sale-v5): 秒杀容量保护与可观测性（限流/排队软上限/熔断/指标）`）
+- **复审对象（C1'，本次复审）**：`2deecfda31d8f7effd8512d21fd68eb90d67ea35`（`fix(flash-sale-v5): 修复压测脚本用户名非法并补齐并发下单与基线保存缺陷`）
+- 审查范围：`0e8089f..35498b0`（Coder 生产代码 + 测试，共 20 文件，+1420/-9）；`docs/design/flash-sale.md`（Analyst 在 A1 更新，Cleaner 校验一致性）；复审范围 `57156db..2deecfd`（仅 `scripts/flashsale-loadtest/run.sh`）
 - 任务前已有修改区分：任务基线处 working tree 干净，V5 相关提交链为 `36b879b`(task) → `0e8089f`(contract+design, A1) → `e685cab`(contract 绑定, A2) → `35498b0`(实现, C1) → `97b4d18`(review 元数据, C2)。审查只针对 C1 相对 A2(`e685cab`) 的实现增量。
 - 关键配置：`flash_sale` 段新增 `rate_limit` / `queue_capacity` / `circuit_breaker` / `metrics`（均默认 `enabled: false`）；无新增 migration；错误码 12009/12010 复用秒杀域 12000-12999。
 
 ## Result
 
-CLEAN
+CLEAN（复审）
+
+## 复审（Re-review）
+
+复审背景：Deliverer 在交付验证中发现 `scripts/flashsale-loadtest/run.sh` 存在阻断性缺陷（用户名含下划线被 IAM 拒绝，脚本在 `setup_users` 即退出），导致 AC-007/008/009 无法执行（`delivery.status=FAIL`）。Coder 在 `2deecfd` 修复 4 处缺陷，Cleaner 复审确认全部修复正确、无新引入问题。
+
+| # | 缺陷 | 修复 | 复审验证 |
+|---|---|---|---|
+| 1 | 用户名 `fslt_{activity}_{i}` 含下划线，被 IAM `^[a-zA-Z0-9]{3,24}$` 拒绝 | 改为 `fslt${ACTIVITY_ID}${i}`（纯字母数字）+ 注释固化约束 | 已核对 `internal/logic/iam/iam.go` `usernamePattern`；新用户名纯字母数字、长度满足 3-24 |
+| 2 | `export -f fire_order` + `xargs bash -c` 跨进程函数传递失败（报 `environment: line 11`） | 改独立 `worker.sh` + `xargs -n 2 "$worker"`，运行参数经 `export` 传给 worker | 模拟验证 worker 正确收到位置参数（token/idx）与 export 环境变量（SCENARIO/ACTIVITY_ID/SKU_ID/BASE_URL/RESULTS） |
+| 3 | `analyze` 写 `$STATS` 时 `printf` 缺尾换行，`read -r` 无换行返回非零触发 `set -e` 退出，`save_baseline` 未执行 | `printf` 追加 `\n` | 实测 `read` 对无换行输入返回 1（确认缺陷），修复后正常 |
+| 4 | 活动/绑定不存在时 `total_stock`/`sold` 为空，空值被当作 0 造成假 PASS | `-z` 空值显式判定 FAIL 并报错 | 代码审查确认（`if [[ -z "$TOTAL_STOCK" || -z "$SOLD" ]]` → FAIL） |
+
+复审验证命令与结果：
+
+| Check | Result |
+|---|---|
+| `bash -n scripts/flashsale-loadtest/run.sh` | PASS |
+| IAM 用户名校验规则核对（`iam.go` `^[a-zA-Z0-9]{3,24}$`） | PASS |
+| `read` 无换行行为实测 | PASS（确认缺陷 + 修复有效） |
+| `worker.sh` 机制模拟（位置参数 + export 环境变量） | PASS |
+
+复审说明：
+- 4 处修复均属脚本层（`run.sh`），未改动任何 Go 生产代码、测试或任务约束；CL-001/CL-002 核心逻辑未变。
+- AC-007/008/009 的端到端压测执行属 Deliverer 里程碑，本次复审只确认脚本缺陷已修复、不再被用户名/并发/基线/假 PASS 缺陷阻断；实际压测结果待 Deliverer 复跑验证。
+- 初次审查的 AC-001~006、AC-010 及四者一致结论不受影响（Go 代码与设计未变）。
 
 ## Acceptance Criteria
 
