@@ -14,6 +14,7 @@ import (
 
 	"cnb.cool/go-cloud-devops/my-shop/internal/boot"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/health"
+	"cnb.cool/go-cloud-devops/my-shop/internal/metrics"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
 	"cnb.cool/go-cloud-devops/my-shop/internal/service"
@@ -98,6 +99,10 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 		return err
 	}
 
+	// 秒杀指标采集端点（Prometheus 文本格式，仅在 flash_sale.metrics.enabled 开启时暴露；
+	// 位于 Response 中间件之外，直接输出原始文本，不经统一 JSON 响应包装）。
+	registerMetricsRoute(ctx, s)
+
 	s.Group("/", func(root *ghttp.RouterGroup) {
 		root.Middleware(middleware.Response)
 		root.Bind(health.NewV1())
@@ -118,6 +123,17 @@ func configureBannerStorage(ctx context.Context, s *ghttp.Server) error {
 	}
 	s.AddStaticPath(storage.BannerURLPrefix, local.BannerDir())
 	return nil
+}
+
+// registerMetricsRoute 在指标开关开启时挂载 GET /metrics（Prometheus 文本格式，不经统一 JSON 响应包装）。
+// 生产入口与集成测试复用本函数，避免采集端点暴露面在两地维护出现漂移。
+func registerMetricsRoute(ctx context.Context, s *ghttp.Server) {
+	if !metrics.Enabled(ctx) {
+		return
+	}
+	s.BindHandler("GET:/metrics", func(r *ghttp.Request) {
+		metrics.Handler().ServeHTTP(r.Response.Writer, r.Request)
+	})
 }
 
 // storageRoot 读取本地存储根目录（环境变量 STORAGE_LOCAL_ROOT 可覆盖），默认 ./storage。

@@ -108,6 +108,8 @@ const (
 	CodeFlashSaleSkuUnavailable       Code = 12006 // 下单时 SKU 禁用或商品下架 → 409
 	CodeFlashSaleInvalidArgument      Code = 12007 // 活动参数非法（秒杀价/库存/时间/状态）→ 400
 	CodeFlashSaleRequestNotRepairable Code = 12008 // 秒杀请求当前状态不可修复（仅 dead 可修复）→ 409
+	CodeFlashSaleRateLimited          Code = 12009 // 用户级/活动级限流拒绝（无副作用）→ 429
+	CodeFlashSaleQueueFull            Code = 12010 // 排队容量软上限拒绝（无副作用）→ 429
 
 	// 轮播图域（Banner）14000-14999。
 	CodeBannerNotFound     Code = 14001 // 轮播图不存在 → 404
@@ -206,6 +208,8 @@ var codeTable = map[Code]codeInfo{
 	CodeFlashSaleSkuUnavailable:       {http.StatusConflict, "秒杀商品不可购买"},
 	CodeFlashSaleInvalidArgument:      {http.StatusBadRequest, "秒杀活动参数非法"},
 	CodeFlashSaleRequestNotRepairable: {http.StatusConflict, "秒杀请求不可修复"},
+	CodeFlashSaleRateLimited:          {http.StatusTooManyRequests, "请求过于频繁，请稍后重试"},
+	CodeFlashSaleQueueFull:            {http.StatusTooManyRequests, "秒杀排队已满，请稍后重试"},
 
 	CodeBannerNotFound:     {http.StatusNotFound, "轮播图不存在"},
 	CodeBannerInvalidInput: {http.StatusBadRequest, "轮播图参数非法"},

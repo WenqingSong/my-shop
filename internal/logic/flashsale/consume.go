@@ -9,11 +9,13 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 
 	"cnb.cool/go-cloud-devops/my-shop/internal/codes"
+	"cnb.cool/go-cloud-devops/my-shop/internal/metrics"
 )
 
 const (
@@ -48,9 +50,12 @@ func (s *sFlashSale) ConsumeQueued(ctx context.Context, limit int) (int, error) 
 	return processed, nil
 }
 
-// consumeOutcome 记录单条消费的事务内终态结果，供事务提交后执行 Redis 补偿（补偿不能先于 MySQL 终态提交）。
+// consumeOutcome 记录单条消费的事务内终态结果，供事务提交后执行 Redis 补偿与指标观测
+// （补偿不能先于 MySQL 终态提交）。
 type consumeOutcome struct {
-	terminalFailure bool
+	terminalFailure bool   // 业务失败/死信：需权威值收敛 + 清除标记（释放预扣）
+	leftQueue       bool   // 请求已离开 queued（success/failed/dead）：需释放排队软上限计数
+	result          string // 指标结果标签
 	activityID      int64
 	skuID           int64
 	userID          int64
@@ -64,6 +69,7 @@ func (s *sFlashSale) consumeOne(ctx context.Context) (bool, error) {
 		processed bool
 		outcome   consumeOutcome
 	)
+	started := time.Now()
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		// 1. 出队并锁定一条可处理的 queued 请求（FOR UPDATE SKIP LOCKED 保证多实例互斥领取同一行）。
 		var rows []*orderRequestRow
@@ -90,6 +96,8 @@ func (s *sFlashSale) consumeOne(ctx context.Context) (bool, error) {
 		snap, err := s.resolveSku(ctx, r.SkuId)
 		if err != nil {
 			outcome.terminalFailure = true
+			outcome.leftQueue = true
+			outcome.result = metrics.ResultFailed
 			return s.failRequestInTx(ctx, tx, r, codes.FromError(err))
 		}
 
@@ -99,6 +107,8 @@ func (s *sFlashSale) consumeOne(ctx context.Context) (bool, error) {
 			business, code := classifyConsumeError(err)
 			if business {
 				outcome.terminalFailure = true
+				outcome.leftQueue = true
+				outcome.result = metrics.ResultFailed
 				return s.failRequestInTx(ctx, tx, r, code)
 			}
 			return s.retryOrDeadRequestInTx(ctx, tx, r, code, &outcome)
@@ -110,15 +120,28 @@ func (s *sFlashSale) consumeOne(ctx context.Context) (bool, error) {
 				return err
 			}
 		}
+		outcome.leftQueue = true
+		outcome.result = metrics.ResultSuccess
 		return s.successRequestInTx(ctx, tx, r, orderID)
 	})
+	if !processed {
+		// 无请求可领取，无业务效果，不观测指标。
+		return false, nil
+	}
 	if err != nil {
+		// 技术失败：事务回滚，请求仍 queued（无终态），仅观测本次失败。
+		metrics.ObserveConsume(ctx, outcome.activityID, metrics.ResultError, time.Since(started))
 		return processed, err
+	}
+	if outcome.leftQueue {
+		// 请求离开 queued，释放排队软上限计数（best-effort）。
+		s.decrQueueCount(ctx, outcome.activityID, outcome.skuID)
 	}
 	if outcome.terminalFailure {
 		// 终态失败（failed/dead）在事务提交后权威值收敛（幂等）+ 清除标记，释放预扣、无半成品。
 		s.convergeStockAndMarkers(ctx, outcome.activityID, outcome.skuID, outcome.userID, outcome.idempotencyKey)
 	}
+	metrics.ObserveConsume(ctx, outcome.activityID, outcome.result, time.Since(started))
 	return processed, nil
 }
 
@@ -145,11 +168,13 @@ func (s *sFlashSale) failRequestInTx(ctx context.Context, tx gdb.TX, r *orderReq
 }
 
 // retryOrDeadRequestInTx 处理技术失败：重试次数 +1 并退避；超上限则落 dead（死信/待修复）。
-// 落 dead 时置 outcome.terminalFailure，提交后补偿 Redis 预扣/标记。
+// 落 dead 时置 outcome.terminalFailure + leftQueue，提交后补偿 Redis 预扣/标记并释放排队计数。
 func (s *sFlashSale) retryOrDeadRequestInTx(ctx context.Context, tx gdb.TX, r *orderRequestRow, code codes.Code, outcome *consumeOutcome) error {
 	newRetry := r.RetryCount + 1
 	if newRetry > maxConsumeRetryAttempts {
 		outcome.terminalFailure = true
+		outcome.leftQueue = true
+		outcome.result = metrics.ResultDead
 		if _, err := tx.Model("flash_sale_order_requests").Ctx(ctx).Where("id", r.Id).Data(g.Map{
 			"status":          requestStatusDead,
 			"retry_count":     newRetry,
@@ -160,6 +185,8 @@ func (s *sFlashSale) retryOrDeadRequestInTx(ctx context.Context, tx gdb.TX, r *o
 		return nil
 	}
 
+	// 未达上限：技术失败退避重试，请求保持 queued（无终态、不释放排队计数），本次观测为技术错误。
+	outcome.result = metrics.ResultError
 	backoff := consumeBackoffSeconds(newRetry)
 	if _, err := tx.Model("flash_sale_order_requests").Ctx(ctx).Where("id", r.Id).Data(g.Map{
 		"retry_count":     newRetry,
