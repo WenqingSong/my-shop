@@ -1,7 +1,7 @@
 // Package metrics 承载秒杀链路（V5 容量保护与可观测性）的 Prometheus 指标。
 //
 // 本包聚焦秒杀下单接口与排队消费链路，非全站通用指标平台：只注册秒杀域指标
-// （flashsale_*），按「接口 / 活动 / 结果」维度区分，指标为进程内观测计数（非业务事实），
+// （flashsale_*），按「接口 / 结果」低基数维度区分，指标为进程内观测计数（非业务事实），
 // 用于 QPS / 成功率 / 拒绝率 / p95 / p99 采集，且可与 MySQL 订单数、queued 数、拒绝数对账。
 //
 // 指标采集默认关闭（flash_sale.metrics.enabled 默认 false），关闭时 Observe 系列为空操作；
@@ -11,7 +11,6 @@ package metrics
 import (
 	"context"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -45,15 +44,15 @@ var (
 	requestsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: "flashsale",
 		Name:      "requests_total",
-		Help:      "秒杀请求总数（按接口/活动/结果），用于 QPS、成功率、拒绝率。",
-	}, []string{"interface", "activity", "result"})
+		Help:      "秒杀请求总数（按接口/结果），用于 QPS、成功率、拒绝率。",
+	}, []string{"interface", "result"})
 
 	requestDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: "flashsale",
 		Name:      "request_duration_seconds",
-		Help:      "秒杀请求耗时（按接口/活动/结果），用于 p95/p99。",
+		Help:      "秒杀请求耗时（按接口/结果），用于 p95/p99。",
 		Buckets:   histogramBuckets,
-	}, []string{"interface", "activity", "result"})
+	}, []string{"interface", "result"})
 )
 
 func init() {
@@ -70,23 +69,21 @@ func Enabled(ctx context.Context) bool {
 }
 
 // ObserveOrder 记录一次秒杀下单请求（接口=order）。
-func ObserveOrder(ctx context.Context, activityID int64, result string, d time.Duration) {
+func ObserveOrder(ctx context.Context, result string, d time.Duration) {
 	if !Enabled(ctx) {
 		return
 	}
-	activity := strconv.FormatInt(activityID, 10)
-	requestsTotal.WithLabelValues(InterfaceOrder, activity, result).Inc()
-	requestDuration.WithLabelValues(InterfaceOrder, activity, result).Observe(d.Seconds())
+	requestsTotal.WithLabelValues(InterfaceOrder, result).Inc()
+	requestDuration.WithLabelValues(InterfaceOrder, result).Observe(d.Seconds())
 }
 
 // ObserveConsume 记录一次排队消费处理（接口=consume）。
-func ObserveConsume(ctx context.Context, activityID int64, result string, d time.Duration) {
+func ObserveConsume(ctx context.Context, result string, d time.Duration) {
 	if !Enabled(ctx) {
 		return
 	}
-	activity := strconv.FormatInt(activityID, 10)
-	requestsTotal.WithLabelValues(InterfaceConsume, activity, result).Inc()
-	requestDuration.WithLabelValues(InterfaceConsume, activity, result).Observe(d.Seconds())
+	requestsTotal.WithLabelValues(InterfaceConsume, result).Inc()
+	requestDuration.WithLabelValues(InterfaceConsume, result).Observe(d.Seconds())
 }
 
 // Handler 返回 Prometheus 指标采集 handler（默认 registry 的文本格式）。
