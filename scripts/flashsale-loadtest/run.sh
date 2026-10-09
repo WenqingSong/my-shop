@@ -49,6 +49,10 @@ MYSQL_USER="${MYSQL_USER:-root}"
 MYSQL_PASS="${MYSQL_PASS:-root}"
 MYSQL_DB="${MYSQL_DB:-my_shop}"
 
+# Redis 版本采集参数（仅用于采集版本，不参与压测主流程；默认与 docker-compose 一致）。
+REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
+REDIS_PORT="${REDIS_PORT:-6379}"
+
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 
 # ---------------------------------------------------------------------------
@@ -87,6 +91,32 @@ parse_worker_out() {
   code="$(printf '%s' "$body" | sed -n 's/.*"code":\([-0-9]*\).*/\1/p')"
   [ -n "$code" ] || code="-1"
   printf '%s,%s,%s\n' "$time_total" "$http_code" "$code"
+}
+
+# ---------------------------------------------------------------------------
+# 纯函数：JSON 字符串转义。转义反斜杠、双引号与常见控制字符，保证 CPU 型号 /
+# 版本号 / PromQL / 命令等字符串安全写入基线 JSON。
+# ---------------------------------------------------------------------------
+json_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"
+  s="${s//$'\r'/\\r}"
+  s="${s//$'\t'/\\t}"
+  printf '%s' "$s"
+}
+
+# ---------------------------------------------------------------------------
+# 纯函数：数值字段输出。非空且为整数时原样输出，否则输出 null（未测量）。
+# ---------------------------------------------------------------------------
+num_or_null() {
+  local v="$1"
+  if [[ -n "$v" && "$v" =~ ^-?[0-9]+$ ]]; then
+    printf '%s' "$v"
+  else
+    printf 'null'
+  fi
 }
 
 mysql_q() { mysql -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -p"$MYSQL_PASS" -N -B -e "$1" "$MYSQL_DB" 2>/dev/null; }
@@ -305,7 +335,37 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
-# 5) 保存基线 JSON。
+# 采集硬件资源（CPU 核数 / 型号、内存总量）。采集命令失败时对应字段置空，
+# 由 save_baseline 记录为 null（未测量），不阻塞压测主流程。
+# ---------------------------------------------------------------------------
+collect_hardware() {
+  CPU_CORES="$(nproc 2>/dev/null || true)"
+  CPU_MODEL="$(lscpu 2>/dev/null | awk -F: '/^Model name:/{sub(/^[ \t]+/,"",$2); print $2; exit}' || true)"
+  MEM_TOTAL_KB="$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null || true)"
+}
+
+# ---------------------------------------------------------------------------
+# 采集运行时版本（Go / MySQL / Redis）。客户端或容器不可用时字段置空（未测量）。
+# Redis 优先本机 redis-cli，其次 docker exec 容器内 redis-cli（docker-compose 部署形态）。
+# ---------------------------------------------------------------------------
+collect_runtime() {
+  GO_VERSION="$(go version 2>/dev/null | sed -n 's/^go version //p' || true)"
+  MYSQL_VERSION="$(mysql_q "SELECT VERSION()" || true)"
+  REDIS_VERSION="$(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" INFO server 2>/dev/null | sed -n 's/^redis_version://p' || true)"
+  if [[ -z "$REDIS_VERSION" ]]; then
+    REDIS_VERSION="$(docker exec my-shop-redis redis-cli INFO server 2>/dev/null | sed -n 's/^redis_version://p' || true)"
+  fi
+}
+
+# 压测所用的 Prometheus recording rules（下单接口 p95 / p99），与
+# prometheus/rules/flashsale_latency.yml 保持一致；观测窗口为 rate 的 5m。
+PROMQL_SOURCE="prometheus/rules/flashsale_latency.yml"
+PROMQL_SCRAPE_INTERVAL="15s"
+PROMQL_P95='histogram_quantile(0.95, sum by (le) (rate(flashsale_request_duration_seconds_bucket{interface="order"}[5m])))'
+PROMQL_P99='histogram_quantile(0.99, sum by (le) (rate(flashsale_request_duration_seconds_bucket{interface="order"}[5m])))'
+
+# ---------------------------------------------------------------------------
+# 5) 保存基线 JSON：既有性能指标 + 硬件 / 运行时版本 / PromQL / 压测命令与观测时间范围。
 # ---------------------------------------------------------------------------
 save_baseline() {
   local ts file
@@ -313,6 +373,26 @@ save_baseline() {
   file="$OUT_DIR/${SCENARIO}-${ts}.json"
   local insufficient_json
   [[ "$SAMPLE_INSUFFICIENT" -eq 1 ]] && insufficient_json="true" || insufficient_json="false"
+
+  # 压测命令（复现用）：记录生效值，不含 MySQL 凭据等敏感信息。
+  LOADTEST_COMMAND="ACTIVITY_ID=$ACTIVITY_ID SKU_ID=$SKU_ID SCENARIO=$SCENARIO USERS=$USERS REQUESTS_PER_USER=$REQUESTS_PER_USER CONCURRENCY=$CONCURRENCY MIN_SAMPLES=$MIN_SAMPLES SETTLE_SECONDS=$SETTLE_SECONDS BASE_URL=$BASE_URL ./run.sh"
+
+  # 先统一做 JSON 转义，避免型号 / 版本 / PromQL / 命令中的引号与反斜杠破坏 JSON。
+  local cpu_model_json go_json mysql_json redis_json base_url_json
+  local promql_p95_json promql_p99_json cmd_json
+  cpu_model_json="$(json_escape "${CPU_MODEL:-}")"
+  go_json="$(json_escape "${GO_VERSION:-}")"
+  mysql_json="$(json_escape "${MYSQL_VERSION:-}")"
+  redis_json="$(json_escape "${REDIS_VERSION:-}")"
+  base_url_json="$(json_escape "${BASE_URL}")"
+  promql_p95_json="$(json_escape "$PROMQL_P95")"
+  promql_p99_json="$(json_escape "$PROMQL_P99")"
+  cmd_json="$(json_escape "$LOADTEST_COMMAND")"
+
+  local cpu_cores_json mem_kb_json
+  cpu_cores_json="$(num_or_null "${CPU_CORES:-}")"
+  mem_kb_json="$(num_or_null "${MEM_TOTAL_KB:-}")"
+
   cat > "$file" <<EOF
 {
   "scenario": "$SCENARIO",
@@ -342,7 +422,52 @@ save_baseline() {
   "queued_peak": ${QUEUE_PEAK:-0},
   "queued_backlog": ${QUEUED_STEADY:-0},
   "max_used_connections": ${MAX_CONNS:-0},
-  "correctness": "$CORRECTNESS"
+  "correctness": "$CORRECTNESS",
+  "hardware": {
+    "cpu_cores": $cpu_cores_json,
+    "cpu_model": "$cpu_model_json",
+    "memory_total_kb": $mem_kb_json,
+    "collection_method": {
+      "cpu_cores": "nproc",
+      "cpu_model": "lscpu 的 Model name 字段",
+      "memory_total_kb": "/proc/meminfo 的 MemTotal（单位 kB）"
+    }
+  },
+  "runtime": {
+    "go_version": "$go_json",
+    "mysql_version": "$mysql_json",
+    "redis_version": "$redis_json",
+    "collection_method": {
+      "go_version": "go version",
+      "mysql_version": "mysql -N -B -e 'SELECT VERSION()'",
+      "redis_version": "redis-cli INFO server（或 docker exec my-shop-redis redis-cli INFO server）"
+    }
+  },
+  "promql": {
+    "source": "$PROMQL_SOURCE",
+    "scrape_interval": "$PROMQL_SCRAPE_INTERVAL",
+    "queries": [
+      {"record": "flashsale_order_request_duration_p95_seconds", "window": "5m", "promql": "$promql_p95_json"},
+      {"record": "flashsale_order_request_duration_p99_seconds", "window": "5m", "promql": "$promql_p99_json"}
+    ]
+  },
+  "loadtest": {
+    "command": "$cmd_json",
+    "key_env_vars": {
+      "BASE_URL": "$base_url_json",
+      "ACTIVITY_ID": "$ACTIVITY_ID",
+      "SKU_ID": "$SKU_ID",
+      "SCENARIO": "$SCENARIO",
+      "USERS": "$USERS",
+      "REQUESTS_PER_USER": "$REQUESTS_PER_USER",
+      "CONCURRENCY": "$CONCURRENCY",
+      "MIN_SAMPLES": "$MIN_SAMPLES",
+      "SETTLE_SECONDS": "$SETTLE_SECONDS"
+    },
+    "start_epoch_seconds": ${START_TS:-0},
+    "end_epoch_seconds": ${END_TS:-0},
+    "duration_seconds": ${ELAPSED:-0}
+  }
 }
 EOF
   log "基线已保存：$file"
@@ -376,6 +501,9 @@ main() {
   # 等待后台消费者把排队请求落单，再取得「压测后稳态」积压与完整订单事实。
   sleep "$SETTLE_SECONDS"
   verify
+  # 采集硬件与运行时版本（采集失败置空为「未测量」，不阻塞主流程）后再落基线。
+  collect_hardware
+  collect_runtime
   save_baseline
   log "压测完成"
 }

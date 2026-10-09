@@ -1,0 +1,28 @@
+schema_version: 3
+task_id: flashsale-performance-baseline
+
+contract:
+  status: NOT_REQUIRED
+  target: ""
+
+resources:
+  reservations: {}
+
+review:
+  status: CLEAN
+  target: "e67cf2829ecdf6d9ff0febc66f10a406a5fa092f"
+
+owner:
+  status: ACCEPTED
+  review_target: "e67cf2829ecdf6d9ff0febc66f10a406a5fa092f"
+
+delivery:
+  status: PASS
+  review_target: "e67cf2829ecdf6d9ff0febc66f10a406a5fa092f"
+  feature_head: "7409e03616cda2f3e39455974637dfa7bbc77a3b"
+  develop_base: "02c3b9218f497826403445b0c5530eee8364df44"
+
+blocked:
+  active: false
+  by: ""
+  reason: ""
