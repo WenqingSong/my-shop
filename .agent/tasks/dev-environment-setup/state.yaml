@@ -1,0 +1,28 @@
+schema_version: 3
+task_id: dev-environment-setup
+
+contract:
+  status: APPROVED
+  target: "f7cb84235e305bc2d369fd129f23b912ac049b7f"
+
+resources:
+  reservations: {}
+
+review:
+  status: CLEAN
+  target: "fb5bbee"
+
+owner:
+  status: ACCEPTED
+  review_target: "fb5bbee"
+
+delivery:
+  status: PASS
+  review_target: "fb5bbee"
+  feature_head: "152aaaf6ff56f51adb16efb158ae622ed4e12860"
+  develop_base: "99ace202a90de7699ab7ea3cd24dd7fa9742ef8c"
+
+blocked:
+  active: false
+  by: ""
+  reason: ""
