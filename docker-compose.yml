@@ -32,7 +32,9 @@ services:
       retries: 5
 
   prometheus:
-    image: prom/prometheus:v2.53.0
+    build:
+      context: ./prometheus
+    image: my-shop-prometheus:local
     container_name: my-shop-prometheus
     restart: unless-stopped
     command:
@@ -40,9 +42,9 @@ services:
       - "--storage.tsdb.path=/prometheus"
     ports:
       - "${PROMETHEUS_PORT:-9090}:9090"
-    volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./prometheus/rules:/etc/prometheus/rules:ro
+    # 抓取配置与 rules 经 prometheus/Dockerfile COPY 内置进镜像，而非 bind mount：
+    # rootless / 嵌套容器环境下 bind mount 单文件会退化为目录挂载（文件变目录），
+    # 导致容器启动失败。
     # 应用以宿主机进程监听 :8000，容器内经 host-gateway 打通到宿主机端口（Linux 需 Docker 20.10+）。
     extra_hosts:
       - "host.docker.internal:host-gateway"

@@ -5,7 +5,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib.sh"
 
 log_info "确保依赖容器已启动..."
-docker_compose up -d mysql redis prometheus
+# --build 使 prometheus 服务按 prometheus/Dockerfile 重新构建（配置经 COPY 内置进镜像，
+# rootless/嵌套容器环境下无法用 bind mount 单文件）。mysql/redis 无 build 定义，不受影响。
+docker_compose up -d --build mysql redis prometheus
 
 log_info "等待依赖就绪..."
 wait_for_deps
