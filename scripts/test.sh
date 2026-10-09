@@ -6,7 +6,8 @@
 # 干净环境变量下运行，配置一律走 manifest/config/config.yaml 的开发默认值，
 # 结果与本地 .env 无关（依赖容器仍需由 make init / make up 提前就绪）。
 set -euo pipefail
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 log_info() { printf '\033[32m[INFO]\033[0m %s\n' "$*"; }
 
