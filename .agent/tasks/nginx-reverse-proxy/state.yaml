@@ -1,0 +1,28 @@
+schema_version: 3
+task_id: nginx-reverse-proxy
+
+contract:
+  status: PENDING
+  target: ""
+
+resources:
+  reservations: {}
+
+review:
+  status: NOT_REQUESTED
+  target: ""
+
+owner:
+  status: PENDING
+  review_target: ""
+
+delivery:
+  status: NOT_RUN
+  review_target: ""
+  feature_head: ""
+  develop_base: ""
+
+blocked:
+  active: false
+  by: ""
+  reason: ""
