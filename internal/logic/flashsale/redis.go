@@ -263,6 +263,10 @@ func (s *sFlashSale) syncActivityCache(ctx context.Context, activityID int64) er
 		if err := g.Redis().SetEX(ctx, flashSaleStockKey(activityID, b.SkuId), strconv.FormatInt(remaining, 10), ttl); err != nil {
 			return fmt.Errorf("预热库存: %w", err)
 		}
+		// 排队软上限计数收敛为权威值（MySQL COUNT(status=queued)），幂等 SET + 活动 TTL。
+		if err := s.convergeQueueCount(ctx, activityID, b.SkuId, inflight[b.SkuId], ttl); err != nil {
+			return fmt.Errorf("收敛排队计数: %w", err)
+		}
 	}
 	if _, err := g.Redis().Del(ctx, flashSaleNullKey(activityID)); err != nil {
 		return fmt.Errorf("清除空值标记: %w", err)
@@ -453,6 +457,10 @@ func (s *sFlashSale) convergeEndedActivity(ctx context.Context, activityID int64
 		if err := g.Redis().SetEX(ctx, flashSaleStockKey(activityID, b.SkuId), strconv.FormatInt(remaining, 10), ttl); err != nil {
 			return fmt.Errorf("收敛结束活动库存: %w", err)
 		}
+		// 排队软上限计数收敛为权威值（MySQL COUNT(status=queued)），幂等 SET + 活动 TTL。
+		if err := s.convergeQueueCount(ctx, activityID, b.SkuId, inflight[b.SkuId], ttl); err != nil {
+			return fmt.Errorf("收敛结束活动排队计数: %w", err)
+		}
 	}
 	if totalInflight > 0 {
 		// 仍有在途请求：仅收敛 remaining，等消费完成后下一周期再失效缓存。
@@ -465,6 +473,10 @@ func (s *sFlashSale) convergeEndedActivity(ctx context.Context, activityID int64
 	for _, b := range skus {
 		if _, err := g.Redis().Del(ctx, flashSaleSoldoutKey(activityID, b.SkuId)); err != nil {
 			return fmt.Errorf("失效结束活动售罄标记: %w", err)
+		}
+		// 活动结束、在途归零：清理排队软上限计数 key（幂等 DEL）。
+		if _, err := g.Redis().Del(ctx, flashSaleQueuedKey(activityID, b.SkuId)); err != nil {
+			return fmt.Errorf("失效结束活动排队计数: %w", err)
 		}
 	}
 	return s.setNullMarker(ctx, activityID)

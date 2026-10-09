@@ -27,6 +27,7 @@ import (
 	productv1 "cnb.cool/go-cloud-devops/my-shop/api/product/v1"
 	skuv1 "cnb.cool/go-cloud-devops/my-shop/api/sku/v1"
 	"cnb.cool/go-cloud-devops/my-shop/internal/codes"
+	"cnb.cool/go-cloud-devops/my-shop/internal/metrics"
 	"cnb.cool/go-cloud-devops/my-shop/internal/service"
 )
 
@@ -41,7 +42,10 @@ const (
 	maxPrice = 99_999_999
 )
 
-type sFlashSale struct{}
+type sFlashSale struct {
+	// breaker 是 Redis 闸门熔断器（进程内状态机，多实例各自独立）。
+	breaker *circuitBreaker
+}
 
 func init() {
 	service.RegisterFlashSale(New())
@@ -49,7 +53,7 @@ func init() {
 
 // New 创建并返回秒杀服务实现。
 func New() *sFlashSale {
-	return &sFlashSale{}
+	return &sFlashSale{breaker: newCircuitBreaker()}
 }
 
 // activityRow 是 flash_sale_activities 表的一条记录。
@@ -247,12 +251,18 @@ func (s *sFlashSale) UpdateActivity(ctx context.Context, req *v1.UpdateReq) (*v1
 	return &v1.UpdateRes{Activity: *a}, nil
 }
 
-// CreateOrder 秒杀下单（V3 异步）：先经 Redis Lua 闸门快速失败（售罄/穿透/已购/幂等命中），
-// 通过闸门（GATE_PASSED，已预扣 + 写入一人一单/幂等标记）后，将请求持久入队（status=queued）
-// 并快速返回「已受理/排队中」，不在同请求内同步落单；后台消费者异步完成订单创建。
+// CreateOrder 秒杀下单（V3 异步 + V5 容量保护）：先经用户级/活动级限流与排队软上限快速拒绝
+// 过量流量（无副作用），再经 Redis Lua 闸门快速失败（售罄/穿透/已购/幂等命中）；闸门前有进程内
+// 熔断器（Redis 闸门故障时快速失败 503）。通过闸门（GATE_PASSED，已预扣 + 写入一人一单/幂等标记）后，
+// 将请求持久入队（status=queued）并快速返回「已受理/排队中」，不在同请求内同步落单；后台消费者异步完成订单创建。
 // Redis 不可用或 Lua 执行失败 → fail-closed（503），不落 request、不预扣、不直接同步落单。
 // 幂等/一人一单/请求级幂等由 DB 唯一约束兜底。
-func (s *sFlashSale) CreateOrder(ctx context.Context, userID, activityID int64, req *v1.CreateOrderReq) (*v1.CreateOrderRes, error) {
+func (s *sFlashSale) CreateOrder(ctx context.Context, userID, activityID int64, req *v1.CreateOrderReq) (res *v1.CreateOrderRes, err error) {
+	started := time.Now()
+	defer func() {
+		metrics.ObserveOrder(ctx, activityID, orderOutcome(res, err), time.Since(started))
+	}()
+
 	skuID := req.SkuId
 	if skuID <= 0 {
 		return nil, codes.New(codes.CodeInvalidArgument)
@@ -264,11 +274,32 @@ func (s *sFlashSale) CreateOrder(ctx context.Context, userID, activityID int64, 
 
 	hash := requestHash(activityID, skuID)
 
+	// V5 容量保护（闸门之前，无副作用快速拒绝）：
+	// 1) 用户级限流 → 2) 活动级限流 → 3) 排队软上限。
+	if err := s.rateLimitUser(ctx, userID); err != nil {
+		return nil, err
+	}
+	if err := s.rateLimitActivity(ctx, activityID); err != nil {
+		return nil, err
+	}
+	if err := s.checkQueueCapacity(ctx, activityID, skuID); err != nil {
+		return nil, err
+	}
+
+	// 熔断器：Open 状态直接快速失败（不进入闸门，不预扣、不建单、不排队）。
+	if !s.breaker.allow(ctx) {
+		glog.Warningf(ctx, "秒杀闸门熔断打开，快速失败(503): activity=%d", activityID)
+		return nil, codes.New(codes.CodeServiceUnavailable)
+	}
+
 	gate, err := s.runGate(ctx, activityID, skuID, userID, idempotencyKey, hash)
 	if err != nil {
+		s.breaker.recordFailure(ctx)
 		glog.Warningf(ctx, "秒杀闸门执行失败，快速失败(503): %v", err)
 		return nil, codes.New(codes.CodeServiceUnavailable)
 	}
+	s.breaker.recordSuccess(ctx)
+
 	switch gate {
 	case gateNotFound:
 		return nil, codes.New(codes.CodeFlashSaleActivityNotFound)
@@ -295,6 +326,30 @@ func (s *sFlashSale) CreateOrder(ctx context.Context, userID, activityID int64, 
 	// enqueue 内部处理，此处直接透传结果，不再二次补偿——否则「幂等键存在 + 内容冲突 + 经入队
 	// 重复键」路径会重复回补 remaining，造成超预扣。
 	return s.enqueue(ctx, userID, activityID, skuID, idempotencyKey, hash)
+}
+
+// orderOutcome 将下单结果映射为指标结果标签（与 Contract 枚举一致），供 CreateOrder 的 defer 观测。
+func orderOutcome(_ *v1.CreateOrderRes, err error) string {
+	if err == nil {
+		return metrics.ResultQueued
+	}
+	switch codes.FromError(err) {
+	case codes.CodeFlashSaleRateLimited:
+		return metrics.ResultRateLimited
+	case codes.CodeFlashSaleQueueFull:
+		return metrics.ResultQueueFull
+	case codes.CodeFlashSaleActivityNotFound,
+		codes.CodeFlashSaleNotInTimeWindow,
+		codes.CodeFlashSaleStockInsufficient,
+		codes.CodeFlashSaleAlreadyPurchased,
+		codes.CodeFlashSaleIdempotencyConflict,
+		codes.CodeFlashSaleSkuUnavailable,
+		codes.CodeFlashSaleInvalidArgument,
+		codes.CodeInvalidArgument:
+		return metrics.ResultGateRejected
+	default:
+		return metrics.ResultError
+	}
 }
 
 // handleIdempotentHit 处理闸门「幂等命中」：幂等标记存在且 hash 匹配，但可能是崩溃窗口孤儿标记

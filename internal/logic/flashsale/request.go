@@ -75,6 +75,8 @@ func (s *sFlashSale) enqueue(ctx context.Context, userID, activityID, skuID int6
 		}
 		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("写入秒杀请求: %w", err))
 	}
+	// 入队成功后近似计数 +1（软上限计数，best-effort，对账扫描器权威收敛）。
+	s.incrQueueCount(ctx, activityID, skuID)
 	return &v1.CreateOrderRes{
 		Status:         v1.RequestStatusQueued,
 		IdempotencyKey: idempotencyKey,

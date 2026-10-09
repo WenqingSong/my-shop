@@ -1,0 +1,28 @@
+schema_version: 3
+task_id: flash-sale-v5
+
+contract:
+  status: APPROVED
+  target: "0e8089f189e275df8407d91e793996cfe0789147"
+
+resources:
+  reservations: {}
+
+review:
+  status: CLEAN
+  target: "2deecfda31d8f7effd8512d21fd68eb90d67ea35"
+
+owner:
+  status: ACCEPTED
+  review_target: "2deecfda31d8f7effd8512d21fd68eb90d67ea35"
+
+delivery:
+  status: PASS
+  review_target: "2deecfda31d8f7effd8512d21fd68eb90d67ea35"
+  feature_head: "f461f9888c0c3ff5c11bd58eb21552f7da8639d7"
+  develop_base: "d2dd5d5deb4f8e48c6b35feca283686f7887c378"
+
+blocked:
+  active: false
+  by: ""
+  reason: ""

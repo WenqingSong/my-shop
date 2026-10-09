@@ -121,6 +121,8 @@ func setupIsolationServer(t *testing.T) string {
 		RegisterFrontendRoutes(group)
 		RegisterAdminRoutes(group)
 	})
+	// 指标采集端点（生产 serve 同款注册；指标开关关闭时为 no-op）。
+	registerMetricsRoute(ctx, s)
 	s.SetDumpRouterMap(false)
 	s.Start()
 	t.Cleanup(func() { _ = s.Shutdown() })

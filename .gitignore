@@ -19,6 +19,9 @@ coverage.out
 logs/
 *.log
 
+# 秒杀压测基线（运行时生成，不入库）
+/scripts/flashsale-loadtest/baselines/*.json
+
 # IDE
 .idea/
 .vscode/
