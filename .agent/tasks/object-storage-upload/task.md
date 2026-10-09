@@ -22,6 +22,8 @@
   - `make up`（第二阶段）：加载现有 `.env` → 校验 MySQL/Redis 等依赖 → 校验七牛 AK/SK/Bucket/Domain → 执行真实七牛 Bucket 可用性检查 → 任一失败终止启动并明确提示原因 → 全部通过后启动 Go 后端。
   - 初始化操作必须**可重复执行**，不破坏已有环境（不覆盖已有 `.env`、不破坏已有容器与数据）。
 - **独立真实 E2E 入口（Owner 决策 2026-10-09）**：`make test-storage` 提供「后端签发 Token → 上传极小合法 PNG → 校验 URL 可访问 → 删除本次测试对象」的端到端验证入口。
+
+> 本轮修订（2026-10-09 `dev-environment-setup` 合并后）：上述「本地开发环境两阶段初始化」与「超级管理员预检」的**实现**已由独立任务 `dev-environment-setup` 交付并验收（`make up` 增加 `admin check` 超级管理员预检、`make init` 检测旧 `.env` 缺项、`.env.example` 补齐全量配置清单）。本任务**不重复开发**这些已完成功能，仅保留 `make up` 成功连接真实七牛 + `make test-storage` 真实 E2E 的验收断言（见 AC-002 / AC-013 / AC-014）。
 - 长期设计：`docs/design/storage.md`（Design Impact = NEW）沉淀上传模型、配置模型、Secret 边界与错误语义。
 - 必要测试：凭证签发正常/拒绝路径、类型与大小边界、凭据缺失/非法语义、错误码；并确保测试不硬编码或打印真实凭据。
 
@@ -91,6 +93,8 @@ Milestone: 文件上传与对象存储（Qiniu）V1 完整交付验收（凭证�
 - [ ] AC-013（make up 两阶段第二阶段）：`make up` 加载现有 `.env` → 校验 MySQL/Redis 等依赖 → 校验七牛 AK/SK/Bucket/Domain → 执行真实七牛 Bucket 可用性检查；任一必要依赖检查失败则**终止启动**、以非零退出码退出并明确提示原因（不泄漏凭据）；全部通过后才启动 Go 后端。
 - [ ] AC-014（make test-storage 独立 E2E）：`make test-storage` 提供独立入口完成「后端签发 Token → 上传极小合法 PNG → `final_url` HTTP 200 且 `Content-Type=image/png` → 用返回 key 删除本次测试对象」；复用真实凭据、不修改生产 key 规则、不要求 `e2e/` 前缀；缺真实凭据时如实 `NOT_VERIFIED`。
 
+> 本轮修订（2026-10-09 `dev-environment-setup` 合并后）：AC-011（`make init`）/ AC-012（幂等）/ AC-013（`make up` 预检）的**实现**已由独立任务 `dev-environment-setup` 交付并验收（`make up` 预检扩展为「`qiniu check` + `admin check` 超级管理员创建条件」集中预检、`make init` 增加旧 `.env` 缺项检测与一次性提示、`.env.example` 补齐全量配置清单、`make test` 隔离 `.env`）。本任务不重复开发这些实现，Cleaner 复审时仅需确认这些入口在合并后仍满足本任务 AC-011/012/013 的验收语义；AC-002 / AC-013 / AC-014 的真实七牛验收要求保持不变。
+
 ## Relevant Context
 
 已核实事实（2026-10-09 owner_update 时核实）：
@@ -105,7 +109,15 @@ Milestone: 文件上传与对象存储（Qiniu）V1 完整交付验收（凭证�
 - 当前 `Makefile` 目标：`help/bootstrap/up/down/restart/status/logs/health/test/clean`，**无 `init`、无 `test-storage`**；`bootstrap.sh` 现仅调用 `up.sh`。
 - 当前 `scripts/up.sh` 流程：`docker_compose up -d mysql redis` → `wait_for_deps` → `build_app` → `migrate_app` → `start_app`；**无七牛配置校验、无真实 bucket 可用性检查**（后者现仅存在于 Go `serve` 的 `ValidateConfig`）。
 - `manifest/config/config.yaml` 的 `qiniu` 段当前 `access_key`/`secret_key`/`bucket`/`domain` 均为空串（region `z2`、ttl 3600、max_file_size 10485760、图片白名单）；该文件的 commit 历史中从未出现非空真实凭据。
-- 当前 `state.yaml`：`contract.status=APPROVED`（target `8abdec2f`）、`review.status=PENDING`（target `7c881f6`）、`delivery.status=NOT_RUN`。
+- 当前 `state.yaml`：`contract.status=APPROVED`（target `a0dfa6e`）、`review.status=PENDING`（target `6e3f1f9`）、`delivery.status=NOT_RUN`。
+
+本轮核实（2026-10-09 `dev-environment-setup` 合并后）：
+
+- 当前分支 `feat/object-storage-upload` HEAD=`821e253`（`dev-environment-setup` 的交付验收提交），local == `origin/feat/object-storage-upload`，working tree clean。
+- `dev-environment-setup` 已合并入本分支并独立走完完整流程（review CLEAN → owner ACCEPTED → delivery PASS），其改动落在本任务原 scope 内文件：`Makefile`、`scripts/{init.sh,up.sh,lib.sh,test.sh}`、新增 `scripts/test-lib.sh`、`.env.example`、`internal/cmd/cmd.go`（新增 `admin check` 子命令）、`internal/boot/{admin_check.go,seed.go}`（新增 `CheckSuperAdminCondition`/`superAdminExists`）。
+- 上传业务代码在合并后未变：`6e3f1f9..821e253` 对 `internal/logic/upload`、`internal/controller/upload`、`internal/service/upload.go`、`api/upload`、`internal/codes`、`docs/design/storage.md`、`internal/cmd/{upload_test.go,storage_e2e_test.go}` 均无改动；`serve()` 仍调用 `service.Upload().ValidateConfig`（AC-010 fail-fast），`qiniu check` 子命令仍存在。
+- CLEAN-003 修复已双保险落地：`TestUploadTokenMissingConfig` 用 `t.Setenv("QINIU_*","")` 隔离（commit `6e3f1f9`），且 `scripts/test.sh` 已不再 source `lib.sh`（`dev-environment-setup` 引入，避免 `.env` 真实凭据污染 `go test`）。仍需 Cleaner 复审关闭。
+- 真实七牛 E2E 验收（AC-002 / AC-013 / AC-014）尚未由 Deliverer 执行（`state.delivery.status=NOT_RUN`），需 Owner 准备真实凭据后由 Deliverer 经 `make test-storage` 完成。
 
 Owner 决策（作为 Analyst 固化 Contract 的约束）：
 
@@ -124,6 +136,8 @@ OPEN QUESTION（不阻塞任务定义，交 Analyst 分析、Owner 确认）：
 - `make up` 预检中「真实七牛 Bucket 可用性检查」的实现载体：是新增 Go 子命令（如 `my-shop qiniu check`，复用 `ValidateConfig`/`checkBucketAvailable`）由 shell 调用，还是仅做 shell 层配置存在性检查、真实检查留在 `serve` 内部；两者是否会重复触发网络请求。
 - `make test-storage` 的实现载体：shell + curl 驱动（签发→直传→删除）还是 Go 工具/Go test；删除测试对象依赖七牛 SDK，需明确其复用方式（Go 子命令 vs curl 签名）。
 - serve fail-fast 对测试装配的影响：正常 serve 现在要求真实七牛凭据才能启动，既有 `internal/cmd` 集成测试如何在不要求真实凭据的前提下保持可运行（fail-fast 作用点与测试注入方式）。
+
+> 上述 OPEN QUESTION 已由 APPROVED Contract 的 D7/D8/D9 固化（`qiniu check` 子命令复用 `ValidateConfig`；`make test-storage` 用 build-tagged Go 测试走真实 HTTP 链路；集成测试经 `setupIsolationServer` 直接装配路由、不经过 `serve()`，故不触发七牛 fail-fast），并已实现；不再作为待决问题。
 
 ## Verification
 
@@ -149,7 +163,9 @@ OPEN QUESTION（不阻塞任务定义，交 Analyst 分析、Owner 确认）：
 
 COMPLEX
 
-原因：新增对象存储/文件上传这一此前不存在的模块能力与长期公开协议（凭证签发 API + 新错误码域），引入第三方七牛云接入，并涉及 Secret 注入与安全边界（config / 环境变量 / 日志 / 跨环境传播）、serve 启动 fail-fast 的真实可用性检查（D5 已实现），以及新的本地开发两阶段初始化与 `make test-storage` 脚本工程；其中「make up 预检与 test-storage 的实现载体」仍未确定、serve fail-fast 对测试装配的影响需设计，需 Analyst 建立一致 Contract 并由 Owner 确认。
+原因：新增对象存储/文件上传这一此前不存在的模块能力与长期公开协议（凭证签发 API + 新错误码域），引入第三方七牛云接入，并涉及 Secret 注入与安全边界（config / 环境变量 / 日志 / 跨环境传播）、serve 启动 fail-fast 的真实可用性检查（D5 已实现），以及新的本地开发两阶段初始化与 `make test-storage` 脚本工程。
+
+> 本轮（`dev-environment-setup` 合并核对）：上述复杂设计已由 APPROVED Contract（D1-D9）固化并实现完毕，Analyst 阶段已完成。剩余路由为「重新确立 review target（Coder 机械动作）→ Cleaner 复审 → OwnerGate → Deliverer」，无需再次交 Analyst；Complexity 保留 COMPLEX 仅作任务性质的历史记录。
 
 ## Analyst Questions
 
@@ -164,11 +180,13 @@ COMPLEX
 ## Review Baseline
 
 - Base commit（原任务起点）：`7de6e74904e2cd95cfc931bb8cd4628c4e23a859`（分支 `feat/object-storage-upload`，起始 working tree clean）。
-- 本次 owner_update（两阶段初始化决策回合）时的分支 head：`7ae0977`（local == `origin/feat/object-storage-upload`，working tree clean）。已含 D5 实现（`f52d044`）、Review Request 更新（`7c881f6`）等。
-- 已存在的本任务修改（非本次新增）：`.agent/tasks/object-storage-upload/*`、`docs/design/storage.md`、`api/upload/v1/upload.go`、`internal/controller/upload/upload.go`、`internal/logic/upload/{upload.go,upload_test.go}`、`internal/service/upload.go`、`internal/codes/codes.go`、`internal/cmd/{cmd.go,routes_admin.go,routes_frontend.go,routes_test.go,upload_test.go}`、`internal/logic/logic.go`、`.env.example`、`.gitignore`、`README.md`、`manifest/config/config.yaml`、`go.mod`/`go.sum`。
-- 重叠修改的区分方式：本次 Task Definition 修订只写 `.agent/tasks/object-storage-upload/task.md`；`contract.md` 为 Analyst 所有物，TaskBuilder 不提交、不改写。新增的 `Makefile` `init`/`test-storage` 目标与 `scripts/init.sh`/`scripts/test-storage.sh`（或等价脚本）属本 Task 新增产物，后续由 Coder 实现并纳入 Cleaner 审查范围；审查范围起点以 `state.yaml` 的 `review.target`（当前 `7c881f6`）为准。
+- 原 Review Request（含 CLEAN-003 修复）时的 review target：`6e3f1f9b46cded6761b264892fe9c1339a46cae4`（`state.review.target`，当时分支 head，working tree clean）。
+- 本次 owner_update（`dev-environment-setup` 合并核对）时的分支 head：`821e2535967b6f79509636a4f5271f78f28391d9`（local == `origin/feat/object-storage-upload`，working tree clean）。
+- 已存在的本任务修改（非本次新增）：`.agent/tasks/object-storage-upload/*`、`docs/design/storage.md`、`api/upload/v1/upload.go`、`internal/controller/upload/upload.go`、`internal/logic/upload/{upload.go,upload_test.go}`、`internal/service/upload.go`、`internal/codes/codes.go`、`internal/cmd/{cmd.go,routes_admin.go,routes_frontend.go,routes_test.go,upload_test.go,storage_e2e_test.go}`、`internal/logic/logic.go`、`.env.example`、`.gitignore`、`README.md`、`manifest/config/config.yaml`、`Makefile`、`scripts/{init.sh,up.sh,test-storage.sh}`、`go.mod`/`go.sum`。
+- 合并入本分支的 `dev-environment-setup` 改动（在 review target `6e3f1f9` 之后，且落在本任务 scope 内文件）：`Makefile`、`scripts/{init.sh,up.sh,lib.sh,test.sh}`、新增 `scripts/test-lib.sh`、`.env.example`、`internal/cmd/cmd.go`、`internal/boot/{admin_check.go,seed.go}`。
+- 重叠修改的区分方式：本任务「上传业务代码 + 测试 + `docs/design/storage.md`」自 `6e3f1f9` 起未变，可沿用原实现；`dev-environment-setup` 增量（环境配置与初始化脚本、`admin check`）已由该任务独立 CLEAN+ACCEPTED+PASS。因 `6e3f1f9` 之后的合并改动落在本任务 scope 内文件，**旧 `state.review.target=6e3f1f9` 已滞后，不得沿用旧 Review 结论**，须在合并后状态重新确立 review target 并由 Cleaner 复审。本次 Task Definition 修订只写 `.agent/tasks/object-storage-upload/task.md`；`contract.md`/`findings.md`/`core-logic.md`/`owner-decision.md`/`delivery.md` 与 `state.yaml` 为其他角色所有物，TaskBuilder 不提交、不改写。
 
-## 本次 Requirement Revision（owner_update 2026-10-09）
+## Requirement Revision 历史（owner_update 2026-10-09 第一轮：两阶段初始化决策）
 
 与上一版要求的主要差异：
 
@@ -187,6 +205,23 @@ COMPLEX
 - Finding `CLEAN-002`（工作区写入真实凭据，OPEN）：脏状态已清理，关闭与否由 Cleaner 复审判定。
 - 实现（含 D5）与文档 `docs/design/storage.md`：在新两阶段初始化与 Secret 边界表述下需重新核对一致性；`docs/design/storage.md` 需补充两阶段初始化与 `make test-storage` 说明。
 
+## 本次 Requirement Revision（owner_update 2026-10-09 第二轮：`dev-environment-setup` 合并后核对）
+
+本轮仅核对与澄清，不重新定义任务目标、不新增 AC、不改动 Contract/Review/Owner/Delivery 状态。与上一版的主要差异：
+
+| 维度 | 上一版（本任务原要求） | 合并后现状 |
+| --- | --- | --- |
+| `.env.example` / `make init` / `make up` / 超级管理员预检 | 本任务 AC-011/012/013 负责实现 | 已由独立任务 `dev-environment-setup` 交付并验收（`make up` 集中预检 = `qiniu check` + `admin check`；`make init` 检测旧 `.env` 缺项；`.env.example` 全量清单），本任务不重复开发 |
+| `make test` 环境隔离（CLEAN-003） | Coder 已修 `t.Setenv`（`6e3f1f9`） | 双保险：`scripts/test.sh` 不再 source `lib.sh` + `TestUploadTokenMissingConfig` 仍 `t.Setenv` 置空；待 Cleaner 复审关闭 |
+| `make test-storage` 真实 E2E | 本任务 AC-014 负责实现 | 入口保留（`dev-environment-setup` 未改动 `test-storage.sh`），验收要求不变 |
+
+需重新验证的既有结论：
+
+- **Review**（`state.review.target=6e3f1f9`，PENDING）：因 `dev-environment-setup` 合并改动本任务 scope 内文件，原 review target 已滞后，**旧 Review 不得自动视为 CLEAN**；须在合并后状态重新确立 review target 并复审。
+- **Contract**（`target=a0dfa6e`，APPROVED）：D1-D9 核心决策（上传主体、不落库、官方 SDK、Secret 边界、启动 fail-fast + `GetBucketInfo`、`qiniu check` 子命令、`make test-storage` 真实 HTTP E2E）仍被合并后代码遵守，**不需 Owner 重新批准**；Contract 中「Verified Current Behavior」对 scripts 的逐条描述已因 `dev-environment-setup` 增量（`admin check`、`up.sh` 集中预检、`test.sh` 不 source `lib.sh`）局部滞后，由 Cleaner 复审时核对 Contract↔实现一致性。
+- **CLEAN-003**（OPEN）：修复已双保险落地，待 Cleaner 复审关闭。
+- **`docs/design/storage.md` 与实现**：`dev-environment-setup` 未改动 `storage.md`，一致性维持，随复审一并核对。
+
 ## Initial Route
 
-交 Analyst（COMPLEX，且 Owner 两阶段初始化决策影响已 APPROVED Contract，需 Analyst 重新修订 Contract——含 `make up` 预检与 `make test-storage` 的实现载体方案——后由 Owner 确认）
+交 Coder（仅机械动作：在合并后 HEAD 重新确立 `state.review.target` 并发起 Review Request，保持 `review.status=PENDING`，**不新增业务代码**）→ 随后 Cleaner 复审（核对 AC 在合并态成立、关闭 CLEAN-003、核验 Secret 无泄漏、Contract↔实现一致性），之后 OwnerGate / Deliverer（真实七牛 E2E 经 `make test-storage`，需 Owner 准备真实凭据）。
