@@ -1,0 +1,28 @@
+schema_version: 3
+task_id: dev-environment-setup
+
+contract:
+  status: APPROVED
+  target: "f7cb84235e305bc2d369fd129f23b912ac049b7f"
+
+resources:
+  reservations: {}
+
+review:
+  status: NOT_REQUESTED
+  target: ""
+
+owner:
+  status: PENDING
+  review_target: ""
+
+delivery:
+  status: NOT_RUN
+  review_target: ""
+  feature_head: ""
+  develop_base: ""
+
+blocked:
+  active: false
+  by: ""
+  reason: ""
