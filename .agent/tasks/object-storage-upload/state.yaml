@@ -15,8 +15,8 @@ review:
   target: "0414bff4116952b5a7bce1f6c4a53934d7f95a85"
 
 owner:
-  status: PENDING
-  review_target: ""
+  status: ACCEPTED
+  review_target: "0414bff4116952b5a7bce1f6c4a53934d7f95a85"
 
 delivery:
   status: NOT_RUN
