@@ -10,7 +10,7 @@ SHELL := /bin/bash
 
 SCRIPTS := scripts
 
-.PHONY: help bootstrap init up down restart status logs health test test-storage clean
+.PHONY: help bootstrap init up down restart status logs health test test-lib test-storage clean
 
 help: ## 列出所有可用目标及说明
 	@bash $(SCRIPTS)/help.sh
@@ -39,8 +39,11 @@ logs: ## 查看应用与依赖容器日志
 health: ## 校验 App / MySQL / Redis 三者健康状态
 	@bash $(SCRIPTS)/health.sh
 
-test: ## 执行 go vet 与 go test
+test: ## 执行 go vet 与 go test（隔离 .env，不受本地环境变量污染）
 	@bash $(SCRIPTS)/test.sh
+
+test-lib: ## 校验 lib.sh 加载语义（空值不覆盖默认值等，AC-003 回归）
+	@bash $(SCRIPTS)/test-lib.sh
 
 test-storage: ## 独立真实存储 E2E：签发→直传真实 PNG→校验 final_url→删除（需真实七牛凭据）
 	@bash $(SCRIPTS)/test-storage.sh

@@ -28,9 +28,10 @@ log_error() { printf '\033[31m[ERROR]\033[0m %s\n' "$*" >&2; }
 
 # ---------------------------------------------------------------------------
 # 加载 .env（若存在）；已导出的环境变量优先级更高。
+# 参数：可选的文件路径，缺省为 ${ROOT_DIR}/.env（便于 shell 测试注入临时文件）。
 # ---------------------------------------------------------------------------
 _load_env_file() {
-  local file="${ROOT_DIR}/.env"
+  local file="${1:-${ROOT_DIR}/.env}"
   [[ -f "${file}" ]] || return 0
   local line key val
   while IFS= read -r line || [[ -n "${line}" ]]; do
@@ -47,14 +48,17 @@ _load_env_file() {
       && { [[ "${val:0:1}" == '"' ]] || [[ "${val:0:1}" == "'" ]]; }; then
       val="${val:1:${#val}-2}"
     fi
-    # 环境变量优先
+    # 空值不导出：`KEY=` 若被导出为空环境变量，GoFrame GetEffective 会把「空但已设置」
+    # 视为覆盖 config.yaml 非空默认值（如 AUTH_JWT_SECRET、DATABASE_DEFAULT_PASS），导致启动失败。
+    # 跳过空值，使加载优先级保持「已导出环境变量 > .env 非空值 > config.yaml 默认值」。
+    [[ -n "${val}" ]] || continue
+    # 已导出的环境变量优先：仅当该键当前未设置（或为空）时用 .env 值填充。
     if [[ -z "${!key:-}" ]]; then
       export "${key}=${val}"
     fi
   done < "${file}"
 }
 _load_env_file
-unset -f _load_env_file
 
 # ---------------------------------------------------------------------------
 # 配置（环境变量可覆盖，默认值与 config.yaml / docker-compose.yml 一致）

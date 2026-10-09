@@ -96,11 +96,11 @@ func seedSuperAdmin(ctx context.Context) error {
 	}
 	password := cfgString(ctx, "admin.super.password", "")
 
-	n, err := g.DB().Model("admins").Ctx(ctx).Where("is_super", 1).Count()
+	exists, err := superAdminExists(ctx)
 	if err != nil {
-		return gerror.Wrap(err, "查询超级管理员")
+		return err
 	}
-	if n > 0 {
+	if exists {
 		glog.Info(ctx, "超级管理员已存在，跳过 seed")
 		return nil
 	}
@@ -136,4 +136,24 @@ func seedSuperAdmin(ctx context.Context) error {
 func isDuplicateKeyError(err error) bool {
 	var mysqlErr *mysql.MySQLError
 	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
+}
+
+// isTableNotExistError 判断是否为 MySQL「表不存在」错误（1146）。
+// admins 表尚未建立（尚未执行 migrate）时视为「超级管理员不存在」，而非启动错误。
+func isTableNotExistError(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1146
+}
+
+// superAdminExists 只读判断数据库是否已存在超级管理员（is_super=1）。
+// admins 表不存在（mysql 1146）视为「不存在」；其它数据库错误返回 error（fail-closed）。
+func superAdminExists(ctx context.Context) (bool, error) {
+	n, err := g.DB().Model("admins").Ctx(ctx).Where("is_super", 1).Count()
+	if err != nil {
+		if isTableNotExistError(err) {
+			return false, nil
+		}
+		return false, gerror.Wrap(err, "查询超级管理员")
+	}
+	return n > 0, nil
 }
