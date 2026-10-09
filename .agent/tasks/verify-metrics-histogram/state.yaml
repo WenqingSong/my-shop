@@ -2,7 +2,8 @@ schema_version: 3
 task_id: verify-metrics-histogram
 
 contract:
-  status: PENDING
+  status: APPROVED
+  target: "ddc137feedfbeb4a41e6dd74fa6430210e0306bf"
 
 resources:
   reservations: {}
