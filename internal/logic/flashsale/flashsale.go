@@ -260,7 +260,7 @@ func (s *sFlashSale) UpdateActivity(ctx context.Context, req *v1.UpdateReq) (*v1
 func (s *sFlashSale) CreateOrder(ctx context.Context, userID, activityID int64, req *v1.CreateOrderReq) (res *v1.CreateOrderRes, err error) {
 	started := time.Now()
 	defer func() {
-		metrics.ObserveOrder(ctx, activityID, orderOutcome(res, err), time.Since(started))
+		metrics.ObserveOrder(ctx, orderOutcome(res, err), time.Since(started))
 	}()
 
 	skuID := req.SkuId

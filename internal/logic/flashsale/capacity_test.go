@@ -6,7 +6,6 @@ package flashsale
 
 import (
 	"context"
-	"strconv"
 	"testing"
 	"time"
 
@@ -240,14 +239,12 @@ func TestMetricsReconcile(t *testing.T) {
 
 	const userID = int64(907000)
 
-	activityLabel := strconv.FormatInt(activityID, 10)
-
 	// 下单前记录基线。
 	queuedBefore := gatherMetricValue(t, "flashsale_requests_total", map[string]string{
-		"interface": "order", "activity": activityLabel, "result": "queued",
+		"interface": "order", "result": "queued",
 	})
 	successBefore := gatherMetricValue(t, "flashsale_requests_total", map[string]string{
-		"interface": "consume", "activity": activityLabel, "result": "success",
+		"interface": "consume", "result": "success",
 	})
 
 	// 下单 + 消费各 1 次。
@@ -261,10 +258,10 @@ func TestMetricsReconcile(t *testing.T) {
 
 	// 指标与真实结果一致：order/queued +1、consume/success +1。
 	queuedAfter := gatherMetricValue(t, "flashsale_requests_total", map[string]string{
-		"interface": "order", "activity": activityLabel, "result": "queued",
+		"interface": "order", "result": "queued",
 	})
 	successAfter := gatherMetricValue(t, "flashsale_requests_total", map[string]string{
-		"interface": "consume", "activity": activityLabel, "result": "success",
+		"interface": "consume", "result": "success",
 	})
 	if queuedAfter-queuedBefore != 1 {
 		t.Fatalf("order/queued delta=%v want 1", queuedAfter-queuedBefore)
