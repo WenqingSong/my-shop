@@ -13,8 +13,8 @@ review:
   target: "fb5bbee"
 
 owner:
-  status: PENDING
-  review_target: ""
+  status: ACCEPTED
+  review_target: "fb5bbee"
 
 delivery:
   status: NOT_RUN
