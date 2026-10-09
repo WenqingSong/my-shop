@@ -73,6 +73,22 @@ judge_correctness() {
   fi
 }
 
+# ---------------------------------------------------------------------------
+# 纯函数：解析 worker 下单输出。$1=curl 输出（body|http_code|time_total）。
+# 输出一行 "time_total,http_code,code"。
+# 网络失败时 fallback 为 "|-1|0"（空 body），解析为 "0,-1,-1"，使该行被 analyze
+# 归为 error / 非有效请求、不参与时延统计；正常 / 429 / 503 等成功响应路径不变。
+# ---------------------------------------------------------------------------
+parse_worker_out() {
+  local out="$1" body time_total http_code code
+  body="${out%|*|*}"
+  time_total="${out##*|}"
+  http_code="${out#*|}"; http_code="${http_code%|*}"
+  code="$(printf '%s' "$body" | sed -n 's/.*"code":\([-0-9]*\).*/\1/p')"
+  [ -n "$code" ] || code="-1"
+  printf '%s,%s,%s\n' "$time_total" "$http_code" "$code"
+}
+
 mysql_q() { mysql -h"$MYSQL_HOST" -P"$MYSQL_PORT" -u"$MYSQL_USER" -p"$MYSQL_PASS" -N -B -e "$1" "$MYSQL_DB" 2>/dev/null; }
 
 # ---------------------------------------------------------------------------
@@ -115,6 +131,33 @@ sample_queue_peak() {
 }
 
 # ---------------------------------------------------------------------------
+# 生成独立 worker 脚本（每个请求由 xargs 派生一个新进程执行）。
+# worker 复用 run.sh 的 parse_worker_out 作为单一解析来源，并通过 if ! 捕获 curl
+# 退出码：curl 失败时（-w 仍会输出 "|000|<time>"）归一为网络失败行 "|-1|0"。
+# ---------------------------------------------------------------------------
+make_worker() {
+  local worker="$1"
+  cat > "$worker" <<'EOF'
+#!/usr/bin/env bash
+# 复用 run.sh 的 parse_worker_out（单一解析来源），保证网络失败与成功响应解析一致。
+source "$SCRIPT_DIR/run.sh"
+token="$1"
+idx="$2"
+key="lt_${SCENARIO}_${ACTIVITY_ID}_${idx}"
+# curl 失败（连接拒绝/超时/重启窗口等）时 -w 仍会输出 "|000|<time>" 且退出码非 0；
+# 若用 `|| echo` 兜底，会把兜底字符串与 -w 输出拼接成坏行。这里用 if ! 捕获退出码，
+# 失败时把 out 归一为 "|-1|0"（网络失败），由 parse_worker_out 解析为 "0,-1,-1"。
+if ! out="$(curl -s -w '|%{http_code}|%{time_total}' -X POST "${BASE_URL}/flash-sales/${ACTIVITY_ID}/orders" \
+  -H "Authorization: Bearer ${token}" -H 'Content-Type: application/json' \
+  -d "{\"sku_id\":${SKU_ID},\"idempotency_key\":\"${key}\"}" 2>/dev/null)"; then
+  out="|-1|0"
+fi
+parse_worker_out "$out" >> "$RESULTS"
+EOF
+  chmod +x "$worker"
+}
+
+# ---------------------------------------------------------------------------
 # 2) 并发下单：每个用户以唯一幂等键下单，记录时延（curl time_total）、HTTP 状态与业务 code。
 #    用独立 worker 脚本 + xargs 并发执行（避免 export -f 函数跨进程的环境传递问题）。
 # ---------------------------------------------------------------------------
@@ -123,22 +166,7 @@ run_orders() {
   : > "$RESULTS"
 
   local worker="$WORK/worker.sh"
-  cat > "$worker" <<'EOF'
-#!/usr/bin/env bash
-token="$1"
-idx="$2"
-key="lt_${SCENARIO}_${ACTIVITY_ID}_${idx}"
-out="$(curl -s -w '|%{http_code}|%{time_total}' -X POST "${BASE_URL}/flash-sales/${ACTIVITY_ID}/orders" \
-  -H "Authorization: Bearer ${token}" -H 'Content-Type: application/json' \
-  -d "{\"sku_id\":${SKU_ID},\"idempotency_key\":\"${key}\"}" 2>/dev/null || echo '||-1|0')"
-body="${out%|*|*}"
-time_total="${out##*|}"
-http_code="${out#*|}"; http_code="${http_code%|*}"
-code="$(printf '%s' "$body" | sed -n 's/.*"code":\([-0-9]*\).*/\1/p')"
-[ -n "$code" ] || code="-1"
-echo "$time_total,$http_code,$code" >> "$RESULTS"
-EOF
-  chmod +x "$worker"
+  make_worker "$worker"
 
   local -a jobs=()
   local i=1
@@ -156,7 +184,8 @@ EOF
   local sampler_pid=$!
 
   # 通过环境变量把运行参数传给 worker（worker 是独立进程，仅继承环境变量）。
-  export SCENARIO ACTIVITY_ID SKU_ID BASE_URL RESULTS
+  # SCRIPT_DIR 供 worker 内 source run.sh 复用 parse_worker_out。
+  export SCENARIO ACTIVITY_ID SKU_ID BASE_URL RESULTS SCRIPT_DIR
   printf '%s\n' "${jobs[@]}" | xargs -P "$CONCURRENCY" -n 2 "$worker"
   touch "$WORK/load_done"
   wait "$sampler_pid" 2>/dev/null || true

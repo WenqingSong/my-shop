@@ -83,4 +83,35 @@ MIN_SAMPLES="5"
 analyze > /dev/null 2>&1
 [[ "$SAMPLE_INSUFFICIENT" == "0" ]] || fail "样本充足（9>=5）不应置位"
 
+# --- parse_worker_out：worker 下单输出解析（含网络失败 fallback 回归）---------
+# 网络失败 fallback（空 body + 时延 0 + http_code -1）必须解析为 "0,-1,-1"，
+# 使该行被 analyze 归为 error / 非有效请求、不参与时延统计（回归 CLEAN-001）。
+p_out="$(parse_worker_out '|-1|0')"
+[[ "$p_out" == "0,-1,-1" ]] || fail "网络失败 fallback 应解析为 0,-1,-1，实际 $p_out"
+
+# 正常 / 429 / 503 等成功响应路径解析保持不变。
+p_out="$(parse_worker_out '{"code":0,"message":"ok"}|200|0.010')"
+[[ "$p_out" == "0.010,200,0" ]] || fail "正常响应应解析为 0.010,200,0，实际 $p_out"
+p_out="$(parse_worker_out '{"code":12009,"message":"限流"}|429|0.030')"
+[[ "$p_out" == "0.030,429,12009" ]] || fail "限流 429 应解析为 0.030,429,12009，实际 $p_out"
+p_out="$(parse_worker_out '{"code":1005,"message":"熔断"}|503|0.040')"
+[[ "$p_out" == "0.040,503,1005" ]] || fail "熔断 503 应解析为 0.040,503,1005，实际 $p_out"
+# 有 HTTP 响应但无业务 code 字段 → code=-1（归类为 error，不参与 queued/rejected 计数）。
+p_out="$(parse_worker_out 'plain-body|500|0.050')"
+[[ "$p_out" == "0.050,500,-1" ]] || fail "无业务码响应应 code=-1，实际 $p_out"
+
+# --- make_worker 端到端：curl 完全失败时应落为 "0,-1,-1"（回归 CLEAN-001 根因）-----
+# 用真实 worker（含 if ! 捕获 curl 退出码）对一个必然拒绝连接的端口下单，
+# 断言写入 RESULTS 的行为网络失败行 "0,-1,-1"，而非被 -w 输出污染的坏行。
+wdir="$tmpdir/worker"
+mkdir -p "$wdir"
+worker="$wdir/worker.sh"
+make_worker "$worker"
+wresults="$wdir/results.csv"
+: > "$wresults"
+export SCENARIO="low" ACTIVITY_ID="1" SKU_ID="1" BASE_URL="http://127.0.0.1:1" RESULTS="$wresults" SCRIPT_DIR="$SCRIPT_DIR"
+"$worker" "dummy_token" "1"
+wline="$(cat "$wresults")"
+[[ "$wline" == "0,-1,-1" ]] || fail "worker 网络失败应输出 0,-1,-1，实际 $wline"
+
 echo "test-run.sh 全部通过"
