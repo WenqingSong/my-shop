@@ -17,10 +17,10 @@ owner:
   review_target: "fb5bbee"
 
 delivery:
-  status: NOT_RUN
-  review_target: ""
-  feature_head: ""
-  develop_base: ""
+  status: PASS
+  review_target: "fb5bbee"
+  feature_head: "152aaaf6ff56f51adb16efb158ae622ed4e12860"
+  develop_base: "99ace202a90de7699ab7ea3cd24dd7fa9742ef8c"
 
 blocked:
   active: false
