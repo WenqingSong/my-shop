@@ -10,17 +10,17 @@
 | --- | --- |
 | 身份与权限 | 前台用户 JWT + Redis 会话、Refresh Token 轮换与会话撤销；后台管理员独立身份域与 RBAC |
 | 商品与购买 | 分类、商品、SKU、库存、地址、购物车；普通订单含服务端定价、快照、幂等、状态机与超时取消 |
-| 秒杀 | V1 MySQL 正确性约束、V2 Redis + Lua 准入、V3 MySQL 出队表异步落单、V4 故障恢复与审计 |
+| 秒杀 | V1 MySQL 正确性约束、V2 Redis + Lua 准入、V3 MySQL 出队表异步落单、V4 故障恢复与审计、V5 限流/排队上限/熔断/指标与逐级压测脚本 |
 | 扩展能力 | 评价、收藏、点赞、轮播图、推荐位、文章等 |
 | 工程基础 | 版本化数据库迁移、Docker Compose 开发依赖、测试与 Makefile 生命周期脚本 |
 
-**能力边界：**普通订单使用 Mock 支付，没有接入真实支付机构；秒杀订单下单即成交，不走普通订单的支付/取消流程。秒杀异步队列使用 MySQL 出队表，没有引入外部 MQ。Kubernetes 部署与 P99 压测数据尚未在本仓库形成可复现的公开结论，因此这里不声明生产容量或性能指标。
+**能力边界：**普通订单使用 Mock 支付，没有接入真实支付机构；秒杀订单下单即成交，不走普通订单的支付/取消流程。秒杀异步队列使用 MySQL 出队表，没有引入外部 MQ。V5 已提供延迟分位数指标和逐级压测脚本，但仓库尚未发布包含环境、负载和结果的稳定性能报告；Kubernetes 部署也未形成已验证结论，因此这里不声明生产容量或 P99 目标已达成。
 
 ## 阅读路径
 
 1. [项目导览](docs/project-overview.md)：了解系统和两条核心交易链路。
 2. [普通订单设计](docs/design/order.md)与[秒杀设计](docs/design/flash-sale.md)：深入状态机、业务不变量、一致性与故障处理。
-3. [订单核心逻辑验证](.agent/tasks/order-v1/core-logic.md)、[秒杀 V4 核心逻辑验证](.agent/tasks/flash-sale-v4/core-logic.md)与[秒杀 V4 交付证据](.agent/tasks/flash-sale-v4/delivery.md)：查看设计如何对应实现和测试。
+3. [订单核心逻辑验证](.agent/tasks/order-v1/core-logic.md)、[秒杀 V4 核心逻辑验证](.agent/tasks/flash-sale-v4/core-logic.md)与[秒杀 V5 交付证据](.agent/tasks/flash-sale-v5/delivery.md)：查看设计如何对应实现和测试。
 4. [Agent Workflow 设计](docs/design/agent-workflow.md)：了解项目如何记录决策、审查实现并保留验收证据。
 
 `docs/design/*` 记录持续维护的项目级设计；`.agent/tasks/*` 是按任务留存的历史资料。阅读历史任务时，应以当前代码和长期设计核对现状。
