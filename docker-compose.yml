@@ -31,6 +31,27 @@ services:
       timeout: 3s
       retries: 5
 
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: my-shop-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    # 应用以宿主机进程监听 :8000，容器内经 host-gateway 打通到宿主机端口（Linux 需 Docker 20.10+）。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
 volumes:
   mysql_data:
   redis_data:

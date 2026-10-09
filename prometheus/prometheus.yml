@@ -1,0 +1,19 @@
+# Prometheus 抓取配置（测试环境）。
+#
+# 抓取 my-shop 服务的 GET /metrics（Prometheus 文本格式）。该端点仅在
+# flash_sale.metrics.enabled=true（环境变量 FLASH_SALE_METRICS_ENABLED）开启时由服务暴露。
+#
+# 网络说明：应用以宿主机进程监听 :8000（SERVER_ADDRESS 可覆盖），Prometheus 运行在容器内，
+# 经 host.docker.internal:host-gateway（docker-compose 的 extra_hosts）访问宿主机端口。
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: my-shop
+    metrics_path: /metrics
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+          - "host.docker.internal:8000"

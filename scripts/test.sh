@@ -13,4 +13,7 @@ log_info "go vet ./..."
 log_info "go test -p 1 ./..."
 ( cd "${ROOT_DIR}" && go test -p 1 ./... )
 
+log_info "校验 Prometheus 接入配置..."
+"${SCRIPT_DIR}/test-prometheus.sh"
+
 log_info "测试全部通过"

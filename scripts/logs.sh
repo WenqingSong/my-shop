@@ -11,5 +11,5 @@ else
   log_warn "暂无应用日志"
 fi
 
-printf '\n===== 依赖容器日志（mysql / redis）=====\n'
-docker_compose logs --tail=100 mysql redis || true
+printf '\n===== 依赖容器日志（mysql / redis / prometheus）=====\n'
+docker_compose logs --tail=100 mysql redis prometheus || true

@@ -47,7 +47,9 @@
 ├── .agent/tasks/           # 任务决策与验收证据
 ├── manifest/config/        # 配置文件
 │   └── config.yaml
-├── docker-compose.yml      # MySQL / Redis 开发依赖
+├── prometheus/             # Prometheus 抓取配置（测试环境）
+│   └── prometheus.yml
+├── docker-compose.yml      # MySQL / Redis / Prometheus 开发依赖
 ├── Makefile                # 本地生命周期入口
 ├── main.go                 # 程序入口
 └── go.mod
@@ -132,3 +134,16 @@ SERVER_ADDRESS=:8080 DATABASE_DEFAULT_HOST=10.0.0.5 go run . serve
 - 服务启动时校验 MySQL、Redis 与数据库 schema；迁移缺失或 dirty 时拒绝启动。
 - 依赖尚未就绪时会以 1 秒为间隔重试，最长持续 `STARTUP_DEPENDENCY_TIMEOUT` 秒。
 - 超时或失败时，进程会输出明确的错误日志并以非零状态退出，不会静默忽略。
+
+## 指标与 Prometheus（测试环境）
+
+秒杀指标（`flashsale_*`）默认关闭；需以 `flash_sale.metrics.enabled=true` 运行服务（环境变量 `FLASH_SALE_METRICS_ENABLED=true`）后，`GET /metrics` 才会以 Prometheus 文本格式暴露。Prometheus 随 `make up` 一并启动（端口 `9090`，可用 `PROMETHEUS_PORT` 覆盖），抓取配置见 `prometheus/prometheus.yml`，其指向宿主机 `:8000` 的 `/metrics` 并经 `host.docker.internal` 打通网络。
+
+```bash
+export ADMIN_SUPER_PASSWORD='your-local-password'
+FLASH_SALE_METRICS_ENABLED=true make up
+make health                       # 校验 App / MySQL / Redis / Prometheus 全部健康
+curl http://127.0.0.1:9090/api/v1/targets   # 查看 my-shop 目标是否 UP
+```
+
+> 指标暴露范围与鉴权语义不变：仅在 `flash_sale.metrics.enabled=true` 时暴露，无独立鉴权入口；生产环境需保证该端点仅内网/监控网段可达。
