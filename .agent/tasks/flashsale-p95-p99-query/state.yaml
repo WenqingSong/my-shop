@@ -1,0 +1,28 @@
+schema_version: 3
+task_id: flashsale-p95-p99-query
+
+contract:
+  status: NOT_REQUIRED
+  target: ""
+
+resources:
+  reservations: {}
+
+review:
+  status: CLEAN
+  target: "23f1c429c4f87ee31c87d0c76a478db2a7dbf117"
+
+owner:
+  status: ACCEPTED
+  review_target: "23f1c429c4f87ee31c87d0c76a478db2a7dbf117"
+
+delivery:
+  status: PASS
+  review_target: "23f1c429c4f87ee31c87d0c76a478db2a7dbf117"
+  feature_head: "62bb60a145ad4fd1676ba3359da157aaa22f1c51"
+  develop_base: "466a239dbd0d2043adb9cae5cdac487acd2dad45"
+
+blocked:
+  active: false
+  by: ""
+  reason: ""
