@@ -17,10 +17,10 @@ owner:
   review_target: "3a78a53f1f9bfa6b0d14135a6f0bfdd45c4a1554"
 
 delivery:
-  status: NOT_RUN
-  review_target: ""
-  feature_head: ""
-  develop_base: ""
+  status: BLOCKED
+  review_target: "3a78a53f1f9bfa6b0d14135a6f0bfdd45c4a1554"
+  feature_head: "4b650ab296281f0b821af0edfa5208bbe3deb2e8"
+  develop_base: "aa272f485c6ea53131464361aa117bcb0d555667"
 
 blocked:
   active: false
