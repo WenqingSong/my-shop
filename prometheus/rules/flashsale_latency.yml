@@ -1,0 +1,23 @@
+# 秒杀下单接口延迟 recording rules（p95 / p99）。
+#
+# 语义：p95 / p99 为「秒杀下单接口」的 HTTP 接收延迟，即 ObserveOrder 在 CreateOrder
+# 进入 → 返回受理结果期间用 time.Since 测量的耗时，单位秒。
+#   不含异步最终订单完成耗时：该耗时由 interface="consume" 单独观测（ObserveConsume），
+#   本规则不使用 consume 序列。
+#
+# 表达式说明：
+#   - histogram_quantile(q, ...) 基于 flashsale_request_duration_seconds 的秒单位桶计算
+#     分位，返回值单位与桶一致（秒）；
+#   - rate(...[5m]) 对最近 5 分钟的桶累计计数求每秒速率；
+#   - sum by (le) 跨 result 维度聚合（同一 le 桶计数相加），得到下单接口整体延迟分布，
+#     不按 result（queued/success/gate_rejected/rate_limited/queue_full/error）拆分；
+#   - interface="order" 限定为唯一下单路由 POST /flash-sales/:id/orders 的接收延迟。
+#
+# 单位换算：指标值单位为秒，换算毫秒为「× 1000」。
+groups:
+  - name: flashsale_latency
+    rules:
+      - record: flashsale_order_request_duration_p95_seconds
+        expr: histogram_quantile(0.95, sum by (le) (rate(flashsale_request_duration_seconds_bucket{interface="order"}[5m])))
+      - record: flashsale_order_request_duration_p99_seconds
+        expr: histogram_quantile(0.99, sum by (le) (rate(flashsale_request_duration_seconds_bucket{interface="order"}[5m])))

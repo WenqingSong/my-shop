@@ -47,7 +47,9 @@
 ├── .agent/tasks/           # 任务决策与验收证据
 ├── manifest/config/        # 配置文件
 │   └── config.yaml
-├── docker-compose.yml      # MySQL / Redis 开发依赖
+├── prometheus/             # Prometheus 抓取配置（测试环境）
+│   └── prometheus.yml
+├── docker-compose.yml      # MySQL / Redis / Prometheus 开发依赖
 ├── Makefile                # 本地生命周期入口
 ├── main.go                 # 程序入口
 └── go.mod
@@ -55,9 +57,21 @@
 
 ## 快速开始
 
-### 推荐：统一生命周期脚本
+### 推荐：两阶段初始化
 
-首次启动需要自行提供本地超级管理员密码。`make bootstrap` 会启动 MySQL/Redis、构建应用、执行数据库迁移，再启动 HTTP 服务。
+推荐使用两阶段初始化，先准备依赖容器与 `.env`，再启动后端（详见下文「本地开发两阶段初始化与真实 E2E」）：
+
+```bash
+make init    # 第一阶段：准备 MySQL/Redis 容器与 .env（不要求七牛凭据、不启动后端）
+# 编辑 .env 填入七牛配置后：
+make up      # 第二阶段：加载 .env → 校验七牛配置与 bucket 可用性 → 启动后端
+```
+
+`make up` 会启动 MySQL/Redis/Prometheus 依赖容器、构建应用、执行七牛与超管预检、迁移并启动 HTTP 服务。默认访问 `http://127.0.0.1:8000/health`；`make down` 停止应用与依赖容器、保留数据卷；更多目标见 `make help`。
+
+### 其他启动方式
+
+`make bootstrap` 一键初始化开发环境：启动 MySQL/Redis、构建应用、执行数据库迁移并启动 HTTP 服务（首次启动需提供本地超级管理员密码）：
 
 ```bash
 export ADMIN_SUPER_PASSWORD='your-local-password'
@@ -65,11 +79,7 @@ make bootstrap
 make health
 ```
 
-默认访问 `http://127.0.0.1:8000/health`。`make down` 停止应用与依赖容器、保留数据卷；更多目标见 `make help`。
-
-### 手动启动
-
-`serve` 只检查 schema，不自动建表。因此必须先执行迁移：
+也可以手动启动。`serve` 只检查 schema，不自动建表，因此必须先执行迁移：
 
 ```bash
 docker compose up -d
@@ -115,15 +125,29 @@ go test -p 1 ./... # 测试包共享本地 MySQL/Redis，串行执行
 | `redis.default.address` | `REDIS_DEFAULT_ADDRESS` | `127.0.0.1:6379` | Redis 地址 |
 | `redis.default.db` | `REDIS_DEFAULT_DB` | `0` | Redis DB |
 | `redis.default.pass` | `REDIS_DEFAULT_PASS` | 空 | Redis 密码 |
-| `auth.jwt.secret` | `AUTH_JWT_SECRET` | 开发用默认值 | JWT 签名密钥；生产必须覆盖 |
-| `admin.super.password` | `ADMIN_SUPER_PASSWORD` | 空 | 首次创建超级管理员时必填 |
+| `auth.jwt.secret` | `AUTH_JWT_SECRET` | 开发默认值 | JWT 签名密钥（HS256，生产必须替换为 ≥32 字节随机密钥） |
+| `admin.super.username` | `ADMIN_SUPER_USERNAME` | `admin` | 超级管理员用户名 |
+| `admin.super.password` | `ADMIN_SUPER_PASSWORD` | 空 | 超级管理员初始密码（仅超管不存在时创建需要，生产必须注入） |
 | `startup.dependency.timeout` | `STARTUP_DEPENDENCY_TIMEOUT` | `30` | 启动依赖校验超时（秒） |
+| `qiniu.access_key` | `QINIU_ACCESS_KEY` | 空 | 七牛 AccessKey（凭据标识，仅环境变量注入） |
+| `qiniu.secret_key` | `QINIU_SECRET_KEY` | 空 | 七牛 SecretKey（机密，仅环境变量注入） |
+| `qiniu.bucket` | `QINIU_BUCKET` | 空 | 七牛存储空间名（非敏感） |
+| `qiniu.domain` | `QINIU_DOMAIN` | 空 | 七牛对外访问域名（非敏感） |
+| `qiniu.region` | `QINIU_REGION` | `z2` | 七牛区域 |
+| `qiniu.token_ttl` | `QINIU_TOKEN_TTL` | `3600` | 上传凭证有效期（秒） |
+| `qiniu.max_file_size` | `QINIU_MAX_FILE_SIZE` | `10485760` | 单文件大小上限（字节） |
 
 示例：
 
 ```bash
 SERVER_ADDRESS=:8080 DATABASE_DEFAULT_HOST=10.0.0.5 go run . serve
 ```
+
+### 本地 .env 与敏感凭据
+
+- 新增模板 `.env.example`（仅变量名/安全示例，可提交）；`make init` 会在 `.env` 不存在时自动从 `.env.example` 复制生成 `.env`（已存在则保留不覆盖），填写本地真实值（`.env` 已被 `.gitignore` 忽略，绝不提交）。
+- 本地通过 `make up` / `make bootstrap` 启动时，`scripts/lib.sh` 自动加载根目录 `.env` 到环境变量；Docker Compose 亦会读取 `.env` 作变量替换。
+- 敏感凭据（`AUTH_JWT_SECRET`、`ADMIN_SUPER_PASSWORD`、`QINIU_ACCESS_KEY`/`QINIU_SECRET_KEY` 等）**仅通过环境变量注入**：本地放 `.env`，CI/生产经平台 Secret / 环境变量注入。`manifest/config/config.yaml` 中这些字段保持空值，不写入任何真实凭据。
 
 > 说明：`config.yaml` 与 `docker-compose.yml` 中的账号密码均为本地开发默认值，生产环境务必通过环境变量注入真实凭据，代码中不硬编码任何生产凭据。
 
@@ -132,3 +156,26 @@ SERVER_ADDRESS=:8080 DATABASE_DEFAULT_HOST=10.0.0.5 go run . serve
 - 服务启动时校验 MySQL、Redis 与数据库 schema；迁移缺失或 dirty 时拒绝启动。
 - 依赖尚未就绪时会以 1 秒为间隔重试，最长持续 `STARTUP_DEPENDENCY_TIMEOUT` 秒。
 - 超时或失败时，进程会输出明确的错误日志并以非零状态退出，不会静默忽略。
+
+## 指标与 Prometheus（测试环境）
+
+秒杀指标（`flashsale_*`）默认关闭；需以 `flash_sale.metrics.enabled=true` 运行服务（环境变量 `FLASH_SALE_METRICS_ENABLED=true`）后，`GET /metrics` 才会以 Prometheus 文本格式暴露。Prometheus 随 `make up` 一并启动（端口 `9090`，可用 `PROMETHEUS_PORT` 覆盖），抓取配置见 `prometheus/prometheus.yml`，其指向宿主机 `:8000` 的 `/metrics` 并经 `host.docker.internal` 打通网络。
+
+```bash
+export ADMIN_SUPER_PASSWORD='your-local-password'
+FLASH_SALE_METRICS_ENABLED=true make up
+make health                       # 校验 App / MySQL / Redis / Prometheus 全部健康
+curl http://127.0.0.1:9090/api/v1/targets   # 查看 my-shop 目标是否 UP
+```
+
+> 指标暴露范围与鉴权语义不变：仅在 `flash_sale.metrics.enabled=true` 时暴露，无独立鉴权入口；生产环境需保证该端点仅内网/监控网段可达。
+
+## 本地开发两阶段初始化与真实 E2E
+
+七牛云为 `serve` 启动的 required dependency：启动时会 fail-fast 校验配置（AK/SK/Bucket/Domain 存在性）并对指定 bucket 执行最小权限只读可用性检查（`GetBucketInfo`），任一失败进程非零退出。
+
+- `make init`（第一阶段）：检查 Docker/Docker Compose → 启动 MySQL/Redis 容器 → 检查根目录 `.env`（不存在则从 `.env.example` 复制生成，已存在保留不覆盖）→ 提示编辑 `.env` 填七牛 AK/SK/Bucket/Domain 并执行 `make up`。本阶段不要求七牛凭据、不启动 Go 后端、不在终端交互输入 Secret；幂等可重复执行。
+- `make up`（第二阶段）：加载 `.env` → 校验 MySQL/Redis → 构建应用 → `my-shop qiniu check` 预检（结构 + 存在性 + 真实 bucket 可用性，失败非零退出、不启动后端）→ 迁移 → 启动后端（serve 自身再次 fail-fast）。
+- `make test-storage`（独立真实 E2E）：走真实 HTTP 链路「注册 → 登录 → 签发 token → 直传真实 1×1 PNG → 校验 `final_url` HTTP 200 且 Content-Type=image/png → 用返回 key 删除测试对象」；缺真实凭据或任一环节失败 → 非零退出，不用 Mock/假凭据冒充通过。
+
+`.env` 为未跟踪本地文件，不随 Git/分支/worktree/容器传播；构建与单元测试（`go build ./...`、`go test ./...`）不依赖 `.env` 存在即可通过。

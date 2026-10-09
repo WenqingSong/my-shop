@@ -13,6 +13,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/recommendation"
 	reviewController "cnb.cool/go-cloud-devops/my-shop/internal/controller/review"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/sku"
+	uploadCtrl "cnb.cool/go-cloud-devops/my-shop/internal/controller/upload"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 )
 
@@ -37,6 +38,7 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 	reviewAdminCtrl := reviewController.NewAdminV1()
 	bannerCtrl := banner.NewV1()
 	recommendationCtrl := recommendation.NewV1()
+	uploadCtrlV1 := uploadCtrl.NewV1()
 
 	// 后台公开接口：管理员登录（无需 token）。
 	root.POST("/admin/login", adminCtrl.Login)
@@ -51,6 +53,9 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 	root.Group("/", func(admin *ghttp.RouterGroup) {
 		admin.Middleware(middleware.AdminAuth)
 		admin.GET("/admin/me", adminCtrl.Me)
+
+		// 文件上传（管理员，签发七牛云直传凭证；低敏感操作，不叠加独立权限 code）。
+		admin.GET("/admin/qiniu/upload/token", uploadCtrlV1.AdminToken)
 
 		// require 返回一个继承了 AdminAuth、再叠加指定权限校验的子分组。
 		require := func(code string) *ghttp.RouterGroup {

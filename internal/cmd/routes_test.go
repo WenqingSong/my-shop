@@ -72,6 +72,8 @@ func TestRouteTable(t *testing.T) {
 		"DELETE /sessions/:sid",
 		"POST /sessions/revoke-others",
 		"POST /sessions/revoke-all",
+		// 文件上传（前台登录用户，签发七牛云直传凭证）。
+		"GET /qiniu/upload/token",
 		// 健康检查。
 		"GET /health",
 		// 后台公开接口。
@@ -79,6 +81,8 @@ func TestRouteTable(t *testing.T) {
 		"POST /admin/logout",
 		// 后台认证接口。
 		"GET /admin/me",
+		// 文件上传（管理员，签发七牛云直传凭证）。
+		"GET /admin/qiniu/upload/token",
 		// 管理员管理。
 		"POST /admin/admins",
 		"PUT /admin/admins/:id/status",

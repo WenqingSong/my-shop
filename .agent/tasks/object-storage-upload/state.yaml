@@ -1,0 +1,30 @@
+schema_version: 3
+task_id: object-storage-upload
+
+contract:
+  status: APPROVED
+  target: "a0dfa6ea7adab9bd5d1696b1b88adbf093e17f78"
+
+resources:
+  reservations:
+    error_code_domain:
+      - "17000-17999"
+
+review:
+  status: CLEAN
+  target: "0414bff4116952b5a7bce1f6c4a53934d7f95a85"
+
+owner:
+  status: ACCEPTED
+  review_target: "0414bff4116952b5a7bce1f6c4a53934d7f95a85"
+
+delivery:
+  status: PASS
+  review_target: "0414bff4116952b5a7bce1f6c4a53934d7f95a85"
+  feature_head: "4f1ebf80d6cd3ba1db2aa02f32642007caed4d0a"
+  develop_base: "99ace202a90de7699ab7ea3cd24dd7fa9742ef8c"
+
+blocked:
+  active: false
+  by: ""
+  reason: ""

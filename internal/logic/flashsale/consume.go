@@ -130,7 +130,7 @@ func (s *sFlashSale) consumeOne(ctx context.Context) (bool, error) {
 	}
 	if err != nil {
 		// 技术失败：事务回滚，请求仍 queued（无终态），仅观测本次失败。
-		metrics.ObserveConsume(ctx, outcome.activityID, metrics.ResultError, time.Since(started))
+		metrics.ObserveConsume(ctx, metrics.ResultError, time.Since(started))
 		return processed, err
 	}
 	if outcome.leftQueue {
@@ -141,7 +141,7 @@ func (s *sFlashSale) consumeOne(ctx context.Context) (bool, error) {
 		// 终态失败（failed/dead）在事务提交后权威值收敛（幂等）+ 清除标记，释放预扣、无半成品。
 		s.convergeStockAndMarkers(ctx, outcome.activityID, outcome.skuID, outcome.userID, outcome.idempotencyKey)
 	}
-	metrics.ObserveConsume(ctx, outcome.activityID, outcome.result, time.Since(started))
+	metrics.ObserveConsume(ctx, outcome.result, time.Since(started))
 	return processed, nil
 }
 

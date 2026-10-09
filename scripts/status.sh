@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 展示 App / MySQL / Redis 当前运行状态。
+# 展示 App / MySQL / Redis / Prometheus 当前运行状态。
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib.sh"
@@ -24,3 +24,4 @@ else
 fi
 print_service_status mysql
 print_service_status redis
+print_service_status prometheus

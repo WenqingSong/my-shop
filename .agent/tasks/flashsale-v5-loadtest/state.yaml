@@ -1,0 +1,28 @@
+schema_version: 3
+task_id: flashsale-v5-loadtest
+
+contract:
+  status: NOT_REQUIRED
+  target: ""
+
+resources:
+  reservations: {}
+
+review:
+  status: CLEAN
+  target: "3a78a53f1f9bfa6b0d14135a6f0bfdd45c4a1554"
+
+owner:
+  status: ACCEPTED
+  review_target: "3a78a53f1f9bfa6b0d14135a6f0bfdd45c4a1554"
+
+delivery:
+  status: PASS
+  review_target: "3a78a53f1f9bfa6b0d14135a6f0bfdd45c4a1554"
+  feature_head: "79d1b9b8c756e222cbfd6c2a4fa3900b7e01b09b"
+  develop_base: "aa272f485c6ea53131464361aa117bcb0d555667"
+
+blocked:
+  active: false
+  by: ""
+  reason: ""
