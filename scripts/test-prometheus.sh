@@ -4,9 +4,9 @@
 # 校验「能区分正确与错误实现」的关键性质：
 #   1. 抓取配置存在且 job_name=my-shop、metrics_path=/metrics、
 #      目标为 host.docker.internal:8000、scrape_interval 已设置；
-#   2. docker-compose 配置可解析，prometheus 服务具备只读挂载的抓取配置、
+#   2. docker-compose 配置可解析，prometheus 服务具备镜像内置的抓取配置、
 #      host.docker.internal:host-gateway 网络打通与 /-/ready healthcheck；
-#   3. recording rules 存在、prometheus.yml 经 rule_files 引用、rules 目录已只读挂载；
+#   3. recording rules 存在、prometheus.yml 经 rule_files 引用、rules 目录已镜像内置；
 #   4. recording rules 表达式用 histogram_quantile + rate(...[5m]) + interface="order" +
 #      sum by (le)，且指标名后缀与单位一致（秒/毫秒不混配）；promtool 可用时校验语法。
 set -euo pipefail
@@ -14,6 +14,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib.sh"
 
 PROM_CFG="${ROOT_DIR}/prometheus/prometheus.yml"
+PROM_DIR="${ROOT_DIR}/prometheus"
+PROM_DOCKERFILE="${PROM_DIR}/Dockerfile"
 COMPOSE_CFG="${ROOT_DIR}/docker-compose.yml"
 RULES_DIR="${ROOT_DIR}/prometheus/rules"
 RULES_FILE="${RULES_DIR}/flashsale_latency.yml"
@@ -32,18 +34,23 @@ grep -Eq '^  scrape_interval: [0-9]+s$' "${PROM_CFG}" || fail "prometheus.yml �
 # 3) compose 配置可解析（语法/合并校验）。
 docker_compose -f "${COMPOSE_CFG}" config -q || fail "docker compose config 校验失败"
 
-# 4) prometheus 服务具备网络打通、只读挂载与 healthcheck。
+# 4) prometheus 服务具备网络打通、镜像内置配置与 healthcheck。
+#    说明：rootless/嵌套容器环境 bind mount 单文件会退化为目录挂载（文件变目录），
+#    故抓取配置与 rules 改为 prometheus/Dockerfile COPY 内置（镜像层天然只读），
+#    此处校验配置路径与构建声明。
 compose_out="$(docker_compose -f "${COMPOSE_CFG}" config)"
 grep -q 'host.docker.internal' <<<"${compose_out}" || fail "prometheus 服务缺少 host.docker.internal 宿主机映射"
 grep -q 'host-gateway' <<<"${compose_out}" || fail "prometheus 服务缺少 host-gateway 网络打通"
-grep -q '/etc/prometheus/prometheus.yml' <<<"${compose_out}" || fail "prometheus 服务缺少抓取配置只读挂载"
+grep -qF -- '--config.file=/etc/prometheus/prometheus.yml' <<<"${compose_out}" || fail "prometheus 服务缺少 --config.file 抓取配置路径"
 grep -q '/-/ready' <<<"${compose_out}" || fail "prometheus 服务缺少 /-/ready healthcheck"
 
-# 5) recording rules 存在，且 prometheus.yml 经 rule_files 引用、rules 目录已只读挂载。
+# 5) recording rules 存在，且 prometheus.yml 经 rule_files 引用、配置随镜像内置。
 [[ -f "${RULES_FILE}" ]] || fail "缺少 recording rules 文件 ${RULES_FILE}"
 grep -q 'rule_files:' "${PROM_CFG}" || fail "prometheus.yml 缺少 rule_files"
 grep -q 'flashsale_latency.yml' "${PROM_CFG}" || fail "prometheus.yml 的 rule_files 未引用 flashsale_latency.yml"
-grep -q '/etc/prometheus/rules' <<<"${compose_out}" || fail "prometheus 服务缺少 rules 目录只读挂载"
+[[ -f "${PROM_DOCKERFILE}" ]] || fail "缺少 ${PROM_DOCKERFILE}（配置应镜像内置）"
+grep -qF 'prometheus.yml' "${PROM_DOCKERFILE}" || fail "Dockerfile 未内置 prometheus.yml"
+grep -qF 'rules' "${PROM_DOCKERFILE}" || fail "Dockerfile 未内置 rules 目录"
 
 # 6) 校验 recording rules 表达式关键性质（仅针对 expr/record 行，避免注释干扰）。
 expr_lines="$(grep -E '^[[:space:]]*expr:' "${RULES_FILE}")" || fail "recording rule 缺少 expr 表达式"
@@ -76,7 +83,7 @@ fi
 if command -v promtool >/dev/null 2>&1; then
   promtool check rules "${RULES_FILE}" || fail "promtool check rules 失败"
 else
-  prom_image="$(grep -oE 'prom/prometheus:[^[:space:]"]+' <<<"${compose_out}" | head -n 1 || true)"
+  prom_image="$(grep -oE 'prom/prometheus:[^[:space:]"]+' "${PROM_DOCKERFILE}" | head -n 1 || true)"
   if command -v docker >/dev/null 2>&1 && [[ -n "${prom_image}" ]] \
     && docker image inspect "${prom_image}" >/dev/null 2>&1; then
     promtool_tmp="$(mktemp)"
