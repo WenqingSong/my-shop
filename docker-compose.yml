@@ -42,6 +42,7 @@ services:
       - "${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
     # 应用以宿主机进程监听 :8000，容器内经 host-gateway 打通到宿主机端口（Linux 需 Docker 20.10+）。
     extra_hosts:
       - "host.docker.internal:host-gateway"

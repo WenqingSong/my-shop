@@ -10,6 +10,10 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+# recording rules：秒杀下单接口 p95/p99 延迟查询（promtool check rules 校验，见 scripts/test-prometheus.sh）。
+rule_files:
+  - "/etc/prometheus/rules/flashsale_latency.yml"
+
 scrape_configs:
   - job_name: my-shop
     metrics_path: /metrics

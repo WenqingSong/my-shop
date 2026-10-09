@@ -319,6 +319,7 @@ V5 在 Redis 闸门之前增加容量保护（限流/排队软上限/熔断）�
 - Counter + Histogram 覆盖 QPS/成功率/拒绝率/p95/p99；标签维度：接口/结果（低基数稳定枚举）。`interface` ∈ {`order`, `consume`}，其中 `order` 对应唯一下单路由 `POST /flash-sales/:id/orders`，`consume` 对应后台消费链路（无 HTTP 路由，使用合成标签）；`result` ∈ {`queued`, `success`, `gate_rejected`, `rate_limited`, `queue_full`, `failed`, `dead`, `error`}。**不使用用户 ID / 订单 ID / 活动 ID 等 ID 型标签**，标签基数不随业务量增长。
 - 指标名保持不变：`flashsale_requests_total`（CounterVec）、`flashsale_request_duration_seconds`（HistogramVec，桶 `0.5ms~10s`）。
 - 计数口径：order 维度每次 `CreateOrder` 调用一次观测；consume 维度每次「出队成功」处理一次观测（技术失败重试的每次领取各产生一次 `error` 观测，「无请求可领取」不观测）。指标为进程内观测计数（非业务事实），成功/拒绝/失败计数可与 MySQL 订单数、`status=queued`、拒绝数对账（INV-021）。
+- p95/p99 延迟查询固化：以 Prometheus recording rules（`prometheus/rules/flashsale_latency.yml`，经 `prometheus.yml` 的 `rule_files` 加载）产出下单接口整体 p95/p99——`histogram_quantile(0.95/0.99, sum by (le) (rate(flashsale_request_duration_seconds_bucket{interface="order"}[5m])))`，跨 `result` 聚合、只取 `interface="order"`；产出指标名 `flashsale_order_request_duration_p95_seconds` / `flashsale_order_request_duration_p99_seconds`，单位为秒（换算毫秒 × 1000），语义为下单接口 HTTP 接收延迟（`ObserveOrder`），不含 `interface="consume"` 的异步落单耗时。
 - 可观测边界：通用 Histogram 不提供单活动 p99/p95 切片；§11.5 热点 Key 分析与 MySQL 订单/请求表仅提供活动维度的容量/业务计数，不构成单活动耗时指标的等价替代。
 
 ### 11.5 热点 Key 分析（可观测）
