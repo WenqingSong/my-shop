@@ -17,9 +17,9 @@ owner:
   review_target: "e67cf2829ecdf6d9ff0febc66f10a406a5fa092f"
 
 delivery:
-  status: BLOCKED
+  status: PASS
   review_target: "e67cf2829ecdf6d9ff0febc66f10a406a5fa092f"
-  feature_head: "49b63ff2d8f10099a81307b2560cf67381103df4"
+  feature_head: "7409e03616cda2f3e39455974637dfa7bbc77a3b"
   develop_base: "02c3b9218f497826403445b0c5530eee8364df44"
 
 blocked:
