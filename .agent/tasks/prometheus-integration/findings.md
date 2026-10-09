@@ -3,19 +3,20 @@
 ## Review Target
 
 - 任务：`prometheus-integration`（测试环境部署并接入 Prometheus）
-- 结论对应版本：`review.target` = C1 = `6af455c11bae122872cbbc459238dcc87079aba8`（Coder 实现 Evidence Commit）
+- 结论对应版本：`review.target` = C1' = `753228e99e386989e23e6c71757d6d31460656a6`（Coder 修复 CLEAN-001 后的实现 Evidence Commit）
+- 复审说明：首轮审查 C1=`6af455c` 结论 `CHANGES_REQUIRED`（CLEAN-001）；Coder 修复后以 C1'=`753228e` 重新发起 Review Request。C1' 相对 C1 仅将 `scripts/test-prometheus.sh` 由 `100644` 改为 `100755`（内容零改动），其余实现未变。
 - 任务基线 base：`99ace202a90de7699ab7ea3cd24dd7fa9742ef8c`（与 `task.md` Review Baseline 声明一致）
-- 分支：`feat/prometheus-metrics-integration`；当前 HEAD = `be019a4c2d386f00cd35d97d28f41071eb30b5f7`（C2 metadata commit，只改 `state.yaml`）
-- 工作区状态：审查开始时 `git status` clean；无任务前遗留未提交修改需区分
-- 本任务相关变更（`git diff 99ace20..6af455c`，C1 内为 `git diff 5533b41..6af455c`）：
+- 分支：`feat/prometheus-metrics-integration`；复审时 HEAD = `20ef0b6`（C2 metadata commit，只改 `state.yaml`）
+- 工作区状态：复审开始时 `git status` clean；无任务前遗留未提交修改需区分
+- 本任务相关变更（`git diff 99ace20..753228e`）：
   - 修改：`Makefile`、`README.md`、`docker-compose.yml`、`scripts/health.sh`、`scripts/logs.sh`、`scripts/status.sh`、`scripts/test.sh`、`scripts/up.sh`
-  - 新增：`prometheus/prometheus.yml`、`scripts/test-prometheus.sh`
+  - 新增：`prometheus/prometheus.yml`、`scripts/test-prometheus.sh`（现为 `100755`）
   - 未触碰：任何 `.go` 生产代码 / `.sql` 迁移 / `internal/metrics` / `docs/design/*`
 - 全局资源：`resources.reservations` 为空，本任务未申请 migration_version / error_code_domain，无三边一致性检查项
 
 ## Result
 
-CHANGES_REQUIRED
+CLEAN
 
 ## Acceptance Criteria
 
@@ -25,7 +26,7 @@ CHANGES_REQUIRED
 | AC-002 | PASS | `prometheus.yml` 含 `job_name: my-shop`、`metrics_path: /metrics`、`scrape_interval: 15s`、target `host.docker.internal:8000`；`promtool check config` SUCCESS；运行时 `/api/v1/status/config` 回读的 scrape_configs 与之一致。 |
 | AC-003 | PASS | `/api/v1/targets` 返回 `health:"up"`、`lastError:""`、`lastScrape` 持续前进、`lastScrapeDuration≈3ms`、无 dropped targets。 |
 | AC-004 | PASS | 发送 3 次真实下单请求（`POST /flash-sales/1/orders`，均被 `秒杀活动不存在` 拒绝为 `result=gate_rejected`）后，等待 ≥1 个 scrape 周期，Prometheus 中 `flashsale_request_duration_seconds_count=3`、`_sum=0.001011639`、`_bucket{le="+Inf"}=3`，与服务端 `GET /metrics` 直读的 `count=3`、`sum=0.001011639` 完全对账一致。 |
-| AC-005 | FAIL | 子项「metrics 仅开关开启时暴露」PASS（关闭时 `/metrics`=404、开启=200；无 Go 鉴权代码改动）；「启停/健康检查接入」PASS（`up/down/status/health/logs` 均正确纳入 prometheus，App/MySQL/Redis 健康不受影响）；但统一测试入口 `make test` 因 `scripts/test-prometheus.sh` 缺可执行权限而确定性失败（exit 126），构成回归，见 CLEAN-001。 |
+| AC-005 | PASS | 子项「metrics 仅开关开启时暴露」PASS（关闭时 `/metrics`=404、开启=200；无 Go 鉴权代码改动）；「启停/健康检查接入」PASS（`up/down/status/health/logs` 均正确纳入 prometheus，App/MySQL/Redis 健康不受影响）；统一测试入口 `make test` 在修复 CLEAN-001 后完整通过（exit 0）。 |
 
 ## Verification
 
@@ -36,12 +37,13 @@ CHANGES_REQUIRED
 | `bash scripts/test-prometheus.sh` | PASS | 静态校验（job/metrics_path/target/scrape_interval/挂载/healthcheck）通过 |
 | `promtool check config prometheus.yml` | PASS | `SUCCESS: ... is valid prometheus config file syntax` |
 | `go build -o bin/my-shop .` | PASS | 退出码 0 |
-| `go test -p 1 ./...`（`make test` 内） | PASS | 全部包 ok（含 `internal/metrics`），在 test-prometheus.sh 失败前 |
-| `make test`（统一入口） | FAIL | `scripts/test.sh:17: .../test-prometheus.sh: Permission denied`，exit 126 |
+| `make test`（统一入口，含 `go vet` + `go test -p 1 ./...` + `test-prometheus.sh`） | PASS | 全部包 ok（含 `internal/metrics`）；`Prometheus 接入静态校验通过`；`测试全部通过`，exit 0 |
 | 运行时：Prometheus `/-/ready` | PASS | 200 |
 | 运行时：`/api/v1/targets` | PASS | `health=up`、无 scrape 错误 |
 | 运行时：histogram 对账 | PASS | Prometheus count/sum/bucket 与 `/metrics` 直读逐值一致 |
 | 运行时：`GET /metrics` 开关语义 | PASS | 关=404、开=200 |
+| 复审：CLEAN-001 触发条件 | PASS | `make test` 由 exit 126 变为 exit 0，`Permission denied` 消失 |
+| 复审：修复 Diff | PASS | C1' 相对 C1 仅 `test-prometheus.sh` mode `100644→100755`，无内容/无新文件/无无关改动 |
 
 环境限制说明（非代码缺陷，仅影响本 Sandbox 直接走 compose `up` 的路径）：
 - 本审查 Sandbox 是容器化 workspace（overlay 文件系统 + DinD，`/.dockerenv` 存在），Docker daemon 与 workspace 文件系统不同源，`docker-compose.yml` 的单文件 bind mount `./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro` 在本 Sandbox 中会被 daemon 当作目录导致启动失败。
@@ -53,15 +55,15 @@ CHANGES_REQUIRED
 ### CLEAN-001：`scripts/test-prometheus.sh` 缺少可执行权限，导致 `make test` 失败
 
 - Severity：P2
-- Status：OPEN
-- Location：`scripts/test-prometheus.sh`（C1 中 git 文件模式为 `100644`，其余脚本均为 `100755`）；触发点 `scripts/test.sh:17` 直接以 `"${SCRIPT_DIR}/test-prometheus.sh"` 调用
-- AC / Invariant：AC-005「无回归」（统一测试入口 `make test` 应保持可用）；任务 Verification「如改动 shell 脚本执行 `bash -n` 校验」
-- Trigger：执行 `make test`（或 `bash scripts/test.sh`）
-- Actual：`test-prometheus.sh` 无 `+x` 位，`test.sh` 第 17 行直接执行该脚本时报 `Permission denied`，`make test` 以 exit 126 失败（`go vet` / `go test` 已通过，但整体命令失败）
-- Expected：`scripts/test-prometheus.sh` 与其他脚本一致具备可执行权限（`100755`），`make test` 完整通过
-- Impact：`make test`（统一测试入口，`test.sh` 已在本任务中加入 Prometheus 静态校验）确定性失败，构成对既有生命周期命令的回归；CI/本地自检会被打断
-- Evidence：
-  - `git ls-tree 6af455c scripts/`：`100644 blob ... scripts/test-prometheus.sh`（唯一 100644，其余脚本 100755）
-  - 实测 `make test`：`scripts/test.sh: line 17: .../test-prometheus.sh: Permission denied`，`make: *** [Makefile:40: test] Error 126`
-  - 反证：`bash scripts/test-prometheus.sh` 直接以 bash 解释执行可正常通过（说明脚本内容正确，仅缺执行位）
-- Required Fix Boundary：使 `scripts/test-prometheus.sh` 具备可执行权限（`chmod +x`，git 模式 `100755`），使 `make test` 完整通过；不规定其他无关改动，不改脚本内容。
+- Status：CLOSED
+- Location：`scripts/test-prometheus.sh`（原 C1 中 git 文件模式为 `100644`）；触发点 `scripts/test.sh:17`
+- AC / Invariant：AC-005「无回归」（统一测试入口 `make test` 应保持可用）
+- Trigger：执行 `make test`
+- Actual（修复前）：`test-prometheus.sh` 无 `+x` 位，`make test` 报 `Permission denied`，exit 126
+- Expected：`scripts/test-prometheus.sh` 具备可执行权限（`100755`），`make test` 完整通过
+- Impact：`make test` 统一测试入口回归；已修复
+- 修复：C1'=`753228e` 将 `scripts/test-prometheus.sh` 由 `100644` 改为 `100755`（`git show` 确认 0 insertions / 0 deletions，仅 mode 变更，脚本内容不变）
+- 回归验证：`make test` 现 exit 0，`Prometheus 接入静态校验通过`、`测试全部通过`；`git ls-tree 753228e` 确认该文件已为 `100755`
+- Required Fix Boundary：已满足（可执行权限恢复，无其他改动）
+
+复审未发现新的开放 Finding。CLEAN-001 已关闭。
