@@ -13,7 +13,8 @@ review:
   target: "6602531953ef7343f5f33c97dedbf9632bdbcb3f"
 
 owner:
-  status: PENDING
+  status: ACCEPTED
+  review_target: "6602531953ef7343f5f33c97dedbf9632bdbcb3f"
 
 delivery:
   status: NOT_RUN
