@@ -19,10 +19,10 @@ owner:
   review_target: "0414bff4116952b5a7bce1f6c4a53934d7f95a85"
 
 delivery:
-  status: NOT_RUN
-  review_target: ""
-  feature_head: ""
-  develop_base: ""
+  status: PASS
+  review_target: "0414bff4116952b5a7bce1f6c4a53934d7f95a85"
+  feature_head: "4f1ebf80d6cd3ba1db2aa02f32642007caed4d0a"
+  develop_base: "99ace202a90de7699ab7ea3cd24dd7fa9742ef8c"
 
 blocked:
   active: false
