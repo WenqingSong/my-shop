@@ -17,7 +17,10 @@ owner:
   review_target: "6602531953ef7343f5f33c97dedbf9632bdbcb3f"
 
 delivery:
-  status: NOT_RUN
+  status: PASS
+  review_target: "6602531953ef7343f5f33c97dedbf9632bdbcb3f"
+  feature_head: "dcbefb82e31b57fab6fc7cd4d2ead4c28de33042"
+  develop_base: "7a335cc1b3c5fbb7d9dcafa5e546f9aae163a952"
 
 blocked:
   active: false
