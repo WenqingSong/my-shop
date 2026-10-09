@@ -2,8 +2,8 @@ schema_version: 3
 task_id: nginx-reverse-proxy
 
 contract:
-  status: PENDING
-  target: ""
+  status: APPROVED
+  target: "a7d40528492a17f2facb0ecb0a38848b4b1a23c0"
 
 resources:
   reservations: {}
