@@ -117,6 +117,13 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 		require("order:ship").POST("/admin/orders/:id/ship", orderAdminCtrl.Ship)
 		require("order:refund").POST("/admin/orders/:id/refund", orderAdminCtrl.Refund)
 
+		// 订单后台只读操作（AdminAuth + RequirePermission）：
+		//   - 列表与统计持 order:list；详情持 order:view。
+		//   - stats 静态段优先于 /admin/orders/:id，避免被 :id 参数段吞掉。
+		require("order:list").GET("/admin/orders", orderAdminCtrl.AdminList)
+		require("order:list").GET("/admin/orders/stats", orderAdminCtrl.AdminStats)
+		require("order:view").GET("/admin/orders/:id", orderAdminCtrl.AdminDetail)
+
 		// 秒杀活动后台写操作（AdminAuth + RequirePermission）。
 		require("flash_sale:create").POST("/admin/flash-sales", flashsaleAdminCtrl.Create)
 		require("flash_sale:update").PUT("/admin/flash-sales/:id", flashsaleAdminCtrl.Update)

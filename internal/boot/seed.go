@@ -53,6 +53,8 @@ var seedPermissionList = []permissionSeed{
 	{Code: "permission:delete", Name: "删除权限"},
 	{Code: "order:ship", Name: "订单发货"},
 	{Code: "order:refund", Name: "订单退款"},
+	{Code: "order:list", Name: "订单列表与统计查询"},
+	{Code: "order:view", Name: "订单详情查看"},
 	{Code: "flash_sale:create", Name: "创建秒杀活动"},
 	{Code: "flash_sale:update", Name: "更新秒杀活动"},
 	{Code: "flash_sale:repair", Name: "修复秒杀请求"},

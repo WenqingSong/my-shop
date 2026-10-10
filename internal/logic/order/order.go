@@ -879,3 +879,236 @@ func duplicateKeyName(err error) string {
 	}
 	return ""
 }
+
+// 后台订单列表的排序字段白名单（防止任意 SQL 排序字段注入）。
+var adminOrderSortColumns = map[string]string{
+	"id":         "id",
+	"created_at": "created_at",
+}
+
+// 后台订单列表分页与排序默认值/上限。
+const (
+	adminDefaultPage  = 1
+	adminDefaultSize  = 20
+	adminMaxSize      = 100
+	adminDefaultSort  = "id"
+	adminDefaultOrder = "desc"
+)
+
+// adminStatusOrder 是统计结果使用的全状态顺序（DB TINYINT 升序，覆盖 7 态）。
+var adminStatusOrder = []int{
+	statusPendingPayment, statusPaid, statusShipped, statusReceived,
+	statusCompleted, statusCancelled, statusRefunded,
+}
+
+// AdminList 后台分页查询全部普通订单（轻量，不含明细），支持组合筛选与稳定排序。
+// 与用户端 List 不同：无归属过滤、MySQL 侧分页（LIMIT/OFFSET）、不逐单加载明细（无 N+1）。
+func (s *sOrder) AdminList(ctx context.Context, req *v1.AdminListReq) (*v1.AdminListRes, error) {
+	page, size, err := s.adminPageParams(req.Page, req.Size)
+	if err != nil {
+		return nil, err
+	}
+	sortCol, direction, err := s.adminSortParams(req.Sort, req.Order)
+	if err != nil {
+		return nil, err
+	}
+
+	model := g.DB().Model("orders").Ctx(ctx)
+	if orderNo := strings.TrimSpace(req.OrderNo); orderNo != "" {
+		model = model.Where("order_no", orderNo)
+	}
+	if req.UserId != nil {
+		if *req.UserId <= 0 {
+			return nil, codes.New(codes.CodeInvalidArgument)
+		}
+		model = model.Where("user_id", *req.UserId)
+	}
+	if status := strings.TrimSpace(req.Status); status != "" {
+		st, e := statusFromString(status)
+		if e != nil {
+			return nil, codes.New(codes.CodeInvalidArgument)
+		}
+		model = model.Where("status", st)
+	}
+	startUnix, endUnix, err := s.adminTimeRange(req.StartTime, req.EndTime)
+	if err != nil {
+		return nil, err
+	}
+	if startUnix != nil {
+		model = model.Where("created_at >= FROM_UNIXTIME(?)", *startUnix)
+	}
+	if endUnix != nil {
+		model = model.Where("created_at < FROM_UNIXTIME(?)", *endUnix)
+	}
+
+	total, err := model.Count()
+	if err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("统计订单: %w", err))
+	}
+
+	// 列表保持轻量：仅取列表所需 6 字段，避免把 idempotency_key/地址快照等一并取出。
+	orderBy := sortCol + " " + direction
+	if sortCol != "id" {
+		orderBy += ", id " + direction // id 作稳定 tiebreak，避免翻页重复/遗漏。
+	}
+	var rows []*orderRow
+	if err := model.Fields("id", "order_no", "user_id", "status", "total_amount", "created_at").
+		Order(orderBy).Page(page, size).Scan(&rows); err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("查询订单列表: %w", err))
+	}
+
+	items := make([]*v1.AdminOrderListItem, 0, len(rows))
+	for _, r := range rows {
+		items = append(items, &v1.AdminOrderListItem{
+			Id:          r.Id,
+			OrderNo:     r.OrderNo,
+			UserId:      r.UserId,
+			Status:      statusToString(r.Status),
+			TotalAmount: r.TotalAmount,
+			CreatedAt:   r.CreatedAt,
+		})
+	}
+	return &v1.AdminListRes{Items: items, Total: int(total), Page: page, Size: size}, nil
+}
+
+// AdminStats 后台按 status 聚合全部普通订单数量，覆盖完整 7 态（无数据为 0），
+// total 等于各状态数量之和；仅作用于 orders 表，天然不混入秒杀订单。
+func (s *sOrder) AdminStats(ctx context.Context) (*v1.AdminOrderStatsRes, error) {
+	var rows []struct {
+		Status int   `json:"status"`
+		Count  int64 `json:"count"`
+	}
+	if err := g.DB().Model("orders").Ctx(ctx).
+		Fields("status", "COUNT(*) AS count").
+		Group("status").
+		Scan(&rows); err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("统计订单状态: %w", err))
+	}
+
+	counts := make(map[int]int64, len(rows))
+	var total int64
+	for _, r := range rows {
+		counts[r.Status] = r.Count
+		total += r.Count
+	}
+
+	stats := make([]*v1.AdminOrderStatsItem, 0, len(adminStatusOrder))
+	for _, st := range adminStatusOrder {
+		stats = append(stats, &v1.AdminOrderStatsItem{
+			Status: statusToString(st),
+			Count:  counts[st],
+		})
+	}
+	return &v1.AdminOrderStatsRes{Total: total, Stats: stats}, nil
+}
+
+// AdminDetail 后台按 id 查询任意普通订单详情（含明细与历史快照），不存在返回 9001。
+// 复用 findByID/loadItems/toOrder，无用户端 findOwned 归属过滤，也不触发懒取消（纯只读）。
+func (s *sOrder) AdminDetail(ctx context.Context, id int64) (*v1.AdminOrderDetailRes, error) {
+	o, err := s.loadByIDOrder(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if o == nil {
+		return nil, codes.New(codes.CodeOrderNotFound)
+	}
+	return &v1.AdminOrderDetailRes{Order: *o}, nil
+}
+
+// adminPageParams 校验分页参数：缺失取默认值，page<1 或 size<1/size>100 返回 400（拒绝而非钳制）。
+func (s *sOrder) adminPageParams(page, size *int) (int, int, error) {
+	p := adminDefaultPage
+	if page != nil {
+		if *page < 1 {
+			return 0, 0, codes.New(codes.CodeInvalidArgument)
+		}
+		p = *page
+	}
+	sz := adminDefaultSize
+	if size != nil {
+		if *size < 1 || *size > adminMaxSize {
+			return 0, 0, codes.New(codes.CodeInvalidArgument)
+		}
+		sz = *size
+	}
+	return p, sz, nil
+}
+
+// adminSortParams 校验排序参数：sort 白名单、order 取 asc/desc；非法返回 400。
+func (s *sOrder) adminSortParams(sortField, order string) (string, string, error) {
+	col := adminDefaultSort
+	if f := strings.TrimSpace(sortField); f != "" {
+		if _, ok := adminOrderSortColumns[f]; !ok {
+			return "", "", codes.New(codes.CodeInvalidArgument)
+		}
+		col = f
+	}
+	direction := "DESC"
+	if d := strings.TrimSpace(order); d != "" {
+		switch strings.ToLower(d) {
+		case "asc":
+			direction = "ASC"
+		case "desc":
+			direction = "DESC"
+		default:
+			return "", "", codes.New(codes.CodeInvalidArgument)
+		}
+	}
+	return col, direction, nil
+}
+
+// adminTimeRange 解析时间范围：RFC3339（必须含时区偏移）→ Unix 秒；非法或 start>=end 返回 400。
+func (s *sOrder) adminTimeRange(start, end string) (*int64, *int64, error) {
+	var startUnix, endUnix *int64
+	if s0 := strings.TrimSpace(start); s0 != "" {
+		ts, err := parseRFC3339ToUnix(s0)
+		if err != nil {
+			return nil, nil, codes.New(codes.CodeInvalidArgument)
+		}
+		startUnix = &ts
+	}
+	if e0 := strings.TrimSpace(end); e0 != "" {
+		ts, err := parseRFC3339ToUnix(e0)
+		if err != nil {
+			return nil, nil, codes.New(codes.CodeInvalidArgument)
+		}
+		endUnix = &ts
+	}
+	if startUnix != nil && endUnix != nil && *startUnix >= *endUnix {
+		return nil, nil, codes.New(codes.CodeInvalidArgument)
+	}
+	return startUnix, endUnix, nil
+}
+
+// parseRFC3339ToUnix 将 RFC3339（含时区偏移）字符串解析为绝对时刻的 Unix 秒。
+// 缺偏移或非法格式返回错误，由上层映射为 400。
+func parseRFC3339ToUnix(s string) (int64, error) {
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return 0, err
+	}
+	return t.Unix(), nil
+}
+
+// statusFromString 将 API 字符串枚举映射回 DB TINYINT（statusToString 的反函数）。
+// 未知状态返回错误，由上层映射为 400。
+func statusFromString(s string) (int, error) {
+	switch s {
+	case v1.StatusPendingPayment:
+		return statusPendingPayment, nil
+	case v1.StatusPaid:
+		return statusPaid, nil
+	case v1.StatusShipped:
+		return statusShipped, nil
+	case v1.StatusReceived:
+		return statusReceived, nil
+	case v1.StatusCompleted:
+		return statusCompleted, nil
+	case v1.StatusCancelled:
+		return statusCancelled, nil
+	case v1.StatusRefunded:
+		return statusRefunded, nil
+	default:
+		return 0, fmt.Errorf("未知订单状态: %s", s)
+	}
+}

@@ -159,3 +159,63 @@ type RefundReq struct {
 type RefundRes struct {
 	Order
 }
+
+// AdminListReq 后台订单分页列表请求（只读，持 order:list）。
+type AdminListReq struct {
+	g.Meta    `path:"/admin/orders" method:"get" tags:"订单" summary:"后台订单分页列表"`
+	Page      *int   `json:"page" dc:"页码，默认 1；<1 或非整数返回 400"`
+	Size      *int   `json:"size" dc:"每页数量，默认 20、上限 100；越界或非整数返回 400"`
+	OrderNo   string `json:"order_no" dc:"订单号，精确匹配"`
+	UserId    *int64 `json:"user_id" dc:"用户 id，精确匹配；<=0 返回 400"`
+	Status    string `json:"status" dc:"状态字符串枚举，非法返回 400"`
+	StartTime string `json:"start_time" dc:"创建时间起点，RFC3339（含时区偏移），左闭"`
+	EndTime   string `json:"end_time" dc:"创建时间终点，RFC3339（含时区偏移），右开"`
+	Sort      string `json:"sort" dc:"排序字段白名单 id/created_at，默认 id，非法返回 400"`
+	Order     string `json:"order" dc:"排序方向 asc/desc，默认 desc，非法返回 400"`
+}
+
+// AdminListRes 后台订单分页列表响应。
+type AdminListRes struct {
+	Items []*AdminOrderListItem `json:"items" dc:"订单列表（轻量，不含明细）"`
+	Total int                   `json:"total" dc:"总记录数"`
+	Page  int                   `json:"page" dc:"当前页码"`
+	Size  int                   `json:"size" dc:"每页数量"`
+}
+
+// AdminOrderListItem 后台订单列表项（轻量，不含订单明细）。
+type AdminOrderListItem struct {
+	Id          int64       `json:"id" dc:"订单 id"`
+	OrderNo     string      `json:"order_no" dc:"订单号"`
+	UserId      int64       `json:"user_id" dc:"用户 id"`
+	Status      string      `json:"status" dc:"状态字符串枚举"`
+	TotalAmount int64       `json:"total_amount" dc:"成交总价（整数分，快照）"`
+	CreatedAt   *gtime.Time `json:"created_at" dc:"创建时间"`
+}
+
+// AdminOrderStatsReq 后台订单状态统计请求（只读，持 order:list）。
+type AdminOrderStatsReq struct {
+	g.Meta `path:"/admin/orders/stats" method:"get" tags:"订单" summary:"后台订单状态统计"`
+}
+
+// AdminOrderStatsRes 后台订单状态统计响应。
+type AdminOrderStatsRes struct {
+	Total int64                  `json:"total" dc:"全部普通订单总数（等于各状态数量之和）"`
+	Stats []*AdminOrderStatsItem `json:"stats" dc:"各状态数量（覆盖全部 7 态，无数据为 0）"`
+}
+
+// AdminOrderStatsItem 单状态统计项。
+type AdminOrderStatsItem struct {
+	Status string `json:"status" dc:"状态字符串枚举"`
+	Count  int64  `json:"count" dc:"该状态订单数量"`
+}
+
+// AdminOrderDetailReq 后台订单详情请求（只读，持 order:view）。
+type AdminOrderDetailReq struct {
+	g.Meta `path:"/admin/orders/:id" method:"get" tags:"订单" summary:"后台订单详情"`
+	Id     int64 `json:"id" in:"path" v:"required" dc:"订单 id"`
+}
+
+// AdminOrderDetailRes 后台订单详情响应（复用 Order，含明细与快照）。
+type AdminOrderDetailRes struct {
+	Order
+}
