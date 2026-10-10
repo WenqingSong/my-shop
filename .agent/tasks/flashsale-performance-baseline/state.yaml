@@ -14,7 +14,7 @@ review:
 
 owner:
   status: ACCEPTED
-  review_target: "e67cf2829ecdf6d9ff0febc66f10a406a5fa092f"
+  review_target: "cb2a8fd62342aaab611fbd857ad715052b3d0ea9"
 
 delivery:
   status: BLOCKED
