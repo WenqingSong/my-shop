@@ -2,8 +2,8 @@ schema_version: 3
 task_id: iam-v5
 
 contract:
-  status: PENDING
-  target: ""
+  status: APPROVED
+  target: "257edf0"
 
 resources:
   reservations: {}
