@@ -1,0 +1,28 @@
+schema_version: 3
+task_id: dashboard-v1
+
+contract:
+  status: APPROVED
+  target: "49241ed9a50f0198b97fee12911ef6baab2c3376"
+
+resources:
+  reservations: {}
+
+review:
+  status: NOT_REQUESTED
+  target: ""
+
+owner:
+  status: PENDING
+  review_target: ""
+
+delivery:
+  status: NOT_RUN
+  review_target: ""
+  feature_head: ""
+  develop_base: ""
+
+blocked:
+  active: false
+  by: ""
+  reason: ""
