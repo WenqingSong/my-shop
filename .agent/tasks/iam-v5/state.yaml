@@ -11,8 +11,8 @@ resources:
       - "20261001000019"
 
 review:
-  status: NOT_REQUESTED
-  target: ""
+  status: PENDING
+  target: "35cbe60"
 
 owner:
   status: PENDING
