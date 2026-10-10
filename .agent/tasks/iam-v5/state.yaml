@@ -19,10 +19,10 @@ owner:
   review_target: "60a2877"
 
 delivery:
-  status: NOT_RUN
-  review_target: ""
-  feature_head: ""
-  develop_base: ""
+  status: PASS
+  review_target: "60a2877"
+  feature_head: "fac813c"
+  develop_base: "1a06ddf"
 
 blocked:
   active: false
