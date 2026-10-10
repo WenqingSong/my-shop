@@ -35,7 +35,7 @@
 
 ### 2.3 权限粒度与清单
 
-权限粒度 `资源:动作`。当前 seed 25 个权限（按 `code` 唯一）：
+权限粒度 `资源:动作`。当前 seed 40 个权限（按 `code` 唯一，见 `internal/boot/seed.go` 的 `seedPermissionList`）：
 
 ```text
 category:create/update/delete                        （3）
@@ -45,6 +45,11 @@ inventory:increase/deduct                            （2）
 admin:create/disable/delete/assign_role              （4）
 role:create/list/update/delete/assign_permission     （5）
 permission:create/list/update/delete                 （4）
+order:ship/refund/list/view                          （4，list=列表+统计、view=详情）
+flash_sale:create/update/repair                      （3）
+review:take_down                                     （1）
+banner:create/update/delete                          （3）
+recommend:create/update/delete/item                  （4）
 ```
 
 ## 3. 业务不变量

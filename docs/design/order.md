@@ -4,7 +4,7 @@
 
 ## 1. 职责与边界
 
-订单回答「用户买到了什么、多少钱、发到哪里、现在处于哪个状态」，承载订单主数据（`orders`）与订单项（`order_items`），实现：下单（购物车勾选/直接购买）、服务端定价与快照、唯一订单号、幂等去重、状态机推进、取消/退款恢复库存、超时未支付自动取消、支付 Mock（幂等）、用户隔离与管理员发货/退款权限。
+订单回答「用户买到了什么、多少钱、发到哪里、现在处于哪个状态」，承载订单主数据（`orders`）与订单项（`order_items`），实现：下单（购物车勾选/直接购买）、服务端定价与快照、唯一订单号、幂等去重、状态机推进、取消/退款恢复库存、超时未支付自动取消、支付 Mock（幂等）、用户隔离、管理员发货/退款权限，以及后台订单只读管理（分页列表 + 组合筛选 + 详情 + 状态统计）。
 
 边界：不接入真实支付平台/网关/退款到账/对账/资金回调（支付仅 Mock）；不做物流/快递单号/配送轨迹；不做评价/售后/退换货（`shipped/received/completed` 后的退款/退货/售后留给未来 After-sales/Refund 模块）；不做优惠券/促销/积分/计价引擎；不修改既有购物车/库存/地址/SKU/商品/分类/身份模块行为（除库存 tx 协同、必要的只读引用与购物车下单删已购条目）。事实来源为单一 MySQL；无 MQ；Redis 仅会话。
 
@@ -95,9 +95,11 @@
 
 - 前台受保护路由（`routes_frontend.go` Auth 分组）：`POST /orders`、`GET /orders`、`GET /orders/:id`、`POST /orders/:id/pay`、`POST /orders/:id/cancel`、`POST /orders/:id/receive`。
 - 后台写路由（`routes_admin.go` require 分组）：`POST /admin/orders/:id/ship`（`order:ship`）、`POST /admin/orders/:id/refund`（`order:refund`）。
-- 身份信任：`Principal.UserID` 是用户侧唯一身份来源；发货/退款仅管理员（含超管），经 `RequirePermission`。
-- 越权语义：用户越权与不存在统一 9001（404，防枚举）；无权限管理员 403；均无 DB 副作用。
-- 权限 code：`order:ship`、`order:refund`（seed 登记 `internal/boot/seed.go`）。
+- 后台只读路由（`routes_admin.go` require 分组，AdminAuth + RequirePermission）：`GET /admin/orders`（`order:list`）、`GET /admin/orders/stats`（`order:list`）、`GET /admin/orders/:id`（`order:view`）。
+- 身份信任：`Principal.UserID` 是用户侧唯一身份来源；发货/退款/后台只读查询仅管理员（含超管），经 `RequirePermission`；普通用户 token（`type=user`）访问后台路由返回 403。
+- 越权语义：用户越权与不存在统一 9001（404，防枚举）；后台详情按 id 查任意订单（无归属过滤），不存在返回 9001（404）；无权限管理员 403；均无 DB 副作用。
+- 权限 code：`order:ship`、`order:refund`、`order:list`（列表 + 统计）、`order:view`（详情）（seed 登记 `internal/boot/seed.go`）。
+- 只读查询语义：后台列表为轻量分页（不含订单明细，杜绝 N+1），支持 `order_no`/`user_id`/`status`/`start_time`/`end_time` 组合筛选与 `{id, created_at}` 白名单稳定排序（默认 `id DESC`，恒以 `id` 作 tiebreak）；详情返回历史快照（不重读 `skus.price`）；统计按 `status` `GROUP BY` 覆盖 7 态。时间范围入参为 RFC3339（含时区偏移），经 `FROM_UNIXTIME(Unix秒)` 在 MySQL 会话时区内转换，与 `created_at`（同会话时区 `NOW()` 写入）同基准比较，左闭右开 `[start,end)`。
 
 ## 7. 错误码域
 
@@ -127,6 +129,6 @@
 - 真实支付/退款到账/对账/资金回调（支付仅 Mock）。
 - 物流/快递单号、配送轨迹、发货单号回传。
 - `shipped/received/completed` 后的退款/退货/售后（留 After-sales/Refund 模块）。
-- 后台订单列表与高级筛选/统计/导出（本任务仅满足查询本人订单的最小能力）。
+- 订单导出、收货人姓名/手机号模糊搜索等高级筛选（后台列表已支持 `order_no`/`user_id`/`status`/`start_time`/`end_time` 组合筛选与 7 态状态统计）。
 - 库存流水 `reason` 字段固定为空，订单驱动的扣减/恢复不落 `reason`，审计粒度有限。
 - 后台扫描 goroutine 的优雅停机（依赖条件更新幂等保证半次扫描安全）。
