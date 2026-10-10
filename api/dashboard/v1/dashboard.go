@@ -59,9 +59,11 @@ type StatusRes struct {
 }
 
 // TopReq 商品销量排行请求（limit 可选，默认 10，上限 50）。
+// limit 使用 string 而非 int，是为了在框架的 gconv 静默转换之前拿到原始参数，
+// 由业务层严格校验：非整数（如 "abc"/"12.5"）必须返回 400/1001，不得静默按默认值处理。
 type TopReq struct {
 	g.Meta `path:"/admin/dashboard/products/top" method:"get" tags:"运营数据大屏" summary:"商品销量 TOP 榜"`
-	Limit  int `json:"limit" in:"query" dc:"返回数量（默认 10，上限 50）"`
+	Limit  string `json:"limit" in:"query" dc:"返回数量（可选，正整数，默认 10，上限 50）"`
 }
 
 // TopItem 销量排行条目。

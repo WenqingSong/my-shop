@@ -57,6 +57,7 @@ admin:
 dashboard:
   # 日期切分时区（系统权威业务时区）：「今日零点」/趋势锚点/时间范围边界均按此时区计算，
   # 且 MySQL 会话时区会与之对齐（连接层 time_zone），保证 NOW()/CURRENT_TIMESTAMP 写值与统计边界一致。
+  # 仅支持无夏令时（DST）的时区；配置含 DST 的时区（如 America/New_York）会在启动时被拒绝。
   timezone: "Asia/Shanghai"
 
 # 订单配置（以下均为开发默认值，可通过环境变量覆盖）

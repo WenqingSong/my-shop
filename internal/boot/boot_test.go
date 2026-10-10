@@ -83,6 +83,55 @@ func TestDependencyTimeoutEnvOverride(t *testing.T) {
 	}
 }
 
+func TestDatabaseTimeZoneExtra(t *testing.T) {
+	ctx := context.Background()
+	if err := genv.Set("DASHBOARD_TIMEZONE", "Asia/Shanghai"); err != nil {
+		t.Fatal(err)
+	}
+	defer genv.Remove("DASHBOARD_TIMEZONE")
+
+	extra, err := databaseTimeZoneExtra(ctx)
+	if err != nil {
+		t.Fatalf("databaseTimeZoneExtra(Asia/Shanghai) 意外错误: %v", err)
+	}
+	if extra != "time_zone=%27%2B08%3A00%27" {
+		t.Fatalf("databaseTimeZoneExtra = %q, want time_zone=%%27%%2B08%%3A00%%27", extra)
+	}
+}
+
+// TestDatabaseTimeZoneExtraRejectsDST 覆盖 CLEAN-002：含 DST 的时区应在启动时被拒绝，
+// 避免用固定偏移表达 DST 时区导致跨切换漂移。
+func TestDatabaseTimeZoneExtraRejectsDST(t *testing.T) {
+	ctx := context.Background()
+	if err := genv.Set("DASHBOARD_TIMEZONE", "America/New_York"); err != nil {
+		t.Fatal(err)
+	}
+	defer genv.Remove("DASHBOARD_TIMEZONE")
+
+	if _, err := databaseTimeZoneExtra(ctx); err == nil {
+		t.Fatal("databaseTimeZoneExtra(America/New_York) 应拒绝 DST 时区，却返回成功")
+	}
+}
+
+// TestHasDST 验证 DST 判定：Asia/Shanghai 无 DST，America/New_York 含 DST。
+func TestHasDST(t *testing.T) {
+	sh, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Skipf("系统缺少 Asia/Shanghai 时区数据: %v", err)
+	}
+	if hasDST(sh) {
+		t.Fatal("Asia/Shanghai 不应判定为含 DST")
+	}
+
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skipf("系统缺少 America/New_York 时区数据: %v", err)
+	}
+	if !hasDST(ny) {
+		t.Fatal("America/New_York 应判定为含 DST")
+	}
+}
+
 func TestApplyRedisConfigEnvOverride(t *testing.T) {
 	ctx := context.Background()
 	envs := map[string]string{

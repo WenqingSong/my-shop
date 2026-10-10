@@ -55,6 +55,7 @@ Dashboard 回答「平台整体运营概况是什么」：为用户、商品、�
 
 - 配置 `dashboard.timezone`（默认 `Asia/Shanghai`），语义为「Dashboard 日期切分时区」= 系统权威业务时区。
 - 连接层使 MySQL 会话时区与该时区一致（`Asia/Shanghai` → `+08:00`），使 `NOW()/CURDATE()/CURRENT_TIMESTAMP` 与 Go `time.LoadLocation(dashboard.timezone)` 一致，消除 Go↔MySQL 漂移。
+- 仅支持无夏令时（DST）的时区：连接层用固定偏移表达会话时区，无法表达 DST 切换。启动时对含 DST 的时区 fail-fast 拒绝（`America/New_York` 等），避免跨切换漂移。
 - 时间边界用 DATETIME 字符串范围比较（左闭右开 `[start, end)`），不用 `DATE()`/`FROM_UNIXTIME()` 等函数包裹列（避免索引失效）。
   - 「今日」= `[今日 00:00:00, 明日 00:00:00)`。
   - 「最近 7 天」= 7 个自然日桶，整体 `[6 天前 00:00:00, 明日 00:00:00)`。
@@ -70,7 +71,7 @@ Dashboard 回答「平台整体运营概况是什么」：为用户、商品、�
 | GET | `/admin/dashboard/overview` | 无 | 运营概览 |
 | GET | `/admin/dashboard/orders/trend` | 无 | 最近 7 天订单趋势 |
 | GET | `/admin/dashboard/orders/status` | `start_time`/`end_time`（可选，RFC3339，同传且 start<end） | 订单状态分布 + 时间范围总数 |
-| GET | `/admin/dashboard/products/top` | `limit`（可选，默认 10，上限 50） | 商品销量 TOP 10 |
+| GET | `/admin/dashboard/products/top` | `limit`（可选，正整数，默认 10，上限 50；非整数/越界返回 400） | 商品销量 TOP 10 |
 | GET | `/admin/dashboard/flash-sales` | 无 | 秒杀运营统计 |
 
 响应结构：
@@ -131,5 +132,6 @@ Dashboard 回答「平台整体运营概况是什么」：为用户、商品、�
 ## 11. 已知留白
 
 - 时区统一为北京时间后，若历史 DATETIME 由非北京时间写入，「今日」边界对历史数据偏移 8h；dev 每日重置环境可接受，生产需一次性校正。
+- `dashboard.timezone` 仅支持无 DST 时区（默认 `Asia/Shanghai` 即满足）；含 DST 的时区在启动时被拒绝，后续如需支持需改为按时刻动态对齐连接层与 Go 边界。
 - 会话时区统一会影响订单 `expire_at`/秒杀时间窗/各 `*_at` 的墙钟参考（现有代码用 `NOW()` 内部自洽），需回归订单超时取消与秒杀时间窗测试。
 - 若最终不新增 `idx_order_items_product`，TOP 10 聚合为 `order_items` 全表扫描（单查询非 N+1，V1 可接受）。

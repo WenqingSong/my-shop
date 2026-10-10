@@ -662,4 +662,13 @@ func TestDashboardInvalidParams(t *testing.T) {
 	if res.Status != 400 || res.Code != 1001 {
 		t.Fatalf("limit=-1: status=%d code=%d want 400/1001", res.Status, res.Code)
 	}
+	// 非整数 limit（CLEAN-001 回归）：不得被 gconv 静默转为默认值/截断，必须 400/1001。
+	res = isoDo(t, base, "GET", "/admin/dashboard/products/top?limit=abc", nil, auth)
+	if res.Status != 400 || res.Code != 1001 {
+		t.Fatalf("limit=abc: status=%d code=%d want 400/1001", res.Status, res.Code)
+	}
+	res = isoDo(t, base, "GET", "/admin/dashboard/products/top?limit=12.5", nil, auth)
+	if res.Status != 400 || res.Code != 1001 {
+		t.Fatalf("limit=12.5: status=%d code=%d want 400/1001", res.Status, res.Code)
+	}
 }

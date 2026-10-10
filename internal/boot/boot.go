@@ -111,12 +111,16 @@ func applyDatabaseConfig(ctx context.Context) error {
 // databaseTimeZoneExtra 依据 dashboard.timezone（默认 Asia/Shanghai）计算 MySQL 会话 time_zone
 // 的 DSN 参数，使连接层的 NOW()/CURDATE()/CURRENT_TIMESTAMP 写值与 Go 端日期切分时区一致，
 // 消除 Go↔MySQL 漂移（详见 docs/design/dashboard.md §3 时区落地设计）。
-// 配置非法时 fail-fast 返回错误，不静默回退。
+// 配置非法或含夏令时（DST）时 fail-fast 返回错误，不静默回退：DST 时区无法用固定偏移表达，
+// 跨切换会与 Go 端 DST 感知的边界计算漂移（CLEAN-002）。
 func databaseTimeZoneExtra(ctx context.Context) (string, error) {
 	name := cfgString(ctx, "dashboard.timezone", "Asia/Shanghai")
 	loc, err := time.LoadLocation(name)
 	if err != nil {
 		return "", gerror.Wrapf(err, "dashboard.timezone 配置非法 %q", name)
+	}
+	if hasDST(loc) {
+		return "", gerror.Newf("dashboard.timezone %q 含夏令时，仅支持无 DST 时区（如 Asia/Shanghai）", name)
 	}
 	_, offset := time.Now().In(loc).Zone()
 	sign := "+"
@@ -127,6 +131,22 @@ func databaseTimeZoneExtra(ctx context.Context) (string, error) {
 	tz := fmt.Sprintf("%s%02d:%02d", sign, offset/3600, (offset%3600)/60)
 	// DSN 系统变量值须 url.QueryEscape 并用单引号包裹（%27），驱动会执行 SET time_zone='+08:00'。
 	return "time_zone=%27" + url.QueryEscape(tz) + "%27", nil
+}
+
+// hasDST 判断时区是否使用夏令时：若当前年内任意时刻的绝对偏移发生变化，则视为存在 DST 切换。
+// 采样当前年每日（含闰年 366 天），足以覆盖现实中的 DST 起始/结束切换点。
+// 仅用于在启动时拒绝含 DST 的时区（CLEAN-002），不承诺给出精确的切换区间。
+func hasDST(loc *time.Location) bool {
+	now := time.Now()
+	base := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
+	_, baseOff := base.In(loc).Zone()
+	for i := 0; i <= 366; i++ {
+		ts := base.AddDate(0, 0, i)
+		if _, off := ts.In(loc).Zone(); off != baseOff {
+			return true
+		}
+	}
+	return false
 }
 
 func applyRedisConfig(ctx context.Context) {

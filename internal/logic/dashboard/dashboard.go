@@ -11,6 +11,8 @@ package dashboard
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -215,14 +217,34 @@ func (s *sDashboard) FlashSales(ctx context.Context) (*v1.FlashSalesRes, error) 
 	}, nil
 }
 
-// businessLocation 加载 Dashboard 日期切分时区；配置非法时 fail-closed 返回 500，不静默回退。
+// businessLocation 加载 Dashboard 日期切分时区；配置非法或含 DST 时 fail-closed 返回 500，不静默回退。
 func businessLocation(ctx context.Context) (*time.Location, error) {
 	name := g.Cfg().MustGet(ctx, "dashboard.timezone", defaultTimezone).String()
 	loc, err := time.LoadLocation(name)
 	if err != nil {
 		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("dashboard.timezone 配置非法: %w", err))
 	}
+	if hasDST(loc) {
+		return nil, codes.Wrap(codes.CodeInternalError,
+			fmt.Errorf("dashboard.timezone %q 含夏令时，本模块仅支持无 DST 时区（如 Asia/Shanghai）", name))
+	}
 	return loc, nil
+}
+
+// hasDST 判断时区是否使用夏令时：若当前年内任意时刻的绝对偏移发生变化，则视为存在 DST 切换。
+// 采样当前年每日（含闰年 366 天），足以覆盖现实中的 DST 起始/结束切换点。
+// 仅用于拒绝含 DST 的时区（CLEAN-002），不承诺给出精确的切换区间。
+func hasDST(loc *time.Location) bool {
+	now := time.Now()
+	base := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
+	_, baseOff := base.In(loc).Zone()
+	for i := 0; i <= 366; i++ {
+		ts := base.AddDate(0, 0, i)
+		if _, off := ts.In(loc).Zone(); off != baseOff {
+			return true
+		}
+	}
+	return false
 }
 
 // todayBounds 返回 [今日 00:00:00, 明日 00:00:00) 的 DATETIME 字符串边界（按指定时区）。
@@ -272,15 +294,18 @@ func parseRange(ctx context.Context, startRaw, endRaw string) (string, string, e
 	return formatDateTime(start.In(loc)), formatDateTime(end.In(loc)), nil
 }
 
-// parseLimit 校验并解析排行榜数量：未提供(0) → 默认 10；负数或超上限 → 400。
-func parseLimit(limit int) (int, error) {
-	if limit == 0 {
+// parseLimit 校验并解析排行榜数量：未提供/空 → 默认 10；非整数、负数或超上限 → 400。
+// 入参为原始字符串，规避框架 gconv 把 "abc"/"12.5" 静默转为 0/12 的问题（见 CLEAN-001）。
+func parseLimit(limit string) (int, error) {
+	limit = strings.TrimSpace(limit)
+	if limit == "" {
 		return defaultTopLimit, nil
 	}
-	if limit < 0 || limit > maxTopLimit {
+	n, err := strconv.Atoi(limit)
+	if err != nil || n <= 0 || n > maxTopLimit {
 		return 0, codes.New(codes.CodeInvalidArgument)
 	}
-	return limit, nil
+	return n, nil
 }
 
 // formatDateTime 将 time.Time 格式化为 MySQL DATETIME 字符串（用于字符串范围比较，避免函数包裹列）。
