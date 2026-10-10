@@ -12,7 +12,7 @@ resources:
 
 review:
   status: PENDING
-  target: "35cbe60"
+  target: "60a2877"
 
 owner:
   status: PENDING
