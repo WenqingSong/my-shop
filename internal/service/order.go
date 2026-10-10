@@ -26,6 +26,12 @@ type IOrder interface {
 	Refund(ctx context.Context, orderID int64) (*v1.RefundRes, error)
 	// CancelExpired 取消过期的待支付订单（供后台扫描器复用），返回本次实际取消数量。
 	CancelExpired(ctx context.Context, limit int) (int, error)
+	// AdminList 后台分页查询全部普通订单（轻量，不含明细，支持组合筛选与稳定排序）。
+	AdminList(ctx context.Context, req *v1.AdminListReq) (*v1.AdminListRes, error)
+	// AdminStats 后台按 status 统计全部普通订单数量（覆盖 7 态，无数据为 0）。
+	AdminStats(ctx context.Context) (*v1.AdminOrderStatsRes, error)
+	// AdminDetail 后台按 id 查询任意普通订单详情（含明细与快照），不存在返回 9001。
+	AdminDetail(ctx context.Context, id int64) (*v1.AdminOrderDetailRes, error)
 }
 
 var localOrder IOrder

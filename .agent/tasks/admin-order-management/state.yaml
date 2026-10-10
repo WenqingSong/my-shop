@@ -1,0 +1,28 @@
+schema_version: 3
+task_id: admin-order-management
+
+contract:
+  status: APPROVED
+  target: b8c4cd34acc1299eb050deaeaa3738d62af4b72e
+
+resources:
+  reservations: {}
+
+review:
+  status: CLEAN
+  target: 6e0e3c89a8e32d8be601fe58ea676968955a5d42
+
+owner:
+  status: ACCEPTED
+  review_target: 6e0e3c89a8e32d8be601fe58ea676968955a5d42
+
+delivery:
+  status: PASS
+  review_target: "6e0e3c89a8e32d8be601fe58ea676968955a5d42"
+  feature_head: "0db7bf63e3fe1d56866aa36a7124de78dff8d9be"
+  develop_base: "1a06ddf2b9da362efc43d69c3191a767635b1c93"
+
+blocked:
+  active: false
+  by: ""
+  reason: ""

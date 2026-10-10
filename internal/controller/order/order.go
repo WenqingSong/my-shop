@@ -96,6 +96,30 @@ func (c *AdminControllerV1) Refund(ctx context.Context, req *v1.RefundReq) (res 
 	return service.Order().Refund(ctx, req.Id)
 }
 
+// AdminList 处理后台订单分页列表（经 RequirePermission("order:list")）。
+func (c *AdminControllerV1) AdminList(ctx context.Context, req *v1.AdminListReq) (res *v1.AdminListRes, err error) {
+	if _, ok := middleware.AdminPrincipalFromContext(ctx); !ok {
+		return nil, codes.New(codes.CodeUnauthorized)
+	}
+	return service.Order().AdminList(ctx, req)
+}
+
+// AdminStats 处理后台订单状态统计（经 RequirePermission("order:list")）。
+func (c *AdminControllerV1) AdminStats(ctx context.Context, req *v1.AdminOrderStatsReq) (res *v1.AdminOrderStatsRes, err error) {
+	if _, ok := middleware.AdminPrincipalFromContext(ctx); !ok {
+		return nil, codes.New(codes.CodeUnauthorized)
+	}
+	return service.Order().AdminStats(ctx)
+}
+
+// AdminDetail 处理后台订单详情（经 RequirePermission("order:view")）。
+func (c *AdminControllerV1) AdminDetail(ctx context.Context, req *v1.AdminOrderDetailReq) (res *v1.AdminOrderDetailRes, err error) {
+	if _, ok := middleware.AdminPrincipalFromContext(ctx); !ok {
+		return nil, codes.New(codes.CodeUnauthorized)
+	}
+	return service.Order().AdminDetail(ctx, req.Id)
+}
+
 // currentUserID 从认证中间件注入的 Principal 取当前用户 id；缺失返回 401。
 func currentUserID(ctx context.Context) (int64, error) {
 	p, ok := middleware.PrincipalFromContext(ctx)

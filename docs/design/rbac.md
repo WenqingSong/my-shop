@@ -45,7 +45,7 @@ inventory:increase/deduct                            （2）
 admin:create/disable/delete/assign_role              （4）
 role:create/list/update/delete/assign_permission     （5）
 permission:create/list/update/delete                 （4）
-order:ship/refund                                    （2）
+order:ship/refund/list/view                          （4，list=列表+统计、view=详情）
 flash_sale:create/update/repair                      （3）
 review:take_down                                     （1）
 banner:create/update/delete                          （3）
