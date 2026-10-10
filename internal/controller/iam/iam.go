@@ -111,3 +111,18 @@ func (c *ControllerV1) RevokeAll(ctx context.Context, req *v1.RevokeAllReq) (res
 	}
 	return nil, nil
 }
+
+// GetUserStatus 查询目标用户账号状态（后台域，经 RequirePermission("user:read")）。
+func (c *ControllerV1) GetUserStatus(ctx context.Context, req *v1.GetUserStatusReq) (res *v1.GetUserStatusRes, err error) {
+	return service.Iam().GetUserStatus(ctx, req.Id)
+}
+
+// UpdateUserStatus 禁用/启用目标用户（后台域，经 RequirePermission("user:status")）。
+// 操作管理员 id 取自已认证 AdminPrincipal，不信任请求体身份。
+func (c *ControllerV1) UpdateUserStatus(ctx context.Context, req *v1.UpdateUserStatusReq) (res *v1.UpdateUserStatusRes, err error) {
+	p, ok := middleware.AdminPrincipalFromContext(ctx)
+	if !ok {
+		return nil, codes.New(codes.CodeUnauthorized)
+	}
+	return service.Iam().UpdateUserStatus(ctx, p.AdminID, req)
+}

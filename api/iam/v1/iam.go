@@ -106,3 +106,28 @@ type RevokeAllReq struct {
 
 // RevokeAllRes 全部退出响应（无业务字段，成功时 data 为 null）。
 type RevokeAllRes struct{}
+
+// GetUserStatusReq 查询用户账号状态请求（后台域，AdminAuth + RequirePermission("user:read")）。
+// 目标用户 id 来自 URL 路径，服务端不信任请求体身份。
+type GetUserStatusReq struct {
+	g.Meta `path:"/admin/users/:id/status" method:"get" tags:"IAM" summary:"查询用户账号状态"`
+	Id     int64 `json:"id" in:"path" v:"required" dc:"目标用户 id"`
+}
+
+// GetUserStatusRes 查询用户账号状态响应。
+type GetUserStatusRes struct {
+	Id     int64 `json:"id" dc:"用户 id"`
+	Status int   `json:"status" dc:"1 启用 / 0 禁用"`
+}
+
+// UpdateUserStatusReq 禁用/启用用户请求（后台域，AdminAuth + RequirePermission("user:status")）。
+// 目标用户 id 来自 URL 路径；reason 必填（trim 后非空、≤255）。
+type UpdateUserStatusReq struct {
+	g.Meta `path:"/admin/users/:id/status" method:"put" tags:"IAM" summary:"禁用/启用用户"`
+	Id     int64  `json:"id" in:"path" v:"required" dc:"目标用户 id"`
+	Status int    `json:"status" v:"required|in:0,1" dc:"1 启用 / 0 禁用"`
+	Reason string `json:"reason" v:"required" dc:"变更原因，非空且不超过 255 字符"`
+}
+
+// UpdateUserStatusRes 禁用/启用用户响应（无业务字段，成功时 data 为 null）。
+type UpdateUserStatusRes struct{}
