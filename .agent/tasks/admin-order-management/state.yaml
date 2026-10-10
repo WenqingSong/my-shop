@@ -2,8 +2,8 @@ schema_version: 3
 task_id: admin-order-management
 
 contract:
-  status: PENDING
-  target: ""
+  status: APPROVED
+  target: b8c4cd34acc1299eb050deaeaa3738d62af4b72e
 
 resources:
   reservations: {}
