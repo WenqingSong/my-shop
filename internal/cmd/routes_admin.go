@@ -6,6 +6,7 @@ import (
 	adminController "cnb.cool/go-cloud-devops/my-shop/internal/controller/admin"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/banner"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/dashboard"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/flashsale"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/inventory"
 	orderController "cnb.cool/go-cloud-devops/my-shop/internal/controller/order"
@@ -39,6 +40,7 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 	bannerCtrl := banner.NewV1()
 	recommendationCtrl := recommendation.NewV1()
 	uploadCtrlV1 := uploadCtrl.NewV1()
+	dashboardCtrl := dashboard.NewV1()
 
 	// 后台公开接口：管理员登录（无需 token）。
 	root.POST("/admin/login", adminCtrl.Login)
@@ -147,5 +149,12 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 		require("recommend:item").POST("/admin/recommend-positions/:id/items", recommendationCtrl.AddItem)
 		require("recommend:item").DELETE("/admin/recommend-positions/:id/items/:product_id", recommendationCtrl.RemoveItem)
 		require("recommend:item").PUT("/admin/recommend-positions/:id/items/sort", recommendationCtrl.UpdateSort)
+
+		// 运营数据大屏（AdminAuth + RequirePermission("dashboard:view")）。
+		require("dashboard:view").GET("/admin/dashboard/overview", dashboardCtrl.Overview)
+		require("dashboard:view").GET("/admin/dashboard/orders/trend", dashboardCtrl.Trend)
+		require("dashboard:view").GET("/admin/dashboard/orders/status", dashboardCtrl.Status)
+		require("dashboard:view").GET("/admin/dashboard/products/top", dashboardCtrl.TopProducts)
+		require("dashboard:view").GET("/admin/dashboard/flash-sales", dashboardCtrl.FlashSales)
 	})
 }

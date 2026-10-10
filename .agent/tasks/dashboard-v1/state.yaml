@@ -1,0 +1,28 @@
+schema_version: 3
+task_id: dashboard-v1
+
+contract:
+  status: APPROVED
+  target: "49241ed9a50f0198b97fee12911ef6baab2c3376"
+
+resources:
+  reservations: {}
+
+review:
+  status: CLEAN
+  target: "37467cfd2456eb5c0207c12b84b8108791ed7100"
+
+owner:
+  status: ACCEPTED
+  review_target: "37467cfd2456eb5c0207c12b84b8108791ed7100"
+
+delivery:
+  status: PASS
+  review_target: "37467cfd2456eb5c0207c12b84b8108791ed7100"
+  feature_head: "e6d93e234f7bfb144d80a1efcc5727949907b526"
+  develop_base: "3523cd20cdb0cdc62a13956812fb9dc98c26760e"
+
+blocked:
+  active: false
+  by: ""
+  reason: ""
