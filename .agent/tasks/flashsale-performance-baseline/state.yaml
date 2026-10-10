@@ -17,10 +17,10 @@ owner:
   review_target: "e67cf2829ecdf6d9ff0febc66f10a406a5fa092f"
 
 delivery:
-  status: PASS
-  review_target: "e67cf2829ecdf6d9ff0febc66f10a406a5fa092f"
-  feature_head: "7409e03616cda2f3e39455974637dfa7bbc77a3b"
-  develop_base: "02c3b9218f497826403445b0c5530eee8364df44"
+  status: BLOCKED
+  review_target: "cb2a8fd62342aaab611fbd857ad715052b3d0ea9"
+  feature_head: "2c754931b12c3c8d302a1ba0dced6b20b2aff12b"
+  develop_base: "f0bf42cbf8592215a76173ef75d2eac5078960e2"
 
 blocked:
   active: false
