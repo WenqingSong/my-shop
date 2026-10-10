@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/gogf/gf/v2/frame/g"
+
+	"cnb.cool/go-cloud-devops/my-shop/internal/auth"
 )
 
 // userStatusPut 调用 PUT /admin/users/:id/status（禁用/启用用户），返回统一响应。
@@ -334,5 +336,78 @@ func TestUserStatusAuditFields(t *testing.T) {
 	}
 	if row.Reason != "测试封禁原因" || row.Result != 1 {
 		t.Fatalf("audit reason/result mismatch: reason=%q result=%d", row.Reason, row.Result)
+	}
+}
+
+// TestUserStatusVersionMismatchRejectsUnrevokedStaleSession 覆盖 CLEAN-001 的 access 侧（INV-003 兜底）：
+// 禁用时 Redis 撤销失败（会话残留未撤销）→ 重新启用后，旧 access 仍因「版本落后」被拒（auth_epoch 比对兜底）。
+// 该用例若删除 Auth 的 user.AuthEpoch != sessionEpoch 判定，将退化为 200（会话有效 + status=1），从而失败。
+func TestUserStatusVersionMismatchRejectsUnrevokedStaleSession(t *testing.T) {
+	base := setupIsolationServer(t)
+
+	aliceID := isoInsertUser(t, "alice", "password123")
+	access1, _, sid1 := isoFrontendLoginFull(t, base, "alice", "password123")
+	adminToken, _ := isoAdminLogin(t, base, isoSuperUsername, isoAdminPassword)
+
+	// 禁用：auth_epoch 0→1，事务撤销 refresh family，事务后撤销 Redis 会话。
+	if res := userStatusPut(t, base, aliceID, map[string]any{"status": 0, "reason": "封禁"}, isoAuthHeader(adminToken)); res.Status != 200 || res.Code != 0 {
+		t.Fatalf("disable: status=%d code=%d", res.Status, res.Code)
+	}
+
+	// 模拟 Redis 撤销失败：将会话 revoked 置回 0，使会话「存在且未撤销」，但绑定的 auth_epoch 仍为 0。
+	if _, err := g.Redis().Do(context.Background(), "HSET", auth.SessionKey(sid1), "revoked", "0"); err != nil {
+		t.Fatalf("un-revoke session: %v", err)
+	}
+
+	// 重新启用：status=1，auth_epoch 保持 1（不递减）。
+	if res := userStatusPut(t, base, aliceID, map[string]any{"status": 1, "reason": "恢复"}, isoAuthHeader(adminToken)); res.Status != 200 || res.Code != 0 {
+		t.Fatalf("re-enable: status=%d code=%d", res.Status, res.Code)
+	}
+
+	// 旧 access：会话未撤销、user_id 匹配、status=1，但 session.auth_epoch=0 != users.auth_epoch=1 → 401（版本兜底）。
+	me := isoDo(t, base, "GET", "/me", nil, isoAuthHeader(access1))
+	if me.Status != 401 || me.Code != 1002 {
+		t.Fatalf("stale unrevoked session must be 401 by version mismatch, got status=%d code=%d", me.Status, me.Code)
+	}
+}
+
+// TestUserStatusVersionMismatchRejectsUnrevokedStaleRefresh 覆盖 CLEAN-001 的 refresh 侧（INV-003 兜底）：
+// 禁用时 family 撤销失败（旧 refresh 残留未撤销）→ 重新启用后，旧 refresh 仍因「版本落后」被拒（1002）。
+// 该用例若删除 Refresh 的 user.AuthEpoch != row.AuthEpoch 判定，将签发新 token（200），从而失败。
+func TestUserStatusVersionMismatchRejectsUnrevokedStaleRefresh(t *testing.T) {
+	base := setupIsolationServer(t)
+
+	aliceID := isoInsertUser(t, "alice", "password123")
+	_, refresh1, sid1 := isoFrontendLoginFull(t, base, "alice", "password123")
+	adminToken, _ := isoAdminLogin(t, base, isoSuperUsername, isoAdminPassword)
+
+	// 禁用：auth_epoch 0→1，事务撤销 refresh family，事务后撤销 Redis 会话。
+	if res := userStatusPut(t, base, aliceID, map[string]any{"status": 0, "reason": "封禁"}, isoAuthHeader(adminToken)); res.Status != 200 || res.Code != 0 {
+		t.Fatalf("disable: status=%d code=%d", res.Status, res.Code)
+	}
+
+	// 模拟 Redis 会话撤销失败：将会话 revoked 置回 0（使 refresh 的 session upsert 不因撤销而 2012）。
+	if _, err := g.Redis().Do(context.Background(), "HSET", auth.SessionKey(sid1), "revoked", "0"); err != nil {
+		t.Fatalf("un-revoke session: %v", err)
+	}
+	// 模拟 family 撤销失败：将旧 refresh 置回未撤销，使「未撤销、未过期，但 row.auth_epoch=0 落后」。
+	hash := auth.HashRefreshToken(refresh1)
+	if _, err := g.DB().Exec(context.Background(),
+		"UPDATE refresh_tokens SET revoked_at = NULL, revoked_reason = NULL WHERE token_hash = ?", hash); err != nil {
+		t.Fatalf("un-revoke refresh: %v", err)
+	}
+
+	// 重新启用：status=1，auth_epoch 保持 1。
+	if res := userStatusPut(t, base, aliceID, map[string]any{"status": 1, "reason": "恢复"}, isoAuthHeader(adminToken)); res.Status != 200 || res.Code != 0 {
+		t.Fatalf("re-enable: status=%d code=%d", res.Status, res.Code)
+	}
+
+	// 旧 refresh：未撤销、未过期、status=1，但 row.auth_epoch=0 != users.auth_epoch=1 → 401/1002（版本兜底）。
+	ref := isoDo(t, base, "POST", "/refresh", map[string]any{"refresh_token": refresh1}, nil)
+	if ref.Status != 401 || ref.Code != 1002 {
+		t.Fatalf("stale unrevoked refresh must be 401/1002 by version mismatch, got status=%d code=%d", ref.Status, ref.Code)
+	}
+	if ref.Data != nil {
+		t.Fatalf("stale unrevoked refresh must not produce tokens, got %v", ref.Data)
 	}
 }

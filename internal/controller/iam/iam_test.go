@@ -632,6 +632,31 @@ func TestRedisWrongTypeFailClosed(t *testing.T) {
 	}
 }
 
+// TestAuthDBQueryFailClosed 覆盖 AC-014 的 DB 侧（CLEAN-002）：Auth 中间件查询 users.status/auth_epoch 失败时 fail-closed 401。
+// 通过临时 RENAME users 表使 findUserAuth 返回 1146（表不存在），模拟 DB 查询失败；测试结束恢复表名。
+func TestAuthDBQueryFailClosed(t *testing.T) {
+	base := setupIAMServer(t)
+	token, _ := registerAndLogin(t, base, "alice", "password123")
+
+	ctx := context.Background()
+	if _, err := g.DB().Exec(ctx, "RENAME TABLE users TO users_iamv5_failclosed_bak"); err != nil {
+		t.Fatalf("rename users: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := g.DB().Exec(context.Background(), "RENAME TABLE users_iamv5_failclosed_bak TO users"); err != nil {
+			t.Errorf("restore users table: %v", err)
+		}
+	})
+
+	me := doRequest(t, base, "GET", "/me", nil, map[string]string{"Authorization": "Bearer " + token})
+	if me.Status != 401 || me.Code != 1002 {
+		t.Fatalf("me with db error: expected fail-closed 401, got status=%d code=%d", me.Status, me.Code)
+	}
+	if me.Data != nil {
+		t.Fatalf("me with db error: expected no data, got %v", me.Data)
+	}
+}
+
 // TestSessionTTLExpiryReturns401 覆盖 AC-004：TTL 到期后 key 自然消失，访问受保护接口仍返回 401。
 func TestSessionTTLExpiryReturns401(t *testing.T) {
 	t.Setenv("AUTH_SESSION_TTL", "1")
