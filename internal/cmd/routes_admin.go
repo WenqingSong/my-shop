@@ -6,7 +6,9 @@ import (
 	adminController "cnb.cool/go-cloud-devops/my-shop/internal/controller/admin"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/banner"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/dashboard"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/flashsale"
+	iamController "cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/inventory"
 	orderController "cnb.cool/go-cloud-devops/my-shop/internal/controller/order"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/product"
@@ -29,6 +31,7 @@ import (
 // 显式 path，因此这里必须用完整路径注册、且与 g.Meta path 保持一致，否则会出现路径漂移。
 func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 	adminCtrl := adminController.NewV1()
+	iamCtrl := iamController.NewV1()
 	categoriesCtrl := categories.NewV1()
 	productCtrl := product.NewV1()
 	skuCtrl := sku.NewV1()
@@ -39,6 +42,7 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 	bannerCtrl := banner.NewV1()
 	recommendationCtrl := recommendation.NewV1()
 	uploadCtrlV1 := uploadCtrl.NewV1()
+	dashboardCtrl := dashboard.NewV1()
 
 	// 后台公开接口：管理员登录（无需 token）。
 	root.POST("/admin/login", adminCtrl.Login)
@@ -63,6 +67,10 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 			permissionGroup.Middleware(middleware.RequirePermission(code))
 			return permissionGroup
 		}
+
+		// 用户账号状态管理（查询/禁用/启用普通用户）。
+		require("user:read").GET("/admin/users/:id/status", iamCtrl.GetUserStatus)
+		require("user:status").PUT("/admin/users/:id/status", iamCtrl.UpdateUserStatus)
 
 		// 管理员管理。
 		require("admin:create").POST("/admin/admins", adminCtrl.CreateAdmin)
@@ -117,6 +125,13 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 		require("order:ship").POST("/admin/orders/:id/ship", orderAdminCtrl.Ship)
 		require("order:refund").POST("/admin/orders/:id/refund", orderAdminCtrl.Refund)
 
+		// 订单后台只读操作（AdminAuth + RequirePermission）：
+		//   - 列表与统计持 order:list；详情持 order:view。
+		//   - stats 静态段优先于 /admin/orders/:id，避免被 :id 参数段吞掉。
+		require("order:list").GET("/admin/orders", orderAdminCtrl.AdminList)
+		require("order:list").GET("/admin/orders/stats", orderAdminCtrl.AdminStats)
+		require("order:view").GET("/admin/orders/:id", orderAdminCtrl.AdminDetail)
+
 		// 秒杀活动后台写操作（AdminAuth + RequirePermission）。
 		require("flash_sale:create").POST("/admin/flash-sales", flashsaleAdminCtrl.Create)
 		require("flash_sale:update").PUT("/admin/flash-sales/:id", flashsaleAdminCtrl.Update)
@@ -147,5 +162,12 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 		require("recommend:item").POST("/admin/recommend-positions/:id/items", recommendationCtrl.AddItem)
 		require("recommend:item").DELETE("/admin/recommend-positions/:id/items/:product_id", recommendationCtrl.RemoveItem)
 		require("recommend:item").PUT("/admin/recommend-positions/:id/items/sort", recommendationCtrl.UpdateSort)
+
+		// 运营数据大屏（AdminAuth + RequirePermission("dashboard:view")）。
+		require("dashboard:view").GET("/admin/dashboard/overview", dashboardCtrl.Overview)
+		require("dashboard:view").GET("/admin/dashboard/orders/trend", dashboardCtrl.Trend)
+		require("dashboard:view").GET("/admin/dashboard/orders/status", dashboardCtrl.Status)
+		require("dashboard:view").GET("/admin/dashboard/products/top", dashboardCtrl.TopProducts)
+		require("dashboard:view").GET("/admin/dashboard/flash-sales", dashboardCtrl.FlashSales)
 	})
 }

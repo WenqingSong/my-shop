@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -80,8 +81,17 @@ func flashConsume(t *testing.T, limit int) {
 
 // flashMintUserToken 为指定 user_id 直接签发有效 token + 会话（绕过 bcrypt 登录），
 // 用于并发测试批量构造不同用户；仍走真实 middleware.Auth（验签 + 会话校验）。
+// IAM V5 起 Auth 每请求校验 users.status/auth_epoch，token 的 sub 必须有对应 users 行，
+// 故此处先落一个启用（status=1、auth_epoch=0 默认）用户，使 mint 出的 token 能通过真实 Auth。
 func flashMintUserToken(t *testing.T, userID int64) string {
 	t.Helper()
+	if _, err := g.DB().Model("users").Ctx(context.Background()).Data(g.Map{
+		"id":            userID,
+		"username":      "mint-" + strconv.FormatInt(userID, 10),
+		"password_hash": "mint",
+	}).Insert(); err != nil {
+		t.Fatalf("insert mint user %d: %v", userID, err)
+	}
 	sid, err := auth.NewSid()
 	if err != nil {
 		t.Fatalf("new sid: %v", err)

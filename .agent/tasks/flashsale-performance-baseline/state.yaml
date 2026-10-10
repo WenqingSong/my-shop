@@ -10,17 +10,17 @@ resources:
 
 review:
   status: CLEAN
-  target: "e67cf2829ecdf6d9ff0febc66f10a406a5fa092f"
+  target: "cb2a8fd62342aaab611fbd857ad715052b3d0ea9"
 
 owner:
   status: ACCEPTED
-  review_target: "e67cf2829ecdf6d9ff0febc66f10a406a5fa092f"
+  review_target: "cb2a8fd62342aaab611fbd857ad715052b3d0ea9"
 
 delivery:
   status: PASS
-  review_target: "e67cf2829ecdf6d9ff0febc66f10a406a5fa092f"
-  feature_head: "7409e03616cda2f3e39455974637dfa7bbc77a3b"
-  develop_base: "02c3b9218f497826403445b0c5530eee8364df44"
+  review_target: "cb2a8fd62342aaab611fbd857ad715052b3d0ea9"
+  feature_head: "78ceb69c117caa9ba4a9dd67848a86a9c6e1c94d"
+  develop_base: "3523cd20cdb0cdc62a13956812fb9dc98c26760e"
 
 blocked:
   active: false

@@ -36,6 +36,7 @@
 | `20261001000006` | `cart_items` | `cart_items`（用户购物车条目，`uk_user_sku` 唯一，软引用无 FK） |
 | `20261001000007` | `orders` | `orders` + `order_items`（订单主数据 + 订单项，快照软引用，`uk_order_no`/`uk_user_idempotency` 唯一，`idx_status_expire` 支撑超时扫描） |
 | `20261001000008` | `refresh_tokens` | `refresh_tokens`（前台 refresh token，`uk_token_hash` 唯一 + `idx_family`/`idx_user`/`idx_sid`，无 FK） |
+| `20261001000019` | `user_status` | `users` 增 `status`/`auth_epoch`、`refresh_tokens` 增 `auth_epoch`、新增 `user_status_audits`（用户账号状态 + 认证版本 + 审计，单文件） |
 
 ### 2.2 baseline 模型
 

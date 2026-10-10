@@ -42,11 +42,19 @@ var dummyPasswordHash = func() []byte {
 	return h
 }()
 
+// userStatusDisabled / userStatusEnabled 是前台用户账号状态（users.status，对齐 admins.status）。
+const (
+	userStatusDisabled = 0
+	userStatusEnabled  = 1
+)
+
 // userRecord 是 users 表的最小查询结果。
 type userRecord struct {
 	ID           int64
 	Username     string
 	PasswordHash string
+	Status       int
+	AuthEpoch    int64
 }
 
 // Register 校验 username/password → bcrypt 哈希 → 写入 users。
@@ -102,6 +110,10 @@ func (s *sIam) Login(ctx context.Context, req *v1.LoginReq, userAgent, ip string
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
 		return nil, codes.New(codes.CodeInvalidCredentials)
 	}
+	// 凭据正确但账号被禁用：拒绝登录（401，不做枚举区分），不签发 token、不写会话。
+	if user.Status != userStatusEnabled {
+		return nil, codes.New(codes.CodeUnauthorized)
+	}
 
 	sid, err := auth.NewSid()
 	if err != nil {
@@ -115,6 +127,7 @@ func (s *sIam) Login(ctx context.Context, req *v1.LoginReq, userAgent, ip string
 		LoginAt:   time.Now().Unix(),
 		UserAgent: userAgent,
 		IP:        ip,
+		AuthEpoch: user.AuthEpoch,
 	}); err != nil {
 		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("写入会话: %w", err))
 	}
@@ -137,7 +150,7 @@ func (s *sIam) Login(ctx context.Context, req *v1.LoginReq, userAgent, ip string
 	if err != nil {
 		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("读取 refresh TTL: %w", err))
 	}
-	if err := insertRefreshRoot(ctx, auth.HashRefreshToken(refreshPlaintext), familyID, user.ID, sid, refreshTTL); err != nil {
+	if err := insertRefreshRoot(ctx, auth.HashRefreshToken(refreshPlaintext), familyID, user.ID, sid, user.AuthEpoch, refreshTTL); err != nil {
 		return nil, err
 	}
 
@@ -277,7 +290,7 @@ func validatePassword(password string) error {
 
 func findUserByUsername(ctx context.Context, username string) (*userRecord, error) {
 	record, err := g.DB().Model("users").Ctx(ctx).
-		Fields("id", "username", "password_hash").
+		Fields("id", "username", "password_hash", "status", "auth_epoch").
 		Where("username", username).
 		One()
 	if err != nil {
@@ -290,6 +303,27 @@ func findUserByUsername(ctx context.Context, username string) (*userRecord, erro
 		ID:           record["id"].Int64(),
 		Username:     record["username"].String(),
 		PasswordHash: record["password_hash"].String(),
+		Status:       record["status"].Int(),
+		AuthEpoch:    record["auth_epoch"].Int64(),
+	}, nil
+}
+
+// findUserAuth 按 id 查询前台用户的状态与认证版本（refresh 校验账号状态/版本用），不存在返回 nil。
+func findUserAuth(ctx context.Context, id int64) (*userRecord, error) {
+	record, err := g.DB().Model("users").Ctx(ctx).
+		Fields("id", "status", "auth_epoch").
+		Where("id", id).
+		One()
+	if err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("按 id 查询用户状态: %w", err))
+	}
+	if record == nil || record.IsEmpty() {
+		return nil, nil
+	}
+	return &userRecord{
+		ID:        record["id"].Int64(),
+		Status:    record["status"].Int(),
+		AuthEpoch: record["auth_epoch"].Int64(),
 	}, nil
 }
 

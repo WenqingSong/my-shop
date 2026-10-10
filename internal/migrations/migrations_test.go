@@ -13,10 +13,10 @@ import (
 // baselineVersion 是内嵌 baseline 迁移的版本号（14 位时间戳）。
 const baselineVersion = uint(20261001000001)
 
-// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + products + skus + inventory + addresses + cart_items + orders + refresh_tokens + reviews + favorites + flash_sale + product_view_count + product_likes + banners + flash_sale_order_requests + recommend + articles + flash_sale_request_audits）。
-const latestMigrationVersion = uint(20261001000018)
+// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + products + skus + inventory + addresses + cart_items + orders + refresh_tokens + reviews + favorites + flash_sale + product_view_count + product_likes + banners + flash_sale_order_requests + recommend + articles + flash_sale_request_audits + user_status）。
+const latestMigrationVersion = uint(20261001000019)
 
-// businessTables 是 migration 应建立的 31 张业务表。
+// businessTables 是 migration 应建立的 32 张业务表。
 // 注意顺序：order_items 通过外键引用 orders（ON DELETE CASCADE），故 order_items 排在 orders 之前；
 // flash_sale_activity_skus 通过外键引用 flash_sale_activities（ON DELETE CASCADE），故排在它之前；
 // recommend_items 通过外键引用 recommend_positions（ON DELETE CASCADE），故排在它之前；
@@ -29,7 +29,7 @@ var businessTables = []string{
 	"article_favorites", "article_likes", "articles",
 	"recommend_items", "recommend_positions",
 	"favorites", "product_likes", "banners", "flash_sale_request_audits", "flash_sale_order_requests", "flash_sale_orders", "flash_sale_activity_skus", "flash_sale_activities",
-	"order_items", "orders", "refresh_tokens", "cart_items", "reviews", "addresses", "users", "inventory_logs", "inventories", "skus", "products", "product_images", "categories", "admins", "roles", "permissions", "admin_roles", "role_permissions",
+	"order_items", "orders", "refresh_tokens", "cart_items", "reviews", "addresses", "users", "user_status_audits", "inventory_logs", "inventories", "skus", "products", "product_images", "categories", "admins", "roles", "permissions", "admin_roles", "role_permissions",
 }
 
 // allTables 含业务表与追踪表。
@@ -413,6 +413,8 @@ var expectedSchema = []tableSpec{
 			{Name: "password_hash", Type: "varchar(60)"},
 			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
 			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
+			{Name: "status", Type: "tinyint", Default: strPtr("1")},
+			{Name: "auth_epoch", Type: "bigint unsigned", Default: strPtr("0")},
 		},
 		Indexes: []indexSpec{
 			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},

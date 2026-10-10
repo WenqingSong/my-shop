@@ -36,6 +36,7 @@ type refreshTokenRow struct {
 	ParentID      *int64      `orm:"parent_id"`
 	Generation    int         `orm:"generation"`
 	Sid           string      `orm:"sid"`
+	AuthEpoch     int64       `orm:"auth_epoch"`
 	ExpiresAt     *gtime.Time `orm:"expires_at"`
 	RevokedAt     *gtime.Time `orm:"revoked_at"`
 	RevokedReason *string     `orm:"revoked_reason"`
@@ -63,6 +64,17 @@ func (s *sIam) Refresh(ctx context.Context, req *v1.RefreshReq, userAgent, ip st
 		return nil, err
 	}
 
+	// 校验账号状态与版本：读 users（status、auth_epoch），要求 status==1 且 row.auth_epoch == users.auth_epoch。
+	// row.auth_epoch 是本次登录绑定的版本，绝不重读 users.auth_epoch 来签发新凭证；
+	// 禁用用户 / 版本落后（禁用后旧 refresh）→ 1002，无任何副作用。
+	user, err := findUserAuth(ctx, row.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil || user.Status != userStatusEnabled || user.AuthEpoch != row.AuthEpoch {
+		return nil, codes.New(codes.CodeUnauthorized)
+	}
+
 	// 有效 → session upsert（先于轮换；失败 500 且未轮换，重试安全）。
 	ttl, err := auth.SessionTTL(ctx)
 	if err != nil {
@@ -76,6 +88,7 @@ func (s *sIam) Refresh(ctx context.Context, req *v1.RefreshReq, userAgent, ip st
 		LoginAt:   gtime.Now().Unix(),
 		UserAgent: userAgent,
 		IP:        ip,
+		AuthEpoch: row.AuthEpoch,
 	})
 	if err != nil {
 		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("确保会话存活: %w", err))
@@ -186,10 +199,10 @@ func rotateRefresh(ctx context.Context, old *refreshTokenRow, newTokenHash strin
 		if n == 0 {
 			return errRefreshNotRotated
 		}
-		// INSERT 新后代：同 sid、同 family_id、parent_id=旧 id、generation+1、expires_at=now+ttl。
+		// INSERT 新后代：同 sid、同 family_id、parent_id=旧 id、generation+1、auth_epoch=旧行值（继承）、expires_at=now+ttl。
 		if _, e := tx.Ctx(ctx).Exec(
-			"INSERT INTO refresh_tokens (token_hash, family_id, user_id, parent_id, generation, sid, expires_at) VALUES (?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))",
-			newTokenHash, old.FamilyID, old.UserID, old.ID, old.Generation+1, old.Sid, ttl,
+			"INSERT INTO refresh_tokens (token_hash, family_id, user_id, parent_id, generation, sid, auth_epoch, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))",
+			newTokenHash, old.FamilyID, old.UserID, old.ID, old.Generation+1, old.Sid, old.AuthEpoch, ttl,
 		); e != nil {
 			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("写入新 refresh token: %w", e))
 		}
@@ -232,11 +245,11 @@ func findRefreshByHash(ctx context.Context, tokenHash string) (*refreshTokenRow,
 	return rows[0], nil
 }
 
-// insertRefreshRoot 登录时写入 refresh family 根（parent_id=NULL，generation=0）。
-func insertRefreshRoot(ctx context.Context, tokenHash, familyID string, userID int64, sid string, ttl int64) error {
+// insertRefreshRoot 登录时写入 refresh family 根（parent_id=NULL，generation=0，绑定登录时读到的 auth_epoch）。
+func insertRefreshRoot(ctx context.Context, tokenHash, familyID string, userID int64, sid string, authEpoch int64, ttl int64) error {
 	_, err := g.DB().Exec(ctx,
-		"INSERT INTO refresh_tokens (token_hash, family_id, user_id, parent_id, generation, sid, expires_at) VALUES (?, ?, ?, NULL, 0, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))",
-		tokenHash, familyID, userID, sid, ttl,
+		"INSERT INTO refresh_tokens (token_hash, family_id, user_id, parent_id, generation, sid, auth_epoch, expires_at) VALUES (?, ?, ?, NULL, 0, ?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))",
+		tokenHash, familyID, userID, sid, authEpoch, ttl,
 	)
 	if err != nil {
 		return codes.Wrap(codes.CodeInternalError, fmt.Errorf("写入 refresh token: %w", err))

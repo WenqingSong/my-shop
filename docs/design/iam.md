@@ -10,7 +10,7 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 - **Redis 会话**：以 `sid` 为桥，在 Redis 中维护会话状态（存在性 + 撤销标记 + 用户绑定）。受保护接口在验签与校验 `exp` 之后，还必须通过 Redis 会话有效性校验才放行。
 - **登出**：通过将对应会话逻辑标记为 `revoked` 实现 token 可撤销，session 记录保留至 TTL 自然过期，不物理删除。
 
-单 access token，无滑动续期、无 `token_version`、无标准 `jti`；长期凭证为 refresh token（仅前台用户域），支持轮换（rotation）、Token Family 血缘与重放（reuse）检测，refresh token 仅以 SHA-256 哈希落 MySQL。前台用户域已支持会话列表与主动撤销（撤销指定/撤销其他/全部退出）；后台管理员域无会话列表/批量撤销；管理员跨用户强制下线未提供。
+单 access token，无滑动续期、无标准 `jti`；账号有每用户持久化认证版本 `users.auth_epoch`（仅在实际「启用→禁用」迁移时递增，绑定会话 Hash 与 refresh token，非 JWT 版本声明）。长期凭证为 refresh token（仅前台用户域），支持轮换（rotation）、Token Family 血缘与重放（reuse）检测，refresh token 仅以 SHA-256 哈希落 MySQL。前台用户域已支持会话列表与主动撤销（撤销指定/撤销其他/全部退出）；后台管理员域无会话列表/批量撤销；管理员经用户状态管理 API 禁用/启用普通用户，禁用时联动撤销会话与 refresh family 并递增 `auth_epoch`。
 
 本系统存在两个互相隔离的身份域：**前台用户**（`users` + `type=user` + `iam:session:{sid}` + `Auth`）与**后台管理员**（`admins` + `type=admin` + `iam:admin:session:{sid}` + `AdminAuth`）。两者使用独立凭据表、独立 token 类型、独立 Session Key 前缀与独立认证中间件，后端始终独立验证身份域（详见「5. 安全边界」）。
 
@@ -59,7 +59,7 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 
 | 组件 | 角色 |
 | --- | --- |
-| MySQL `users` | 前台用户身份事实来源（id/username/password_hash） |
+| MySQL `users` | 前台用户身份事实来源（id/username/password_hash/status/auth_epoch） |
 | MySQL `admins` | 后台管理员身份事实来源（id/username/password_hash/status/is_super） |
 | MySQL `refresh_tokens` | 前台 refresh token 事实来源（token_hash、family 血缘、revoked/过期状态，见 3.6） |
 | Redis `iam:session:{sid}` | 前台会话状态事实来源（存在性 + revoked + user_id 绑定 + 元数据） |
@@ -91,6 +91,7 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 - **Value**：Hash，字段：
   - `user_id`：用户 id 的十进制字符串（用于与 JWT `sub` 交叉校验，纵深防御）。
   - `revoked`：`"0"`（未撤销）/ `"1"`（已撤销）。
+  - `auth_epoch`：会话创建时绑定的账号认证版本（十进制字符串），鉴权时与 `users.auth_epoch` 比对，禁用后版本递增使旧会话永久失效。
   - `login_at`：登录时间（unix 秒），用于会话列表展示与排序。
   - `user_agent` / `ip`：设备信息（登录时从请求采集，用于区分设备）。
 - **TTL**：`auth.session.ttl` 秒，默认 3600，必须 > 0，可经 `AUTH_SESSION_TTL` 覆盖。
@@ -138,6 +139,7 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 | `parent_id` | BIGINT UNSIGNED NULL | 父 token id，根为 NULL |
 | `generation` | INT NOT NULL DEFAULT 0 | 代际计数 |
 | `sid` | VARCHAR(32) | 绑定的 access session sid |
+| `auth_epoch` | BIGINT UNSIGNED NOT NULL DEFAULT 0 | 签发时绑定的认证版本，随 family 血缘继承（轮换沿用父行值，不重读 `users.auth_epoch`） |
 | `expires_at` | DATETIME NOT NULL | 绝对过期时间 |
 | `revoked_at` | DATETIME NULL | 撤销/轮换时间 |
 | `revoked_reason` | VARCHAR(16) NULL | `rotated` / `revoked` |
@@ -145,20 +147,27 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 
 索引：`uk_token_hash(token_hash)`、`idx_family(family_id)`、`idx_user(user_id)`、`idx_sid(sid)`。
 
+### 3.7 用户账号状态与认证版本
+
+- `users.status`：`TINYINT NOT NULL DEFAULT 1`，`1=启用`/`0=禁用`（对齐 `admins.status`）；旧用户升级后默认启用。
+- `users.auth_epoch`：`BIGINT UNSIGNED NOT NULL DEFAULT 0`，每用户认证版本，仅在实际「启用→禁用」迁移时 +1，启用不递减、不重签。它是「重新启用不复活旧凭证」与「禁用即时失效」的最终保证：旧凭证（会话 Hash / refresh token）绑定旧版本，禁用后落后于当前版本即永久失效，必须重新登录。
+- `user_status_audits`（append-only，软引用无 FK）：`target_user_id`、`operator_admin_id`、`operator_username`（快照）、`action`（`enable`/`disable`）、`before_status`、`after_status`、`reason`、`result`（`1=成功`）、`created_at`。仅实际状态迁移落审计；幂等 no-op 不写审计、不递增版本、不重复撤销。
+
 ## 4. 鉴权与登出流程
 
 ### 4.1 登录（同步）
 
 ```
 校验 username/password（bcrypt，防枚举假哈希对齐耗时）
+  → 校验 users.status（禁用 → 1002 UNAUTHORIZED，不做枚举区分）
   → 生成 sid
-  → 写 Redis session（HSet user_id + revoked=0，Expire TTL）
+  → 写 Redis session（HSet user_id + auth_epoch + revoked=0，Expire TTL）
   → 签发含 sid 的 JWT
-  → 生成 refresh token（明文仅本次返回；SHA-256 哈希 + family_id 落 refresh_tokens 根，绑 sid）
+  → 生成 refresh token（明文仅本次返回；SHA-256 哈希 + family_id + auth_epoch 落 refresh_tokens 根，绑 sid）
   → 返回 {access_token, refresh_token, token_type:"Bearer", expires_in:3600}
 ```
 
-写 Redis session 失败 → 登录失败，返回 500（`1000 INTERNAL_ERROR`），不签发 token，保证「返回的 token 必有有效 session」。写 refresh_tokens 失败 → 登录失败（500），不返回 refresh token（access token 与 refresh token 作为同一登录产物，任一失败即整体失败）。
+登录以「本次读到的 `users.auth_epoch`」绑定会话 Hash 与 refresh 根，不重读。写 Redis session 失败 → 登录失败，返回 500（`1000 INTERNAL_ERROR`），不签发 token，保证「返回的 token 必有有效 session」。写 refresh_tokens 失败 → 登录失败（500），不返回 refresh token（access token 与 refresh token 作为同一登录产物，任一失败即整体失败）。
 
 ### 4.2 鉴权（同步，每请求）
 
@@ -167,8 +176,9 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 1. 提取 `Authorization: Bearer <token>`。
 2. `auth.Parse`：验签 + `exp` 校验 + issuer + 限定 HS256。失败 → 401（不触达 Redis）。
 3. 解析 `sub` 与 `sid`（`sid` 为空 → 401）。
-4. `ValidateSession(sid, userID)`：查 Redis 会话，要求「存在、未 revoked、`user_id == sub`」。
-5. 通过后注入 `Principal{UserID, Sid}`；`/me` 只信任 `Principal.UserID`，不信任请求自带身份。
+4. `ValidateSession(sid, userID)`：查 Redis 会话，要求「存在、未 revoked、`user_id == sub`」，并取回会话绑定的 `auth_epoch`。
+5. 每请求查 `users`（`status`、`auth_epoch`）：要求 `status==1` 且 `session.auth_epoch == users.auth_epoch`；用户不存在/禁用/版本不匹配/查询失败均 401（fail-closed）。
+6. 通过后注入 `Principal{UserID, Sid}`；`/me` 只信任 `Principal.UserID`，不信任请求自带身份。
 
 ### 4.3 登出（同步，幂等）
 
@@ -198,18 +208,32 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
    - `revoked_at` 非空（`reason='revoked'`）→ `2012 REFRESH_TOKEN_INVALID`（401）；
    - `expires_at < NOW()` → `2013 REFRESH_TOKEN_EXPIRED`（401）；
    - 否则有效。
-2. session upsert：按 sid 确保 access session 存活——存在且未撤销 → 续期 TTL 至 `auth.session.ttl`（保留 login_at/UA/IP）；不存在（已过期）→ 以同 sid 重建（login_at=当前时间）；已撤销（防御性）→ 拒绝（2012）。不新增会话列表条目（sid 不变）。
-3. 事务内轮换：条件 `UPDATE refresh_tokens SET revoked_at=NOW(), revoked_reason='rotated' WHERE token_hash=? AND revoked_at IS NULL AND expires_at > NOW()`；`RowsAffected==0` 则回滚并按第 1 步重判（并发后到者 → reuse）；否则 INSERT 新后代（同 sid、同 family_id、parent_id=旧 id、generation+1、expires_at=now+30d）。
-4. 签发新 access token（复用同一 sid，`type=user`）。
-5. 返回 `{access_token, refresh_token, token_type:"Bearer", expires_in:3600}`。
+2. 校验账号状态与版本：读 `users`（`status`、`auth_epoch`），要求 `status==1` 且 `row.auth_epoch == users.auth_epoch`；不符 → `1002 UNAUTHORIZED`（401，无副作用）。`row.auth_epoch` 是本次登录绑定的版本，绝不重读 `users.auth_epoch` 来签发新凭证。
+3. session upsert：按 sid 确保 access session 存活——存在且未撤销 → 续期 TTL 至 `auth.session.ttl`（保留 login_at/UA/IP/`auth_epoch`）；不存在（已过期）→ 以同 sid 重建（login_at=当前时间，`auth_epoch` 继承 `row.auth_epoch`）；已撤销（防御性）→ 拒绝（2012）。不新增会话列表条目（sid 不变）。
+4. 事务内轮换：条件 `UPDATE refresh_tokens SET revoked_at=NOW(), revoked_reason='rotated' WHERE token_hash=? AND revoked_at IS NULL AND expires_at > NOW()`；`RowsAffected==0` 则回滚并按第 1 步重判（并发后到者 → reuse）；否则 INSERT 新后代（同 sid、同 family_id、`auth_epoch=row.auth_epoch` 继承、parent_id=旧 id、generation+1、expires_at=now+30d）。
+5. 签发新 access token（复用同一 sid，`type=user`）。
+6. 返回 `{access_token, refresh_token, token_type:"Bearer", expires_in:3600}`。
 
 并发语义：InnoDB 行锁串行化同一 `token_hash` 的条件 UPDATE，仅一个事务成功轮换；后到者重判为 reuse（INV-002/INV-003）。
 
 **reuse 全量撤销**：`reason='rotated'` 的 token 再次提交即视为重放，撤销该用户全部 refresh families（全部未撤销成员置 `revoked_reason='revoked'`）+ 撤销该用户全部 access sessions（`RevokeAllSessions`），强制重新认证，不产生任何新 token。
 
+### 4.6 用户状态管理（后台，同步）
+
+`GET /admin/users/:id/status`（`AdminAuth` + `RequirePermission("user:read")`）返回 `{id, status}`；`PUT /admin/users/:id/status`（`AdminAuth` + `RequirePermission("user:status")`）以请求体 `{status, reason}` 禁用/启用目标用户；目标 id 取自 URL 路径，操作管理员取自 `AdminPrincipal`。
+
+状态更新在单个 MySQL 事务内以 `SELECT ... FOR UPDATE` 锁定目标行，区分三态：
+
+- 无行 → `2015 USER_NOT_FOUND`（404，无写入）；
+- `status == 目标` → 幂等成功（no-op，不写审计、不递增版本、不撤销）；
+- `status != 目标` → 实际迁移：更新 `status`（禁用时 `auth_epoch=auth_epoch+1`）+ 写审计 +（禁用场景）撤销该用户全部 refresh family。
+
+事务提交后（仅禁用实际迁移）best-effort `RevokeAllSessions(userID)`（Redis），失败仅日志——每请求 status/版本校验兜底。启用不递减 `auth_epoch`、不撤销会话/family。
+
 ## 5. 安全边界
 
 - **fail-closed**：鉴权中间件查询 Redis 失败（不可用/超时/类型错误）一律返回 401（`1002`），绝不放行可能已撤销的 token；底层错误仅记录服务端日志，不对外暴露内部状态。
+- **禁用/版本 fail-closed**：`Auth` 每请求查 `users.status`/`auth_epoch` 失败（DB 故障）一律 401，绝不放行禁用用户；`users.auth_epoch` 版本不匹配（禁用后旧凭证）一律 401。DB/Redis 故障统一 401（不区分「未授权」与「系统故障」，也不改用 503，保持与 `AdminAuth` 一致且不暴露基础设施状态）。
 - **错误码复用**：已撤销/缺失 session 复用 `1002 UNAUTHORIZED`（401），不新增独立错误码（客户端无法仅凭 code 区分「被登出」与「token 过期」，当前范围内撤销仅由客户端自身登出触发，区分价值低，属可接受取舍）。
 - **密钥与凭据**：不硬编码 Redis 地址 / JWT 密钥；密码 bcrypt 存储；Token/密钥不进日志或错误响应。
 - **身份信任**：服务端验证身份，不信任客户端提交的 `sid` 或用户身份；`Principal` 是唯一身份来源。
@@ -234,23 +258,25 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 | --- | --- | --- |
 | 成功（含 logout 幂等成功） | 0 | 200 |
 | 登录写 session / 生成 sid / 签发失败 | 1000 | 500 |
-| token 缺失/非法/签名无效/过期/sid 缺失/会话缺失/已撤销/Redis 故障 | 1002 | 401 |
+| token 缺失/非法/签名无效/过期/sid 缺失/会话缺失/已撤销/Redis 故障/用户禁用/认证版本不匹配 | 1002 | 401 |
 | 凭据错误（登录） | 2002 | 401 |
 | 用户名已存在（注册） | 2001 | 409 |
 | 撤销会话目标不存在或不属于当前用户 | 2011 | 404 |
 | refresh token 无效/未知/篡改/已撤销（不泄露存在性） | 2012 | 401 |
 | refresh token 过期 | 2013 | 401 |
 | refresh token 重放（已轮换 token 再次提交） | 2014 | 401 |
+| 用户状态管理目标用户不存在 | 2015 | 404 |
 
 ## 7. 失败与一致性语义
 
 - 登录：写 Redis 失败 → 500，不返回 token；「Redis 已写、JWT 未签」的极窄窗口产生孤儿 session，由 TTL 到期自愈，无安全影响。写 refresh_tokens 失败 → 500，不返回 refresh token。
-- 鉴权：JWT 无效/过期 → 401（不触达 Redis）；JWT 有效但 session 缺失/撤销/`user_id` 不匹配 → 401；Redis 错误 → 401（fail-closed）+ 服务端日志。
+- 鉴权：JWT 无效/过期 → 401（不触达 Redis）；JWT 有效但 session 缺失/撤销/`user_id` 不匹配 → 401；`users.status==0`（禁用）或 `session.auth_epoch != users.auth_epoch`（版本落后）→ 401；Redis 错误或 `users` 查询错误 → 401（fail-closed）+ 服务端日志。
 - logout：幂等；同一 token 并发登出为原子操作（Lua），结果一致；不同会话互不影响；联动撤销 refresh family（MySQL 更新，幂等）。
 - refresh：轮换的「旧 token 置 rotated + 新后代 INSERT」在同一 MySQL 事务内，失败即回滚（旧 token 不失效，可重试）；session upsert 先于轮换，失败则 500 且未轮换（重试安全）；并发后到者重判为 reuse（全量撤销）。
 - 会话列表：Redis 枚举/读取失败 → 500 + 日志（不返回空列表，防 fail-open）；ZSET stale member 以 Hash 为准过滤并清理。
 - 撤销：逻辑标记 `revoked=1` 并保留 key 与 TTL；`revoke-others`/`revoke-all` 经 Lua 原子批量撤销，并联动撤销对应 refresh family；Redis 写失败 → 500 + 日志（不吞错误伪报成功）；重复撤销幂等，非本人/不存在 → 404 无写入。
 - reuse：撤销该用户全部 refresh families + 全部 access sessions，为 MySQL 更新 + Redis Lua 撤销，非跨系统事务（Redis 失败时 family 已撤销、session 由 TTL/后续校验兜底）。
+- 用户状态管理：`status`/`auth_epoch`/审计/family 撤销在同一 MySQL 事务内全有或全无；`SELECT ... FOR UPDATE` 串行化并发状态变更，区分「不存在（404）/已一致（幂等）/实际迁移（更新+审计+禁用撤销 family）」三态；仅实际禁用递增 `auth_epoch`；Redis 会话撤销在事务提交后 best-effort（失败仅日志，由每请求 status/版本校验兜底）。
 - 无 MQ、无异步；MySQL 与 Redis 间为顺序写，无跨系统事务。
 
 ## 8. 配置

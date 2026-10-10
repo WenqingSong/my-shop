@@ -27,6 +27,8 @@ const (
 	sessionFieldUserAgent = "user_agent"
 	// sessionFieldIP 是 session Hash 中存储的客户端 IP 字段。
 	sessionFieldIP = "ip"
+	// sessionFieldAuthEpoch 是 session Hash 中存储的账号认证版本字段（十进制字符串）。
+	sessionFieldAuthEpoch = "auth_epoch"
 	// defaultSessionTTL 是会话默认 TTL（秒），与 JWT exp 对齐。
 	defaultSessionTTL = 3600
 	// adminSessionKeyPrefix 是管理员会话 key 前缀，完整 key 为 iam:admin:session:{sid}。
@@ -123,6 +125,9 @@ type SessionMeta struct {
 	UserAgent string
 	// IP 是客户端 IP（设备信息）。
 	IP string
+	// AuthEpoch 是会话绑定的账号认证版本（登录时读到的 users.auth_epoch；refresh 重建时继承 row.auth_epoch）。
+	// 鉴权时与 users.auth_epoch 比对，禁用后版本递增使旧会话永久失效。
+	AuthEpoch int64
 }
 
 // CreateSession 写入会话 Hash（user_id、revoked=0、登录元数据）并设置 TTL，初始未撤销。
@@ -148,6 +153,7 @@ func createSessionHash(ctx context.Context, sid string, userID int64, ttl int64,
 		sessionFieldLoginAt:   strconv.FormatInt(meta.LoginAt, 10),
 		sessionFieldUserAgent: meta.UserAgent,
 		sessionFieldIP:        meta.IP,
+		sessionFieldAuthEpoch: strconv.FormatInt(meta.AuthEpoch, 10),
 	}); err != nil {
 		return fmt.Errorf("写入会话: %w", err)
 	}
@@ -158,24 +164,27 @@ func createSessionHash(ctx context.Context, sid string, userID int64, ttl int64,
 }
 
 // ValidateSession 校验会话是否有效：key 存在、未撤销且 user_id 与给定 userID 一致。
-// 返回 (valid bool, err error)：err 非 nil 表示 Redis 查询失败，调用方必须 fail-closed（401）。
-func ValidateSession(ctx context.Context, sid string, userID int64) (bool, error) {
+// 返回 (valid bool, epoch int64, err error)：err 非 nil 表示 Redis 查询失败，调用方必须 fail-closed（401）；
+// epoch 为会话 Hash 绑定的认证版本（无效会话时为 0），鉴权时与 users.auth_epoch 比对（同一次 Redis 读返回，避免额外读）。
+func ValidateSession(ctx context.Context, sid string, userID int64) (bool, int64, error) {
 	v, err := g.Redis().HGetAll(ctx, SessionKey(sid))
 	if err != nil {
-		return false, fmt.Errorf("查询会话: %w", err)
+		return false, 0, fmt.Errorf("查询会话: %w", err)
 	}
 	fields := v.MapStrStr()
 	if len(fields) == 0 {
 		// session 不存在（TTL 到期或被清理）。
-		return false, nil
+		return false, 0, nil
 	}
 	if fields[sessionFieldRevoked] == "1" {
-		return false, nil
+		return false, 0, nil
 	}
 	if fields[sessionFieldUserID] != strconv.FormatInt(userID, 10) {
-		return false, nil
+		return false, 0, nil
 	}
-	return true, nil
+	epoch, _ := strconv.ParseInt(fields[sessionFieldAuthEpoch], 10, 64)
+	// 旧会话 Hash 无 auth_epoch 字段时按 0 解读（与 users.auth_epoch=0 匹配，兼容迁移前会话）。
+	return true, epoch, nil
 }
 
 // RevokeSession 原子撤销会话（仅当 key 存在时置 revoked=1），保持剩余 TTL，不创建新 key。

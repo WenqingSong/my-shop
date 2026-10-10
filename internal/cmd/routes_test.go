@@ -121,6 +121,10 @@ func TestRouteTable(t *testing.T) {
 		// 订单后台写操作（AdminAuth + RequirePermission）。
 		"POST /admin/orders/:id/ship",
 		"POST /admin/orders/:id/refund",
+		// 订单后台只读操作（AdminAuth + RequirePermission）。
+		"GET /admin/orders",
+		"GET /admin/orders/stats",
+		"GET /admin/orders/:id",
 		// 秒杀前台下单（Auth 保护）。
 		"POST /flash-sales/:id/orders",
 		// 秒杀下单结果查询（Auth 保护）。
