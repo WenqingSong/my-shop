@@ -65,6 +65,8 @@ var seedPermissionList = []permissionSeed{
 	{Code: "recommend:delete", Name: "删除推荐位"},
 	{Code: "recommend:item", Name: "管理推荐商品"},
 	{Code: "dashboard:view", Name: "查看运营数据大屏"},
+	{Code: "user:read", Name: "查看用户状态"},
+	{Code: "user:status", Name: "禁用/启用用户"},
 }
 
 // seedPermissions 幂等写入标准权限：已存在（code 唯一）则跳过。

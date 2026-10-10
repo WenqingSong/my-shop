@@ -17,6 +17,8 @@ const (
 	bearerPrefix = "Bearer "
 	// adminStatusEnabled 表示管理员启用状态（admins.status=1）。
 	adminStatusEnabled = 1
+	// userStatusEnabled 表示前台用户启用状态（users.status=1）。
+	userStatusEnabled = 1
 )
 
 // Auth 解析用户侧 token（type=user），校验签名、有效期与会话有效性，注入 Principal。
@@ -31,7 +33,7 @@ func Auth(r *ghttp.Request) {
 		return
 	}
 
-	valid, err := auth.ValidateSession(r.Context(), p.Sid, p.UserID)
+	valid, sessionEpoch, err := auth.ValidateSession(r.Context(), p.Sid, p.UserID)
 	if err != nil {
 		// Redis 不可用/查询失败：安全优先，fail-closed 拒绝放行，服务端记录底层错误。
 		glog.Errorf(r.Context(), "会话校验失败（fail-closed）: %v", err)
@@ -39,6 +41,19 @@ func Auth(r *ghttp.Request) {
 		return
 	}
 	if !valid {
+		r.SetError(codes.New(codes.CodeUnauthorized))
+		return
+	}
+
+	// 每请求查 users：要求 status==1 且 session.auth_epoch == users.auth_epoch。
+	// 用户不存在/禁用/版本不匹配/查询失败一律 fail-closed 401，不依赖 JWT 过期、不只在登录时检查。
+	user, err := findUserAuth(r.Context(), p.UserID)
+	if err != nil {
+		glog.Errorf(r.Context(), "查询用户状态失败（fail-closed）: %v", err)
+		r.SetError(codes.New(codes.CodeUnauthorized))
+		return
+	}
+	if user == nil || user.Status != userStatusEnabled || user.AuthEpoch != sessionEpoch {
 		r.SetError(codes.New(codes.CodeUnauthorized))
 		return
 	}
@@ -199,6 +214,30 @@ func parseAdminPrincipal(r *ghttp.Request, claims *auth.Claims) (*AdminPrincipal
 		return nil, false
 	}
 	return &AdminPrincipal{AdminID: adminID, Sid: claims.Sid}, true
+}
+
+// userAuthRecord 是 users 表的最小查询结果（鉴权阶段所需字段）。
+type userAuthRecord struct {
+	Status    int
+	AuthEpoch int64
+}
+
+// findUserAuth 按 id 查询前台用户的状态与认证版本，不存在返回 nil。
+func findUserAuth(ctx context.Context, id int64) (*userAuthRecord, error) {
+	record, err := g.DB().Model("users").Ctx(ctx).
+		Fields("status", "auth_epoch").
+		Where("id", id).
+		One()
+	if err != nil {
+		return nil, err
+	}
+	if record == nil || record.IsEmpty() {
+		return nil, nil
+	}
+	return &userAuthRecord{
+		Status:    record["status"].Int(),
+		AuthEpoch: record["auth_epoch"].Int64(),
+	}, nil
 }
 
 // adminRecord 是 admins 表的最小查询结果（认证阶段所需字段）。

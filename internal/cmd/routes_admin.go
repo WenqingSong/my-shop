@@ -8,6 +8,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/dashboard"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/flashsale"
+	iamController "cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/inventory"
 	orderController "cnb.cool/go-cloud-devops/my-shop/internal/controller/order"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/product"
@@ -30,6 +31,7 @@ import (
 // 显式 path，因此这里必须用完整路径注册、且与 g.Meta path 保持一致，否则会出现路径漂移。
 func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 	adminCtrl := adminController.NewV1()
+	iamCtrl := iamController.NewV1()
 	categoriesCtrl := categories.NewV1()
 	productCtrl := product.NewV1()
 	skuCtrl := sku.NewV1()
@@ -65,6 +67,10 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 			permissionGroup.Middleware(middleware.RequirePermission(code))
 			return permissionGroup
 		}
+
+		// 用户账号状态管理（查询/禁用/启用普通用户）。
+		require("user:read").GET("/admin/users/:id/status", iamCtrl.GetUserStatus)
+		require("user:status").PUT("/admin/users/:id/status", iamCtrl.UpdateUserStatus)
 
 		// 管理员管理。
 		require("admin:create").POST("/admin/admins", adminCtrl.CreateAdmin)

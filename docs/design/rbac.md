@@ -35,7 +35,7 @@
 
 ### 2.3 权限粒度与清单
 
-权限粒度 `资源:动作`。当前 seed 25 个权限（按 `code` 唯一）：
+权限粒度 `资源:动作`。当前 seed 权限（按 `code` 唯一，权威清单见 `internal/boot/seed.go`）：
 
 ```text
 category:create/update/delete                        （3）
@@ -45,6 +45,12 @@ inventory:increase/deduct                            （2）
 admin:create/disable/delete/assign_role              （4）
 role:create/list/update/delete/assign_permission     （5）
 permission:create/list/update/delete                 （4）
+order:ship/refund                                    （2）
+flash_sale:create/update/repair                      （3）
+review:take_down                                     （1）
+banner:create/update/delete                          （3）
+recommend:create/update/delete/item                  （4）
+user:read / user:status                              （2，用户状态管理：查询 / 禁用·启用）
 ```
 
 ## 3. 业务不变量
@@ -92,6 +98,7 @@ permission:create/list/update/delete                 （4）
 
 - 认证部分（JWT `type` 声明、`iam:admin:session:` 会话、`AdminAuth`/`AdminAuthSignatureOnly` 中间件、身份域隔离）见 `iam.md`。
 - 各业务模块的写接口经 `RequirePermission` 挂载对应权限 code：`category:*`/`product:*`/`sku:*`/`inventory:*`，见各模块 Design。
+- 用户状态管理（后台，`AdminAuth` + `RequirePermission`）：`GET /admin/users/:id/status` 挂 `user:read`，`PUT /admin/users/:id/status` 挂 `user:status`；认证/撤销语义见 `iam.md`。
 - 授权数据模型（4 表）经 golang-migrate baseline（`20261001000001`）建表，见 `migration.md`。
 
 ## 8. Deferred / 已知留白
