@@ -15,8 +15,8 @@ review:
   target: "60a2877"
 
 owner:
-  status: PENDING
-  review_target: ""
+  status: ACCEPTED
+  review_target: "60a2877"
 
 delivery:
   status: NOT_RUN
