@@ -132,3 +132,24 @@
 - 订单导出、收货人姓名/手机号模糊搜索等高级筛选（后台列表已支持 `order_no`/`user_id`/`status`/`start_time`/`end_time` 组合筛选与 7 态状态统计）。
 - 库存流水 `reason` 字段固定为空，订单驱动的扣减/恢复不落 `reason`，审计粒度有限。
 - 后台扫描 goroutine 的优雅停机（依赖条件更新幂等保证半次扫描安全）。
+
+## 10. 后台只读查询性能与索引（EXPLAIN 证据）
+
+本节记录后台订单只读接口（分页列表、组合筛选、状态统计）的索引支撑与真实执行计划证据，作为「V1 不新增 `created_at` 索引」这一已批准决策的可复核依据。证据环境：MySQL 8.0（docker `mysql:8.0`，会话时区 `SYSTEM=UTC`），采集于 2026-10-10；数据规模为 7 行样本（执行计划由查询结构与索引决定，与数据量基本无关）。
+
+核心查询（`internal/logic/order/order.go` 的 `AdminList`/`AdminStats` 经 GoFrame 生成的真实 SQL 形状）与 `EXPLAIN` 关键列：
+
+| # | 查询形状 | type | key | Extra | 结论 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `SELECT id,order_no,user_id,status,total_amount,created_at FROM orders ORDER BY id DESC LIMIT ? OFFSET ?`（默认列表/排序） | `index` | `PRIMARY` | `Backward index scan` | 主键倒序扫描，无 filesort，最优 |
+| 2 | 上形 + `WHERE status=? AND user_id=? AND created_at>=FROM_UNIXTIME(?) AND created_at<FROM_UNIXTIME(?)`（组合筛选） | `ref` | `idx_status_expire` | `Using where; Using filesort` | `status` 走 `idx_status_expire` 最左前缀定位，`user_id`/时间范围由 `Using where` 过滤，`ORDER BY id` 需 filesort |
+| 3 | `WHERE order_no=?` | `const` | `uk_order_no` | — | 唯一索引常量查找，最优 |
+| 4 | `WHERE user_id=? ORDER BY id DESC` | `ref` | `uk_user_idempotency`（最左前缀 `user_id`） | `Using filesort` | 走 `user_id` 前缀（`uk_user_idempotency` 或 `idx_user_id`，优化器按统计择一），`ORDER BY id` 需 filesort |
+| 5 | `WHERE created_at>=FROM_UNIXTIME(?) AND created_at<FROM_UNIXTIME(?) ORDER BY id DESC`（仅时间范围） | `index` | `PRIMARY` | `Using where; Backward index scan` | **无 `created_at` 索引** → 主键倒序全扫 + `Using where` 过滤，见下方风险 |
+| 6 | `SELECT status, COUNT(*) AS count FROM orders GROUP BY status`（统计） | `index` | `idx_status_expire` | `Using index` | 覆盖索引扫描，无需回表 |
+
+性能风险与取舍（与 APPROVED Contract 索引决策一致）：
+
+- **`created_at` 时间范围筛选无索引**：查询走主键倒序扫描 + `Using where` 过滤（表 #5）。因 `ORDER BY id DESC` 与 `created_at` 序不同，即便新增 `created_at` 索引仍无法消除 `id` 排序的 filesort，收益仅缩小扫描范围；当前为低 QPS 后台只读场景，故 V1 不新增索引、不新增 migration。
+- **优化触发信号**：当「后台时间范围筛选出现可感知延迟」或「`EXPLAIN` 显示时间范围过滤后扫描行数超阈值」时，再评估新增 `created_at` 相关索引；届时需走 Registry 预留 migration version，并说明收益、写入开销与兼容性影响。
+- **其余路径已覆盖**：默认 `id DESC`、`order_no`、`user_id`、`status` 精确筛选与状态统计分别由 `PRIMARY`/`uk_order_no`/`uk_user_idempotency`/`idx_user_id`/`idx_status_expire` 支撑，无需新增索引。
