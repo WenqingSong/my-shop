@@ -24,6 +24,7 @@
 - 测试数据：`activity_id=1`、`sku_id=1`、`total_stock=1000`、`flash_price=50`，时间窗 `NOW()-2h ~ NOW()+12h`
 - 配置来源：`.env`（七牛凭据已注入，不记录 Secret 值）+ 环境变量容量保护开关（`FLASH_SALE_*`）
 - 隔离与清理：开发环境 MySQL/Redis；压测前 `sold=0` 重置、清空 `flash_sale_orders`/`flash_sale_order_requests`、`redis FLUSHDB` 后由对账扫描器重新预热
+- develop 基线：验证起始 `f0bf42c`；验证期间 `origin/develop` 前进至 `3523cd20`（Analyst 的 Registry-only 提交「预留 migration 20261001000019（iam-v5）」，仅改 `.agent/registry/migrations.md`，与本 feature 无文件重叠）。已 `git merge-tree` 确认 feature 在 `3523cd20` 上无冲突，`develop_base` 校正为 `3523cd20`
 
 ## Verification
 
