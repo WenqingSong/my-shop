@@ -6,7 +6,9 @@ contract:
   target: "257edf0"
 
 resources:
-  reservations: {}
+  reservations:
+    migration_version:
+      - "20261001000019"
 
 review:
   status: NOT_REQUESTED
