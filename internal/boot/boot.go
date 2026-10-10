@@ -2,6 +2,8 @@ package boot
 
 import (
 	"context"
+	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -87,6 +89,10 @@ func applyServerConfig(ctx context.Context) {
 }
 
 func applyDatabaseConfig(ctx context.Context) error {
+	timeZoneExtra, err := databaseTimeZoneExtra(ctx)
+	if err != nil {
+		return err
+	}
 	node := gdb.ConfigNode{
 		Type:     cfgString(ctx, "database.default.type", defaultDBType),
 		Host:     cfgString(ctx, "database.default.host", defaultDBHost),
@@ -97,8 +103,30 @@ func applyDatabaseConfig(ctx context.Context) error {
 		Charset:  cfgString(ctx, "database.default.charset", defaultDBCharset),
 		Protocol: "tcp",
 		Debug:    cfgBool(ctx, "database.default.debug", false),
+		Extra:    timeZoneExtra,
 	}
 	return gdb.SetConfigGroup(gdb.DefaultGroupName, gdb.ConfigGroup{node})
+}
+
+// databaseTimeZoneExtra 依据 dashboard.timezone（默认 Asia/Shanghai）计算 MySQL 会话 time_zone
+// 的 DSN 参数，使连接层的 NOW()/CURDATE()/CURRENT_TIMESTAMP 写值与 Go 端日期切分时区一致，
+// 消除 Go↔MySQL 漂移（详见 docs/design/dashboard.md §3 时区落地设计）。
+// 配置非法时 fail-fast 返回错误，不静默回退。
+func databaseTimeZoneExtra(ctx context.Context) (string, error) {
+	name := cfgString(ctx, "dashboard.timezone", "Asia/Shanghai")
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return "", gerror.Wrapf(err, "dashboard.timezone 配置非法 %q", name)
+	}
+	_, offset := time.Now().In(loc).Zone()
+	sign := "+"
+	if offset < 0 {
+		sign = "-"
+		offset = -offset
+	}
+	tz := fmt.Sprintf("%s%02d:%02d", sign, offset/3600, (offset%3600)/60)
+	// DSN 系统变量值须 url.QueryEscape 并用单引号包裹（%27），驱动会执行 SET time_zone='+08:00'。
+	return "time_zone=%27" + url.QueryEscape(tz) + "%27", nil
 }
 
 func applyRedisConfig(ctx context.Context) {

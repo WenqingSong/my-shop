@@ -52,6 +52,13 @@ admin:
     # 生产/开发均通过环境变量 ADMIN_SUPER_PASSWORD 注入。
     password: ""
 
+# 运营数据大屏配置（以下均为开发默认值，可通过环境变量覆盖）
+# 对应环境变量：DASHBOARD_TIMEZONE
+dashboard:
+  # 日期切分时区（系统权威业务时区）：「今日零点」/趋势锚点/时间范围边界均按此时区计算，
+  # 且 MySQL 会话时区会与之对齐（连接层 time_zone），保证 NOW()/CURRENT_TIMESTAMP 写值与统计边界一致。
+  timezone: "Asia/Shanghai"
+
 # 订单配置（以下均为开发默认值，可通过环境变量覆盖）
 # 对应环境变量：ORDER_PAY_TIMEOUT / ORDER_CANCEL_SCAN_INTERVAL
 order:
