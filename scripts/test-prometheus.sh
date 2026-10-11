@@ -3,9 +3,9 @@
 #
 # 校验「能区分正确与错误实现」的关键性质：
 #   1. 抓取配置存在且 job_name=my-shop、metrics_path=/metrics、
-#      目标为 host.docker.internal:8000、scrape_interval 已设置；
-#   2. docker-compose 配置可解析，prometheus 服务具备镜像内置的抓取配置、
-#      host.docker.internal:host-gateway 网络打通与 /-/ready healthcheck；
+#      目标为 app:8000（Compose DNS 名）、scrape_interval 已设置；
+#   2. docker-compose 配置可解析，prometheus 服务具备镜像内置的抓取配置与 /-/ready healthcheck，
+#      且不再经 host.docker.internal/host-gateway 打通宿主机（app 与 prometheus 同处 Compose 网络）；
 #   3. recording rules 存在、prometheus.yml 经 rule_files 引用、rules 目录已镜像内置；
 #   4. recording rules 表达式用 histogram_quantile + rate(...[5m]) + interface="order" +
 #      sum by (le)，且指标名后缀与单位一致（秒/毫秒不混配）；promtool 可用时校验语法。
@@ -28,19 +28,24 @@ fail() { log_error "$*"; exit 1; }
 # 2) 校验抓取 job 关键字段（错误实现会因字段缺失/错值在此失败）。
 grep -q '^  - job_name: my-shop$' "${PROM_CFG}" || fail "prometheus.yml 缺少 my-shop 抓取 job"
 grep -q '^    metrics_path: /metrics$' "${PROM_CFG}" || fail "prometheus.yml 缺少 metrics_path=/metrics"
-grep -q 'host.docker.internal:8000' "${PROM_CFG}" || fail "prometheus.yml 缺少目标 host.docker.internal:8000"
+grep -q '"app:8000"' "${PROM_CFG}" || fail "prometheus.yml 缺少目标 app:8000（Compose DNS 名）"
 grep -Eq '^  scrape_interval: [0-9]+s$' "${PROM_CFG}" || fail "prometheus.yml 缺少合理的 scrape_interval"
 
 # 3) compose 配置可解析（语法/合并校验）。
 docker_compose -f "${COMPOSE_CFG}" config -q || fail "docker compose config 校验失败"
 
-# 4) prometheus 服务具备网络打通、镜像内置配置与 healthcheck。
+# 4) prometheus 服务具备镜像内置配置与 healthcheck，且不再经宿主机网络打通。
 #    说明：rootless/嵌套容器环境 bind mount 单文件会退化为目录挂载（文件变目录），
-#    故抓取配置与 rules 改为 prometheus/Dockerfile COPY 内置（镜像层天然只读），
-#    此处校验配置路径与构建声明。
+#    故抓取配置与 rules 改为 prometheus/Dockerfile COPY 内置（镜像层天然只读）。
+#    抓取目标为 app:8000（Compose DNS），app 与 prometheus 同处 Compose 网络，
+#    不应再出现 host.docker.internal / host-gateway 宿主机映射。
 compose_out="$(docker_compose -f "${COMPOSE_CFG}" config)"
-grep -q 'host.docker.internal' <<<"${compose_out}" || fail "prometheus 服务缺少 host.docker.internal 宿主机映射"
-grep -q 'host-gateway' <<<"${compose_out}" || fail "prometheus 服务缺少 host-gateway 网络打通"
+if grep -q 'host.docker.internal' <<<"${compose_out}"; then
+  fail "compose 仍残留 host.docker.internal 宿主机映射（应经 Compose DNS 名 app 通信）"
+fi
+if grep -q 'host-gateway' <<<"${compose_out}"; then
+  fail "compose 仍残留 host-gateway 网络打通（应移除 extra_hosts）"
+fi
 grep -qF -- '--config.file=/etc/prometheus/prometheus.yml' <<<"${compose_out}" || fail "prometheus 服务缺少 --config.file 抓取配置路径"
 grep -q '/-/ready' <<<"${compose_out}" || fail "prometheus 服务缺少 /-/ready healthcheck"
 

@@ -6,13 +6,6 @@ source "${SCRIPT_DIR}/lib.sh"
 
 overall=true
 
-if app_healthy; then
-  printf '%-9s healthy\n' "App"
-else
-  printf '%-9s unhealthy\n' "App"
-  overall=false
-fi
-
 check_service() {
   local svc="$1"
   if container_healthy "${svc}"; then
@@ -22,6 +15,8 @@ check_service() {
     overall=false
   fi
 }
+
+check_service app
 check_service mysql
 check_service redis
 check_service prometheus

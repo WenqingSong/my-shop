@@ -73,7 +73,8 @@ _env_value() {
 }
 
 # 必填配置清单（开发环境）：七牛 4 项 required + 超级管理员初始密码。
-# MySQL/Redis/JWT secret/超管用户名等均有 config.yaml 开发默认值，不强制在 .env 填写。
+# MySQL/Redis 密码与 JWT secret 由 docker-compose.yml 提供 dev 默认值（仅供 CNB DinD 开发环境），
+# 不强制在 .env 填写；如需自定义可覆盖 MYSQL_ROOT_PASSWORD / AUTH_JWT_SECRET。
 REQUIRED_VARS=(QINIU_ACCESS_KEY QINIU_SECRET_KEY QINIU_BUCKET QINIU_DOMAIN ADMIN_SUPER_PASSWORD)
 
 missing_keys=""
@@ -118,7 +119,7 @@ if [[ "${#empty_required[@]}" -gt 0 ]]; then
 fi
 
 cat <<EOF
-下一步：编辑 ${ENV_FILE} 填写必填配置后执行 make up 完成第二阶段启动（会校验七牛配置与超管创建条件）。
+下一步：编辑 ${ENV_FILE} 填写必填配置后执行 make up 完成第二阶段启动（app 容器 entrypoint 执行 migration，serve 启动时校验七牛配置与超管创建条件，缺失 fail-fast）。
 
-注意：AK/SK、JWT secret、超管密码等为机密，仅保存在本地 .env，绝不提交仓库、不进日志/响应。
+注意：AK/SK、JWT secret、超管密码等为机密，仅保存在本地 .env，绝不提交仓库、不进镜像、不进日志/响应。
 EOF

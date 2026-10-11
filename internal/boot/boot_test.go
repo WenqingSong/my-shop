@@ -7,16 +7,14 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/database/gredis"
-	"github.com/gogf/gf/v2/os/genv"
 )
 
 func TestCfgStringEnvOverride(t *testing.T) {
 	ctx := context.Background()
-	const envKey = "DATABASE_DEFAULT_HOST"
-	if err := genv.Set(envKey, "env-host"); err != nil {
-		t.Fatal(err)
-	}
-	defer genv.Remove(envKey)
+	// 使用 t.Setenv 而非 genv.Set/os.Setenv：t.Setenv 在测试结束后自动恢复原值，
+	// 避免把 DATABASE_DEFAULT_HOST 等进程级环境变量永久覆盖/清除，污染后续测试
+	// （尤其 test.sh 注入的 DATABASE_DEFAULT_PASS 不能被 boot 包内其它测试清除）。
+	t.Setenv("DATABASE_DEFAULT_HOST", "env-host")
 
 	if got := cfgString(ctx, "database.default.host", "default-host"); got != "env-host" {
 		t.Fatalf("expected env override %q, got %q", "env-host", got)
@@ -40,15 +38,8 @@ func TestApplyDatabaseConfigEnvOverride(t *testing.T) {
 		"DATABASE_DEFAULT_NAME": "env_db",
 	}
 	for k, v := range envs {
-		if err := genv.Set(k, v); err != nil {
-			t.Fatal(err)
-		}
+		t.Setenv(k, v)
 	}
-	defer func() {
-		for k := range envs {
-			_ = genv.Remove(k)
-		}
-	}()
 
 	if err := applyDatabaseConfig(ctx); err != nil {
 		t.Fatalf("applyDatabaseConfig failed: %v", err)
@@ -73,10 +64,7 @@ func TestApplyDatabaseConfigEnvOverride(t *testing.T) {
 
 func TestDependencyTimeoutEnvOverride(t *testing.T) {
 	ctx := context.Background()
-	if err := genv.Set("STARTUP_DEPENDENCY_TIMEOUT", "5"); err != nil {
-		t.Fatal(err)
-	}
-	defer genv.Remove("STARTUP_DEPENDENCY_TIMEOUT")
+	t.Setenv("STARTUP_DEPENDENCY_TIMEOUT", "5")
 
 	if got := dependencyTimeout(ctx); got != 5*time.Second {
 		t.Fatalf("expected %v, got %v", 5*time.Second, got)
@@ -85,10 +73,7 @@ func TestDependencyTimeoutEnvOverride(t *testing.T) {
 
 func TestDatabaseTimeZoneExtra(t *testing.T) {
 	ctx := context.Background()
-	if err := genv.Set("DASHBOARD_TIMEZONE", "Asia/Shanghai"); err != nil {
-		t.Fatal(err)
-	}
-	defer genv.Remove("DASHBOARD_TIMEZONE")
+	t.Setenv("DASHBOARD_TIMEZONE", "Asia/Shanghai")
 
 	extra, err := databaseTimeZoneExtra(ctx)
 	if err != nil {
@@ -103,10 +88,7 @@ func TestDatabaseTimeZoneExtra(t *testing.T) {
 // 避免用固定偏移表达 DST 时区导致跨切换漂移。
 func TestDatabaseTimeZoneExtraRejectsDST(t *testing.T) {
 	ctx := context.Background()
-	if err := genv.Set("DASHBOARD_TIMEZONE", "America/New_York"); err != nil {
-		t.Fatal(err)
-	}
-	defer genv.Remove("DASHBOARD_TIMEZONE")
+	t.Setenv("DASHBOARD_TIMEZONE", "America/New_York")
 
 	if _, err := databaseTimeZoneExtra(ctx); err == nil {
 		t.Fatal("databaseTimeZoneExtra(America/New_York) 应拒绝 DST 时区，却返回成功")
@@ -140,15 +122,8 @@ func TestApplyRedisConfigEnvOverride(t *testing.T) {
 		"REDIS_DEFAULT_DB":      "3",
 	}
 	for k, v := range envs {
-		if err := genv.Set(k, v); err != nil {
-			t.Fatal(err)
-		}
+		t.Setenv(k, v)
 	}
-	defer func() {
-		for k := range envs {
-			_ = genv.Remove(k)
-		}
-	}()
 
 	applyRedisConfig(ctx)
 
