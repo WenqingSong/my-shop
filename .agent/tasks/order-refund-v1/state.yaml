@@ -1,0 +1,32 @@
+schema_version: 3
+task_id: order-refund-v1
+
+contract:
+  status: APPROVED
+  target: "537edc4b0363355c3dbab4f516c237b0d6eca9f8"
+
+resources:
+  reservations:
+    error_code_domain:
+      - "18000-18999"
+    migration_version:
+      - "20261001000020"
+
+review:
+  status: CLEAN
+  target: "e7a49bc2b6719f54a6e7c24ea4572564da38c87c"
+
+owner:
+  status: ACCEPTED
+  review_target: "e7a49bc2b6719f54a6e7c24ea4572564da38c87c"
+
+delivery:
+  status: PASS
+  review_target: "e7a49bc2b6719f54a6e7c24ea4572564da38c87c"
+  feature_head: "a77d4448e1a7c55e3e7ea555a14fe2794301553b"
+  develop_base: "f14a88a78ac6fa419eca4d33b35e92f05c67d013"
+
+blocked:
+  active: false
+  by: ""
+  reason: ""

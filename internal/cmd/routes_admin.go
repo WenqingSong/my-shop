@@ -13,6 +13,7 @@ import (
 	orderController "cnb.cool/go-cloud-devops/my-shop/internal/controller/order"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/product"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/recommendation"
+	refundController "cnb.cool/go-cloud-devops/my-shop/internal/controller/refund"
 	reviewController "cnb.cool/go-cloud-devops/my-shop/internal/controller/review"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/sku"
 	uploadCtrl "cnb.cool/go-cloud-devops/my-shop/internal/controller/upload"
@@ -43,6 +44,7 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 	recommendationCtrl := recommendation.NewV1()
 	uploadCtrlV1 := uploadCtrl.NewV1()
 	dashboardCtrl := dashboard.NewV1()
+	refundAdminCtrl := refundController.NewAdminV1()
 
 	// 后台公开接口：管理员登录（无需 token）。
 	root.POST("/admin/login", adminCtrl.Login)
@@ -123,7 +125,6 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 
 		// 订单后台写操作（AdminAuth + RequirePermission）。
 		require("order:ship").POST("/admin/orders/:id/ship", orderAdminCtrl.Ship)
-		require("order:refund").POST("/admin/orders/:id/refund", orderAdminCtrl.Refund)
 
 		// 订单后台只读操作（AdminAuth + RequirePermission）：
 		//   - 列表与统计持 order:list；详情持 order:view。
@@ -131,6 +132,14 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 		require("order:list").GET("/admin/orders", orderAdminCtrl.AdminList)
 		require("order:list").GET("/admin/orders/stats", orderAdminCtrl.AdminStats)
 		require("order:view").GET("/admin/orders/:id", orderAdminCtrl.AdminDetail)
+
+		// 退款后台接口（AdminAuth + RequirePermission）。
+		require("refund:list").GET("/admin/refunds", refundAdminCtrl.AdminList)
+		require("refund:view").GET("/admin/refunds/:id", refundAdminCtrl.AdminDetail)
+		require("refund:view").GET("/admin/refunds/:id/audits", refundAdminCtrl.ListAudits)
+		require("refund:review").POST("/admin/refunds/:id/review", refundAdminCtrl.Review)
+		require("refund:execute").POST("/admin/refunds/:id/execute", refundAdminCtrl.Execute)
+		require("refund:execute").POST("/admin/refunds/:id/close", refundAdminCtrl.Close)
 
 		// 秒杀活动后台写操作（AdminAuth + RequirePermission）。
 		require("flash_sale:create").POST("/admin/flash-sales", flashsaleAdminCtrl.Create)

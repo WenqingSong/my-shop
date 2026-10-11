@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 
+	"github.com/gogf/gf/v2/database/gdb"
+
 	v1 "cnb.cool/go-cloud-devops/my-shop/api/order/v1"
 )
 
@@ -20,10 +22,12 @@ type IOrder interface {
 	Cancel(ctx context.Context, userID, id int64) (*v1.CancelRes, error)
 	// Receive 确认收货（仅本人，已发货→已完成，同请求原子推进）。
 	Receive(ctx context.Context, userID, id int64) (*v1.ReceiveRes, error)
-	// Ship 发货（仅管理员，已支付→已发货）。
+	// Ship 发货（仅管理员，已支付→已发货；与退款申请互斥）。
 	Ship(ctx context.Context, orderID int64) (*v1.ShipRes, error)
-	// Refund 退款（仅管理员，已支付→已退款，恢复库存）。
-	Refund(ctx context.Context, orderID int64) (*v1.RefundRes, error)
+	// CompleteRefundInTx 在既有事务内完成退款推进：订单 paid(20)→refunded(70) + refunded_at + 恢复库存。
+	// WHERE status=20 闸门保证「只补偿一次」；0 行返回明确错误供退款模块回滚。
+	// 供退款模块在「执行退款成功」同事务中调用。
+	CompleteRefundInTx(ctx context.Context, tx gdb.TX, orderID int64) error
 	// CancelExpired 取消过期的待支付订单（供后台扫描器复用），返回本次实际取消数量。
 	CancelExpired(ctx context.Context, limit int) (int, error)
 	// AdminList 后台分页查询全部普通订单（轻量，不含明细，支持组合筛选与稳定排序）。

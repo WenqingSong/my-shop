@@ -88,14 +88,6 @@ func (c *AdminControllerV1) Ship(ctx context.Context, req *v1.ShipReq) (res *v1.
 	return service.Order().Ship(ctx, req.Id)
 }
 
-// Refund 处理退款（仅管理员，经 RequirePermission("order:refund")）。
-func (c *AdminControllerV1) Refund(ctx context.Context, req *v1.RefundReq) (res *v1.RefundRes, err error) {
-	if _, ok := middleware.AdminPrincipalFromContext(ctx); !ok {
-		return nil, codes.New(codes.CodeUnauthorized)
-	}
-	return service.Order().Refund(ctx, req.Id)
-}
-
 // AdminList 处理后台订单分页列表（经 RequirePermission("order:list")）。
 func (c *AdminControllerV1) AdminList(ctx context.Context, req *v1.AdminListReq) (res *v1.AdminListRes, err error) {
 	if _, ok := middleware.AdminPrincipalFromContext(ctx); !ok {

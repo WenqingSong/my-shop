@@ -149,17 +149,6 @@ type ShipRes struct {
 	Order
 }
 
-// RefundReq 退款请求（仅管理员，持 order:refund，仅已支付未发货可退）。
-type RefundReq struct {
-	g.Meta `path:"/admin/orders/:id/refund" method:"post" tags:"订单" summary:"退款"`
-	Id     int64 `json:"id" in:"path" v:"required" dc:"订单 id"`
-}
-
-// RefundRes 退款响应。
-type RefundRes struct {
-	Order
-}
-
 // AdminListReq 后台订单分页列表请求（只读，持 order:list）。
 type AdminListReq struct {
 	g.Meta    `path:"/admin/orders" method:"get" tags:"订单" summary:"后台订单分页列表"`
