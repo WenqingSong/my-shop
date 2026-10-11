@@ -8,6 +8,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/banner"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/cart"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/coupon"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/favorite"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/flashsale"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
@@ -43,6 +44,7 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	recommendationCtrl := recommendation.NewV1()
 	articleCtrl := article.NewV1()
 	uploadCtrlV1 := uploadCtrl.NewV1()
+	couponCtrl := coupon.NewV1()
 
 	// 前台公开接口：注册、登录、刷新、分类查询、商品查询、轮播图列表（无需 token）。
 	root.POST("/register", iamCtrl.Register)
@@ -126,6 +128,10 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 		user.DELETE("/articles/:id/favorite", articleCtrl.Unfavorite)
 		user.GET("/articles/:id/favorite/check", articleCtrl.FavoriteCheck)
 		user.GET("/my/articles/favorites", articleCtrl.MyFavorites)
+
+		// 优惠券（仅登录用户，作用于本人数据）。
+		user.POST("/coupons/:template_id/claim", couponCtrl.Claim)
+		user.GET("/my/coupons", couponCtrl.ListMine)
 
 		user.GET("/sessions", iamCtrl.ListSessions)
 		user.DELETE("/sessions/:sid", iamCtrl.RevokeSession)
