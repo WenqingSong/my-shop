@@ -18,7 +18,10 @@
 | `order_no` | VARCHAR(32) | 非空，唯一 `uk_order_no`（全局唯一订单号） |
 | `user_id` | BIGINT UNSIGNED | 非空，软引用（无 FK），取自 `Principal.UserID` |
 | `status` | TINYINT | 非空默认 10（见状态机） |
-| `total_amount` | INT UNSIGNED | 非空，成交总价整数分快照（= Σ 订单项 `price×quantity`） |
+| `total_amount` | INT UNSIGNED | 非空，应付金额整数分快照（= `original_amount` - `discount_amount`） |
+| `original_amount` | INT UNSIGNED | 非空，优惠前金额快照（= Σ 订单项 `price×quantity`） |
+| `discount_amount` | INT UNSIGNED | 非空，优惠金额快照（默认 0） |
+| `user_coupon_id` | BIGINT UNSIGNED | 可空，下单时使用的用户券 id（软引用，快照，见 `coupon.md`） |
 | `idempotency_key` | VARCHAR(64) | 非空，客户端幂等键 |
 | `request_hash` | VARCHAR(64) | 非空，请求指纹（sha256 hex），用于同 key 判内容一致 |
 | `recipient_name`/`phone`/`province`/`city`/`district`/`detail` | VARCHAR(32/20/32/32/32/255) | 非空，收货地址快照 |
@@ -49,9 +52,9 @@
 
 索引：`idx_order_id(order_id)`。
 
-### 2.3 成交价语义
+### 2.3 金额快照语义
 
-成交价为下单时 `skus.price`（整数分）重读结果，不信任客户端提交价、也不信任购物车 `price_snapshot`；订单快照为「锁定成交价」，下单后改价不影响订单。`products.price` 与订单无关（订单为 SKU 粒度）。
+订单金额分三列快照：`original_amount`（优惠前金额）= Σ `order_items.price×quantity`（下单时重读 `skus.price`，不信任客户端提交价、也不信任购物车 `price_snapshot`）；`discount_amount`（优惠金额，由服务端按已选券计算，无券为 0）；`total_amount`（应付金额）= `original_amount - discount_amount`。订单快照为「锁定金额」，下单后改价/改模板不影响订单；`products.price` 与订单无关（订单为 SKU 粒度）。无券时 `original_amount = total_amount`、`discount_amount = 0`，与历史订单语义一致（历史订单迁移回填 `original_amount = total_amount`）。
 
 ## 3. 状态机与合法迁移
 
@@ -73,7 +76,7 @@
 - INV-001（归属与隔离）：`orders.user_id` 取自 `Principal.UserID`；用户只能查看/取消/支付/收货自己的订单；跨用户操作返回 9001（404）且无写入。
 - INV-002（幂等去重）：同一 `(user_id, idempotency_key)` 至多产生一个成功订单（`uk_user_idempotency` 兜底）；同 key 同 `request_hash` 返回既有订单、不重复扣库存；同 key 不同 `request_hash` 返回 9006。
 - INV-003（事务原子性）：创建订单 = 单事务「写 orders + 写 order_items + 扣库存 +（购物车模式）删已购条目」，任一步失败整体回滚，无半成品、库存与购物车均不变。
-- INV-004（服务端定价与快照）：成交价 = 下单时 `skus.price`；快照自足，改价/改地址不影响订单。
+- INV-004（服务端定价与快照）：`original_amount` = Σ 下单时 `skus.price×quantity`；`total_amount = original_amount - discount_amount`（`discount` 由服务端计算、≤ `original`）；快照自足，改价/改模板/改地址不影响订单。
 - INV-005（状态机）：仅合法迁移可推进；非法迁移 9002 且状态不变；`refunded` 仅从 `paid` 可达。
 - INV-006（防超卖）：并发同一 SKU 下单成功扣减总量 ≤ 可售库存且库存 ≥ 0（条件扣减 + `RowsAffected`）。
 - INV-007（取消/退款只补偿一次）：同一订单取消/退款仅恢复一次库存（条件状态更新 + `RowsAffected` 原子闸门）。
@@ -84,7 +87,7 @@
 ## 5. 一致性模型与失败语义
 
 - 事实来源：单一 MySQL。`orders`/`order_items`（订单事实）、`inventories`（库存事实）、`inventory_logs`（库存流水，只追加）、`skus`（下单时价格/状态事实来源，读后快照）。Redis 仅会话；无 MQ、无跨系统事务。
-- 成功语义：创建成功 = orders + order_items + 库存扣减（+ 购物车条目删除）同事务提交；取消/退款成功 = 状态变更 + 库存恢复同事务；支付/发货/收货成功 = 状态推进。
+- 成功语义：创建成功 = orders + order_items + 库存扣减（+ 购物车条目删除）（+ 用券预占）同事务提交；取消成功 = 状态变更 + 库存恢复 + 券释放同事务；支付成功 = 状态推进 + 券核销同事务；退款成功 = 状态变更 + 库存恢复（不返券）；发货/收货成功 = 状态推进。
 - 原子性：下单与取消/退款均为单事务；库存变更复用 `IInventory` 的 tx 感知方法（`DeductInTx`/`IncreaseInTx`），Order 只协调外层事务、不复制扣减/增加业务规则。
 - 幂等与重复：幂等键重复（同 hash）→ 返回既有订单；支付/取消/退款重复 → 状态机 + 条件更新保证不重复改状态/不重复补偿。
 - 超时取消：后台 scanner（ticker，周期 `order.cancel_scan_interval`）扫描 `status=10 AND expire_at < now` 逐单原子取消；查询/支付入口懒取消兜底；多实例并发靠「条件状态 UPDATE + RowsAffected」原子闸门，仅迁移成功者补偿库存。
@@ -120,7 +123,8 @@
 - `order_items.sku_id`/`product_id` → `skus.id`/`products.id`（软引用，无 FK），快照自足；SKU/商品删除后订单仍可读。
 - 库存：下单经 `IInventory.DeductInTx` 扣减、取消经 `IInventory.IncreaseInTx` 恢复，复用其「条件更新 + RowsAffected + 流水」规则；`operator_admin_id` 落 NULL（用户/系统驱动）。
 - 退款：退款成功推进订单 `paid→refunded` 由 refund 模块经 `IOrder.CompleteRefundInTx` 复用（订单 `20→70` + `refunded_at` + 恢复库存，`WHERE status=20` 闸门），见 `refund.md`。
-- 定价：成交价重读 `ISku.GetByID` 的 `skus.price`，校验 SKU enabled 且商品 on_shelf（否则 9003）。
+- 定价：`original_amount` 重读 `ISku.GetByID` 的 `skus.price` 求和，校验 SKU enabled 且商品 on_shelf（否则 9003）；用券经 `ICoupon` 校验归属/有效期/状态/门槛并计算 `discount_amount`。
+- 优惠券：`orders.user_coupon_id` → `user_coupons.id`（软引用，快照）；预占/核销/释放经 `ICoupon` 与订单状态变更同事务，见 `coupon.md`。
 - 地址：快照自 `addresses`，下单后地址变更不影响订单。
 - 建表经 golang-migrate 迁移（`20261001000007_orders.up.sql`），见 `migration.md`。
 - 配置：`order.pay_timeout`（支付超时秒，默认 900）、`order.cancel_scan_interval`（扫描周期秒，默认 60）。

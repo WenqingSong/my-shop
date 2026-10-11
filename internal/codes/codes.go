@@ -139,6 +139,15 @@ const (
 	CodeRefundOrderNotRefundable      Code = 18003 // 订单非已支付未发货，不可退款 → 409
 	CodeRefundAlreadyExists           Code = 18004 // 同一订单已存在有效退款申请 → 409
 	CodeRefundShipConflict            Code = 18005 // 退款与发货互斥冲突 → 409
+
+	// 优惠券域（Coupon）19000-19999。
+	CodeCouponTemplateNotFound Code = 19001 // 优惠券模板不存在 → 404
+	CodeCouponTemplateInvalid  Code = 19002 // 模板参数非法（门槛/减免/时间/总量）→ 400
+	CodeCouponNotFound         Code = 19003 // 优惠券不存在或不属于当前用户（防枚举）→ 404
+	CodeCouponAlreadyClaimed   Code = 19004 // 已领取该模板 → 409
+	CodeCouponClaimUnavailable Code = 19005 // 未开始/已结束/已停止，不可领取 → 409
+	CodeCouponClaimSoldOut     Code = 19006 // 发放总量已满 → 409
+	CodeCouponUnavailable      Code = 19007 // 下单用券：已使用/被占用/不在使用期/未达门槛 → 409
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -247,6 +256,14 @@ var codeTable = map[Code]codeInfo{
 	CodeRefundOrderNotRefundable:      {http.StatusConflict, "订单不可退款"},
 	CodeRefundAlreadyExists:           {http.StatusConflict, "退款申请已存在"},
 	CodeRefundShipConflict:            {http.StatusConflict, "退款与发货冲突"},
+
+	CodeCouponTemplateNotFound: {http.StatusNotFound, "优惠券模板不存在"},
+	CodeCouponTemplateInvalid:  {http.StatusBadRequest, "优惠券参数非法"},
+	CodeCouponNotFound:         {http.StatusNotFound, "优惠券不存在"},
+	CodeCouponAlreadyClaimed:   {http.StatusConflict, "已领取该优惠券"},
+	CodeCouponClaimUnavailable: {http.StatusConflict, "优惠券暂不可领取"},
+	CodeCouponClaimSoldOut:     {http.StatusConflict, "优惠券已领完"},
+	CodeCouponUnavailable:      {http.StatusConflict, "优惠券不可用"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。

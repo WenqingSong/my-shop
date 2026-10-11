@@ -6,6 +6,7 @@ import (
 	adminController "cnb.cool/go-cloud-devops/my-shop/internal/controller/admin"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/banner"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/coupon"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/dashboard"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/flashsale"
 	iamController "cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
@@ -45,6 +46,7 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 	uploadCtrlV1 := uploadCtrl.NewV1()
 	dashboardCtrl := dashboard.NewV1()
 	refundAdminCtrl := refundController.NewAdminV1()
+	couponAdminCtrl := coupon.NewAdminV1()
 
 	// 后台公开接口：管理员登录（无需 token）。
 	root.POST("/admin/login", adminCtrl.Login)
@@ -178,5 +180,10 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 		require("dashboard:view").GET("/admin/dashboard/orders/status", dashboardCtrl.Status)
 		require("dashboard:view").GET("/admin/dashboard/products/top", dashboardCtrl.TopProducts)
 		require("dashboard:view").GET("/admin/dashboard/flash-sales", dashboardCtrl.FlashSales)
+
+		// 优惠券后台模板管理（AdminAuth + RequirePermission）。
+		require("coupon:create").POST("/admin/coupons", couponAdminCtrl.AdminCreate)
+		require("coupon:list").GET("/admin/coupons", couponAdminCtrl.AdminList)
+		require("coupon:stop").POST("/admin/coupons/:id/stop", couponAdminCtrl.AdminStop)
 	})
 }

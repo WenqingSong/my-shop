@@ -72,6 +72,9 @@ var seedPermissionList = []permissionSeed{
 	{Code: "dashboard:view", Name: "查看运营数据大屏"},
 	{Code: "user:read", Name: "查看用户状态"},
 	{Code: "user:status", Name: "禁用/启用用户"},
+	{Code: "coupon:create", Name: "创建优惠券模板"},
+	{Code: "coupon:list", Name: "查看优惠券模板"},
+	{Code: "coupon:stop", Name: "停止优惠券领取"},
 }
 
 // seedPermissions 幂等写入标准权限：已存在（code 唯一）则跳过。

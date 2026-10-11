@@ -1,0 +1,33 @@
+schema_version: 3
+task_id: coupon-v1
+
+contract:
+  status: APPROVED
+  target: "8d6bcd1df15f74475fba1f89d35c563731516429"
+
+resources:
+  reservations:
+    error_code_domain:
+      - "19000-19999"
+    migration_version:
+      - "20261001000021"
+      - "20261001000022"
+
+review:
+  status: CLEAN
+  target: "d4bbf7b0735674a8a0be80e3f0d2bd6c80feae86"
+
+owner:
+  status: ACCEPTED
+  review_target: "d4bbf7b0735674a8a0be80e3f0d2bd6c80feae86"
+
+delivery:
+  status: PASS
+  review_target: "d4bbf7b0735674a8a0be80e3f0d2bd6c80feae86"
+  feature_head: "4441ebad3f6cccf2753de684dfd321eda3b780a0"
+  develop_base: "e2f82f620d5711ff15c2bae554e85b599213a9b7"
+
+blocked:
+  active: false
+  by: ""
+  reason: ""
