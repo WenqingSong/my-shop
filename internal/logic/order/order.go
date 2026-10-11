@@ -532,6 +532,8 @@ func (s *sOrder) Receive(ctx context.Context, userID, id int64) (*v1.ReceiveRes,
 }
 
 // Ship 发货（仅管理员）：已支付→已发货。
+// 事务内锁定订单行，与「发起退款申请」「退款成功」经同一 orders 行锁串行化；
+// 存在有效退款申请（status ∈ {10,20,30}）时拒绝发货（退款与发货互斥）。
 func (s *sOrder) Ship(ctx context.Context, orderID int64) (*v1.ShipRes, error) {
 	row, err := s.findByID(ctx, orderID)
 	if err != nil {
@@ -541,58 +543,34 @@ func (s *sOrder) Ship(ctx context.Context, orderID int64) (*v1.ShipRes, error) {
 		return nil, codes.New(codes.CodeOrderNotFound)
 	}
 
-	result, err := g.DB().Model("orders").Ctx(ctx).
-		Where("id", orderID).
-		Where("status", statusPaid).
-		Data(g.Map{"status": statusShipped, "shipped_at": gdb.Raw("NOW()")}).
-		Update()
-	if err != nil {
-		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("发货: %w", err))
-	}
-	if affected, _ := result.RowsAffected(); affected == 0 {
-		return nil, codes.New(codes.CodeOrderInvalidStatusTransition)
-	}
-
-	o, err := s.loadByIDOrder(ctx, orderID)
-	if err != nil {
-		return nil, err
-	}
-	if o == nil {
-		return nil, codes.New(codes.CodeOrderNotFound)
-	}
-	return &v1.ShipRes{Order: *o}, nil
-}
-
-// Refund 退款（仅管理员）：已支付→已退款，恢复库存（原子，仅补偿一次）。
-func (s *sOrder) Refund(ctx context.Context, orderID int64) (*v1.RefundRes, error) {
-	row, err := s.findByID(ctx, orderID)
-	if err != nil {
-		return nil, err
-	}
-	if row == nil {
-		return nil, codes.New(codes.CodeOrderNotFound)
-	}
-
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		result, e := tx.Model("orders").Ctx(ctx).
-			Where("id", orderID).
-			Where("status", statusPaid).
-			Data(g.Map{"status": statusRefunded, "refunded_at": gdb.Raw("NOW()")}).
-			Update()
-		if e != nil {
-			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("退款: %w", e))
+		var locked []*orderRow
+		if e := tx.Model("orders").Ctx(ctx).Where("id", orderID).LockUpdate().Scan(&locked); e != nil {
+			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("锁定订单: %w", e))
 		}
-		if affected, _ := result.RowsAffected(); affected == 0 {
+		if len(locked) == 0 {
+			return codes.New(codes.CodeOrderNotFound)
+		}
+		if locked[0].Status != statusPaid {
 			return codes.New(codes.CodeOrderInvalidStatusTransition)
 		}
-		items, e := s.loadItemsInTx(ctx, tx, orderID)
+		has, e := service.Refund().HasActiveRequestInTx(ctx, tx, orderID)
 		if e != nil {
 			return e
 		}
-		for _, it := range items {
-			if _, e := service.Inventory().IncreaseInTx(ctx, tx, it.SkuId, it.Quantity, nil); e != nil {
-				return e
-			}
+		if has {
+			return codes.New(codes.CodeRefundShipConflict)
+		}
+		result, e := tx.Model("orders").Ctx(ctx).
+			Where("id", orderID).
+			Where("status", statusPaid).
+			Data(g.Map{"status": statusShipped, "shipped_at": gdb.Raw("NOW()")}).
+			Update()
+		if e != nil {
+			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("发货: %w", e))
+		}
+		if affected, _ := result.RowsAffected(); affected == 0 {
+			return codes.New(codes.CodeOrderInvalidStatusTransition)
 		}
 		return nil
 	})
@@ -607,7 +585,34 @@ func (s *sOrder) Refund(ctx context.Context, orderID int64) (*v1.RefundRes, erro
 	if o == nil {
 		return nil, codes.New(codes.CodeOrderNotFound)
 	}
-	return &v1.RefundRes{Order: *o}, nil
+	return &v1.ShipRes{Order: *o}, nil
+}
+
+// CompleteRefundInTx 在既有事务内完成退款推进：订单 paid(20)→refunded(70) + refunded_at + 恢复库存。
+// WHERE status=20 闸门保证「只补偿一次」；0 行返回明确错误供退款模块整体回滚。
+// 供退款模块在「执行退款成功」同事务中复用，不复制订单状态迁移与库存恢复业务规则。
+func (s *sOrder) CompleteRefundInTx(ctx context.Context, tx gdb.TX, orderID int64) error {
+	result, err := tx.Model("orders").Ctx(ctx).
+		Where("id", orderID).
+		Where("status", statusPaid).
+		Data(g.Map{"status": statusRefunded, "refunded_at": gdb.Raw("NOW()")}).
+		Update()
+	if err != nil {
+		return codes.Wrap(codes.CodeInternalError, fmt.Errorf("退款推进订单: %w", err))
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return codes.New(codes.CodeOrderInvalidStatusTransition)
+	}
+	items, err := s.loadItemsInTx(ctx, tx, orderID)
+	if err != nil {
+		return err
+	}
+	for _, it := range items {
+		if _, err := service.Inventory().IncreaseInTx(ctx, tx, it.SkuId, it.Quantity, nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // CancelExpired 取消过期的待支付订单（供后台扫描器复用），逐单原子取消，返回本次实际取消数量。

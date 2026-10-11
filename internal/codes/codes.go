@@ -132,6 +132,13 @@ const (
 	CodeUploadInvalidInput  Code = 17001 // 扩展名/MIME 不在白名单 → 400
 	CodeUploadConfigInvalid Code = 17002 // 七牛云配置缺失/非法（安全语义失败）→ 500
 	CodeUploadTokenFailed   Code = 17003 // 签发上传凭证失败 → 500
+
+	// 退款域（Refund）18000-18999。
+	CodeRefundNotFound                Code = 18001 // 退款申请不存在或非本人/不可见（防枚举）→ 404
+	CodeRefundInvalidStatusTransition Code = 18002 // 非法退款状态迁移 → 409
+	CodeRefundOrderNotRefundable      Code = 18003 // 订单非已支付未发货，不可退款 → 409
+	CodeRefundAlreadyExists           Code = 18004 // 同一订单已存在有效退款申请 → 409
+	CodeRefundShipConflict            Code = 18005 // 退款与发货互斥冲突 → 409
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -234,6 +241,12 @@ var codeTable = map[Code]codeInfo{
 	CodeUploadInvalidInput:  {http.StatusBadRequest, "文件类型或参数非法"},
 	CodeUploadConfigInvalid: {http.StatusInternalServerError, "上传服务配置错误"},
 	CodeUploadTokenFailed:   {http.StatusInternalServerError, "签发上传凭证失败"},
+
+	CodeRefundNotFound:                {http.StatusNotFound, "退款申请不存在"},
+	CodeRefundInvalidStatusTransition: {http.StatusConflict, "退款状态迁移非法"},
+	CodeRefundOrderNotRefundable:      {http.StatusConflict, "订单不可退款"},
+	CodeRefundAlreadyExists:           {http.StatusConflict, "退款申请已存在"},
+	CodeRefundShipConflict:            {http.StatusConflict, "退款与发货冲突"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。

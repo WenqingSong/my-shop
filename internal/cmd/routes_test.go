@@ -67,6 +67,11 @@ func TestRouteTable(t *testing.T) {
 		"POST /orders/:id/pay",
 		"POST /orders/:id/cancel",
 		"POST /orders/:id/receive",
+		"POST /orders/:id/refund",
+		// 退款前台接口（Auth 保护）。
+		"GET /refunds",
+		"GET /refunds/:id",
+		"POST /refunds/:id/revoke",
 		// 前台会话管理接口（IAM V3）。
 		"GET /sessions",
 		"DELETE /sessions/:sid",
@@ -120,11 +125,17 @@ func TestRouteTable(t *testing.T) {
 		"POST /admin/inventories/:sku_id/deduct",
 		// 订单后台写操作（AdminAuth + RequirePermission）。
 		"POST /admin/orders/:id/ship",
-		"POST /admin/orders/:id/refund",
 		// 订单后台只读操作（AdminAuth + RequirePermission）。
 		"GET /admin/orders",
 		"GET /admin/orders/stats",
 		"GET /admin/orders/:id",
+		// 退款后台接口（AdminAuth + RequirePermission）。
+		"GET /admin/refunds",
+		"GET /admin/refunds/:id",
+		"GET /admin/refunds/:id/audits",
+		"POST /admin/refunds/:id/review",
+		"POST /admin/refunds/:id/execute",
+		"POST /admin/refunds/:id/close",
 		// 秒杀前台下单（Auth 保护）。
 		"POST /flash-sales/:id/orders",
 		// 秒杀下单结果查询（Auth 保护）。
