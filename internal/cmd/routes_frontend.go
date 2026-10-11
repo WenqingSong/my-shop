@@ -8,6 +8,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/banner"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/cart"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/coupon"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/favorite"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/flashsale"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
@@ -15,6 +16,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/order"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/product"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/recommendation"
+	refundCtrl "cnb.cool/go-cloud-devops/my-shop/internal/controller/refund"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/review"
 	uploadCtrl "cnb.cool/go-cloud-devops/my-shop/internal/controller/upload"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
@@ -43,6 +45,8 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	recommendationCtrl := recommendation.NewV1()
 	articleCtrl := article.NewV1()
 	uploadCtrlV1 := uploadCtrl.NewV1()
+	refundCtrlV1 := refundCtrl.NewV1()
+	couponCtrl := coupon.NewV1()
 
 	// 前台公开接口：注册、登录、刷新、分类查询、商品查询、轮播图列表（无需 token）。
 	root.POST("/register", iamCtrl.Register)
@@ -91,6 +95,12 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 		user.POST("/orders/:id/pay", orderCtrl.Pay)
 		user.POST("/orders/:id/cancel", orderCtrl.Cancel)
 		user.POST("/orders/:id/receive", orderCtrl.Receive)
+		user.POST("/orders/:id/refund", refundCtrlV1.Apply)
+
+		// 退款申请（仅登录用户，作用于本人数据）。
+		user.GET("/refunds", refundCtrlV1.List)
+		user.GET("/refunds/:id", refundCtrlV1.Detail)
+		user.POST("/refunds/:id/revoke", refundCtrlV1.Revoke)
 
 		// 秒杀下单（仅登录用户，作用于本人数据）。
 		user.POST("/flash-sales/:id/orders", flashsaleCtrl.CreateOrder)
@@ -126,6 +136,10 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 		user.DELETE("/articles/:id/favorite", articleCtrl.Unfavorite)
 		user.GET("/articles/:id/favorite/check", articleCtrl.FavoriteCheck)
 		user.GET("/my/articles/favorites", articleCtrl.MyFavorites)
+
+		// 优惠券（仅登录用户，作用于本人数据）。
+		user.POST("/coupons/:template_id/claim", couponCtrl.Claim)
+		user.GET("/my/coupons", couponCtrl.ListMine)
 
 		user.GET("/sessions", iamCtrl.ListSessions)
 		user.DELETE("/sessions/:sid", iamCtrl.RevokeSession)

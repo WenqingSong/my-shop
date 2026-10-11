@@ -52,9 +52,12 @@ var seedPermissionList = []permissionSeed{
 	{Code: "permission:update", Name: "更新权限"},
 	{Code: "permission:delete", Name: "删除权限"},
 	{Code: "order:ship", Name: "订单发货"},
-	{Code: "order:refund", Name: "订单退款"},
 	{Code: "order:list", Name: "订单列表与统计查询"},
 	{Code: "order:view", Name: "订单详情查看"},
+	{Code: "refund:list", Name: "查看退款列表"},
+	{Code: "refund:view", Name: "查看退款详情与审计"},
+	{Code: "refund:review", Name: "审核退款申请"},
+	{Code: "refund:execute", Name: "执行退款与关闭退款"},
 	{Code: "flash_sale:create", Name: "创建秒杀活动"},
 	{Code: "flash_sale:update", Name: "更新秒杀活动"},
 	{Code: "flash_sale:repair", Name: "修复秒杀请求"},
@@ -69,6 +72,9 @@ var seedPermissionList = []permissionSeed{
 	{Code: "dashboard:view", Name: "查看运营数据大屏"},
 	{Code: "user:read", Name: "查看用户状态"},
 	{Code: "user:status", Name: "禁用/启用用户"},
+	{Code: "coupon:create", Name: "创建优惠券模板"},
+	{Code: "coupon:list", Name: "查看优惠券模板"},
+	{Code: "coupon:stop", Name: "停止优惠券领取"},
 }
 
 // seedPermissions 幂等写入标准权限：已存在（code 唯一）则跳过。

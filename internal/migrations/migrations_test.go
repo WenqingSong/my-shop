@@ -13,10 +13,10 @@ import (
 // baselineVersion 是内嵌 baseline 迁移的版本号（14 位时间戳）。
 const baselineVersion = uint(20261001000001)
 
-// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + products + skus + inventory + addresses + cart_items + orders + refresh_tokens + reviews + favorites + flash_sale + product_view_count + product_likes + banners + flash_sale_order_requests + recommend + articles + flash_sale_request_audits + user_status）。
-const latestMigrationVersion = uint(20261001000019)
+// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + … + refund + coupon + order_coupon_amounts）。
+const latestMigrationVersion = uint(20261001000022)
 
-// businessTables 是 migration 应建立的 32 张业务表。
+// businessTables 是 migration 应建立的 34 张业务表。
 // 注意顺序：order_items 通过外键引用 orders（ON DELETE CASCADE），故 order_items 排在 orders 之前；
 // flash_sale_activity_skus 通过外键引用 flash_sale_activities（ON DELETE CASCADE），故排在它之前；
 // recommend_items 通过外键引用 recommend_positions（ON DELETE CASCADE），故排在它之前；
@@ -26,9 +26,11 @@ const latestMigrationVersion = uint(20261001000019)
 // 即 inventories/inventory_logs 排在 skus 之前、skus 排在 products 之前、products 排在 categories 之前，
 // 否则 DROP TABLE 会因外键依赖失败。
 var businessTables = []string{
+	"user_coupons", "coupon_templates",
 	"article_favorites", "article_likes", "articles",
 	"recommend_items", "recommend_positions",
 	"favorites", "product_likes", "banners", "flash_sale_request_audits", "flash_sale_order_requests", "flash_sale_orders", "flash_sale_activity_skus", "flash_sale_activities",
+	"refund_audits", "refund_requests",
 	"order_items", "orders", "refresh_tokens", "cart_items", "reviews", "addresses", "users", "user_status_audits", "inventory_logs", "inventories", "skus", "products", "product_images", "categories", "admins", "roles", "permissions", "admin_roles", "role_permissions",
 }
 
@@ -515,6 +517,52 @@ var expectedSchema = []tableSpec{
 		},
 	},
 	{
+		Name:      "coupon_templates",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "name", Type: "varchar(64)"},
+			{Name: "threshold_amount", Type: "int unsigned"},
+			{Name: "discount_amount", Type: "int unsigned"},
+			{Name: "total_quantity", Type: "int unsigned"},
+			{Name: "issued_quantity", Type: "int unsigned", Default: strPtr("0")},
+			{Name: "claim_start_time", Type: "datetime"},
+			{Name: "claim_end_time", Type: "datetime"},
+			{Name: "use_start_time", Type: "datetime"},
+			{Name: "use_end_time", Type: "datetime"},
+			{Name: "status", Type: "tinyint", Default: strPtr("1")},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+		},
+	},
+	{
+		Name:      "user_coupons",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "user_id", Type: "bigint unsigned"},
+			{Name: "template_id", Type: "bigint unsigned"},
+			{Name: "status", Type: "tinyint"},
+			{Name: "order_id", Type: "bigint unsigned", Nullable: true},
+			{Name: "received_at", Type: "datetime"},
+			{Name: "locked_at", Type: "datetime", Nullable: true},
+			{Name: "used_at", Type: "datetime", Nullable: true},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "uk_user_template", Unique: true, Columns: []string{"user_id", "template_id"}},
+			{Name: "idx_user_id", Unique: false, Columns: []string{"user_id"}},
+			{Name: "idx_order_id", Unique: false, Columns: []string{"order_id"}},
+		},
+	},
+	{
 		Name:      "orders",
 		Engine:    "InnoDB",
 		Collation: "utf8mb4_unicode_ci",
@@ -524,6 +572,9 @@ var expectedSchema = []tableSpec{
 			{Name: "user_id", Type: "bigint unsigned"},
 			{Name: "status", Type: "tinyint", Default: strPtr("10")},
 			{Name: "total_amount", Type: "int unsigned"},
+			{Name: "original_amount", Type: "int unsigned", Default: strPtr("0")},
+			{Name: "discount_amount", Type: "int unsigned", Default: strPtr("0")},
+			{Name: "user_coupon_id", Type: "bigint unsigned", Nullable: true},
 			{Name: "idempotency_key", Type: "varchar(64)"},
 			{Name: "request_hash", Type: "varchar(64)"},
 			{Name: "recipient_name", Type: "varchar(32)"},

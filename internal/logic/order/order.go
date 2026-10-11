@@ -70,6 +70,9 @@ type orderRow struct {
 	UserId         int64       `json:"user_id"`
 	Status         int         `json:"status"`
 	TotalAmount    int64       `json:"total_amount"`
+	OriginalAmount int64       `json:"original_amount"`
+	DiscountAmount int64       `json:"discount_amount"`
+	UserCouponId   *int64      `json:"user_coupon_id"`
 	IdempotencyKey string      `json:"idempotency_key"`
 	RequestHash    string      `json:"request_hash"`
 	RecipientName  string      `json:"recipient_name"`
@@ -134,6 +137,9 @@ func (s *sOrder) Create(ctx context.Context, userID int64, req *v1.CreateReq) (*
 	if idempotencyKey == "" {
 		return nil, codes.New(codes.CodeInvalidArgument)
 	}
+	if req.CouponId < 0 {
+		return nil, codes.New(codes.CodeInvalidArgument)
+	}
 
 	address, err := service.Address().Detail(ctx, userID, req.AddressId)
 	if err != nil {
@@ -145,17 +151,33 @@ func (s *sOrder) Create(ctx context.Context, userID int64, req *v1.CreateReq) (*
 		return nil, err
 	}
 
-	totalAmount := int64(0)
+	// 优惠前金额 = Σ 下单时 skus.price×quantity（服务端定价，不信任客户端金额）。
+	originalAmount := int64(0)
 	for _, l := range lines {
-		totalAmount += l.Price * l.Quantity
+		originalAmount += l.Price * l.Quantity
 	}
 
-	hash := requestHash(source, req.AddressId, lines)
+	// 用券：服务端校验归属/有效期/状态/门槛并计算优惠金额；无券时优惠为 0。
+	discountAmount := int64(0)
+	var couponID *int64
+	if req.CouponId > 0 {
+		d, err := service.Coupon().GetDiscount(ctx, userID, req.CouponId, originalAmount)
+		if err != nil {
+			return nil, err
+		}
+		discountAmount = d
+		cid := req.CouponId
+		couponID = &cid
+	}
+	totalAmount := originalAmount - discountAmount
+
+	hash := requestHash(source, req.AddressId, req.CouponId, lines)
 
 	var createdID int64
 	for attempt := 0; attempt < maxOrderNoRetry; attempt++ {
 		orderNo := generateOrderNo()
-		createdID, err = s.insertOrder(ctx, userID, source, req.AddressId, idempotencyKey, hash, totalAmount, orderNo, &address.Address, lines)
+		createdID, err = s.insertOrder(ctx, userID, source, req.AddressId, idempotencyKey, hash,
+			originalAmount, discountAmount, totalAmount, couponID, orderNo, &address.Address, lines)
 		if err == nil {
 			break
 		}
@@ -255,26 +277,29 @@ func (s *sOrder) resolveLine(ctx context.Context, skuID, qty int64) (lineItem, e
 	}, nil
 }
 
-// insertOrder 在单事务内写订单 + 订单项 + 扣库存（购物车模式另删已购条目），返回订单 id。
-// 订单 INSERT 命中唯一约束时返回 duplicateKeyErr 供上层分流。
+// insertOrder 在单事务内写订单 + 订单项 + 扣库存（+ 预占券 + 购物车模式删已购条目），返回订单 id。
+// 订单 INSERT 命中唯一约束时返回 duplicateKeyErr 供上层分流；预占失败（券不可用）返回 19007 并整体回滚。
 func (s *sOrder) insertOrder(
 	ctx context.Context,
 	userID int64,
 	source string,
 	addressID int64,
 	idempotencyKey, hash string,
-	totalAmount int64,
+	originalAmount, discountAmount, totalAmount int64,
+	couponID *int64,
 	orderNo string,
 	address *addressv1.Address,
 	lines []lineItem,
 ) (int64, error) {
 	var orderID int64
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		id, e := tx.Model("orders").Ctx(ctx).Data(g.Map{
+		data := g.Map{
 			"order_no":        orderNo,
 			"user_id":         userID,
 			"status":          statusPendingPayment,
 			"total_amount":    totalAmount,
+			"original_amount": originalAmount,
+			"discount_amount": discountAmount,
 			"idempotency_key": idempotencyKey,
 			"request_hash":    hash,
 			"recipient_name":  address.RecipientName,
@@ -286,7 +311,11 @@ func (s *sOrder) insertOrder(
 			"address_id":      addressID,
 			// 支付截止时间用 MySQL NOW() 计算，避免 Go 进程与 MySQL 的时区不一致导致过期判定偏移。
 			"expire_at": gdb.Raw("DATE_ADD(NOW(), INTERVAL " + strconv.FormatInt(payTimeout(ctx), 10) + " SECOND)"),
-		}).InsertAndGetId()
+		}
+		if couponID != nil {
+			data["user_coupon_id"] = *couponID
+		}
+		id, e := tx.Model("orders").Ctx(ctx).Data(data).InsertAndGetId()
 		if e != nil {
 			if key := duplicateKeyName(e); key != "" {
 				return &duplicateKeyErr{key: key}
@@ -311,6 +340,13 @@ func (s *sOrder) insertOrder(
 
 		for _, l := range lines {
 			if _, e := service.Inventory().DeductInTx(ctx, tx, l.SkuID, l.Quantity, nil); e != nil {
+				return e
+			}
+		}
+
+		// 预占券：与订单创建同事务原子完成（available→locked），失败整体回滚（不残留「已预占」）。
+		if couponID != nil {
+			if e := service.Coupon().LockInTx(ctx, tx, userID, *couponID, id); e != nil {
 				return e
 			}
 		}
@@ -427,17 +463,29 @@ func (s *sOrder) Pay(ctx context.Context, userID, id int64) (*v1.PayRes, error) 
 		}
 		return &v1.PayRes{Order: *o}, nil
 	case statusPendingPayment:
-		result, e := g.DB().Model("orders").Ctx(ctx).
-			Where("id", id).
-			Where("user_id", userID).
-			Where("status", statusPendingPayment).
-			Data(g.Map{"status": statusPaid, "paid_at": gdb.Raw("NOW()")}).
-			Update()
-		if e != nil {
-			return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("支付订单: %w", e))
-		}
-		if affected, _ := result.RowsAffected(); affected == 0 {
-			return nil, codes.New(codes.CodeOrderInvalidStatusTransition)
+		// 事务：订单 10→20（条件更新）+ 若用券则核销（locked→used），原子完成，重复支付不重复核销。
+		err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+			result, e := tx.Model("orders").Ctx(ctx).
+				Where("id", id).
+				Where("user_id", userID).
+				Where("status", statusPendingPayment).
+				Data(g.Map{"status": statusPaid, "paid_at": gdb.Raw("NOW()")}).
+				Update()
+			if e != nil {
+				return codes.Wrap(codes.CodeInternalError, fmt.Errorf("支付订单: %w", e))
+			}
+			if affected, _ := result.RowsAffected(); affected == 0 {
+				return codes.New(codes.CodeOrderInvalidStatusTransition)
+			}
+			if row.UserCouponId != nil {
+				if e := service.Coupon().MarkUsedInTx(ctx, tx, *row.UserCouponId); e != nil {
+					return e
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
 		}
 		o, err := s.loadOwnedOrder(ctx, userID, id)
 		if err != nil {
@@ -532,6 +580,8 @@ func (s *sOrder) Receive(ctx context.Context, userID, id int64) (*v1.ReceiveRes,
 }
 
 // Ship 发货（仅管理员）：已支付→已发货。
+// 事务内锁定订单行，与「发起退款申请」「退款成功」经同一 orders 行锁串行化；
+// 存在有效退款申请（status ∈ {10,20,30}）时拒绝发货（退款与发货互斥）。
 func (s *sOrder) Ship(ctx context.Context, orderID int64) (*v1.ShipRes, error) {
 	row, err := s.findByID(ctx, orderID)
 	if err != nil {
@@ -541,58 +591,34 @@ func (s *sOrder) Ship(ctx context.Context, orderID int64) (*v1.ShipRes, error) {
 		return nil, codes.New(codes.CodeOrderNotFound)
 	}
 
-	result, err := g.DB().Model("orders").Ctx(ctx).
-		Where("id", orderID).
-		Where("status", statusPaid).
-		Data(g.Map{"status": statusShipped, "shipped_at": gdb.Raw("NOW()")}).
-		Update()
-	if err != nil {
-		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("发货: %w", err))
-	}
-	if affected, _ := result.RowsAffected(); affected == 0 {
-		return nil, codes.New(codes.CodeOrderInvalidStatusTransition)
-	}
-
-	o, err := s.loadByIDOrder(ctx, orderID)
-	if err != nil {
-		return nil, err
-	}
-	if o == nil {
-		return nil, codes.New(codes.CodeOrderNotFound)
-	}
-	return &v1.ShipRes{Order: *o}, nil
-}
-
-// Refund 退款（仅管理员）：已支付→已退款，恢复库存（原子，仅补偿一次）。
-func (s *sOrder) Refund(ctx context.Context, orderID int64) (*v1.RefundRes, error) {
-	row, err := s.findByID(ctx, orderID)
-	if err != nil {
-		return nil, err
-	}
-	if row == nil {
-		return nil, codes.New(codes.CodeOrderNotFound)
-	}
-
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		result, e := tx.Model("orders").Ctx(ctx).
-			Where("id", orderID).
-			Where("status", statusPaid).
-			Data(g.Map{"status": statusRefunded, "refunded_at": gdb.Raw("NOW()")}).
-			Update()
-		if e != nil {
-			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("退款: %w", e))
+		var locked []*orderRow
+		if e := tx.Model("orders").Ctx(ctx).Where("id", orderID).LockUpdate().Scan(&locked); e != nil {
+			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("锁定订单: %w", e))
 		}
-		if affected, _ := result.RowsAffected(); affected == 0 {
+		if len(locked) == 0 {
+			return codes.New(codes.CodeOrderNotFound)
+		}
+		if locked[0].Status != statusPaid {
 			return codes.New(codes.CodeOrderInvalidStatusTransition)
 		}
-		items, e := s.loadItemsInTx(ctx, tx, orderID)
+		has, e := service.Refund().HasActiveRequestInTx(ctx, tx, orderID)
 		if e != nil {
 			return e
 		}
-		for _, it := range items {
-			if _, e := service.Inventory().IncreaseInTx(ctx, tx, it.SkuId, it.Quantity, nil); e != nil {
-				return e
-			}
+		if has {
+			return codes.New(codes.CodeRefundShipConflict)
+		}
+		result, e := tx.Model("orders").Ctx(ctx).
+			Where("id", orderID).
+			Where("status", statusPaid).
+			Data(g.Map{"status": statusShipped, "shipped_at": gdb.Raw("NOW()")}).
+			Update()
+		if e != nil {
+			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("发货: %w", e))
+		}
+		if affected, _ := result.RowsAffected(); affected == 0 {
+			return codes.New(codes.CodeOrderInvalidStatusTransition)
 		}
 		return nil
 	})
@@ -607,7 +633,34 @@ func (s *sOrder) Refund(ctx context.Context, orderID int64) (*v1.RefundRes, erro
 	if o == nil {
 		return nil, codes.New(codes.CodeOrderNotFound)
 	}
-	return &v1.RefundRes{Order: *o}, nil
+	return &v1.ShipRes{Order: *o}, nil
+}
+
+// CompleteRefundInTx 在既有事务内完成退款推进：订单 paid(20)→refunded(70) + refunded_at + 恢复库存。
+// WHERE status=20 闸门保证「只补偿一次」；0 行返回明确错误供退款模块整体回滚。
+// 供退款模块在「执行退款成功」同事务中复用，不复制订单状态迁移与库存恢复业务规则。
+func (s *sOrder) CompleteRefundInTx(ctx context.Context, tx gdb.TX, orderID int64) error {
+	result, err := tx.Model("orders").Ctx(ctx).
+		Where("id", orderID).
+		Where("status", statusPaid).
+		Data(g.Map{"status": statusRefunded, "refunded_at": gdb.Raw("NOW()")}).
+		Update()
+	if err != nil {
+		return codes.Wrap(codes.CodeInternalError, fmt.Errorf("退款推进订单: %w", err))
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return codes.New(codes.CodeOrderInvalidStatusTransition)
+	}
+	items, err := s.loadItemsInTx(ctx, tx, orderID)
+	if err != nil {
+		return err
+	}
+	for _, it := range items {
+		if _, err := service.Inventory().IncreaseInTx(ctx, tx, it.SkuId, it.Quantity, nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // CancelExpired 取消过期的待支付订单（供后台扫描器复用），逐单原子取消，返回本次实际取消数量。
@@ -681,6 +734,10 @@ func (s *sOrder) cancelInTx(ctx context.Context, tx gdb.TX, orderID int64, reaso
 		if _, err := service.Inventory().IncreaseInTx(ctx, tx, it.SkuId, it.Quantity, nil); err != nil {
 			return false, err
 		}
+	}
+	// 释放占用的券（locked→available，清空 order_id/locked_at）；订单未占券时为 no-op。
+	if err := service.Coupon().ReleaseInTx(ctx, tx, orderID); err != nil {
+		return false, err
 	}
 	return true, nil
 }
@@ -775,6 +832,9 @@ func (s *sOrder) toOrder(ctx context.Context, r *orderRow) (*v1.Order, error) {
 		UserId:         r.UserId,
 		Status:         statusToString(r.Status),
 		TotalAmount:    r.TotalAmount,
+		OriginalAmount: r.OriginalAmount,
+		DiscountAmount: r.DiscountAmount,
+		UserCouponId:   r.UserCouponId,
 		IdempotencyKey: r.IdempotencyKey,
 		RecipientName:  r.RecipientName,
 		Phone:          r.Phone,
@@ -835,8 +895,9 @@ func statusToString(s int) string {
 	}
 }
 
-// requestHash 计算请求指纹：sha256hex(source|address_id|sku_id:qty...（按 sku_id 升序）)。
-func requestHash(source string, addressID int64, lines []lineItem) string {
+// requestHash 计算请求指纹：sha256hex(source|address_id|coupon_id|sku_id:qty...（按 sku_id 升序）)。
+// coupon_id 缺省为 0（无券），使同一幂等键下「是否用券/用哪张券」参与内容一致性判定（INV-C10）。
+func requestHash(source string, addressID int64, couponID int64, lines []lineItem) string {
 	sorted := make([]lineItem, len(lines))
 	copy(sorted, lines)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].SkuID < sorted[j].SkuID })
@@ -845,6 +906,8 @@ func requestHash(source string, addressID int64, lines []lineItem) string {
 	b.WriteString(source)
 	b.WriteByte('|')
 	b.WriteString(strconv.FormatInt(addressID, 10))
+	b.WriteByte('|')
+	b.WriteString(strconv.FormatInt(couponID, 10))
 	for _, l := range sorted {
 		b.WriteByte('|')
 		b.WriteString(strconv.FormatInt(l.SkuID, 10))

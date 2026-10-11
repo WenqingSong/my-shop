@@ -34,7 +34,10 @@ type Order struct {
 	OrderNo        string       `json:"order_no" dc:"全局唯一订单号"`
 	UserId         int64        `json:"user_id" dc:"归属用户 id"`
 	Status         string       `json:"status" dc:"状态：pending_payment/paid/shipped/received/completed/cancelled/refunded"`
-	TotalAmount    int64        `json:"total_amount" dc:"成交总价（整数分，快照）"`
+	TotalAmount    int64        `json:"total_amount" dc:"应付金额（整数分，快照 = original_amount - discount_amount）"`
+	OriginalAmount int64        `json:"original_amount" dc:"优惠前金额（整数分，快照 = Σ 订单项 price×quantity）"`
+	DiscountAmount int64        `json:"discount_amount" dc:"优惠金额（整数分，快照，无券为 0）"`
+	UserCouponId   *int64       `json:"user_coupon_id" dc:"下单时使用的用户券 id（软引用，快照，无券为空）"`
 	IdempotencyKey string       `json:"idempotency_key" dc:"幂等键"`
 	RecipientName  string       `json:"recipient_name" dc:"收货人姓名快照"`
 	Phone          string       `json:"phone" dc:"手机号快照"`
@@ -77,6 +80,7 @@ type CreateReq struct {
 	IdempotencyKey string `json:"idempotency_key" v:"required" dc:"幂等键（同键同内容幂等，同键不同内容 9006）"`
 	SkuId          int64  `json:"sku_id" dc:"直接购买 SKU id（source=direct 必填）"`
 	Quantity       int64  `json:"quantity" dc:"直接购买数量（source=direct 必填，正整数）"`
+	CouponId       int64  `json:"coupon_id" dc:"可选使用的用户券 id（一笔订单最多一张，0 或缺省表示不使用）"`
 }
 
 // CreateRes 创建订单响应。
@@ -146,17 +150,6 @@ type ShipReq struct {
 
 // ShipRes 发货响应。
 type ShipRes struct {
-	Order
-}
-
-// RefundReq 退款请求（仅管理员，持 order:refund，仅已支付未发货可退）。
-type RefundReq struct {
-	g.Meta `path:"/admin/orders/:id/refund" method:"post" tags:"订单" summary:"退款"`
-	Id     int64 `json:"id" in:"path" v:"required" dc:"订单 id"`
-}
-
-// RefundRes 退款响应。
-type RefundRes struct {
 	Order
 }
 

@@ -1,16 +1,11 @@
 #!/usr/bin/env bash
-# 清理编译产物与临时文件，不误删源码与持久数据（MySQL/Redis 数据卷）。
+# 清理编译产物与临时文件，不误删源码与持久数据（MySQL/Redis/本地存储数据卷）。
+# 容器与镜像经 make down（停止并移除容器，保留卷）管理，不在此处删除。
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib.sh"
 
-# 若应用仍在运行，先停止它，避免删除 pid 文件后留下无法被生命周期感知/停止的孤儿进程。
-if is_app_running; then
-  log_warn "检测到应用正在运行，先停止应用再清理..."
-  stop_app
-fi
-
 log_info "清理编译产物与临时文件..."
-rm -rf "${BIN_DIR}" "${TMP_DIR}"
+rm -rf "${ROOT_DIR}/bin" "${ROOT_DIR}/tmp"
 ( cd "${ROOT_DIR}" && go clean )
-log_info "clean complete（源码与持久数据不受影响）"
+log_info "clean complete（源码与数据卷不受影响；容器/镜像经 make down 管理）"
