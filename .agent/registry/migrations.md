@@ -42,3 +42,4 @@
 | 20261001000017 | articles | article-cms-v1 | RESERVED | articles + article_likes + article_favorites 文章三表 |
 | 20261001000018 | flash_sale_request_audits | flash-sale-v4 | RESERVED | flash_sale_request_audits 秒杀请求人工修复审计表 |
 | 20261001000019 | user_status | iam-v5 | RESERVED | users 增 status/auth_epoch、refresh_tokens 增 auth_epoch、新增 user_status_audits 审计表 |
+| 20261001000020 | refund | order-refund-v1 | RESERVED | refund_requests + refund_audits 退款两表 |
