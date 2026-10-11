@@ -45,3 +45,4 @@
 | 20261001000020 | refund | order-refund-v1 | RESERVED | refund_requests + refund_audits 退款两表 |
 | 20261001000021 | coupon | coupon-v1 | RESERVED | coupon_templates + user_coupons 优惠券两表 |
 | 20261001000022 | order_coupon_amounts | coupon-v1 | RESERVED | orders 增 original_amount/discount_amount/user_coupon_id 三列 + 回填 |
+| 20261001000023 | legacy_id_map | legacy-data-migration | RESERVED | 目标库新增 legacy_id_map 旧 ID→新 ID 映射表 |
