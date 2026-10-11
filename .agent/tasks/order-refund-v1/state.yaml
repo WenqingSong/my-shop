@@ -6,7 +6,11 @@ contract:
   target: "537edc4b0363355c3dbab4f516c237b0d6eca9f8"
 
 resources:
-  reservations: {}
+  reservations:
+    error_code_domain:
+      - "18000-18999"
+    migration_version:
+      - "20261001000020"
 
 review:
   status: NOT_REQUESTED
