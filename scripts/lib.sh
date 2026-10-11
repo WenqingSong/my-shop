@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # 公共工具库：被其它生命周期脚本 source 使用。
 #
+# 应用与依赖统一经 Docker Compose 编排运行，脚本不再管理宿主机进程
+# （已移除 nohup / pid 文件，从根上杜绝宿主机进程与 Compose app 双启动）。
+#
 # 安全约定：
 #   - 不在此处硬编码任何密码 / 凭证。
-#   - MySQL / Redis 健康通过 docker 容器的 healthcheck 判断；
-#     应用健康通过 HTTP GET /health 判断，二者均无需密码。
+#   - MySQL / Redis / App / Prometheus 健康通过 docker 容器的 healthcheck 判断，无需密码。
 #   - 配置默认值与 manifest/config/config.yaml、docker-compose.yml 保持一致，
 #     支持环境变量覆盖（环境变量 > .env > 内置默认值）。
 
@@ -12,12 +14,6 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export ROOT_DIR
-
-BIN_DIR="${ROOT_DIR}/bin"
-TMP_DIR="${ROOT_DIR}/tmp"
-APP_BIN="${BIN_DIR}/my-shop"
-APP_PID_FILE="${TMP_DIR}/my-shop.pid"
-APP_LOG_FILE="${TMP_DIR}/my-shop.log"
 
 # ---------------------------------------------------------------------------
 # 日志
@@ -49,7 +45,7 @@ _load_env_file() {
       val="${val:1:${#val}-2}"
     fi
     # 空值不导出：`KEY=` 若被导出为空环境变量，GoFrame GetEffective 会把「空但已设置」
-    # 视为覆盖 config.yaml 非空默认值（如 AUTH_JWT_SECRET、DATABASE_DEFAULT_PASS），导致启动失败。
+    # 视为覆盖 config.yaml 非空默认值，导致启动失败。
     # 跳过空值，使加载优先级保持「已导出环境变量 > .env 非空值 > config.yaml 默认值」。
     [[ -n "${val}" ]] || continue
     # 已导出的环境变量优先：仅当该键当前未设置（或为空）时用 .env 值填充。
@@ -63,22 +59,10 @@ _load_env_file
 # ---------------------------------------------------------------------------
 # 配置（环境变量可覆盖，默认值与 config.yaml / docker-compose.yml 一致）
 # ---------------------------------------------------------------------------
-SERVER_ADDRESS="${SERVER_ADDRESS:-:8000}"
+# 依赖就绪等待超时（mysql/redis 健康检查轮询），秒。
 STARTUP_DEPENDENCY_TIMEOUT="${STARTUP_DEPENDENCY_TIMEOUT:-30}"
-
-# 应用健康检查 URL（仅探测用，无需密码）
-app_health_url() {
-  local addr="${SERVER_ADDRESS}"
-  if [[ "${addr}" == :* ]]; then
-    printf 'http://127.0.0.1%s/health' "${addr}"
-  else
-    local host="${addr%:*}" port="${addr##*:}"
-    case "${host}" in
-      0.0.0.0|::|\[::\]) host="127.0.0.1" ;;
-    esac
-    printf 'http://%s:%s/health' "${host}" "${port}"
-  fi
-}
+# app 容器健康等待超时（含首次构建、mysql/redis 健康、app 迁移与启动），秒。
+APP_START_TIMEOUT="${APP_START_TIMEOUT:-300}"
 
 # ---------------------------------------------------------------------------
 # docker compose 封装
@@ -131,83 +115,29 @@ wait_for_deps() {
   done
 }
 
-# ---------------------------------------------------------------------------
-# 应用进程管理（应用以本地进程方式运行）
-# ---------------------------------------------------------------------------
-is_app_running() {
-  [[ -f "${APP_PID_FILE}" ]] || return 1
-  local pid
-  pid="$(cat "${APP_PID_FILE}" 2>/dev/null || true)"
-  [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null
-}
-
-app_healthy() {
-  curl -fsS "$(app_health_url)" >/dev/null 2>&1
-}
-
-build_app() {
-  mkdir -p "${BIN_DIR}"
-  local tmp_bin="${APP_BIN}.tmp"
-  log_info "构建应用二进制..."
-  ( cd "${ROOT_DIR}" && go build -o "${tmp_bin}" . )
-  mv -f "${tmp_bin}" "${APP_BIN}"
-  log_info "已构建 ${APP_BIN}"
-}
-
-# 执行数据库迁移（显式 my-shop migrate up），成功后才允许 serve 启动。
-migrate_app() {
-  log_info "执行数据库迁移..."
-  ( cd "${ROOT_DIR}" && "${APP_BIN}" migrate up )
-  log_info "数据库迁移完成"
-}
-
-start_app() {
-  if is_app_running; then
-    log_info "应用已在运行（pid $(cat "${APP_PID_FILE}")）"
-    return 0
-  fi
-  mkdir -p "${TMP_DIR}"
-  log_info "启动应用..."
-  nohup "${APP_BIN}" serve >>"${APP_LOG_FILE}" 2>&1 &
-  echo "$!" > "${APP_PID_FILE}"
-  wait_for_app
-}
-
+# 轮询等待 app 容器健康；检测到容器已退出（迁移/启动失败）时提前失败。
 wait_for_app() {
-  local timeout="${STARTUP_DEPENDENCY_TIMEOUT}"
+  local timeout="${APP_START_TIMEOUT}"
   local deadline=$(( $(date +%s) + timeout ))
+  local id state
   while true; do
-    if app_healthy; then
-      log_info "应用已健康（$(app_health_url)）"
+    if container_healthy app; then
+      log_info "app 已健康"
       return 0
     fi
-    if ! is_app_running; then
-      log_error "应用启动后退出，详见 ${APP_LOG_FILE}"
-      return 1
+    id="$(docker_compose ps -q app 2>/dev/null || true)"
+    if [[ -n "${id}" ]]; then
+      id="${id%%$'\n'*}"
+      state="$(docker inspect --format '{{.State.Status}}' "${id}" 2>/dev/null || printf 'missing')"
+      if [[ "${state}" == "exited" || "${state}" == "dead" ]]; then
+        log_error "app 容器已退出（state=${state}），请执行 make logs 查看原因"
+        return 1
+      fi
     fi
     if (( $(date +%s) >= deadline )); then
-      log_error "应用在 ${timeout}s 内未通过健康检查"
+      log_error "app 在 ${timeout}s 内未通过健康检查，请执行 make logs 查看原因"
       return 1
     fi
     sleep 1
   done
-}
-
-stop_app() {
-  if [[ -f "${APP_PID_FILE}" ]]; then
-    local pid i
-    pid="$(cat "${APP_PID_FILE}" 2>/dev/null || true)"
-    if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
-      log_info "停止应用（pid ${pid}）..."
-      kill "${pid}" 2>/dev/null || true
-      for i in $(seq 1 10); do
-        kill -0 "${pid}" 2>/dev/null || break
-        sleep 0.1
-      done
-      if kill -0 "${pid}" 2>/dev/null; then
-        kill -9 "${pid}" 2>/dev/null || true
-      fi
-    fi
-    rm -f "${APP_PID_FILE}"
-  fi
 }

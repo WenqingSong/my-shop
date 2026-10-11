@@ -10,7 +10,7 @@ SHELL := /bin/bash
 
 SCRIPTS := scripts
 
-.PHONY: help bootstrap init up down restart status logs health test test-prometheus test-lib test-storage clean
+.PHONY: help bootstrap init up down restart status logs health test test-prometheus test-container test-lib test-storage clean
 
 help: ## 列出所有可用目标及说明
 	@bash $(SCRIPTS)/help.sh
@@ -21,10 +21,10 @@ bootstrap: ## 一键初始化开发环境（依赖容器就绪、构建并启动
 init: ## 两阶段初始化第一阶段：准备依赖容器与 .env（不要求七牛凭据、不启动后端）
 	@bash $(SCRIPTS)/init.sh
 
-up: ## 启动依赖容器、七牛预检并启动应用（幂等，需 .env 已填七牛配置）
+up: ## 构建并启动完整容器栈（app/mysql/redis/prometheus），幂等，需 .env 已填七牛与超管配置
 	@bash $(SCRIPTS)/up.sh
 
-down: ## 停止应用与依赖容器（保留 MySQL/Redis 数据卷）
+down: ## 停止并移除应用与依赖容器（保留 MySQL/Redis/本地存储数据卷）
 	@bash $(SCRIPTS)/down.sh
 
 restart: ## 先停止再启动，恢复服务可用
@@ -44,6 +44,9 @@ test: ## 执行 go vet 与 go test（隔离 .env，不受本地环境变量污�
 
 test-prometheus: ## 校验 Prometheus 抓取配置与 compose 服务定义
 	@bash $(SCRIPTS)/test-prometheus.sh
+
+test-container: ## 校验容器化配置（Dockerfile / .dockerignore / compose / 凭据分离）
+	@bash $(SCRIPTS)/test-container.sh
 
 test-lib: ## 校验 lib.sh 加载语义（空值不覆盖默认值等，AC-003 回归）
 	@bash $(SCRIPTS)/test-lib.sh

@@ -5,13 +5,16 @@ server:
 
 # 数据库配置（以下均为开发默认值，可通过环境变量覆盖）
 # 对应环境变量：DATABASE_DEFAULT_TYPE / HOST / PORT / USER / PASS / NAME / CHARSET / DEBUG
+# ⚠️ database.default.pass 为敏感凭据，不固化默认值：此处保持空值，运行时通过环境变量
+# DATABASE_DEFAULT_PASS 注入（容器环境由 docker-compose.yml 注入 ${MYSQL_ROOT_PASSWORD:-root} 开发默认值）。
+# 缺失时 MySQL 认证失败，启动会在依赖连通重试超时后非零退出，不回退任何公开默认密码。
 database:
   default:
     type: "mysql"
     host: "127.0.0.1"
     port: "3306"
     user: "root"
-    pass: "root"
+    pass: ""
     name: "my_shop"
     charset: "utf8"
     debug: false
@@ -29,9 +32,10 @@ redis:
 auth:
   jwt:
     # JWT 签名密钥（HS256）。
-    # ⚠️ 开发环境默认值，仅用于本地/CI 每日重置环境。
-    # 生产环境必须通过环境变量 AUTH_JWT_SECRET 注入真实密钥，禁止使用此默认值。
-    secret: "c49d0fea5cf77761ca6d0275545b9501686dd40cc313b072c36972d6128fc403"
+    # ⚠️ 敏感凭据，不固化默认值：此处保持空值，运行时通过环境变量 AUTH_JWT_SECRET 注入。
+    # 缺失或过短（<32 字节）时启动 fail-fast，不回退任何公开默认密钥。
+    # 开发环境由 docker-compose.yml 提供 dev 默认值（仅供 CNB DinD 开发环境，生产必须覆盖）。
+    secret: ""
   session:
     # 会话 TTL（秒），默认 3600，与 JWT exp 对齐；必须大于 0。
     # 有效访问窗口 = min(JWT exp, 会话 TTL)。

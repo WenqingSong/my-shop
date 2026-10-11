@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
-# 统一测试入口：先静态检查（go vet），再执行单元测试（go test）。
+# 统一测试入口：先静态检查（go vet），再执行单元测试（go test），最后跑容器化静态断言。
 #
-# 环境隔离（AC-010）：本脚本刻意不 source lib.sh，因为 lib.sh 会加载 .env 并把真实凭据
-# （七牛 AK/SK、JWT secret、超管密码等）导出到环境变量，污染 go test 结果。测试应在
-# 干净环境变量下运行，配置一律走 manifest/config/config.yaml 的开发默认值，
-# 结果与本地 .env 无关（依赖容器仍需由 make init / make up 提前就绪）。
+# 环境隔离：本脚本刻意不 source lib.sh，因为 lib.sh 会加载 .env 并把真实凭据
+# （七牛 AK/SK、JWT secret、超管密码等）导出到环境变量，污染 go test 结果。
+# 测试在干净环境变量下运行，结果与本地 .env 无关。
+#
+# 凭据分离（Contract D5）：config.yaml 已清空 database.default.pass，测试代码不注入
+# MySQL 密码，故在此注入开发测试凭据 DATABASE_DEFAULT_PASS（默认 root，与 compose 一致），
+# 使各集成测试可连接由 make init / make up 提前就绪的 MySQL。AUTH_JWT_SECRET /
+# ADMIN_SUPER_PASSWORD 已由各测试自身 t.Setenv 注入，无需在此导出。
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 log_info() { printf '\033[32m[INFO]\033[0m %s\n' "$*"; }
+
+# 开发测试 MySQL 凭据（与 docker-compose.yml 的 ${MYSQL_ROOT_PASSWORD:-root} 一致，仅供本地/CI）。
+export DATABASE_DEFAULT_PASS="${DATABASE_DEFAULT_PASS:-root}"
 
 log_info "go vet ./..."
 ( cd "${ROOT_DIR}" && go vet ./... )
@@ -21,5 +28,8 @@ log_info "go test -p 1 ./..."
 
 log_info "校验 Prometheus 接入配置..."
 "${SCRIPT_DIR}/test-prometheus.sh"
+
+log_info "校验容器化配置（Dockerfile / .dockerignore / compose / config 凭据分离）..."
+"${SCRIPT_DIR}/test-container.sh"
 
 log_info "测试全部通过"

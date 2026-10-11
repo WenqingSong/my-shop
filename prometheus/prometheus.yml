@@ -3,8 +3,8 @@
 # 抓取 my-shop 服务的 GET /metrics（Prometheus 文本格式）。该端点仅在
 # flash_sale.metrics.enabled=true（环境变量 FLASH_SALE_METRICS_ENABLED）开启时由服务暴露。
 #
-# 网络说明：应用以宿主机进程监听 :8000（SERVER_ADDRESS 可覆盖），Prometheus 运行在容器内，
-# 经 host.docker.internal:host-gateway（docker-compose 的 extra_hosts）访问宿主机端口。
+# 网络说明：应用以后端容器（Compose 服务名 app）监听 :8000，Prometheus 与 app 同处
+# Compose 网络，直接经 DNS 名 app:8000 抓取，不再经 host.docker.internal 打通宿主机端口。
 
 global:
   scrape_interval: 15s
@@ -20,4 +20,4 @@ scrape_configs:
     scrape_interval: 15s
     static_configs:
       - targets:
-          - "host.docker.internal:8000"
+          - "app:8000"

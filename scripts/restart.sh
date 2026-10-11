@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 先停止再启动，最终使服务恢复可用状态。
+# 先停止再启动（重建镜像），最终使服务恢复可用状态。
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib.sh"
