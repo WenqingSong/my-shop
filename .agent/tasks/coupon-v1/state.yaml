@@ -2,8 +2,8 @@ schema_version: 3
 task_id: coupon-v1
 
 contract:
-  status: PENDING
-  target: ""
+  status: APPROVED
+  target: "8d6bcd1df15f74475fba1f89d35c563731516429"
 
 resources:
   reservations: {}
