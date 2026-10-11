@@ -43,3 +43,5 @@
 | 20261001000018 | flash_sale_request_audits | flash-sale-v4 | RESERVED | flash_sale_request_audits 秒杀请求人工修复审计表 |
 | 20261001000019 | user_status | iam-v5 | RESERVED | users 增 status/auth_epoch、refresh_tokens 增 auth_epoch、新增 user_status_audits 审计表 |
 | 20261001000020 | refund | order-refund-v1 | RESERVED | refund_requests + refund_audits 退款两表 |
+| 20261001000021 | coupon | coupon-v1 | RESERVED | coupon_templates + user_coupons 优惠券两表 |
+| 20261001000022 | order_coupon_amounts | coupon-v1 | RESERVED | orders 增 original_amount/discount_amount/user_coupon_id 三列 + 回填 |

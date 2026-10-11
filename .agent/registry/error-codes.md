@@ -44,3 +44,4 @@
 | 16000-16999 | article-cms-v1 | RESERVED | article-cms-v1 文章域（域序 16 = max(15)+1） |
 | 17000-17999 | object-storage-upload | RESERVED | object-storage-upload 上传/存储域（域序 17 = max(16)+1） |
 | 18000-18999 | order-refund-v1 | RESERVED | order-refund-v1 退款域（域序 18 = max(17)+1） |
+| 19000-19999 | coupon-v1 | RESERVED | coupon-v1 优惠券域（域序 19 = max(18)+1） |
