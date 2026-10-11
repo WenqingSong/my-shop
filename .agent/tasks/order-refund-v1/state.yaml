@@ -17,8 +17,8 @@ review:
   target: "e7a49bc2b6719f54a6e7c24ea4572564da38c87c"
 
 owner:
-  status: PENDING
-  review_target: ""
+  status: ACCEPTED
+  review_target: "e7a49bc2b6719f54a6e7c24ea4572564da38c87c"
 
 delivery:
   status: NOT_RUN
