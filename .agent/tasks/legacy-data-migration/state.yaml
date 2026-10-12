@@ -11,8 +11,8 @@ resources:
       - "20261001000023"
 
 review:
-  status: NOT_REQUESTED
-  target: ""
+  status: PENDING
+  target: a38c28df967aa54016fa839f46f7f7f9fa0b9840
 
 owner:
   status: PENDING
