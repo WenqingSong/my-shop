@@ -17,10 +17,10 @@ owner:
   review_target: "f1c129b882a1fddf7edcc41a2af8a4656d8ed9e4"
 
 delivery:
-  status: NOT_RUN
-  review_target: ""
-  feature_head: ""
-  develop_base: ""
+  status: PASS
+  review_target: "f1c129b882a1fddf7edcc41a2af8a4656d8ed9e4"
+  feature_head: "f4733e2a15af0b95e9e24bdef6f321cb787fc352"
+  develop_base: "657cd977ecae3f7b0e1baf17434a1aa819a7decd"
 
 blocked:
   active: false
