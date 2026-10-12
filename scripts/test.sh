@@ -32,4 +32,7 @@ log_info "校验 Prometheus 接入配置..."
 log_info "校验容器化配置（Dockerfile / .dockerignore / compose / config 凭据分离）..."
 "${SCRIPT_DIR}/test-container.sh"
 
+log_info "校验 Nginx 反向代理配置..."
+"${SCRIPT_DIR}/test-nginx.sh"
+
 log_info "测试全部通过"

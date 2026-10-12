@@ -4,4 +4,4 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib.sh"
 
-docker_compose logs --tail=100 app mysql redis prometheus || true
+docker_compose logs --tail=100 nginx app mysql redis prometheus || true
