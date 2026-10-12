@@ -15,8 +15,8 @@ review:
   target: 04350e374224db9a6c8eb1573aa327c6d45c987f
 
 owner:
-  status: PENDING
-  review_target: ""
+  status: ACCEPTED
+  review_target: "04350e374224db9a6c8eb1573aa327c6d45c987f"
 
 delivery:
   status: NOT_RUN
