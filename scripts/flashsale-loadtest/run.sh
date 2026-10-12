@@ -13,7 +13,7 @@
 # 支持优化前后对比（见 compare.sh）。
 #
 # 前置条件：
-#   - 应用已启动（默认 http://127.0.0.1:8000），MySQL/Redis 已就绪；
+#   - 应用已启动（默认经 Nginx 唯一入口 http://127.0.0.1:${NGINX_PORT:-8080}），MySQL/Redis 已就绪；
 #   - 已存在一个进行中的秒杀活动与绑定 SKU（提供 ACTIVITY_ID / SKU_ID）；
 #   - 依赖：curl、sort、awk、mysql（客户端）、date、mktemp。
 #
@@ -31,7 +31,7 @@
 # =============================================================================
 set -euo pipefail
 
-BASE_URL="${BASE_URL:-http://127.0.0.1:8000}"
+BASE_URL="${BASE_URL:-http://127.0.0.1:${NGINX_PORT:-8080}}"
 ACTIVITY_ID="${ACTIVITY_ID:-}"
 SKU_ID="${SKU_ID:-}"
 SCENARIO="${SCENARIO:-low}"

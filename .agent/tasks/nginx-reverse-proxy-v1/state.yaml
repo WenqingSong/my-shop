@@ -1,0 +1,28 @@
+schema_version: 3
+task_id: nginx-reverse-proxy-v1
+
+contract:
+  status: APPROVED
+  target: "3f4c0b78e4be1d18a70f9ee31d1198b46fe480a9"
+
+resources:
+  reservations: {}
+
+review:
+  status: CLEAN
+  target: "f1c129b882a1fddf7edcc41a2af8a4656d8ed9e4"
+
+owner:
+  status: ACCEPTED
+  review_target: "f1c129b882a1fddf7edcc41a2af8a4656d8ed9e4"
+
+delivery:
+  status: PASS
+  review_target: "f1c129b882a1fddf7edcc41a2af8a4656d8ed9e4"
+  feature_head: "f4733e2a15af0b95e9e24bdef6f321cb787fc352"
+  develop_base: "657cd977ecae3f7b0e1baf17434a1aa819a7decd"
+
+blocked:
+  active: false
+  by: ""
+  reason: ""

@@ -10,7 +10,7 @@ SHELL := /bin/bash
 
 SCRIPTS := scripts
 
-.PHONY: help bootstrap init up down restart status logs health test test-prometheus test-container test-lib test-storage clean
+.PHONY: help bootstrap init up down restart status logs health test test-prometheus test-container test-nginx test-lib test-storage clean
 
 help: ## 列出所有可用目标及说明
 	@bash $(SCRIPTS)/help.sh
@@ -47,6 +47,9 @@ test-prometheus: ## 校验 Prometheus 抓取配置与 compose 服务定义
 
 test-container: ## 校验容器化配置（Dockerfile / .dockerignore / compose / 凭据分离）
 	@bash $(SCRIPTS)/test-container.sh
+
+test-nginx: ## 校验 Nginx 反向代理配置（信任边界 / 重试边界 / DNS 再解析 / 日志关联 / 编排）
+	@bash $(SCRIPTS)/test-nginx.sh
 
 test-lib: ## 校验 lib.sh 加载语义（空值不覆盖默认值等，AC-003 回归）
 	@bash $(SCRIPTS)/test-lib.sh

@@ -7,7 +7,8 @@ services:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-my_shop}
     ports:
-      - "${MYSQL_PORT:-3306}:3306"
+      # 回环绑定：仅宿主机本机可连（开发与压测 verify() 经 127.0.0.1 连库），不对外暴露。
+      - "127.0.0.1:${MYSQL_PORT:-3306}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
@@ -22,7 +23,8 @@ services:
     container_name: my-shop-redis
     restart: unless-stopped
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      # 回环绑定：仅宿主机本机可连（开发与压测经 127.0.0.1），不对外暴露。
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -76,8 +78,7 @@ services:
       QINIU_MAX_FILE_SIZE: "${QINIU_MAX_FILE_SIZE:-10485760}"
       # 秒杀指标开关（Prometheus /metrics 暴露开关，默认关闭）。
       FLASH_SALE_METRICS_ENABLED: "${FLASH_SALE_METRICS_ENABLED:-false}"
-    ports:
-      - "${APP_PORT:-8000}:8000"
+    # 不映射宿主机端口：app 仅 Compose 网络内 app:8000 可达（Nginx 唯一对外入口的信任边界前提）。
     volumes:
       - app_storage:/app/storage
     # /health 为 liveness：serve 仅在 bootstrap（依赖/schema/seed/七牛）全部通过后才监听端口，
@@ -88,6 +89,27 @@ services:
       timeout: 5s
       retries: 5
       start_period: 60s
+
+  nginx:
+    build:
+      context: ./nginx
+    image: my-shop-nginx:local
+    container_name: my-shop-nginx
+    restart: unless-stopped
+    # 待 app 健康后再启动：Nginx 作为唯一对外入口，依赖 app 已就绪。
+    depends_on:
+      app:
+        condition: service_healthy
+    # 唯一对外 HTTP 入口（${NGINX_PORT:-8080}），容器内监听 80。
+    ports:
+      - "${NGINX_PORT:-8080}:80"
+    # 健康检查：经本容器回环探活，透传 app 的 /health（语义与 app 自身 healthcheck 一致）。
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   prometheus:
     build:

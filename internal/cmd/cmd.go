@@ -141,6 +141,9 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 	registerMetricsRoute(ctx, s)
 
 	s.Group("/", func(root *ghttp.RouterGroup) {
+		// RequestID 注册于 Response 之前（外层）：统一读取/生成 Request ID、回写响应头，
+		// 并在请求结束时输出含 request_id 的结构化访问日志（与 Nginx 访问日志关联）。
+		root.Middleware(middleware.RequestID)
 		root.Middleware(middleware.Response)
 		root.Bind(health.NewV1())
 
