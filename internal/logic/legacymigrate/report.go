@@ -27,6 +27,9 @@ type Result struct {
 
 	// Skipped 逐条记录被跳过数据及原因（成功数量不逐条记录，避免报告冗余）。
 	Skipped []SkipRecord
+	// Warnings 记录「迁移完成但发生降级」的说明（如父分类缺失 parent_id 置 0），
+	// 与 Skipped 严格区分：降级数据仍算迁移成功，不计入跳过（AC-012 真实统计）。
+	Warnings []string
 	// Failures 记录事务级失败（整批回滚）及原因。
 	Failures []string
 }
@@ -42,6 +45,11 @@ func (r *Result) addSkip(entity string, oldID int64, reason string) {
 	case "sku":
 		r.SkusSkipped++
 	}
+}
+
+// addWarning 追加一条降级说明（不改变成功/跳过计数）。
+func (r *Result) addWarning(format string, args ...any) {
+	r.Warnings = append(r.Warnings, fmt.Sprintf(format, args...))
 }
 
 // addFailure 追加一条事务级失败记录。
@@ -65,6 +73,12 @@ func (r *Result) WriteReport(w io.Writer) {
 		fmt.Fprintf(w, "\n-- 跳过明细（共 %d 条） --\n", len(r.Skipped))
 		for _, s := range r.Skipped {
 			fmt.Fprintf(w, "  [%s] old_id=%d: %s\n", s.Entity, s.OldID, s.Reason)
+		}
+	}
+	if len(r.Warnings) > 0 {
+		fmt.Fprintf(w, "\n-- 降级说明（共 %d 条，数据仍已迁移） --\n", len(r.Warnings))
+		for _, s := range r.Warnings {
+			fmt.Fprintf(w, "  %s\n", s)
 		}
 	}
 	if len(r.Failures) > 0 {

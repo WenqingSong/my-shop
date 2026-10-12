@@ -84,13 +84,22 @@ func (e *Engine) loadMigratedMap(ctx context.Context) (map[string]int64, error) 
 	return m, rows.Err()
 }
 
+// errSkipped 表示当前分类已按规则跳过（原因已写入 result），调用方应忽略并继续。
+var errSkipped = errors.New("category skipped")
+
 // migrateCategories 迁移分类，返回旧分类 ID → 新分类 ID 的完整映射（含已迁移与本次新增）。
-// import 模式在一个事务内完成「插入（parent_id 暂置 0）+ 回填 parent_id + 写映射」，
-// 保证分类与其映射行同事务、任一步失败整体回滚（INV-006）。
+// import 模式按「父先子后」顺序以最终 parent_id 单趟插入（parent_id 无自引用 FK，无需两阶段），
+// 避免两阶段临时 parent_id=0 在 uk(parent_id,name) 下把「不同父级同名分类」误判为冲突（CLEAN-001）。
+// 同父级重名等约束冲突逐条跳过并记录原因；父缺失/父被跳过/父链成环降级为 parent_id=0 并记警告（不计入跳过）。
 func (e *Engine) migrateCategories(ctx context.Context, migrated map[string]int64, dryRun bool, result *Result) (map[int64]int64, error) {
 	cats, err := e.loadLegacyCategories(ctx)
 	if err != nil {
 		return nil, err
+	}
+
+	byID := make(map[int64]*LegacyCategory, len(cats))
+	for _, c := range cats {
+		byID[c.ID] = c
 	}
 
 	oldToNew := make(map[int64]int64, len(cats))
@@ -110,62 +119,90 @@ func (e *Engine) migrateCategories(ctx context.Context, migrated map[string]int6
 				result.addSkip(entityCategory, c.ID, "分类名为空")
 				continue
 			}
+			if c.PID != 0 {
+				if _, ok := byID[c.PID]; !ok {
+					result.addWarning("分类 old_id=%d 的父分类 old_id=%d 不存在，parent_id 置 0", c.ID, c.PID)
+				}
+			}
 			oldToNew[c.ID] = 0 // 占位：将迁移，新 ID 待实际写入确定
 			result.CategoriesMigrated++
 		}
 		return oldToNew, nil
 	}
 
-	// import：单事务内完成全部新增分类的插入与 parent_id 回填。
+	// import：父先子后单趟插入，业务记录与映射行同事务（INV-006）。
 	tx, err := e.target.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("开启分类迁移事务: %w", err)
 	}
 	defer tx.Rollback()
 
-	inserted := make([]*LegacyCategory, 0, len(cats))
-	for _, c := range cats {
-		if _, ok := oldToNew[c.ID]; ok {
-			continue // 已迁移
+	resolving := make(map[int64]bool)
+	skipped := make(map[int64]bool)
+	var resolve func(c *LegacyCategory) (int64, error)
+	resolve = func(c *LegacyCategory) (int64, error) {
+		// 已迁移或本次已处理。
+		if nid, ok := oldToNew[c.ID]; ok {
+			return nid, nil
+		}
+		// 本次已跳过（可能被递归重复访问），只记一次。
+		if skipped[c.ID] {
+			return 0, errSkipped
 		}
 		if strings.TrimSpace(c.Name) == "" {
 			result.addSkip(entityCategory, c.ID, "分类名为空")
-			continue
+			skipped[c.ID] = true
+			return 0, errSkipped
 		}
-		// 第一阶段：parent_id 暂置 0，随后统一回填。
-		res, err := tx.ExecContext(ctx,
-			"INSERT INTO categories (parent_id, name, sort, status) VALUES (?, ?, ?, ?)",
-			0, c.Name, c.Sort, MapCategory(c).Status)
-		if err != nil {
-			return nil, fmt.Errorf("插入分类 old_id=%d: %w", c.ID, err)
+		// 父链成环：降级为顶级分类，避免死循环。
+		if resolving[c.ID] {
+			result.addWarning("分类 old_id=%d 父链存在环，parent_id 置 0", c.ID)
+			nid, err := e.insertCategory(ctx, tx, c, 0)
+			if err != nil {
+				return 0, err
+			}
+			oldToNew[c.ID] = nid
+			result.CategoriesMigrated++
+			return nid, nil
 		}
-		newID, err := res.LastInsertId()
-		if err != nil {
-			return nil, fmt.Errorf("读取分类新 ID old_id=%d: %w", c.ID, err)
-		}
-		if _, err := tx.ExecContext(ctx,
-			"INSERT INTO legacy_id_map (source, entity_type, old_id, new_id) VALUES (?, ?, ?, ?)",
-			SourceName, entityCategory, c.ID, newID); err != nil {
-			return nil, fmt.Errorf("写入分类映射 old_id=%d: %w", c.ID, err)
-		}
-		oldToNew[c.ID] = newID
-		inserted = append(inserted, c)
-		result.CategoriesMigrated++
-	}
+		resolving[c.ID] = true
+		defer delete(resolving, c.ID)
 
-	// 第二阶段：回填 parent_id（pid 引用缺失则置 0 顶级，并记录）。
-	for _, c := range inserted {
-		newPID := int64(0)
+		// 解析父分类新 ID。
+		parentNewID := int64(0)
 		if c.PID != 0 {
-			if pid, ok := oldToNew[c.PID]; ok {
-				newPID = pid
-			} else {
-				result.addSkip(entityCategory, c.ID, fmt.Sprintf("父分类 old_id=%d 未迁移，parent_id 置 0", c.PID))
+			parent, ok := byID[c.PID]
+			switch {
+			case !ok:
+				result.addWarning("分类 old_id=%d 的父分类 old_id=%d 不存在，parent_id 置 0", c.ID, c.PID)
+			default:
+				if pid, err := resolve(parent); err == nil {
+					parentNewID = pid
+				} else if errors.Is(err, errSkipped) {
+					result.addWarning("分类 old_id=%d 的父分类 old_id=%d 被跳过，parent_id 置 0", c.ID, c.PID)
+				} else {
+					return 0, err
+				}
 			}
 		}
-		if _, err := tx.ExecContext(ctx,
-			"UPDATE categories SET parent_id = ? WHERE id = ?", newPID, oldToNew[c.ID]); err != nil {
-			return nil, fmt.Errorf("回填分类 parent_id old_id=%d: %w", c.ID, err)
+
+		nid, err := e.insertCategory(ctx, tx, c, parentNewID)
+		if err != nil {
+			if isDuplicateKeyError(err) {
+				result.addSkip(entityCategory, c.ID, fmt.Sprintf("与同父级分类重名 %q", c.Name))
+				skipped[c.ID] = true
+				return 0, errSkipped
+			}
+			return 0, err
+		}
+		oldToNew[c.ID] = nid
+		result.CategoriesMigrated++
+		return nid, nil
+	}
+
+	for _, c := range cats {
+		if _, err := resolve(c); err != nil && !errors.Is(err, errSkipped) {
+			return nil, err
 		}
 	}
 
@@ -173,6 +210,27 @@ func (e *Engine) migrateCategories(ctx context.Context, migrated map[string]int6
 		return nil, fmt.Errorf("提交分类迁移事务: %w", err)
 	}
 	return oldToNew, nil
+}
+
+// insertCategory 在事务内插入单个分类（最终 parent_id）并写映射行，返回新 ID。
+// 唯一约束冲突交由调用方（resolve）判读为逐条跳过，本函数不吞掉其他错误。
+func (e *Engine) insertCategory(ctx context.Context, tx *sql.Tx, c *LegacyCategory, parentNewID int64) (int64, error) {
+	res, err := tx.ExecContext(ctx,
+		"INSERT INTO categories (parent_id, name, sort, status) VALUES (?, ?, ?, ?)",
+		parentNewID, c.Name, c.Sort, MapCategory(c).Status)
+	if err != nil {
+		return 0, fmt.Errorf("插入分类 old_id=%d: %w", c.ID, err)
+	}
+	newID, err := res.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("读取分类新 ID old_id=%d: %w", c.ID, err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		"INSERT INTO legacy_id_map (source, entity_type, old_id, new_id) VALUES (?, ?, ?, ?)",
+		SourceName, entityCategory, c.ID, newID); err != nil {
+		return 0, fmt.Errorf("写入分类映射 old_id=%d: %w", c.ID, err)
+	}
+	return newID, nil
 }
 
 // migrateProducts 迁移商品及其图册、SKU、库存：每个商品一个事务（业务记录与映射行同事务）。
@@ -332,9 +390,9 @@ func (e *Engine) loadLegacyProducts(ctx context.Context) ([]*LegacyProduct, erro
 	var out []*LegacyProduct
 	for rows.Next() {
 		var p LegacyProduct
-		var price, cateID sql.NullString
+		var price, cateID, image, sliderImage, storeName, description sql.NullString
 		var stock sql.NullInt64
-		if err := rows.Scan(&p.ID, &cateID, &price, &stock, &p.IsShow, &p.IsDel, &p.SpecType, &p.Image, &p.SliderImage, &p.StoreName, &p.Description); err != nil {
+		if err := rows.Scan(&p.ID, &cateID, &price, &stock, &p.IsShow, &p.IsDel, &p.SpecType, &image, &sliderImage, &storeName, &description); err != nil {
 			return nil, fmt.Errorf("扫描 store_product: %w", err)
 		}
 		p.CateID = cateID.String
@@ -344,6 +402,10 @@ func (e *Engine) loadLegacyProducts(ctx context.Context) ([]*LegacyProduct, erro
 		if stock.Valid {
 			p.Stock = stock.Int64
 		}
+		p.Image = image.String
+		p.SliderImage = sliderImage.String
+		p.StoreName = storeName.String
+		p.Description = description.String
 		out = append(out, &p)
 	}
 	return out, rows.Err()
@@ -361,9 +423,9 @@ func (e *Engine) loadLegacyAttrValues(ctx context.Context) (map[int64][]*LegacyA
 	out := make(map[int64][]*LegacyAttrValue)
 	for rows.Next() {
 		var av LegacyAttrValue
-		var price sql.NullString
+		var price, image sql.NullString
 		var stock sql.NullInt64
-		if err := rows.Scan(&av.ID, &av.ProductID, &av.SKU, &stock, &price, &av.Image); err != nil {
+		if err := rows.Scan(&av.ID, &av.ProductID, &av.SKU, &stock, &price, &image); err != nil {
 			return nil, fmt.Errorf("扫描 store_product_attr_value: %w", err)
 		}
 		if price.Valid {
@@ -372,6 +434,7 @@ func (e *Engine) loadLegacyAttrValues(ctx context.Context) (map[int64][]*LegacyA
 		if stock.Valid {
 			av.Stock = stock.Int64
 		}
+		av.Image = image.String
 		out[av.ProductID] = append(out[av.ProductID], &av)
 	}
 	return out, rows.Err()
@@ -415,4 +478,10 @@ func parseCateID(s string) (int64, error) {
 func isTableNotExist(err error) bool {
 	var mysqlErr *go_mysql.MySQLError
 	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1146
+}
+
+// isDuplicateKeyError 判断是否为 MySQL 唯一约束冲突（1062），用于分类同名逐条跳过。
+func isDuplicateKeyError(err error) bool {
+	var mysqlErr *go_mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
 }
