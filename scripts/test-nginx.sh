@@ -19,7 +19,6 @@ source "${SCRIPT_DIR}/lib.sh"
 
 NGINX_CONF="${ROOT_DIR}/nginx/nginx.conf"
 NGINX_DOCKERFILE="${ROOT_DIR}/nginx/Dockerfile"
-NGINX_DIR="${ROOT_DIR}/nginx"
 COMPOSE_CFG="${ROOT_DIR}/docker-compose.yml"
 
 fail() { log_error "$*"; exit 1; }
@@ -98,19 +97,30 @@ grep -qF '127.0.0.1:${REDIS_PORT:-6379}:6379' <<<"${compose_body}" || fail "redi
 # 10) docker compose 可解析（与 test-prometheus.sh / test-container.sh 一致）。
 docker_compose -f "${COMPOSE_CFG}" config -q || fail "docker compose config 校验失败"
 
-# 11) nginx -t 语法校验（docker 可用时 best-effort；静态断言仍是权威校验）。
+# 11) nginx -t 语法校验：复用「配置经 nginx/Dockerfile COPY 内置」的已构建镜像
+#     my-shop-nginx:local 直接运行 nginx -t，不使用单文件 bind mount——
+#     rootless/嵌套容器环境下单文件 bind mount 会退化为目录挂载（文件变目录），
+#     导致容器启动报 "not a directory"（与 prometheus/Dockerfile 同一约束）。
 if command -v docker >/dev/null 2>&1; then
-  nginx_image="$(grep -oE 'FROM nginx:[^[:space:]]+' "${NGINX_DOCKERFILE}" | head -n 1 | sed 's/^FROM //' || true)"
-  if [[ -n "${nginx_image}" ]] && docker image inspect "${nginx_image}" >/dev/null 2>&1; then
-    docker run --rm \
-      -v "${NGINX_CONF}:/etc/nginx/nginx.conf:ro" \
-      -v "${NGINX_DIR}/error:/etc/nginx/error:ro" \
-      "${nginx_image}" nginx -t || fail "nginx -t 语法校验失败"
+  if docker image inspect my-shop-nginx:local >/dev/null 2>&1; then
+    docker run --rm my-shop-nginx:local nginx -t || fail "nginx -t 语法校验失败"
   else
-    log_warn "未找到 nginx 镜像 ${nginx_image:-<空>}，跳过 nginx -t（静态断言仍执行）"
+    log_warn "未找到已构建镜像 my-shop-nginx:local，跳过 nginx -t（先执行 docker compose build nginx，静态断言仍执行）"
   fi
 else
   log_warn "未找到 docker，跳过 nginx -t（静态断言仍执行）"
 fi
 
-log_info "Nginx 反向代理静态校验通过（信任边界 / 重试边界 / DNS 再解析 / 监控隔离 / 日志关联 / 编排）"
+# 12) 统一入口一致性：压测默认入口与 README 对外入口不得回退到已移除的宿主端口 8000。
+LOADTEST="${ROOT_DIR}/scripts/flashsale-loadtest/run.sh"
+[[ -f "${LOADTEST}" ]] || fail "缺少 ${LOADTEST}"
+if grep -qF '127.0.0.1:8000' "${LOADTEST}"; then
+  fail "flashsale-loadtest/run.sh 默认 BASE_URL 仍指向已移除的宿主端口 8000（应指向 Nginx 入口）"
+fi
+README="${ROOT_DIR}/README.md"
+[[ -f "${README}" ]] || fail "缺少 ${README}"
+if grep -qF 'http://127.0.0.1:8000' "${README}"; then
+  fail "README.md 仍以 http://127.0.0.1:8000 作为对外入口（应指向 Nginx 入口 ${NGINX_PORT:-8080}）"
+fi
+
+log_info "Nginx 反向代理静态校验通过（信任边界 / 重试边界 / DNS 再解析 / 监控隔离 / 日志关联 / 编排 / 统一入口）"

@@ -51,7 +51,7 @@
 │   └── prometheus.yml
 ├── Dockerfile              # 后端多阶段构建（镜像内不含敏感凭据）
 ├── .dockerignore           # 构建上下文排除（.env / bin / tmp / storage 等）
-├── docker-compose.yml      # app / MySQL / Redis / Prometheus 统一编排
+├── docker-compose.yml      # nginx / app / MySQL / Redis / Prometheus 统一编排
 ├── Makefile                # 本地生命周期入口
 ├── main.go                 # 程序入口
 └── go.mod
@@ -66,10 +66,10 @@
 ```bash
 make init    # 第一阶段：准备 MySQL/Redis 容器与 .env（不要求七牛凭据、不启动后端）
 # 编辑 .env 填入七牛配置与超管密码后：
-make up      # 第二阶段：构建并启动 app/MySQL/Redis/Prometheus 容器
+make up      # 第二阶段：构建并启动 nginx/app/MySQL/Redis/Prometheus 容器
 ```
 
-`make up` 会构建后端镜像并启动 app/MySQL/Redis/Prometheus 四个容器：app 容器 entrypoint 先执行幂等 migration（`migrate up`），再由 `serve` 校验七牛配置与超管创建条件并启动 HTTP 服务（缺失 fail-fast）。默认访问 `http://127.0.0.1:8000/health`；`make down` 停止并移除容器、保留数据卷；更多目标见 `make help`。
+`make up` 会构建后端与 Nginx 镜像并启动 nginx/app/MySQL/Redis/Prometheus 五个容器：app 容器 entrypoint 先执行幂等 migration（`migrate up`），再由 `serve` 校验七牛配置与超管创建条件并启动 HTTP 服务（缺失 fail-fast）。Nginx 为对外唯一 HTTP 入口，默认访问 `http://127.0.0.1:8080/health`（`NGINX_PORT` 可覆盖）；`make down` 停止并移除容器、保留数据卷；更多目标见 `make help`。
 
 ### 其他启动方式
 
@@ -97,13 +97,13 @@ go run . serve
 ### 访问健康检查接口
 
 ```bash
-curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8080/health
 # {"code":0,"message":"OK","data":{"status":"ok","time":"..."}}
 ```
 
 ## 容器化部署模型
 
-后端与 MySQL、Redis、Prometheus 统一经 Docker Compose 编排，提供稳定的 Compose 内部入口 `app:8000`（供 Prometheus 及后续 Nginx 使用）。要点：
+后端与 MySQL、Redis、Prometheus、Nginx 统一经 Docker Compose 编排：Nginx 为对外唯一 HTTP 入口（`${NGINX_PORT:-8080}`），`app:8000` 为稳定的 Compose 内部入口（供 Nginx 与 Prometheus 使用，不映射宿主机端口）。要点：
 
 - **镜像与配置**：`Dockerfile` 多阶段构建（Go 1.23 静态编译 → alpine + tzdata + ca-certificates），镜像内仅打包「已清空敏感默认值」的 `manifest/config/config.yaml`；`.dockerignore` 排除 `.env`/`bin`/`tmp`/`storage`，凭据不进镜像与构建上下文。
 - **启动生命周期**：容器 entrypoint 先 `my-shop migrate up`（幂等 + golang-migrate `GET_LOCK` 串行），再 `exec my-shop serve`（复用 serve 自身的依赖重试、schema 就绪只读校验、七牛校验与超管/权限 seed fail-fast）。
@@ -180,7 +180,7 @@ SERVER_ADDRESS=:8080 DATABASE_DEFAULT_HOST=10.0.0.5 go run . serve
 ```bash
 export ADMIN_SUPER_PASSWORD='your-local-password'
 FLASH_SALE_METRICS_ENABLED=true make up
-make health                       # 校验 App / MySQL / Redis / Prometheus 全部健康
+make health                       # 校验 Nginx / App / MySQL / Redis / Prometheus 全部健康
 curl http://127.0.0.1:9090/api/v1/targets   # 查看 my-shop 目标是否 UP
 ```
 
@@ -191,7 +191,7 @@ curl http://127.0.0.1:9090/api/v1/targets   # 查看 my-shop 目标是否 UP
 七牛云为 `serve` 启动的 required dependency：启动时会 fail-fast 校验配置（AK/SK/Bucket/Domain 存在性）并对指定 bucket 执行最小权限只读可用性检查（`GetBucketInfo`），任一失败进程非零退出。
 
 - `make init`（第一阶段）：检查 Docker/Docker Compose → 启动 MySQL/Redis 容器 → 检查根目录 `.env`（不存在则从 `.env.example` 复制生成，已存在保留不覆盖）→ 提示编辑 `.env` 填七牛 AK/SK/Bucket/Domain 与超管密码并执行 `make up`。本阶段不要求七牛凭据、不启动后端、不在终端交互输入 Secret；幂等可重复执行。
-- `make up`（第二阶段）：构建后端镜像并启动 app/MySQL/Redis/Prometheus 容器。app 容器 entrypoint 先执行幂等 migration（`migrate up`，golang-migrate `GET_LOCK` 串行），再由 serve 校验七牛 required 配置与超管创建条件（结构 + 存在性 + 真实 bucket 可用性），任一失败非零退出、容器不对外，`restart: unless-stopped` 重试；schema 未就绪 / dirty 时同样非零退出。
+- `make up`（第二阶段）：构建后端与 Nginx 镜像并启动 nginx/app/MySQL/Redis/Prometheus 容器。app 容器 entrypoint 先执行幂等 migration（`migrate up`，golang-migrate `GET_LOCK` 串行），再由 serve 校验七牛 required 配置与超管创建条件（结构 + 存在性 + 真实 bucket 可用性），任一失败非零退出、容器不对外，`restart: unless-stopped` 重试；schema 未就绪 / dirty 时同样非零退出。
 - `make test-storage`（独立真实 E2E）：走真实 HTTP 链路「注册 → 登录 → 签发 token → 直传真实 1×1 PNG → 校验 `final_url` HTTP 200 且 Content-Type=image/png → 用返回 key 删除测试对象」；缺真实凭据或任一环节失败 → 非零退出，不用 Mock/假凭据冒充通过。
 
 `.env` 为未跟踪本地文件，不随 Git/分支/worktree/容器传播；构建与单元测试（`go build ./...`、`go test ./...`）不依赖 `.env` 存在即可通过。
