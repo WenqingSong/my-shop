@@ -220,6 +220,46 @@ func TestEngineCategoryReportConsistency(t *testing.T) {
 	}
 }
 
+// TestEngineCategoryCyclicParent 覆盖 CLEAN-004 回归：
+// 环状父链（A.pid=B 且 B.pid=A）被打破时，每个分类只插入一次，无重复分类行，报告与库内一致。
+func TestEngineCategoryCyclicParent(t *testing.T) {
+	source, target := setupEngineTest(t)
+	ctx := context.Background()
+
+	// A(id=1,pid=2) ↔ B(id=2,pid=1) 形成环。
+	for _, row := range [][3]any{
+		{1, 2, "A"},
+		{2, 1, "B"},
+	} {
+		if _, err := source.ExecContext(ctx, "INSERT INTO store_category (id, pid, cate_name, sort, is_show, is_del) VALUES (?, ?, ?, 0, 1, 0)", row[0], row[1], row[2]); err != nil {
+			t.Fatalf("insert store_category: %v", err)
+		}
+	}
+
+	result, err := NewEngine(source, target).Run(ctx, false)
+	if err != nil {
+		t.Fatalf("import 失败: %v", err)
+	}
+	if result.CategoriesMigrated != 2 || result.CategoriesSkipped != 0 {
+		t.Fatalf("期望成功 2 / 跳过 0, 实际成功 %d / 跳过 %d（报告: %s）", result.CategoriesMigrated, result.CategoriesSkipped, result.String())
+	}
+	if n := countRows(t, target, "categories"); n != 2 {
+		t.Fatalf("环被打破后应只有 2 行, 实际 %d", n)
+	}
+	// 不允许出现重复分类名（环被打破时每个节点只插入一次）。
+	var dup int
+	if err := target.QueryRowContext(ctx, "SELECT COUNT(*) FROM (SELECT name FROM categories GROUP BY name HAVING COUNT(*) > 1) t").Scan(&dup); err != nil {
+		t.Fatalf("查询重复分类: %v", err)
+	}
+	if dup != 0 {
+		t.Fatalf("存在重复分类名, 重复行数 %d", dup)
+	}
+	// 报告处理数（成功+跳过）与库内实际行数一致（AC-012）。
+	if got := result.CategoriesMigrated + result.CategoriesSkipped; got != countRows(t, target, "categories") {
+		t.Fatalf("报告处理数 %d 与库内行数 %d 不一致", got, countRows(t, target, "categories"))
+	}
+}
+
 // TestEngineImportIdempotentAndIDMap 覆盖 CLEAN-003（INV-003 幂等 + ID 映射持久化）：
 // 重复 import 行数不变、不重复插入；legacy_id_map 记录 category/product/sku 映射。
 func TestEngineImportIdempotentAndIDMap(t *testing.T) {

@@ -186,6 +186,12 @@ func (e *Engine) migrateCategories(ctx context.Context, migrated map[string]int6
 			}
 		}
 
+		// 递归解析父分类期间，当前分类可能已通过环检测分支被插入（环状父链），
+		// 此时复用其新 ID，避免重复插入（CLEAN-004）。
+		if nid, ok := oldToNew[c.ID]; ok {
+			return nid, nil
+		}
+
 		nid, err := e.insertCategory(ctx, tx, c, parentNewID)
 		if err != nil {
 			if isDuplicateKeyError(err) {
