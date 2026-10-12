@@ -1,0 +1,30 @@
+schema_version: 3
+task_id: legacy-data-migration
+
+contract:
+  status: APPROVED
+  target: 5dbad8e01996be72ffeb2372efb43072ba72c594
+
+resources:
+  reservations:
+    migration_version:
+      - "20261001000023"
+
+review:
+  status: CLEAN
+  target: 04350e374224db9a6c8eb1573aa327c6d45c987f
+
+owner:
+  status: ACCEPTED
+  review_target: "04350e374224db9a6c8eb1573aa327c6d45c987f"
+
+delivery:
+  status: PASS
+  review_target: "04350e374224db9a6c8eb1573aa327c6d45c987f"
+  feature_head: "e68b4d864dd9d4856568818e533a4c6fa166c42c"
+  develop_base: "657cd977ecae3f7b0e1baf17434a1aa819a7decd"
+
+blocked:
+  active: false
+  by: ""
+  reason: ""

@@ -13,10 +13,10 @@ import (
 // baselineVersion 是内嵌 baseline 迁移的版本号（14 位时间戳）。
 const baselineVersion = uint(20261001000001)
 
-// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + … + refund + coupon + order_coupon_amounts）。
-const latestMigrationVersion = uint(20261001000022)
+// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + … + coupon + order_coupon_amounts + legacy_id_map）。
+const latestMigrationVersion = uint(20261001000023)
 
-// businessTables 是 migration 应建立的 34 张业务表。
+// businessTables 是 migration 应建立的 37 张业务表。
 // 注意顺序：order_items 通过外键引用 orders（ON DELETE CASCADE），故 order_items 排在 orders 之前；
 // flash_sale_activity_skus 通过外键引用 flash_sale_activities（ON DELETE CASCADE），故排在它之前；
 // recommend_items 通过外键引用 recommend_positions（ON DELETE CASCADE），故排在它之前；
@@ -26,6 +26,7 @@ const latestMigrationVersion = uint(20261001000022)
 // 即 inventories/inventory_logs 排在 skus 之前、skus 排在 products 之前、products 排在 categories 之前，
 // 否则 DROP TABLE 会因外键依赖失败。
 var businessTables = []string{
+	"legacy_id_map",
 	"user_coupons", "coupon_templates",
 	"article_favorites", "article_likes", "articles",
 	"recommend_items", "recommend_positions",
@@ -173,7 +174,7 @@ func setupSyntheticMigrationDB(t *testing.T) *sql.DB {
 }
 
 // TestUpCreatesSchemaAndIsIdempotent 覆盖 AC-001/AC-002（INV-001 幂等按序一次）：
-// 空库执行 Up 建立 27 张业务表 + schema_migrations；再次 Up 幂等、版本不变。
+// 空库执行 Up 建立全部业务表 + schema_migrations；再次 Up 幂等、版本不变。
 // 说明：迁移为无 IF NOT EXISTS 的普通 CREATE TABLE，若被重复执行会因表已存在而报错，
 // 因此「再次 Up 成功」本身就是「旧迁移未重跑」的直接证明。
 func TestUpCreatesSchemaAndIsIdempotent(t *testing.T) {
@@ -400,11 +401,29 @@ type tableSpec struct {
 // strPtr 便于书写字符串默认值（区分「默认空字符串」与「无默认值」）。
 func strPtr(s string) *string { return &s }
 
-// expectedSchema 是「baseline 7 表 + orders/order_items + reviews + flash_sale 3 表 + favorites/product_likes/banners + articles 3 表 + recommend 2 表」DDL 的精确结构快照，
+// expectedSchema 是「legacy_id_map + baseline 7 表 + orders/order_items + reviews + flash_sale 3 表 + favorites/product_likes/banners + articles 3 表 + recommend 2 表」DDL 的精确结构快照，
 // 是 INV-003「结构严格等价」的权威基准。它独立于迁移文件硬编码，因此任何对相关迁移的
 // 列/类型/空值/默认值/索引/引擎/字符集改动若不同步更新此处，等价性测试都会失败——
 // 这正是它能够识别错误实现的原因。
 var expectedSchema = []tableSpec{
+	{
+		Name:      "legacy_id_map",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "source", Type: "varchar(64)"},
+			{Name: "entity_type", Type: "varchar(16)"},
+			{Name: "old_id", Type: "bigint unsigned"},
+			{Name: "new_id", Type: "bigint unsigned"},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "uk_source_entity_old", Unique: true, Columns: []string{"source", "entity_type", "old_id"}},
+		},
+	},
 	{
 		Name:      "users",
 		Engine:    "InnoDB",
