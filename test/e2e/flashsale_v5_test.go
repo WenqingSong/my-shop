@@ -1,4 +1,4 @@
-package cmd
+package e2e
 
 // 秒杀 V5（容量保护与可观测性）集成测试：通过真实路由 + 真实 MySQL/Redis 覆盖
 // 用户级限流（429/12009）与指标采集端点（GET /metrics）。排队软上限/熔断/指标对账的

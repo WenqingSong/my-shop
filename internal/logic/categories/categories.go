@@ -373,7 +373,7 @@ func validateParent(parentOf map[int64]int64, parentID, selfID int64) error {
 	}
 	parentLevel, err := levelOf(parentOf, parentID)
 	if err != nil {
-		return codes.New(codes.CodeCategoryInvalidParent) // 父层级异常
+		return err // 父层级异常（levelOf 已映射为 3004）
 	}
 	if selfID == 0 {
 		// 创建场景：新节点为叶子，新层级 = 父层级 + 1。
@@ -429,14 +429,14 @@ func levelOf(parentOf map[int64]int64, id int64) (int, error) {
 	for cur != 0 {
 		level++
 		if level > maxLevel {
-			return 0, fmt.Errorf("分类层级超过 %d", maxLevel)
+			return 0, codes.New(codes.CodeCategoryInvalidParent)
 		}
 		parent, ok := parentOf[cur]
 		if !ok {
-			return 0, fmt.Errorf("分类 %d 的父分类不存在", cur)
+			return 0, codes.New(codes.CodeCategoryInvalidParent)
 		}
 		if parent == cur {
-			return 0, fmt.Errorf("分类 %d 存在环", cur)
+			return 0, codes.New(codes.CodeCategoryInvalidParent)
 		}
 		cur = parent
 	}

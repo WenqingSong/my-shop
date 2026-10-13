@@ -1,4 +1,4 @@
-package cmd
+package e2e
 
 // 本文件通过真实路由（RegisterFrontendRoutes + RegisterAdminRoutes）+ 真实 MySQL/Redis
 // 锁定「后台订单只读管理」的行为：分页列表、组合筛选、稳定排序、详情快照、状态统计与权限隔离。

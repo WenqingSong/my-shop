@@ -16,6 +16,7 @@ import (
 	v1 "cnb.cool/go-cloud-devops/my-shop/api/iam/v1"
 	"cnb.cool/go-cloud-devops/my-shop/internal/auth"
 	"cnb.cool/go-cloud-devops/my-shop/internal/codes"
+	"cnb.cool/go-cloud-devops/my-shop/internal/logx"
 	"cnb.cool/go-cloud-devops/my-shop/internal/service"
 )
 
@@ -104,14 +105,18 @@ func (s *sIam) Login(ctx context.Context, req *v1.LoginReq, userAgent, ip string
 	if user == nil {
 		// 用户不存在也执行一次等耗时 bcrypt 比对，防止用户名枚举。
 		_ = bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(req.Password))
+		// 不记录 username / user_id：与响应一致地不区分「不存在」与「密码错误」，避免日志侧枚举。
+		logx.Info(ctx, "login_failed", "登录失败：凭据无效", logx.Fields{"outcome": "invalid_credentials"})
 		return nil, codes.New(codes.CodeInvalidCredentials)
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+		logx.Info(ctx, "login_failed", "登录失败：凭据无效", logx.Fields{"outcome": "invalid_credentials"})
 		return nil, codes.New(codes.CodeInvalidCredentials)
 	}
 	// 凭据正确但账号被禁用：拒绝登录（401，不做枚举区分），不签发 token、不写会话。
 	if user.Status != userStatusEnabled {
+		logx.Info(ctx, "login_failed", "登录失败：账号已禁用", logx.Fields{"outcome": "disabled", "user_id": user.ID})
 		return nil, codes.New(codes.CodeUnauthorized)
 	}
 
@@ -154,6 +159,7 @@ func (s *sIam) Login(ctx context.Context, req *v1.LoginReq, userAgent, ip string
 		return nil, err
 	}
 
+	logx.Info(ctx, "login_success", "登录成功", logx.Fields{"user_id": user.ID})
 	return &v1.LoginRes{
 		AccessToken:  token,
 		RefreshToken: refreshPlaintext,

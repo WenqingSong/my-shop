@@ -1,4 +1,4 @@
-package cmd
+package e2e
 
 // 本文件通过真实路由（RegisterFrontendRoutes + RegisterAdminRoutes）+ 真实 MySQL/Redis
 // 锁定「优惠券」核心闭环行为：模板管理、领取/查询、满减用券与金额三列快照、订单联动（预占/核销/释放/不返券）。

@@ -1,4 +1,4 @@
-package cmd
+package e2e
 
 // 秒杀 V2（Redis + Lua）集成测试：通过真实路由 + 真实 MySQL/Redis 覆盖 AC-001、AC-003、
 // AC-006、AC-007 与 INV-006（Redis 预扣不超预热库存）、INV-007（对账收敛）。

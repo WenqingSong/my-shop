@@ -1,4 +1,4 @@
-package cmd
+package e2e
 
 // 本文件通过真实路由（RegisterFrontendRoutes + RegisterAdminRoutes）+ 真实 MySQL/Redis
 // 锁定「秒杀核心闭环」V1 的行为，覆盖 AC-001 至 AC-009 与关键不变量（INV-001 至 INV-008）。

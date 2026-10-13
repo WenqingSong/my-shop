@@ -38,11 +38,13 @@
 ├── api/                    # 对外 API 定义（请求/响应结构体）
 ├── internal/
 │   ├── boot/               # 配置、依赖与数据库 schema 就绪检查
-│   ├── cmd/                # 命令行入口、路由与后台扫描器
+│   ├── cmd/                # 命令行入口、路由注册
 │   ├── controller/         # 控制器
 │   ├── logic/              # 业务逻辑实现
 │   ├── service/            # 服务接口定义
+│   ├── worker/             # 后台扫描器（订单超时取消、秒杀对账/消费）
 │   └── migrations/         # 版本化数据库迁移
+├── test/e2e/               # 集成/E2E 测试（真实 MySQL/Redis，串行执行）
 ├── docs/design/            # 项目级长期设计
 ├── .agent/tasks/           # 任务决策与验收证据
 ├── manifest/config/        # 配置文件

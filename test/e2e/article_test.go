@@ -1,4 +1,4 @@
-package cmd
+package e2e
 
 // 本文件通过真实路由（RegisterFrontendRoutes）+ 真实 MySQL/Redis 锁定「用户文章」核心闭环。
 // 覆盖 article-cms-v1 的 AC-001 至 AC-012 与关键不变量（服务端归属绑定、越权隔离、幂等、删除关联清理）。

@@ -1,4 +1,4 @@
-package cmd
+package e2e
 
 // 本文件通过真实路由（RegisterFrontendRoutes + RegisterAdminRoutes）+ 真实 MySQL/Redis
 // 锁定「文件上传 / 七牛云直传凭证签发」核心闭环，覆盖 AC-001/AC-003/AC-004/AC-005

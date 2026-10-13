@@ -1,4 +1,4 @@
-package cmd
+package e2e
 
 // 本文件通过真实路由（RegisterFrontendRoutes + RegisterAdminRoutes）+ 真实 MySQL/Redis
 // 锁定 IAM V5「用户账号状态管理」的行为：禁用/启用普通用户、禁用即时失效（含已签发 JWT）、

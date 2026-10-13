@@ -1,4 +1,4 @@
-package cmd
+package e2e
 
 // 本文件通过真实路由（RegisterFrontendRoutes + RegisterAdminRoutes）+ 真实 MySQL/Redis
 // 锁定「轮播图」核心闭环，覆盖 banner-v1 的 AC-001 至 AC-006 与关键不变量（INV-001 至 INV-004）。
@@ -20,6 +20,7 @@ import (
 	"github.com/gogf/gf/v2/util/guid"
 
 	"cnb.cool/go-cloud-devops/my-shop/internal/boot"
+	"cnb.cool/go-cloud-devops/my-shop/internal/cmd"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
 	"cnb.cool/go-cloud-devops/my-shop/internal/storage"
@@ -60,8 +61,8 @@ func setupBannerServer(t *testing.T) string {
 	}
 	s.Group("/", func(group *ghttp.RouterGroup) {
 		group.Middleware(middleware.Response)
-		RegisterFrontendRoutes(group)
-		RegisterAdminRoutes(group)
+		cmd.RegisterFrontendRoutes(group)
+		cmd.RegisterAdminRoutes(group)
 	})
 	s.SetDumpRouterMap(false)
 	s.Start()

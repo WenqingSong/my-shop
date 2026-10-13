@@ -1,4 +1,4 @@
-package cmd
+package e2e
 
 // 本文件通过真实路由（RegisterFrontendRoutes + RegisterAdminRoutes）+ 真实 MySQL/Redis
 // 锁定「订单核心闭环」的行为。覆盖 order-v1 的 AC-001 至 AC-015 与关键不变量。

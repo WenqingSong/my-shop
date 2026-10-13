@@ -1,4 +1,4 @@
-package cmd
+package e2e
 
 // 本文件通过真实路由（RegisterFrontendRoutes）+ 真实 MySQL/Redis 锁定「商品收藏」核心闭环。
 // 覆盖 product-favorite-v1 的 AC-001 至 AC-008 与关键不变量。

@@ -1,4 +1,4 @@
-package cmd
+package e2e
 
 // 本文件通过真实路由（RegisterFrontendRoutes + RegisterAdminRoutes）+ 真实 MySQL/Redis
 // 锁定「已支付未发货普通订单仅退款」闭环，覆盖 order-refund-v1 的 AC-001 至 AC-014 与 INV-001 至 INV-013。

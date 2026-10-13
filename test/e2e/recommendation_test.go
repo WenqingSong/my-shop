@@ -1,4 +1,4 @@
-package cmd
+package e2e
 
 // 本文件通过真实路由（RegisterFrontendRoutes + RegisterAdminRoutes）+ 真实 MySQL/Redis
 // 锁定「推荐位」核心闭环，覆盖 recommendation-v1 的 AC-001 至 AC-008 与关键不变量（INV-001 至 INV-006）。
@@ -19,6 +19,7 @@ import (
 	"github.com/gogf/gf/v2/util/guid"
 
 	"cnb.cool/go-cloud-devops/my-shop/internal/boot"
+	"cnb.cool/go-cloud-devops/my-shop/internal/cmd"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
 	// 触发各 logic 包的 init()，注册 service.IRecommendation 等。
@@ -58,8 +59,8 @@ func setupRecommendationServer(t *testing.T) string {
 	s.SetAddr(":0")
 	s.Group("/", func(group *ghttp.RouterGroup) {
 		group.Middleware(middleware.Response)
-		RegisterFrontendRoutes(group)
-		RegisterAdminRoutes(group)
+		cmd.RegisterFrontendRoutes(group)
+		cmd.RegisterAdminRoutes(group)
 	})
 	s.SetDumpRouterMap(false)
 	s.Start()

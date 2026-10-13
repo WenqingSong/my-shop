@@ -1,4 +1,4 @@
-package cmd
+package worker
 
 import (
 	"context"
@@ -14,9 +14,9 @@ import (
 func TestScannersStopOnContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
-	startOrderCancelScanner(ctx, &wg)
-	startFlashSaleReconcileScanner(ctx, &wg)
-	startFlashSaleConsumeScanner(ctx, &wg)
+	StartOrderCancelScanner(ctx, &wg)
+	StartFlashSaleReconcileScanner(ctx, &wg)
+	StartFlashSaleConsumeScanner(ctx, &wg)
 
 	// 立即取消（模拟停机）：扫描器应在首个 tick 前退出，不触及 DB/Redis 业务调用。
 	cancel()

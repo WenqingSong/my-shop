@@ -7,13 +7,11 @@ import (
 	"strconv"
 	"sync"
 	"syscall"
-	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/os/gcmd"
-	"github.com/gogf/gf/v2/os/glog"
 
 	"cnb.cool/go-cloud-devops/my-shop/internal/boot"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/health"
@@ -22,6 +20,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
 	"cnb.cool/go-cloud-devops/my-shop/internal/service"
 	"cnb.cool/go-cloud-devops/my-shop/internal/storage"
+	"cnb.cool/go-cloud-devops/my-shop/internal/worker"
 )
 
 // 命令结构：my-shop [serve|migrate <up|force|version>|qiniu <check>|admin <check>|legacy-migrate <dry-run|import>]。
@@ -133,11 +132,11 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 
 	var wg sync.WaitGroup
 	// 启动后台超时取消扫描器：扫描 status=待支付 且 expire_at 已过的订单，逐单原子取消并恢复库存。
-	startOrderCancelScanner(signalCtx, &wg)
+	worker.StartOrderCancelScanner(signalCtx, &wg)
 	// 启动秒杀缓存对账扫描器：按「活动 × SKU」粒度将 Redis remaining 刷成 total_stock - sold - inflight_queued，并回补缺失预热。
-	startFlashSaleReconcileScanner(signalCtx, &wg)
+	worker.StartFlashSaleReconcileScanner(signalCtx, &wg)
 	// 启动秒杀异步消费扫描器：出队 queued 请求并事务落单/失败/重试/死信。
-	startFlashSaleConsumeScanner(signalCtx, &wg)
+	worker.StartFlashSaleConsumeScanner(signalCtx, &wg)
 
 	s := g.Server()
 	// 初始化本地图片存储：seed 轮播图占位图，并将 banner 目录映射为静态路由 /storage/banners。
@@ -194,96 +193,6 @@ func storageRoot(ctx context.Context) string {
 		return "./storage"
 	}
 	return v.String()
-}
-
-// orderCancelScanBatch 是每轮超时取消扫描处理的最大订单数。
-const orderCancelScanBatch = 100
-
-// startOrderCancelScanner 启动订单超时取消后台扫描器（goroutine + ticker）。
-// 周期由 order.cancel_scan_interval 配置（秒，默认 60）；多实例并发依赖「条件状态更新 + RowsAffected」
-// 原子闸门保证同一订单只被取消并恢复一次库存，故无需优雅停机通知。
-// ctx 取消（SIGINT/SIGTERM）时停止领取新任务；在途单事务由数据库原子性保证回滚或完成，无半成品。
-func startOrderCancelScanner(ctx context.Context, wg *sync.WaitGroup) {
-	interval := g.Cfg().MustGet(ctx, "order.cancel_scan_interval", 60).Int()
-	if interval <= 0 {
-		interval = 60
-	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		ticker := time.NewTicker(time.Duration(interval) * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if _, err := service.Order().CancelExpired(ctx, orderCancelScanBatch); err != nil {
-					glog.Warningf(ctx, "订单超时取消扫描失败: %v", err)
-				}
-			}
-		}
-	}()
-}
-
-// flashSaleReconcileScanBatch 是每轮秒杀缓存对账扫描处理的最大活动数。
-const flashSaleReconcileScanBatch = 100
-
-// flashSaleConsumeScanBatch 是每轮秒杀异步消费扫描处理的最大请求数。
-const flashSaleConsumeScanBatch = 100
-
-// startFlashSaleConsumeScanner 启动秒杀异步消费后台扫描器（goroutine + ticker）。
-// 周期由 flash_sale.consume_scan_interval 配置（秒，默认 1，保证低延迟落单）；
-// 出队依赖 FOR UPDATE SKIP LOCKED + 状态原子更新保证同一请求只被处理一次，多实例并发安全。
-// ctx 取消时停止领取新任务；在途消费单事务回滚后请求保持 queued，重启后由重试/对账恢复。
-func startFlashSaleConsumeScanner(ctx context.Context, wg *sync.WaitGroup) {
-	interval := g.Cfg().MustGet(ctx, "flash_sale.consume_scan_interval", 1).Int()
-	if interval <= 0 {
-		interval = 1
-	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		ticker := time.NewTicker(time.Duration(interval) * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if _, err := service.FlashSale().ConsumeQueued(ctx, flashSaleConsumeScanBatch); err != nil {
-					glog.Warningf(ctx, "秒杀异步消费扫描失败: %v", err)
-				}
-			}
-		}
-	}()
-}
-
-// startFlashSaleReconcileScanner 启动秒杀缓存对账后台扫描器（goroutine + ticker）。
-// 周期由 flash_sale.reconcile_scan_interval 配置（秒，默认 60）；对账为无状态、幂等写入
-// 权威值（remaining = total_stock - sold），多实例并发安全。
-// ctx 取消时停止领取新任务；对账为幂等 SET，中断无副作用。
-func startFlashSaleReconcileScanner(ctx context.Context, wg *sync.WaitGroup) {
-	interval := g.Cfg().MustGet(ctx, "flash_sale.reconcile_scan_interval", 60).Int()
-	if interval <= 0 {
-		interval = 60
-	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		ticker := time.NewTicker(time.Duration(interval) * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if _, err := service.FlashSale().ReconcileCache(ctx, flashSaleReconcileScanBatch); err != nil {
-					glog.Warningf(ctx, "秒杀缓存对账扫描失败: %v", err)
-				}
-			}
-		}
-	}()
 }
 
 // migrateUp 执行所有未应用 migration。

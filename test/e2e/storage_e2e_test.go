@@ -1,6 +1,6 @@
 //go:build storage_e2e
 
-package cmd
+package e2e
 
 // 本文件是「独立真实存储 E2E」入口（AC-002/AC-014，D8/D9）：走真实 HTTP 链路
 // 「注册一次性用户 → 登录 → 请求签发接口 → 用返回 token 经七牛 SDK 直传真实 1×1 PNG →

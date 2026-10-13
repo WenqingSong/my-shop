@@ -1,4 +1,4 @@
-package cmd
+package e2e
 
 // 本文件通过真实路由（RegisterFrontendRoutes + RegisterAdminRoutes）+ 真实 MySQL/Redis
 // 锁定「前台用户 / 后台管理员」两个身份域之间的隔离边界。覆盖 task 中的 AC-001 至 AC-007。
@@ -21,6 +21,7 @@ import (
 
 	"cnb.cool/go-cloud-devops/my-shop/internal/auth"
 	"cnb.cool/go-cloud-devops/my-shop/internal/boot"
+	"cnb.cool/go-cloud-devops/my-shop/internal/cmd"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
 	// 触发各 logic 包的 init()，注册 service.Iam / service.Admin。
@@ -118,8 +119,8 @@ func setupIsolationServer(t *testing.T) string {
 	s.SetAddr(":0")
 	s.Group("/", func(group *ghttp.RouterGroup) {
 		group.Middleware(middleware.Response)
-		RegisterFrontendRoutes(group)
-		RegisterAdminRoutes(group)
+		cmd.RegisterFrontendRoutes(group)
+		cmd.RegisterAdminRoutes(group)
 	})
 	// 指标采集端点（生产 serve 同款注册；指标开关关闭时为 no-op）。
 	registerMetricsRoute(ctx, s)

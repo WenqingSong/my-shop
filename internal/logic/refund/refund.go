@@ -308,7 +308,7 @@ func (s *sRefund) AdminList(ctx context.Context, req *v1.AdminListReq) (*v1.Admi
 	if status := strings.TrimSpace(req.Status); status != "" {
 		st, e := refundStatusFromString(status)
 		if e != nil {
-			return nil, codes.New(codes.CodeInvalidArgument)
+			return nil, e
 		}
 		model = model.Where("status", st)
 	}
@@ -826,7 +826,7 @@ func refundStatusFromString(s string) (int, error) {
 	case v1.StatusClosed:
 		return refundStatusClosed, nil
 	default:
-		return 0, fmt.Errorf("未知退款状态: %s", s)
+		return 0, codes.New(codes.CodeInvalidArgument)
 	}
 }
 

@@ -20,13 +20,13 @@ import (
 	"github.com/go-sql-driver/mysql"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/os/glog"
 	"github.com/gogf/gf/v2/os/gtime"
 
 	v1 "cnb.cool/go-cloud-devops/my-shop/api/flashsale/v1"
 	productv1 "cnb.cool/go-cloud-devops/my-shop/api/product/v1"
 	skuv1 "cnb.cool/go-cloud-devops/my-shop/api/sku/v1"
 	"cnb.cool/go-cloud-devops/my-shop/internal/codes"
+	"cnb.cool/go-cloud-devops/my-shop/internal/logx"
 	"cnb.cool/go-cloud-devops/my-shop/internal/metrics"
 	"cnb.cool/go-cloud-devops/my-shop/internal/service"
 )
@@ -163,7 +163,10 @@ func (s *sFlashSale) CreateActivity(ctx context.Context, req *v1.CreateReq) (*v1
 	// MySQL 提交后同步维护 Redis 缓存（预热）；Redis 失败仅记录日志，
 	// 由后台扫描器兜底回补，不阻断已成功落库的创建结果。
 	if err := s.syncActivityCache(ctx, activityID); err != nil {
-		glog.Warningf(ctx, "同步秒杀活动缓存失败(activity=%d): %v", activityID, err)
+		logx.Warning(ctx, "flashsale_cache_sync_failed", "同步秒杀活动缓存失败", logx.Fields{
+			"flashsale_id": activityID,
+			"error":        err.Error(),
+		})
 	}
 
 	a, err := s.loadActivity(ctx, activityID)
@@ -241,7 +244,10 @@ func (s *sFlashSale) UpdateActivity(ctx context.Context, req *v1.UpdateReq) (*v1
 	// MySQL 提交后同步维护 Redis 缓存（预热/失效/重载）；Redis 失败仅记录日志，
 	// 由后台扫描器兜底回补，不阻断已成功落库的更新结果。
 	if err := s.syncActivityCache(ctx, req.Id); err != nil {
-		glog.Warningf(ctx, "同步秒杀活动缓存失败(activity=%d): %v", req.Id, err)
+		logx.Warning(ctx, "flashsale_cache_sync_failed", "同步秒杀活动缓存失败", logx.Fields{
+			"flashsale_id": req.Id,
+			"error":        err.Error(),
+		})
 	}
 
 	a, err := s.loadActivity(ctx, req.Id)
@@ -288,14 +294,21 @@ func (s *sFlashSale) CreateOrder(ctx context.Context, userID, activityID int64, 
 
 	// 熔断器：Open 状态直接快速失败（不进入闸门，不预扣、不建单、不排队）。
 	if !s.breaker.allow(ctx) {
-		glog.Warningf(ctx, "秒杀闸门熔断打开，快速失败(503): activity=%d", activityID)
+		logx.Warning(ctx, "flashsale_breaker_open", "秒杀闸门熔断打开，快速失败", logx.Fields{
+			"user_id":      userID,
+			"flashsale_id": activityID,
+		})
 		return nil, codes.New(codes.CodeServiceUnavailable)
 	}
 
 	gate, err := s.runGate(ctx, activityID, skuID, userID, idempotencyKey, hash)
 	if err != nil {
 		s.breaker.recordFailure(ctx)
-		glog.Warningf(ctx, "秒杀闸门执行失败，快速失败(503): %v", err)
+		logx.Warning(ctx, "flashsale_gate_error", "秒杀闸门执行失败，快速失败", logx.Fields{
+			"user_id":      userID,
+			"flashsale_id": activityID,
+			"error":        err.Error(),
+		})
 		return nil, codes.New(codes.CodeServiceUnavailable)
 	}
 	s.breaker.recordSuccess(ctx)
