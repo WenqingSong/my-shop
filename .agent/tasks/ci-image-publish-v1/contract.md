@@ -63,7 +63,7 @@ Owner 已确认采用推荐方案（见 Owner Decision Record）：
 
 ## Verification Requirements
 - INV-001 → 构造 test 或 build 失败的提交，观察 push job 失败、制品库无新 `<sha>` 标签、`latest` digest 未变（AC-007）。
-- INV-002 → `docker pull <repo>:<sha>` 与 `:latest` 比对 `RepoDigests` 一致（AC-006）。
+- INV-002 → push 完成后用 `docker manifest inspect`（或 registry API）取 `<repo>:${CNB_COMMIT_SHORT}` 与 `<repo>:latest` 的 digest，二者必须一致（同源，AC-006）；亦可用 `docker pull` 后比对 `RepoDigests` 交叉确认。
 - INV-003 → 审查 `.cnb.yml` 与运行日志，无明文密码，确认使用 CNB 内置凭据（AC-008）。
 - AC-004 → `main` push 成功后制品库可查到 `<sha>` 标签镜像。
 - AC-009 → 用 `<sha>` 标签拉取并运行，容器 `/health` 正常（Deliverer 集成验证）。
@@ -75,3 +75,4 @@ Owner 已确认采用推荐方案（见 Owner Decision Record）：
 
 ## Owner Decision Record
 - 2026-10-13：Owner 确认采用 Analyst 推荐方案，四项均选 A——短 SHA 标签用 8 位 `CNB_COMMIT_SHORT`；流水线用单 job 顺序 stage；镜像目标平台单平台 linux/amd64；制品库命名无子路径 `docker.cnb.cool/framework-station/my-shop`。同时明确实现边界：不改 Dockerfile 无关内容、不引入多架构、不硬编码 CNB Token/仓库凭据，保证测试失败不发布镜像、构建失败不更新 `latest`、短 SHA 标签与 `latest` 指向同一镜像 digest。
+- 2026-10-13（追加）：Owner 补充验证要求——push 完成后须通过 `docker manifest inspect` 或 registry API 验证 `:${CNB_COMMIT_SHORT}` 与 `:latest` 的 digest，二者必须一致。
