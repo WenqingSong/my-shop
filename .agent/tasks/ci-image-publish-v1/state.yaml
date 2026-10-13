@@ -10,7 +10,7 @@ resources:
 
 review:
   status: PENDING
-  target: "9eb842f"
+  target: "6f1e2a6"
 
 owner:
   status: PENDING
