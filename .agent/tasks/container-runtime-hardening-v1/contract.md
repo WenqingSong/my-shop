@@ -120,3 +120,13 @@ APPROVED
 - D-003（优雅关闭模型）：`graceful_timeout=10s`，在途事务回滚优先；`signal.NotifyContext(SIGINT, SIGTERM)` 作后台消费者根 ctx；禁止强杀导致半提交、修改订单状态机、引入新 drain 调度系统。适用范围：`serve` 生命周期与扫描器 ctx 接线。
 - D-004（Compose healthcheck）：Compose 保持 `/health`（liveness）作探针；`/ready` 仅作未来 K8s readinessProbe 目标，不改 Compose 启动门控。适用范围：`docker-compose.yml` 与 `docs/design/deployment.md`。
 - 总适用范围：上述决定仅约束 `container-runtime-hardening-v1` 的容器运行时/生命周期实现，不改变业务规则、公开业务 API、错误码语义或数据模型，不产出 K8s 编排清单。
+
+## Contract Revision
+
+### R1：配置键名一致性修正（CLEAN-001，Owner 重新批准）
+
+- 变更内容：本项目优雅关闭 drain 超时的配置键统一修正为蛇形 `server.graceful_timeout`（对应环境变量 `SERVER_GRACEFUL_TIMEOUT`），替换原 camelCase `server.gracefulTimeout`。共 6 处：R3 停机时序、Selected Design D-003、实施范围、Interfaces and Data、失败语义、Owner Decision Record D-003。
+- 变更原因：Cleaner CLEAN-001（P2）——键若为 camelCase，GoFrame `FormatEnvKey` 会产出 `SERVER_GRACEFULTIMEOUT`，使 `SERVER_GRACEFUL_TIMEOUT` 被静默忽略、回落默认值；蛇形键才能产出正确环境变量名。
+- 保持不变：D-001~D-004 设计决策、业务不变量 INV-001~INV-007、错误码、数据模型、实施范围（含/不含）均不变。
+- 术语澄清：`Verified Current Behavior` 与 `Open Risks` 中保留的 `gracefulTimeout`（camelCase）指 GoFrame 内部 `ServerConfig.GracefulTimeout`（json 键 `gracefulTimeout`，默认 2s），与本项目配置键 `server.graceful_timeout`（蛇形，默认 10s，经 `g.Server().SetGracefulTimeout` 覆盖）是两个不同对象，非笔误。
+- 验证：`internal/boot/boot_test.go#TestApplyServerConfigGracefulTimeoutEnvOverride` 断言 `SERVER_GRACEFUL_TIMEOUT=42` 时 `GetGracefulTimeout()==42`；键退化回 camelCase 时该测试失败。
