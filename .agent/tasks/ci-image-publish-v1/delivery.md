@@ -25,7 +25,7 @@
 | `.cnb.yml` YAML 合法性 | PASS | `gopkg.in/yaml.v3` 解析成功 |
 | 凭据扫描（无硬编码） | PASS | 无 `docker login` / `password:` / `token:` 明文；仅命中注释「无需手动 docker login」 |
 | build stage（`go build`） | PASS | `go build -trimpath -o bin/my-shop .` 成功 |
-| test stage（`make test`） | FAIL（pre-existing） | exit 126：`scripts/test-nginx.sh: Permission denied`（该文件 git mode 100644，基线 `359b8cc` 即如此） |
+| test stage（`make test`） | PASS（复验） | 首次 exit 126（`scripts/test-nginx.sh: Permission denied`）；复验在临时合并态 `develop+fix+feature` 下 exit 0，全部通过（修复见下） |
 | `go vet ./...` | PASS | 通过 |
 | docker-build stage（`docker build`） | PASS | 多阶段构建成功（golang:1.23-alpine → alpine:3.20） |
 | 双标签同源（INV-002，本地） | PASS | `docker tag` 后 `<sha>` 与 `latest` 的 ImageId 均为 `sha256:5a46c615...` |
@@ -51,9 +51,18 @@
 | 失败不更新 `latest`（AC-007） | 需在 `main` 上构造失败提交 | 顺序 stage「任一失败即中断」静态成立，运行时未验证 |
 | `/health` 端到端（AC-009） | 无七牛 AK/SK/bucket/domain | serve 阶段 fail-fast，`/health` 未验证 |
 
+## Re-verification（第二次验收）
+
+- 触发：Owner 反馈「已修复，重新交付」，修复对象为首次 `make test` 失败（`OUT_OF_SCOPE_EXISTING_ISSUE`）。
+- 修复内容：独立分支 `fix/test-nginx-exec-permission`（commit `1614739`），仅改 `scripts/test-nginx.sh` git mode `100644 → 100755`，脚本内容不变。
+- 验证方式：临时 worktree 合并 `develop(359b8cc) + fix(1614739) + feature(c84be90)` 后重跑（未创建/推送任何永久 integration branch）。
+- 复验结果：`make test` 由 exit 126（Permission denied）转为 exit 0（go vet + go test + 三项静态校验全部通过）；`go build`、`docker build + tag`、双标签同 digest 复验均 PASS。
+- 修复结论：`make test` 阻塞项已解除；但该修复**尚未合入** `develop` 或 `feat/ci-image-publish-v1`（本 feature 分支的 `scripts/test-nginx.sh` 仍为 100644）。
+
 ## Remaining Risks
 
-- 前置阻塞（pre-existing，非本任务引入，`OUT_OF_SCOPE_EXISTING_ISSUE`）：`make test` 在 `scripts/test-nginx.sh`（git mode 100644，基线即如此）处 `Permission denied`（exit 126）失败，会导致 PR 检查与 main-ci 的 test stage 变红，后续 docker-build / docker-push 永不执行，镜像发布无法达成。需 Owner 决定是否另行修复。
+- 运行时发布 AC（AC-004~007、AC-009 制品库侧）仍为 `ENVIRONMENT_GAP`：需 feature 并入 `main` 后触发真实 CNB 流水线 + 授权制品库 `docker.cnb.cool/framework-station/my-shop`，Deliverer 预合并阶段无法验证，故仍 `BLOCKED`。
+- 集成缺口：`make test` 修复位于独立分支 `fix/test-nginx-exec-permission`，未合并；若仅合并 feature 而不先合并该修复，`main` 上 CI 的 test stage 仍会失败。需 Owner 决定合并顺序。
 - CNB 制品库 `framework-station/my-shop` 是否需预创建/授权（Contract Open Risks），首次 push 可能因仓库不存在失败。
 - 本环境 `CNB_REPO_SLUG=zsy-deve/zsy-dev`（fork），非目标 slug；制品库侧验证需在 `framework-station/my-shop` 上下文进行。
 
