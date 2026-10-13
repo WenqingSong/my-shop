@@ -35,7 +35,15 @@ main:
       stages:
         - name: start-dependencies
           script: |
-            docker compose up -d
+            set -euo pipefail
+            # CI 隔离测试变量：MYSQL_ROOT_PASSWORD 需与 scripts/test.sh 注入的
+            # DATABASE_DEFAULT_PASS=root 一致，使集成测试以 root/root 连接 MySQL；
+            # AUTH_JWT_SECRET 仅为满足生产 compose 的 ${AUTH_JWT_SECRET:?} 插值（占位值），
+            # 各测试自身经 t.Setenv 注入密钥，此值不用于任何服务，也不用于生产。
+            export MYSQL_ROOT_PASSWORD=root
+            export AUTH_JWT_SECRET=ci-placeholder-jwt-secret-not-for-prod
+            # 只启动测试依赖 mysql/redis，不启动完整 compose，避免构建 backend/nginx 镜像。
+            docker compose up -d mysql redis
             bash -c 'source scripts/lib.sh; wait_for_deps'
 
         - name: test
@@ -56,7 +64,12 @@ main:
       stages:
         - name: start-dependencies
           script: |
-            docker compose up -d
+            set -euo pipefail
+            # CI 隔离测试变量：与 pr-check 相同；仅用于测试依赖启动，不用于生产。
+            export MYSQL_ROOT_PASSWORD=root
+            export AUTH_JWT_SECRET=ci-placeholder-jwt-secret-not-for-prod
+            # 只启动测试依赖 mysql/redis，不启动完整 compose，避免构建 backend/nginx 镜像。
+            docker compose up -d mysql redis
             bash -c 'source scripts/lib.sh; wait_for_deps'
 
         - name: test
