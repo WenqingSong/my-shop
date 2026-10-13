@@ -57,12 +57,23 @@
 - 修复内容：独立分支 `fix/test-nginx-exec-permission`（commit `1614739`），仅改 `scripts/test-nginx.sh` git mode `100644 → 100755`，脚本内容不变。
 - 验证方式：临时 worktree 合并 `develop(359b8cc) + fix(1614739) + feature(c84be90)` 后重跑（未创建/推送任何永久 integration branch）。
 - 复验结果：`make test` 由 exit 126（Permission denied）转为 exit 0（go vet + go test + 三项静态校验全部通过）；`go build`、`docker build + tag`、双标签同 digest 复验均 PASS。
-- 修复结论：`make test` 阻塞项已解除；但该修复**尚未合入** `develop` 或 `feat/ci-image-publish-v1`（本 feature 分支的 `scripts/test-nginx.sh` 仍为 100644）。
+- 修复结论：`make test` 阻塞项已解除。该修复后续已合入 `develop`（`7b3449f`，见第三次验收）；按方案 A，`feat/ci-image-publish-v1` 分支的 `scripts/test-nginx.sh` 保持 100644（修复仅存在于 develop，集成时经 develop 带入 main）。
+
+## Re-verification（第三次验收：里程碑复验，develop_base=7b3449f）
+
+- 触发：Owner 指令「执行里程碑复验」——更新 `develop_base` 为当前 `origin/develop=7b3449f`，不改 `.cnb.yml`/部署设计，重跑主链路。
+- 基线变更：`state.yaml` 的 `delivery.develop_base` 由 `359b8cc` 更新为 `7b3449f`（该 develop 已含 `fix/test-nginx-exec-permission` 的 `scripts/test-nginx.sh` 100644→100755）。
+- 验证方式：临时 worktree 以 detached HEAD 于 `7b3449f` 合并 `feature(971e71f)`，模拟「feature → develop」集成态后重跑（未创建/推送任何永久 integration branch）。
+- 复验结果（真实合并态）：
+  - `make test` exit 0（go vet + go test + 三项静态校验全部通过，`test-nginx.sh` 100755 不再 Permission denied）；
+  - `go build -trimpath` PASS；
+  - `docker build`（多阶段）+ `docker tag` PASS，短 SHA 与 `latest` 同 digest。
+- 结论：`make test` 阻塞与「修复未合入 develop」的集成缺口均已消除；运行时发布 AC（AC-004~007、AC-009 制品库侧）仍需 feature 并入 `main` 后触发真实 CNB 流水线验证，故 `delivery.status` 保持 `BLOCKED`。
 
 ## Remaining Risks
 
 - 运行时发布 AC（AC-004~007、AC-009 制品库侧）仍为 `ENVIRONMENT_GAP`：需 feature 并入 `main` 后触发真实 CNB 流水线 + 授权制品库 `docker.cnb.cool/framework-station/my-shop`，Deliverer 预合并阶段无法验证，故仍 `BLOCKED`。
-- 集成缺口：`make test` 修复位于独立分支 `fix/test-nginx-exec-permission`，未合并；若仅合并 feature 而不先合并该修复，`main` 上 CI 的 test stage 仍会失败。需 Owner 决定合并顺序。
+- `make test` 修复已存在于 `develop`（`7b3449f`）；集成时按 `feature → develop → main` 顺序自然带入，无需再处理合并顺序。
 - CNB 制品库 `framework-station/my-shop` 是否需预创建/授权（Contract Open Risks），首次 push 可能因仓库不存在失败。
 - 本环境 `CNB_REPO_SLUG=zsy-deve/zsy-dev`（fork），非目标 slug；制品库侧验证需在 `framework-station/my-shop` 上下文进行。
 
