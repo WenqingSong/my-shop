@@ -10,6 +10,13 @@
 
 ## 2. 数据模型
 
+RBAC 涉及四类主体/对象：
+
+- **User（前台用户）**：`users` 表，凭 `type=user` JWT 访问前台接口；仅做认证（`Auth` 中间件），无角色/权限绑定，只访问本人数据，不参与后台 RBAC 授权。认证细节见 `iam.md`。
+- **Admin（后台管理员）**：`admins` 表，凭 `type=admin` JWT 访问 `/admin`；经认证（`AdminAuth`）+ 授权（`RequirePermission`）双层保护，通过角色持有权限；`is_super` 标记超级管理员。
+- **Role（角色）**：`roles` 表，权限集合的载体，经 `admin_roles` 绑定管理员、`role_permissions` 绑定权限。
+- **Permission（权限）**：`permissions` 表，最小授权单元；`code` 为稳定 key（`资源:动作` 粒度），`RequirePermission` 按 `code` 匹配。
+
 ### 2.1 `admins`（管理员身份）
 
 | 字段 | 类型 | 约束/说明 |
@@ -45,12 +52,15 @@ inventory:increase/deduct                            （2）
 admin:create/disable/delete/assign_role              （4）
 role:create/list/update/delete/assign_permission     （5）
 permission:create/list/update/delete                 （4）
-order:ship/refund/list/view                          （4，list=列表+统计、view=详情）
+order:ship/list/view                                 （3，list=列表+统计、view=详情）
+refund:list/view/review/execute                      （4，list=列表、view=详情+审计、review=审核、execute=执行/关闭）
 flash_sale:create/update/repair                      （3）
 review:take_down                                     （1）
 banner:create/update/delete                          （3）
 recommend:create/update/delete/item                  （4）
+dashboard:view                                       （1，运营数据大屏）
 user:read / user:status                              （2，用户状态管理：查询 / 禁用·启用）
+coupon:create/list/stop                              （3）
 ```
 
 ## 3. 业务不变量
@@ -97,7 +107,7 @@ user:read / user:status                              （2，用户状态管理�
 ## 7. 跨模块关系
 
 - 认证部分（JWT `type` 声明、`iam:admin:session:` 会话、`AdminAuth`/`AdminAuthSignatureOnly` 中间件、身份域隔离）见 `iam.md`。
-- 各业务模块的写接口经 `RequirePermission` 挂载对应权限 code：`category:*`/`product:*`/`sku:*`/`inventory:*`，见各模块 Design。
+- 各业务模块的写接口经 `RequirePermission` 挂载对应权限 code（权威清单见 2.3 与 `internal/boot/seed.go`）；接口与权限的挂载关系见 `internal/cmd/routes_admin.go` 及各模块 Design。
 - 用户状态管理（后台，`AdminAuth` + `RequirePermission`）：`GET /admin/users/:id/status` 挂 `user:read`，`PUT /admin/users/:id/status` 挂 `user:status`；认证/撤销语义见 `iam.md`。
 - 授权数据模型（4 表）经 golang-migrate baseline（`20261001000001`）建表，见 `migration.md`。
 
