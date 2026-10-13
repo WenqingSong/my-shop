@@ -209,12 +209,26 @@ CNB CI（`.cnb.yml`）：
 | 部署 / 容器 / 网络 | `docs/design/deployment.md` |
 | IAM / 会话 | `docs/design/iam.md` |
 | RBAC | `docs/design/rbac.md` |
+| 商品 | `docs/design/product.md` |
+| 分类 | `docs/design/category.md` |
+| SKU | `docs/design/sku.md` |
 | 订单 | `docs/design/order.md` |
+| 购物车 | `docs/design/cart.md` |
+| 收货地址 | `docs/design/address.md` |
 | 库存 | `docs/design/inventory.md` |
-| 秒杀 | `docs/design/flash-sale.md` |
 | 优惠券 | `docs/design/coupon.md` |
 | 退款 | `docs/design/refund.md` |
+| 秒杀 | `docs/design/flash-sale.md` |
+| 轮播图 | `docs/design/banner.md` |
+| 文章 | `docs/design/article.md` |
+| 推荐位 | `docs/design/recommendation.md` |
+| 评价 | `docs/design/review.md` |
+| 数据大屏 | `docs/design/dashboard.md` |
+| 收藏 | `docs/design/favorite.md` |
+| 点赞 | `docs/design/like.md` |
 | 对象存储 | `docs/design/storage.md` |
 | 错误码 | `docs/design/error-codes.md` |
+| 数据库迁移 | `docs/design/migration.md` |
+| 历史数据迁移 | `docs/design/legacy-data-migration.md` |
 
 项目级长期设计以 `docs/design/*` 为权威；历史任务决策与验收证据在 `.agent/tasks/*`，不应仅凭旧任务清单判断当前功能状态。

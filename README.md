@@ -2,12 +2,20 @@
 
 基于 [GoFrame v2](https://goframe.org) 的电商后端项目。以**普通订单**与**秒杀**为两条核心交易链路，覆盖前台用户与后台管理员的完整身份与权限体系，以及商品、购物车、库存、优惠券、退款、运营内容等电商核心域。项目侧重业务正确性、一致性与故障恢复，并以 Docker Compose 提供可复现的本地运行与测试环境。
 
+## 核心亮点
+
+- **秒杀**：Redis + Lua 准入闸门、MySQL 出队表异步落单、故障恢复与容量保护（限流/熔断/指标/压测），MySQL 始终是最终事实来源，五个业务不变量全程可验证。
+- **订单一致性**：服务端定价与快照、幂等去重、单事务「订单 + 条件扣库存」、状态机 + 条件更新，保证不超卖、取消/退款只补偿一次。
+- **IAM / RBAC**：JWT + Redis 有状态会话、Refresh Token 轮换与重放检测、前台用户与后台管理员双身份域隔离、后台细粒度 RBAC（`资源:动作` 权限码）。
+- **云工程能力**：Docker 多阶段构建与非 root 运行、版本化迁移、凭据分离、优雅停机、`/health`/`/ready` 探针、Prometheus 指标与 CI/CD 流水线。
+
 ## 项目简介
 
 | 领域 | 能力 |
 | --- | --- |
 | 普通订单链路 | 购物车/直接购买下单、服务端定价与快照、幂等去重、订单状态机、超时取消、Mock 支付、发货与收货 |
 | 秒杀链路 | Redis + Lua 准入闸门、MySQL 出队表异步落单、故障恢复与审计、限流/熔断/指标与压测 |
+| 商品与库存 | 商品 SPU（分类/展示价/图册/详情）、上下架状态机、分类树、SKU 独立售价、条件扣减防负库存与库存流水 |
 | IAM / RBAC | 前台用户 JWT + Redis 有状态会话、Refresh Token 轮换与重放检测；后台管理员独立身份域与 RBAC 授权 |
 | 优惠券 | 平台固定金额满减券：领取唯一、总量不超发、下单预占、支付核销、取消释放 |
 | 退款 | 已支付未发货普通订单整单退款：申请/审核/执行状态机与 append-only 审计 |
@@ -48,6 +56,13 @@
 - **V4（故障恢复）**：幂等补偿、崩溃重投、活动结束终态收敛、死信人工修复与 append-only 审计。
 - **V5（容量保护与可观测）**：用户级/活动级限流、排队软上限、Redis 闸门熔断降级、Prometheus 指标与逐级压测脚本。
 
+### 商品与库存
+
+- **商品 SPU 主数据**：名称、品牌、分类、基础展示价、图册、详情，价格整数分；`草稿 → 上架 → 下架` 状态机（创建强制草稿、普通更新不改状态、前台仅 `on_shelf` 可见），浏览量原子自增。
+- **分类树**：最多 3 级树形分类，同级名唯一、循环引用与超层校验、软下线；删除前校验无子分类且无关联商品（FK 兜底）。
+- **SKU**：商品 1—N SKU 独立售价（与 SPU 展示价解耦），同商品内名称唯一，物理删除 + 稳定引用键（自增不重用）。
+- **库存**：`sku_id` 1:1 库存记录，条件扣减（`WHERE quantity >= N` + `RowsAffected`）防负库存，append-only 变更流水，后台增扣与查询按 `inventory:*` 权限。
+
 ### IAM（身份认证）
 
 - **JWT + Redis 有状态会话**：JWT（HS256）作为访问凭证，Redis 会话承载存在性与撤销标记，受保护接口验签后还必须通过会话有效性校验。
@@ -78,6 +93,15 @@
 - **运营数据大屏**：用户/商品/订单/秒杀的只读聚合统计（概览、趋势、状态分布、销量 TOP、秒杀运营），严格区分订单、金额、销量口径。
 - **内容与互动**：轮播图、推荐位、文章，以及商品的评价、收藏、点赞。
 
+### 工程化与云原生能力
+
+- **可复现交付**：Docker 多阶段构建（`CGO_ENABLED=0` 静态编译）、非 root 运行、`docker-compose.yml` 一键编排 nginx/app/MySQL/Redis/Prometheus，`make init/up/health` 两阶段初始化。
+- **版本化迁移**：golang-migrate 管理 schema，`migrate up` 幂等 + `GET_LOCK` 串行，启动前置迁移，schema 未就绪不对外。
+- **凭据与配置分离**：敏感值仅经环境变量注入（`${VAR:?}` 必填，无内置默认回退），`config.yaml` 敏感字段保持空值。
+- **健康检查与优雅停机**：`/health` liveness（不依赖 DB/Redis）、`/ready` readiness（DB/Redis 不可达返回 503）、`SIGTERM` 取消根 ctx 后 drain 在途请求再退出。
+- **可观测**：Prometheus 秒杀指标（QPS/成功率/拒绝率/p95/p99）+ recording rules；Nginx 统一 Request ID 贯通访问日志。
+- **CI/CD**：CNB 流水线（测试 → 竞态检测 → 构建 → 镜像发布，短 SHA + latest 双标签），`latest` 仅指向测试全绿的构建。
+
 ## 能力边界
 
 为保持真实，以下边界需要明确说明：
@@ -94,15 +118,15 @@
 ### 推荐：两阶段初始化
 
 ```bash
-make init    # 第一阶段：启动 MySQL/Redis 容器并生成 .env（不要求七牛凭据、不启动后端）
+make init    # 第一阶段：启动 MySQL/Redis 容器并生成 .env（需已填 MYSQL_ROOT_PASSWORD；不要求七牛凭据、不启动后端）
 # 编辑 .env，填入 MySQL 密码、JWT 密钥、七牛配置与超管密码后：
 make up      # 第二阶段：构建并启动 nginx/app/MySQL/Redis/Prometheus 容器
 make health  # 校验全部容器健康
 ```
 
-`make up` 构建后端与 Nginx 镜像并启动五个容器：app 容器 entrypoint 先执行幂等 migration（`migrate up`），再由 `serve` 校验七牛配置与超管创建条件并启动 HTTP 服务（缺失 fail-fast）。Nginx 为对外唯一 HTTP 入口，默认访问 `http://127.0.0.1:8080/health`（`NGINX_PORT` 可覆盖）；`make down` 停止并移除容器、保留数据卷。
+`make up` 构建后端、Nginx 与 Prometheus 镜像并启动五个容器：app 容器 entrypoint 先执行幂等 migration（`migrate up`），再由 `serve` 校验七牛配置与超管创建条件并启动 HTTP 服务（缺失 fail-fast）。Nginx 为对外唯一 HTTP 入口，默认访问 `http://127.0.0.1:8080/health`（`NGINX_PORT` 可覆盖）；`make down` 停止并移除容器、保留数据卷。
 
-> 本地开发亦须显式提供凭据：`MYSQL_ROOT_PASSWORD` 与 `AUTH_JWT_SECRET` 为必填项（Compose 使用 `${VAR:?}` 语法，缺失即失败，无内置默认回退）。
+> 本地开发亦须显式提供凭据：`MYSQL_ROOT_PASSWORD` 与 `AUTH_JWT_SECRET` 为必填项（Compose 使用 `${VAR:?}` 语法，缺失即失败，无内置默认回退）。其中 `MYSQL_ROOT_PASSWORD` 需在首次执行 `make init` 前就已填入 `.env`（`init.sh` 会校验，缺失直接报错退出）。
 
 ### 宿主机手动启动（非容器化，仅调试用）
 
@@ -231,7 +255,7 @@ curl http://127.0.0.1:9090/api/v1/targets   # 查看 my-shop 目标是否 UP
 ## 文档导航
 
 - [项目导览](docs/project-overview.md)：系统与两条核心交易链路的总览。
-- 核心设计：[普通订单](docs/design/order.md)、[秒杀](docs/design/flash-sale.md)、[IAM](docs/design/iam.md)、[RBAC](docs/design/rbac.md)、[优惠券](docs/design/coupon.md)、[退款](docs/design/refund.md)。
+- 核心设计：[普通订单](docs/design/order.md)、[秒杀](docs/design/flash-sale.md)、[商品](docs/design/product.md)、[分类](docs/design/category.md)、[SKU](docs/design/sku.md)、[库存](docs/design/inventory.md)、[IAM](docs/design/iam.md)、[RBAC](docs/design/rbac.md)、[优惠券](docs/design/coupon.md)、[退款](docs/design/refund.md)。
 - 部署与运维：[容器化部署模型](docs/design/deployment.md)、[数据库迁移](docs/design/migration.md)、[错误码](docs/design/error-codes.md)。
 
 `docs/design/*` 记录持续维护的项目级长期设计，是了解各模块现状与边界的权威来源。

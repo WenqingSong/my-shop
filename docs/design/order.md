@@ -75,7 +75,7 @@
 
 - INV-001（归属与隔离）：`orders.user_id` 取自 `Principal.UserID`；用户只能查看/取消/支付/收货自己的订单；跨用户操作返回 9001（404）且无写入。
 - INV-002（幂等去重）：同一 `(user_id, idempotency_key)` 至多产生一个成功订单（`uk_user_idempotency` 兜底）；同 key 同 `request_hash` 返回既有订单、不重复扣库存；同 key 不同 `request_hash` 返回 9006。
-- INV-003（事务原子性）：创建订单 = 单事务「写 orders + 写 order_items + 扣库存 +（购物车模式）删已购条目」，任一步失败整体回滚，无半成品、库存与购物车均不变。
+- INV-003（事务原子性）：创建订单 = 单事务「写 orders + 写 order_items + 扣库存 +（若用券）预占券 +（购物车模式）删已购条目」，任一步失败整体回滚，无半成品、库存、券与购物车均不变。
 - INV-004（服务端定价与快照）：`original_amount` = Σ 下单时 `skus.price×quantity`；`total_amount = original_amount - discount_amount`（`discount` 由服务端计算、≤ `original`）；快照自足，改价/改模板/改地址不影响订单。
 - INV-005（状态机）：仅合法迁移可推进；非法迁移 9002 且状态不变；`refunded` 仅从 `paid` 可达。
 - INV-006（防超卖）：并发同一 SKU 下单成功扣减总量 ≤ 可售库存且库存 ≥ 0（条件扣减 + `RowsAffected`）。
@@ -115,7 +115,7 @@
 | 9005 | ORDER_INVALID_QUANTITY（直接购买数量非法） | 400 |
 | 9006 | ORDER_IDEMPOTENCY_CONFLICT（同 key 不同请求内容） | 409 |
 
-复用：`1001`（400）、`1002`（401）、`1003`（403）、`5001`（SKU 不存在）、`6001`（库存不足）、`7001`（地址不存在）。
+复用：`1001`（400）、`1002`（401）、`1003`（403）、`5001`（SKU 不存在）、`6001`（库存不足）、`7001`（地址不存在）、`19003`（券不存在）、`19007`（券不可用，见 `coupon.md`）。
 
 ## 8. 跨模块关系
 
@@ -126,7 +126,7 @@
 - 定价：`original_amount` 重读 `ISku.GetByID` 的 `skus.price` 求和，校验 SKU enabled 且商品 on_shelf（否则 9003）；用券经 `ICoupon` 校验归属/有效期/状态/门槛并计算 `discount_amount`。
 - 优惠券：`orders.user_coupon_id` → `user_coupons.id`（软引用，快照）；预占/核销/释放经 `ICoupon` 与订单状态变更同事务，见 `coupon.md`。
 - 地址：快照自 `addresses`，下单后地址变更不影响订单。
-- 建表经 golang-migrate 迁移（`20261001000007_orders.up.sql`），见 `migration.md`。
+- 建表经 golang-migrate 迁移（`20261001000007_orders.up.sql`）；金额三列（`original_amount`/`discount_amount`/`user_coupon_id`）由后续迁移 `20261001000022_order_coupon_amounts.up.sql` 增列并回填，见 `migration.md`、`coupon.md`。
 - 配置：`order.pay_timeout`（支付超时秒，默认 900）、`order.cancel_scan_interval`（扫描周期秒，默认 60）。
 
 ## 9. Deferred / 已知留白
