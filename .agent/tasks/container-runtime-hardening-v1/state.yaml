@@ -3,7 +3,7 @@ task_id: container-runtime-hardening-v1
 
 contract:
   status: APPROVED
-  target: "d94a46d5de8654d3693bf9c8cecc321b0e8cb0ca"
+  target: "41c12a74c306ee51062db5059d24bd8d237821f3"
 
 resources:
   reservations: {}
