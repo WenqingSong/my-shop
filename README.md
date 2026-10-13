@@ -57,6 +57,14 @@
 └── go.mod
 ```
 
+### 历史遗留目录与脚本保留说明
+
+以下疑似废弃目录/脚本经引用核验后确认仍承担职责，保留不删：
+
+- `scripts/import-legacy.sh`：仍被 `docs/legacy-data.md` §6「导入与迁移」引用，是历史数据导入隔离 staging 库的入口（配合 `my-shop legacy-migrate dry-run/import`），承担运行时职责。
+- `docs/学习/`：Project Mastery Workflow 学习产物（学习计划与 Tutorial），由 `docs/学习/README.md` 声明用途、与生产 Workflow V3 资产隔离，承担学习/历史证据职责。
+- `docs/tasks/`（iam-v1 / make-lifecycle / project-init）：Workflow V3 迁移前的旧任务产物，仅被其自身文件引用、未在 `.agent/tasks/` 重复收录，承担历史决策与验收证据职责。
+
 ## 快速开始
 
 ### 推荐：两阶段初始化
