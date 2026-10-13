@@ -3,7 +3,7 @@ task_id: ci-image-publish-v1
 
 contract:
   status: APPROVED
-  target: "487085b"
+  target: "6bff54d"
 
 resources:
   reservations: {}
