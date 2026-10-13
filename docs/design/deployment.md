@@ -32,7 +32,7 @@ Compose 服务（`docker-compose.yml`）：
 - **多阶段构建**：builder（Go 1.23，`CGO_ENABLED=0` 静态编译，依赖全为纯 Go）→ runtime（alpine + `tzdata` + `ca-certificates`），工作目录 `/app`。`manifest/config/config.yaml` COPY 进镜像默认路径，保证 `time.LoadLocation("Asia/Shanghai")` 等时区语义可用（无 DST）。
 - **非 root 运行**：runtime 阶段创建专用用户 `app:app`（`uid=10001`、`gid=10001`），`USER 10001:10001`；`/app` 与 `/app/storage` 提前 `chown`，保证非 root 下运行时目录可写、轮播图占位图 seed 可执行。主进程有效 UID 非 0（不用 alpine `nobody`，固定身份便于未来 K8s `SecurityContext` 对接）。
 - **配置与敏感凭据分离**：
-  - `manifest/config/config.yaml` 仅保留普通非敏感配置（`server.address`、`dashboard.timezone`、`storage.local.root`、`order.*`、`flash_sale.*`、`qiniu.region/token_ttl/max_file_size/白名单` 等），敏感字段（`auth.jwt.secret`、`database.default.pass`）默认值为空，可安全打包进镜像。
+  - `manifest/config/config.yaml` 仅保留普通非敏感配置（`server.address`、`dashboard.timezone`、`storage.local.root`、`order.*`、`flash_sale.*`、`qiniu.region/token_ttl/max_file_size/白名单` 等），敏感字段（`auth.jwt.secret`、`database.default.pass`、`qiniu.secret_key`、`admin.super.password`）默认值为空，可安全打包进镜像。
   - 敏感凭据（JWT secret、MySQL/Redis 密码、七牛 AK/SK/bucket/domain、超管密码）统一经运行时环境变量注入（Compose `environment` + `.env`），缺失时 `auth.Secret`/MySQL 认证/七牛 `ValidateConfig` fail-fast，**不回退任何内置默认密钥/密码**。
   - **无内置默认回退**：`docker-compose.yml` 对 `MYSQL_ROOT_PASSWORD`、`AUTH_JWT_SECRET` 使用 `${VAR:?error}` 必填语法，禁止 `${VAR:-default}`；`scripts/init.sh` 将二者加入 `REQUIRED_VARS` 缺失即报错（空字符串不可绕过）。`serve` 启动对 `DATABASE_DEFAULT_PASS`、`AUTH_JWT_SECRET` 显式非空校验，缺失非零退出、不监听端口、不回退内置默认值。
   - **连接字符集**：应用连接（`database.default.charset`）与 Migration DSN 统一为 `utf8mb4`，四字节 Unicode 字符（emoji / 补充平面字符）可经连接正确读写；表结构已为 utf8mb4，本次为连接层统一。
@@ -115,7 +115,7 @@ Nginx 是面向外部的唯一 HTTP 入口，职责为纯反向代理（无 Lua/
 - **镜像仓库地址**：`docker.cnb.cool/framework-station/my-shop`，由 `${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}` 派生（`CNB_DOCKER_REGISTRY = docker.cnb.cool`，仓库路径取当前仓库 slug 小写、无子路径）。fork 后 `CNB_REPO_SLUG_LOWERCASE` 指向 fork 自身 slug，不污染上游仓库。
 - **版本标识**：同一次成功构建同时打两个标签——短 SHA 标签 `${CNB_COMMIT_SHORT}`（平台内置只读变量，完整提交 SHA 前 8 位）与 `latest`。二者由同一镜像经 `docker tag` 派生，指向同一 digest（双标签同源）。
 - **`latest` 语义**：`latest` 始终指向最近一次「测试 + 构建 + 推送全部成功」的构建；测试或构建任一失败时不推送任何标签、`latest` 不变。
-- **发布顺序**：`test` → `build`（go build）→ `docker build`（含 `docker tag :latest`）→ `docker push`（先短 SHA 后 `latest`）；任一 stage 失败即中断、后续不执行。短 SHA 先于 `latest` 推送，保证 `latest` 只会指向「短 SHA 标签已存在」的构建。
+- **发布顺序**：`test` → `race` → `build`（go build）→ `docker build`（含 `docker tag :latest`）→ `docker push`（先短 SHA 后 `latest`）；任一 stage 失败即中断、后续不执行。短 SHA 先于 `latest` 推送，保证 `latest` 只会指向「短 SHA 标签已存在」的构建。
 - **目标平台**：单平台 `linux/amd64`（沿用 Dockerfile `CGO_ENABLED=0 GOOS=linux` 静态编译，native build，不显式 `--platform`、不引入 buildx/QEMU）。
 - **凭据**：制品库认证使用 CNB 内置凭据（流水线内置触发者凭据 / `CNB_TOKEN`），推送 CNB 制品库无需手动 `docker login`；`.cnb.yml` 与运行日志不出现硬编码密码。
 - **回滚方法**：部署回滚用历史成功构建的短 SHA 标签拉取并运行目标版本（`docker run docker.cnb.cool/framework-station/my-shop:<短SHA>`），不依赖 `latest`；`latest` 仅表达「默认最新」，不作为可回滚的历史锚点。
