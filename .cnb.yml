@@ -28,7 +28,7 @@ main:
       services:
         - docker
       docker:
-        image: golang:1.24
+        image: golang:1.23
         volumes:
           - /go/pkg/mod
           - /root/.cache/go-build
@@ -40,13 +40,16 @@ main:
 
         - name: test
           script: make test
+
+        - name: race
+          script: make test-race
 
   push:
     - name: main-ci
       services:
         - docker
       docker:
-        image: golang:1.24
+        image: golang:1.23
         volumes:
           - /go/pkg/mod
           - /root/.cache/go-build
@@ -58,6 +61,9 @@ main:
 
         - name: test
           script: make test
+
+        - name: race
+          script: make test-race
 
         - name: build
           script: |
