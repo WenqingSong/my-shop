@@ -32,9 +32,10 @@ Compose 服务（`docker-compose.yml`）：
 - **多阶段构建**：builder（Go 1.23，`CGO_ENABLED=0` 静态编译，依赖全为纯 Go）→ runtime（alpine + `tzdata` + `ca-certificates`），工作目录 `/app`。`manifest/config/config.yaml` COPY 进镜像默认路径，保证 `time.LoadLocation("Asia/Shanghai")` 等时区语义可用（无 DST）。
 - **配置与敏感凭据分离**：
   - `manifest/config/config.yaml` 仅保留普通非敏感配置（`server.address`、`dashboard.timezone`、`storage.local.root`、`order.*`、`flash_sale.*`、`qiniu.region/token_ttl/max_file_size/白名单` 等），敏感字段（`auth.jwt.secret`、`database.default.pass`）默认值为空，可安全打包进镜像。
-  - 敏感凭据（JWT secret、MySQL/Redis 密码、七牛 AK/SK/bucket/domain、超管密码）统一经运行时环境变量注入（Compose `environment` + `.env`），缺失时 `auth.Secret`/MySQL 认证/七牛 `ValidateConfig` fail-fast，**不回退公开默认密钥**。
-  - 开发测试凭据（如 MySQL `root`）仅出现在 `docker-compose.yml` 的 `${VAR:-default}`（明确标记，供 CNB DinD 开发环境），不进镜像、不进 `config.yaml`；生产经平台 Secret/环境变量注入。
-  - `.env.example` 为模板（敏感字段留空）；`.env` 不提交 Git、不进镜像（`.dockerignore` 排除 `.env`、`bin/`、`tmp/`、`storage/` 运行数据）。
+  - 敏感凭据（JWT secret、MySQL/Redis 密码、七牛 AK/SK/bucket/domain、超管密码）统一经运行时环境变量注入（Compose `environment` + `.env`），缺失时 `auth.Secret`/MySQL 认证/七牛 `ValidateConfig` fail-fast，**不回退任何内置默认密钥/密码**。
+  - **无内置默认回退**：`docker-compose.yml` 对 `MYSQL_ROOT_PASSWORD`、`AUTH_JWT_SECRET` 使用 `${VAR:?error}` 必填语法，禁止 `${VAR:-default}`；`scripts/init.sh` 将二者加入 `REQUIRED_VARS` 缺失即报错（空字符串不可绕过）。`serve` 启动对 `DATABASE_DEFAULT_PASS`、`AUTH_JWT_SECRET` 显式非空校验，缺失非零退出、不监听端口、不回退内置默认值。
+  - **连接字符集**：应用连接（`database.default.charset`）与 Migration DSN 统一为 `utf8mb4`，四字节 Unicode 字符（emoji / 补充平面字符）可经连接正确读写；表结构已为 utf8mb4，本次为连接层统一。
+  - `.env.example` 为模板（敏感字段留空并注明必填）；`.env` 不提交 Git、不进镜像（`.dockerignore` 排除 `.env`、`bin/`、`tmp/`、`storage/` 运行数据）。
 
 ## 4. 启动生命周期
 
@@ -91,8 +92,8 @@ Nginx 是面向外部的唯一 HTTP 入口，职责为纯反向代理（无 Lua/
 
 ## 10. 安全与凭据边界
 
-- 敏感凭据仅经运行时环境变量注入，不进镜像、不进 `config.yaml` 默认值、不进日志/响应。
-- `make init`/`make up` 复用两阶段初始化：`make init` 只起 MySQL/Redis、生成 `.env`（不要求七牛凭据、不启动后端）；`make up` 起 app（Compose 注入 `.env` 变量）。
+- 敏感凭据仅经运行时环境变量注入，不进镜像、不进 `config.yaml` 默认值、不进日志/响应；缺失即 fail-fast，**无内置默认回退**。
+- `make init`/`make up` 复用两阶段初始化：`make init` 起 MySQL/Redis、生成 `.env`（要求已填 `MYSQL_ROOT_PASSWORD`，`scripts/init.sh` 缺失即报错，不要求七牛凭据、不启动后端）；`make up` 起 app（Compose 注入 `.env` 变量，要求 `AUTH_JWT_SECRET`，缺失由 `${VAR:?}` 与 serve fail-fast 双重拦截）。
 - 开发命令（`make up/down/status/logs/health`）全面容器化，不再启动宿主机进程，杜绝双启动。
 
 ## 11. Deferred / 已知留白

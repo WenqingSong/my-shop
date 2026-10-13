@@ -70,7 +70,8 @@ baseline 内容 = 迁移前 `boot.go` 中 7 张既有表的等价 DDL（`users`�
 
 - 迁移是运维操作（CLI），不经 HTTP 暴露；无鉴权中间件参与。
 - serve 的 readiness check 严格 fail-fast：dirty、未初始化或版本落后均拒绝启动，明确提示先执行 `migrate up`（dirty 时提示人工 `force`）。
-- DSN 从 `database.default.*` 配置构造，启用 `multiStatements=true`（支持 baseline 多语句文件）；凭据不硬编码。
+- DSN 从 `database.default.*` 配置构造，启用 `multiStatements=true`（支持 baseline 多语句文件）；凭据不硬编码、无内置默认密码回退（密码缺失时 fail-fast，不回退 `root`）。
+- 连接字符集为 `utf8mb4`（DSN `charset=utf8mb4`），与表结构（`DEFAULT CHARSET=utf8mb4`）及应用连接一致，支持四字节 Unicode 字符迁移读写。
 
 ## 6. 错误码域
 
