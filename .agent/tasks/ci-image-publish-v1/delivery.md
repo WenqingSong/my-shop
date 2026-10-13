@@ -72,11 +72,11 @@
 
 ## Remaining Risks
 
-- 运行时发布 AC（AC-004~007、AC-009 制品库侧）仍为 `ENVIRONMENT_GAP`：需 feature 并入 `main` 后触发真实 CNB 流水线 + 授权制品库 `docker.cnb.cool/framework-station/my-shop`，Deliverer 预合并阶段无法验证，故仍 `BLOCKED`。
+- 运行时发布 AC（AC-004~007、AC-009 制品库侧）：阻塞原因标记为 `Owner-controlled integration dependency`。Owner 决定「main 集成与真实制品库发布验证」不在本 feature branch 验收范围（main 合并属 Owner 权限；CNB main pipeline 触发属发布阶段）。待 Owner 执行 main 集成后，另行启动发布验收流程。
 - `make test` 修复已存在于 `develop`（`7b3449f`）；集成时按 `feature → develop → main` 顺序自然带入，无需再处理合并顺序。
 - CNB 制品库 `framework-station/my-shop` 是否需预创建/授权（Contract Open Risks），首次 push 可能因仓库不存在失败。
 - 本环境 `CNB_REPO_SLUG=zsy-deve/zsy-dev`（fork），非目标 slug；制品库侧验证需在 `framework-station/my-shop` 上下文进行。
 
 ## Result
 
-BLOCKED
+BLOCKED —— 阻塞原因：`Owner-controlled integration dependency`（main 集成与制品库发布属发布阶段，Owner 已确认不在本 feature branch 验收范围；待 main 集成后另行启动发布验收流程）。
