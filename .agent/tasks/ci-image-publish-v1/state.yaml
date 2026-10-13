@@ -9,7 +9,7 @@ resources:
   reservations: {}
 
 review:
-  status: PENDING
+  status: CLEAN
   target: "6f1e2a6"
 
 owner:
