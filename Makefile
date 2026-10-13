@@ -10,7 +10,7 @@ SHELL := /bin/bash
 
 SCRIPTS := scripts
 
-.PHONY: help bootstrap init up down restart status logs health test test-prometheus test-container test-nginx test-lib test-storage clean
+.PHONY: help bootstrap init up down restart status logs health test test-race test-prometheus test-container test-nginx test-lib test-storage clean
 
 help: ## 列出所有可用目标及说明
 	@bash $(SCRIPTS)/help.sh
@@ -39,8 +39,11 @@ logs: ## 查看应用与依赖容器日志
 health: ## 校验 App / MySQL / Redis / Prometheus 健康状态
 	@bash $(SCRIPTS)/health.sh
 
-test: ## 执行 go vet 与 go test（隔离 .env，不受本地环境变量污染）
+test: ## 执行 go vet、go test、Registry 校验与容器化静态断言（隔离 .env，不受本地环境变量污染）
 	@bash $(SCRIPTS)/test.sh
+
+test-race: ## 执行 go test -race（进程内共享内存并发逻辑，与 DB 集成测试隔离）
+	@bash $(SCRIPTS)/test-race.sh
 
 test-prometheus: ## 校验 Prometheus 抓取配置与 compose 服务定义
 	@bash $(SCRIPTS)/test-prometheus.sh

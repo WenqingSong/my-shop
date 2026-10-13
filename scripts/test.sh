@@ -26,6 +26,11 @@ log_info "go vet ./..."
 log_info "go test -p 1 ./..."
 ( cd "${ROOT_DIR}" && go test -p 1 ./... )
 
+# 全局资源 Registry 一致性校验（Migration 版本冲突 + 错误码域漂移），纯静态、无需 DB。
+# 检测到冲突/漂移即非零退出，使门禁阶段失败并阻止后续构建/发布。
+log_info "校验全局资源 Registry 一致性（migration version / 错误码域）..."
+"${SCRIPT_DIR}/check-registry.sh"
+
 log_info "校验 Prometheus 接入配置..."
 "${SCRIPT_DIR}/test-prometheus.sh"
 
