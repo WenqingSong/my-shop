@@ -1,6 +1,6 @@
 # 容器化部署模型（Deployment / Compose）
 
-本文面向项目接手者，说明 SurgeCart 后端（及依赖）的容器化部署模型：服务编排、镜像与配置模型、启动生命周期、持久化、网络与健康检查语义。事实来源为 `backend-container-v1` 与 `nginx-reverse-proxy-v1` 的 APPROVED Contract。Kubernetes / Ingress / HTTPS/TLS / 多实例负载均衡不在本文范围（另见各相关任务）。
+本文面向项目接手者，说明 SurgeCart 后端（及依赖）的容器化部署模型：服务编排、镜像与配置模型、启动生命周期、持久化、网络与健康检查语义。事实来源为 `backend-container-v1`、`nginx-reverse-proxy-v1` 与 `container-runtime-hardening-v1` 的 APPROVED Contract。Kubernetes / Ingress / HTTPS/TLS / 多实例负载均衡不在本文范围（另见各相关任务）；`/ready` readiness 端点已落地，但 K8s readinessProbe 编排清单不在本文范围。
 
 ## 1. 职责与边界
 
@@ -30,6 +30,7 @@ Compose 服务（`docker-compose.yml`）：
 ## 3. 镜像与配置模型（凭据分离）
 
 - **多阶段构建**：builder（Go 1.23，`CGO_ENABLED=0` 静态编译，依赖全为纯 Go）→ runtime（alpine + `tzdata` + `ca-certificates`），工作目录 `/app`。`manifest/config/config.yaml` COPY 进镜像默认路径，保证 `time.LoadLocation("Asia/Shanghai")` 等时区语义可用（无 DST）。
+- **非 root 运行**：runtime 阶段创建专用用户 `app:app`（`uid=10001`、`gid=10001`），`USER 10001:10001`；`/app` 与 `/app/storage` 提前 `chown`，保证非 root 下运行时目录可写、轮播图占位图 seed 可执行。主进程有效 UID 非 0（不用 alpine `nobody`，固定身份便于未来 K8s `SecurityContext` 对接）。
 - **配置与敏感凭据分离**：
   - `manifest/config/config.yaml` 仅保留普通非敏感配置（`server.address`、`dashboard.timezone`、`storage.local.root`、`order.*`、`flash_sale.*`、`qiniu.region/token_ttl/max_file_size/白名单` 等），敏感字段（`auth.jwt.secret`、`database.default.pass`）默认值为空，可安全打包进镜像。
   - 敏感凭据（JWT secret、MySQL/Redis 密码、七牛 AK/SK/bucket/domain、超管密码）统一经运行时环境变量注入（Compose `environment` + `.env`），缺失时 `auth.Secret`/MySQL 认证/七牛 `ValidateConfig` fail-fast，**不回退公开默认密钥**。
@@ -46,15 +47,19 @@ Compose 服务（`docker-compose.yml`）：
 - 依赖未就绪：Compose `depends_on: condition: service_healthy` 先行等待，app 内 `waitForDependencies`（`STARTUP_DEPENDENCY_TIMEOUT`，默认 30s）再重试兜底。
 - 启动幂等不并发：重复 `up`、容器重启、并发启动，migration 不重复、超管/权限不重复（`schema_migrations` 追踪 + `GET_LOCK` + 唯一约束 1062 兜底）。
 
+停止生命周期（优雅关闭）：`serve` 以 `signal.NotifyContext(SIGINT, SIGTERM)` 为根 ctx 驱动三个后台扫描器（订单超时取消、秒杀对账、秒杀消费）。停机时序：SIGTERM/SIGINT → 取消根 ctx → 扫描器停止领取新任务、在途单事务回滚或完成 → HTTP 停收新连接并 drain 在途请求（`server.gracefulTimeout`，默认 10s）→ `sync.WaitGroup` 收尾后进程退出。消费事务被打断时整体回滚、请求保持 `queued`，重启后由重试/对账恢复，不产生半成品或重复下单。
+
 ## 5. 持久化
 
 - MySQL/Redis：named volume `mysql_data`/`redis_data`，`down`（保留卷）+ `up` 重建不丢数据。
-- 本地文件：named volume `app_storage` → `/app/storage`（容器内 `STORAGE_LOCAL_ROOT=/app/storage`）。V1 本地存储仅幂等 seed 轮播图占位图（可重建），卷的「不丢失」语义面向未来落本地的文件；用 named volume（非 bind mount）规避 rootless/嵌套容器下 bind mount 单文件退化为目录的问题。
+- 本地文件：named volume `app_storage` → `/app/storage`（容器内 `STORAGE_LOCAL_ROOT=/app/storage`）。V1 本地存储仅幂等 seed 轮播图占位图（可重建），卷的「不丢失」语义面向未来落本地的文件；用 named volume（非 bind mount）规避 rootless/嵌套容器下 bind mount 单文件退化为目录的问题。镜像内 `/app/storage` 已 `chown` 为 `app:app`，named volume 首次挂载继承镜像目录 owner，故非 root 下 `/app/storage/banners` 可写、占位图 seed 成功。
 
 ## 6. 网络与健康检查
 
 - `app:8000` 是稳定的 Compose 内部服务入口，**不映射宿主机端口**；外部只能经 Nginx（`${NGINX_PORT:-8080}`）访问。
-- `/health` 为 liveness（`status=ok` + 时间）；serve 仅在 bootstrap 全部通过后才监听端口，故可响应 `/health` 即代表依赖已就绪、schema 已就绪、七牛已校验。不引入独立 readiness 端点（单实例、无摘流量需求）。`/health` 经 Nginx 公开透传（最小探活响应）。
+- `/health` 为 liveness（`status=ok` + 时间，判定不依赖 DB/Redis）：进程存活且 HTTP server 在监听即 200。
+- `/ready` 为 readiness（fail-closed）：探测 MySQL Ping + Redis PING（探测超时 1s，结果进程内缓存 TTL 3s，缓存窗口内重复探测不新增 DB/Redis 访问）；DB 或 Redis 任一不可达 → 503（`codes.CodeServiceUnavailable`），响应/日志不泄漏数据库地址、Redis 信息或错误堆栈。schema 就绪由启动 bootstrap 保证（`serve` 仅在 `checkSchemaReady` 通过后监听），不逐次探测。
+- `/health` 经 Nginx 公开透传（最小探活响应）；`/ready` 当前仅作未来 K8s readinessProbe 目标，Compose 的 app/nginx healthcheck 仍用 `/health`（Compose 无 Service 摘流机制，用 `/ready` 作 healthcheck 会放大 DB/Redis 抖动为 unhealthy + `restart` 误触发）。
 - Prometheus 抓取目标为 `app:8000`（不经 `host.docker.internal`、不经 Nginx）；`/metrics` 仅在 `FLASH_SALE_METRICS_ENABLED=true`（`flash_sale.metrics.enabled`）时暴露，抓取内容与开关语义不变；Nginx 公共入口对 `/metrics` 返回 404，不转发。
 
 ## 7. Nginx 反向代理模型（统一入口）
@@ -79,15 +84,22 @@ Nginx 是面向外部的唯一 HTTP 入口，职责为纯反向代理（无 Lua/
 - INV-005（监控指标语义不变）：指标开关开启时 Prometheus `app` 目标 UP、`/metrics` 含 `flashsale_*`；关闭时不暴露。
 - INV-006（统一入口不绕过）：外部只能经 Nginx 访问 Go API，app 不对外暴露端口，直连原 8000 端口不可达。
 - INV-007（客户端 IP 防伪造）：经 Nginx 的登录/刷新，后端会话记录的客户端 IP 为 Nginx 真实对端 IP，伪造转发头不生效。
+- INV-008（非 root 运行）：容器主进程有效 UID 非 0；`/app/storage/banners` 非 root 可写、轮播图占位图 seed 成功。
+- INV-009（liveness 独立）：`/health` 判定不依赖 DB/Redis，进程存活即 200。
+- INV-010（readiness 摘流）：`/ready` 在 DB 或 Redis 不可达时返回 503，响应/日志不泄漏凭据、路径、堆栈。
+- INV-011（readiness 探测负载）：`/ready` 探测带超时 + 结果缓存，缓存窗口内重复调用不新增 DB/Redis 探测。
+- INV-012（优雅停机一致性）：停机不产生半成品；消费事务被打断整体回滚、请求保持 `queued`，重启后不重复下单。
 
 ## 9. 一致性模型与失败语义
 
-- **成功**：`docker compose up` 后 app 容器 healthy、`/health` ok、关键业务 API 正常；仅代表「schema 已就绪」，不代表「刚执行过 migration」。
+- **成功**：`docker compose up` 后 app 容器 healthy、`/health` 200、`/ready` 200、关键业务 API 正常；`/health` 200 代表进程存活，`/ready` 200 代表 DB/Redis 当前可达（受缓存窗口内可能延迟反映恢复），不代表「刚执行过 migration」。
 - **MySQL 未就绪**：`depends_on` 等待 + `waitForDependencies` 重试，超时非零退出，`restart` 重试。
 - **schema 未迁移**：entrypoint `migrate up` 执行；依赖未就绪致连接失败 → 非零退出重试；已迁移则幂等通过。
 - **dirty / 迁移确定性失败**：`migrate up` 非零退出 → 容器 crash-loop，日志明确，需人工 `migrate force <version>`（不自动 force、不自动回滚）。
 - **七牛凭据缺失 / 首次建号缺 `ADMIN_SUPER_PASSWORD`**：`serve` fail-fast 非零退出，日志指认字段名、不泄漏凭据值。
 - 部分完成：migration dirty 需人工 `force` 恢复。
+- **运行时依赖失效**：DB/Redis 不可达时 `/ready` 返回 503（fail-closed，不泄漏敏感信息），结果缓存 TTL 内不重复打库/打缓存，恢复后下一 TTL 窗口返回 200；`/health` 仍 200（liveness 不依赖依赖）。
+- **优雅停机**：SIGTERM/SIGINT 触发后 HTTP 停收新连接并 drain 在途请求（`server.gracefulTimeout`，超时强制退出），扫描器停止领取新任务、在途单事务回滚或完成；消费被打断 → 事务回滚 + 请求保持 `queued`，重启后重试/对账恢复，不产生半成品或重复下单。事实来源不变：MySQL 为业务权威、Redis 为派生缓存，无 MQ。
 
 ## 10. 安全与凭据边界
 
@@ -98,5 +110,5 @@ Nginx 是面向外部的唯一 HTTP 入口，职责为纯反向代理（无 Lua/
 ## 11. Deferred / 已知留白
 
 - Kubernetes/Ingress、HTTPS/TLS、多实例负载均衡（后续任务）。
-- readiness 独立端点（当前 `/health` 语义足够，单实例无摘流量需求）。
+- K8s 编排清单（Deployment/Pod/Probe/SecurityContext/HPA/Service/Ingress）：本次已落地容器运行能力（非 root、`/health` liveness、`/ready` readiness、优雅退出），但不产出 K8s 部署文件；`/ready` 将作为未来 readinessProbe 目标。
 - CNB DinD 环境的真实构建/卷/网络能力以集成验证（AC-013）为准。
