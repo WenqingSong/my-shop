@@ -2,8 +2,8 @@ schema_version: 3
 task_id: container-runtime-hardening-v1
 
 contract:
-  status: PENDING
-  target: ""
+  status: APPROVED
+  target: "8a6b5455ddd6e3c0d9b183fb10ed58f13ae0069d"
 
 resources:
   reservations: {}
