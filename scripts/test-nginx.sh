@@ -21,8 +21,6 @@ NGINX_CONF="${ROOT_DIR}/nginx/nginx.conf"
 NGINX_DOCKERFILE="${ROOT_DIR}/nginx/Dockerfile"
 COMPOSE_CFG="${ROOT_DIR}/docker-compose.yml"
 
-fail() { log_error "$*"; exit 1; }
-
 # 1) 配置文件存在。
 [[ -f "${NGINX_CONF}" ]] || fail "缺少 ${NGINX_CONF}"
 [[ -f "${NGINX_DOCKERFILE}" ]] || fail "缺少 ${NGINX_DOCKERFILE}"
@@ -95,9 +93,9 @@ grep -qF '127.0.0.1:${MYSQL_PORT:-3306}:3306' <<<"${compose_body}" || fail "mysq
 grep -qF '127.0.0.1:${REDIS_PORT:-6379}:6379' <<<"${compose_body}" || fail "redis 端口未回环绑定"
 
 # 10) docker compose 可解析（与 test-prometheus.sh / test-container.sh 一致）。
-# compose 已对 MYSQL_ROOT_PASSWORD / AUTH_JWT_SECRET 使用 ${VAR:?} 必填，语法校验时注入占位值（非真实凭据）。
-MYSQL_ROOT_PASSWORD=test-root AUTH_JWT_SECRET=0123456789abcdef0123456789abcdef \
-  docker_compose -f "${COMPOSE_CFG}" config -q || fail "docker compose config 校验失败"
+# compose 已对 MYSQL_ROOT_PASSWORD / AUTH_JWT_SECRET 使用 ${VAR:?} 必填，语法校验时经
+# lib.sh 的 docker_compose_placeholder 注入占位值（非真实凭据）。
+docker_compose_placeholder -f "${COMPOSE_CFG}" config -q || fail "docker compose config 校验失败"
 
 # 11) nginx -t 语法校验：复用「配置经 nginx/Dockerfile COPY 内置」的已构建镜像
 #     my-shop-nginx:local 直接运行 nginx -t，不使用单文件 bind mount——

@@ -14,15 +14,14 @@
 # 本脚本为纯静态断言，不依赖 Docker 可用；`make test` 已将其纳入统一测试入口。
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+LIB_SKIP_ENV=1
+source "${SCRIPT_DIR}/lib.sh"
 
 CONFIG_CFG="${ROOT_DIR}/manifest/config/config.yaml"
 DOCKERIGNORE="${ROOT_DIR}/.dockerignore"
 DOCKERFILE="${ROOT_DIR}/Dockerfile"
 ENTRYPOINT="${ROOT_DIR}/scripts/docker-entrypoint.sh"
 COMPOSE_CFG="${ROOT_DIR}/docker-compose.yml"
-
-fail() { printf '\033[31m[ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
 # 1) 凭据分离（INV-003）
@@ -113,10 +112,10 @@ fi
 
 # 可选：docker 可用时校验 compose 可解析（与 test-prometheus.sh 保持一致）。
 # 注意：compose 已对 MYSQL_ROOT_PASSWORD / AUTH_JWT_SECRET 使用 ${VAR:?} 必填（无内置默认回退），
-# 语法校验时注入占位值（非真实凭据）以通过必填拦截；缺失即失败由 ${VAR:?} 语义保证（AC-004）。
+# 语法校验时经 lib.sh 的 docker_compose_placeholder 注入占位值（非真实凭据）以通过必填拦截；
+# 缺失即失败由 ${VAR:?} 语义保证（AC-004）。
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-  MYSQL_ROOT_PASSWORD=test-root AUTH_JWT_SECRET=0123456789abcdef0123456789abcdef \
-    docker compose -f "${COMPOSE_CFG}" config -q || fail "docker compose config 校验失败"
+  docker_compose_placeholder -f "${COMPOSE_CFG}" config -q || fail "docker compose config 校验失败"
 fi
 
-printf '\033[32m[INFO]\033[0m 容器化配置静态断言通过（凭据分离 / 构建上下文 / 镜像 / 生命周期 / 编排）\n'
+log_info "容器化配置静态断言通过（凭据分离 / 构建上下文 / 镜像 / 生命周期 / 编排）"

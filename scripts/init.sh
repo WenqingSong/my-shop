@@ -34,43 +34,7 @@ _load_env_file "${ENV_FILE}"
 # ---------------------------------------------------------------------------
 # 缺项检测与必填提示（只提示、不改写 .env、不打印任何已填 Secret 值）
 # ---------------------------------------------------------------------------
-
-# 提取 .env / .env.example 中的键名（仅未注释的 `KEY=...` 行），每行一个。
-_env_keys() {
-  local file="$1" line key
-  [[ -f "${file}" ]] || return 0
-  while IFS= read -r line || [[ -n "${line}" ]]; do
-    line="${line%%#*}"                             # 去掉行内注释
-    line="${line#"${line%%[![:space:]]*}"}"        # 去掉前导空白
-    line="${line%"${line##*[![:space:]]}"}"        # 去掉尾部空白
-    [[ -z "${line}" ]] && continue
-    [[ "${line}" == *=* ]] || continue
-    key="${line%%=*}"
-    key="${key%"${key##*[![:space:]]}"}"
-    printf '%s\n' "${key}"
-  done < "${file}"
-}
-
-# 读取 .env 中某键的值（键不存在或空值均输出空串）。
-_env_value() {
-  local file="$1" target="$2" line key val
-  [[ -f "${file}" ]] || { printf ''; return 0; }
-  while IFS= read -r line || [[ -n "${line}" ]]; do
-    line="${line%%#*}"
-    line="${line#"${line%%[![:space:]]*}"}"
-    line="${line%"${line##*[![:space:]]}"}"
-    [[ -z "${line}" ]] && continue
-    [[ "${line}" == *=* ]] || continue
-    key="${line%%=*}"
-    key="${key%"${key##*[![:space:]]}"}"
-    if [[ "${key}" == "${target}" ]]; then
-      val="${line#*=}"
-      printf '%s\n' "${val}"
-      return 0
-    fi
-  done < "${file}"
-  printf ''
-}
+# .env 键名提取与取值统一复用 lib.sh 的 _env_keys / _env_value（.env 解析逻辑唯一来源）。
 
 # 必填配置清单（开发环境）：MySQL root 密码与 JWT secret 无内置默认回退（缺失即失败），
 # 加上七牛 4 项 required 与超级管理员初始密码。

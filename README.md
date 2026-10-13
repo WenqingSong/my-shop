@@ -118,15 +118,42 @@
 ### 推荐：两阶段初始化
 
 ```bash
-make init    # 第一阶段：启动 MySQL/Redis 容器并生成 .env（需已填 MYSQL_ROOT_PASSWORD；不要求七牛凭据、不启动后端）
-# 编辑 .env，填入 MySQL 密码、JWT 密钥、七牛配置与超管密码后：
+make init    # 第一阶段：准备 MySQL/Redis 容器与 .env（不要求七牛凭据、不启动后端）
+# 编辑 .env 填入 MySQL 密码、JWT 密钥、七牛配置与超管密码后：
 make up      # 第二阶段：构建并启动 nginx/app/MySQL/Redis/Prometheus 容器
 make health  # 校验全部容器健康
 ```
 
-`make up` 构建后端、Nginx 与 Prometheus 镜像并启动五个容器：app 容器 entrypoint 先执行幂等 migration（`migrate up`），再由 `serve` 校验七牛配置与超管创建条件并启动 HTTP 服务（缺失 fail-fast）。Nginx 为对外唯一 HTTP 入口，默认访问 `http://127.0.0.1:8080/health`（`NGINX_PORT` 可覆盖）；`make down` 停止并移除容器、保留数据卷。
+如需一键完成，可用 `make bootstrap`（等价于依次执行 `make init` + `make up`）。
 
-> 本地开发亦须显式提供凭据：`MYSQL_ROOT_PASSWORD` 与 `AUTH_JWT_SECRET` 为必填项（Compose 使用 `${VAR:?}` 语法，缺失即失败，无内置默认回退）。其中 `MYSQL_ROOT_PASSWORD` 需在首次执行 `make init` 前就已填入 `.env`（`init.sh` 会校验，缺失直接报错退出）。
+`make up` 会构建后端、Nginx 与 Prometheus 镜像并启动 nginx/app/MySQL/Redis/Prometheus 五个容器：app 容器 entrypoint 先执行幂等 migration（`migrate up`），再由 `serve` 校验七牛配置与超管创建条件并启动 HTTP 服务（缺失 fail-fast）。Nginx 为对外唯一 HTTP 入口，默认访问 `http://127.0.0.1:8080/health`（`NGINX_PORT` 可覆盖）；`make down` 停止并移除容器、保留数据卷；更多目标见 `make help`。
+
+### 生命周期命令
+
+统一用 `make` 管理项目生命周期，`make help` 可随时查看全部目标：
+
+| 命令 | 说明 |
+| --- | --- |
+| `make bootstrap` | 一键初始化：`make init` + `make up`（准备依赖容器与 `.env` → 构建并启动完整容器栈） |
+| `make init` | 第一阶段：准备 MySQL/Redis 容器与 `.env`（不要求七牛凭据、不启动后端） |
+| `make up` | 第二阶段：构建并启动完整容器栈（nginx/app/mysql/redis/prometheus） |
+| `make down` | 停止并移除容器（保留 MySQL/Redis/本地存储数据卷） |
+| `make restart` | 先停后启，恢复服务可用 |
+| `make status` | 查看 App / MySQL / Redis / Prometheus 运行状态 |
+| `make logs` | 查看应用与依赖容器日志 |
+| `make health` | 校验 App / MySQL / Redis / Prometheus 健康状态 |
+| `make test` | 统一测试入口：`go vet` + 单元测试 + 集成测试 + Registry 校验 + 容器化静态断言 |
+| `make test-race` | 执行 `go test -race`（进程内共享内存并发逻辑） |
+| `make test-storage` | 独立真实存储 E2E（需真实七牛凭据） |
+| `make build` | 本地静态编译 `bin/my-shop`（`CGO_ENABLED=0` / `-trimpath` / `-ldflags="-s -w"`，与 Dockerfile 一致） |
+| `make docker-build` | 构建发布镜像并打标签（短 SHA + `latest`，双标签同源） |
+| `make migrate-up` | 应用所有未执行 migration（`my-shop migrate up`） |
+| `make config-check` | 启动前统一预检：`qiniu check` + `admin check`（七牛与超管条件校验） |
+| `make clean` | 清理编译产物与临时文件（不删除源码与持久数据） |
+
+更细粒度的目标（`deps-start` / `docker-push` / `migrate-version` / `migrate-force` / `test-prometheus` / `test-container` / `test-nginx` / `test-lib`）见 `make help`。
+
+开发命令已全面容器化：应用与依赖统一经 Docker Compose 运行，杜绝宿主机与容器双启动；宿主机直接启动仅保留为调试手段（见下）。
 
 ### 宿主机手动启动（非容器化，仅调试用）
 
@@ -141,7 +168,9 @@ go run . migrate up
 go run . serve
 ```
 
-服务默认监听 `:8000`。健康检查：
+服务默认监听 `:8000`。
+
+### 访问健康检查接口
 
 ```bash
 curl http://127.0.0.1:8080/health   # liveness，返回 {"code":0,"message":"OK","data":{"status":"ok",...}}
@@ -231,22 +260,37 @@ curl http://127.0.0.1:8000/ready    # readiness，DB/Redis 不可达时返回 50
 - 敏感凭据（`MYSQL_ROOT_PASSWORD`、`AUTH_JWT_SECRET`、`ADMIN_SUPER_PASSWORD`、`QINIU_ACCESS_KEY`/`QINIU_SECRET_KEY` 等）**仅通过环境变量注入**：本地放 `.env`，CI/生产经平台 Secret 注入。`manifest/config/config.yaml` 中的敏感字段保持空值，镜像内亦不含凭据。
 - `docker-compose.yml` 对 `MYSQL_ROOT_PASSWORD`、`AUTH_JWT_SECRET` 使用 `${VAR:?}` 必填语法，缺失即启动失败，**无内置默认回退**。
 
+## 构建与运维命令（Makefile 统一入口）
+
+本地构建、镜像构建、数据库迁移与启动前预检通过统一 Makefile 目标完成（`make help` 可查看全部目标）：
+
+| 命令 | 说明 |
+| --- | --- |
+| `make build` | 本地静态编译到 `bin/my-shop`，统一参数 `CGO_ENABLED=0 -trimpath -ldflags="-s -w"`，与 `Dockerfile` 构建行为一致；`GOOS`/`GOARCH` 可覆盖（缺省为宿主机原生，保证 `migrate` 等命令可直接运行；需 Linux 部署产物用 `GOOS=linux make build`） |
+| `make docker-build` | 构建发布镜像并打标签（镜像名由 CNB 变量派生，短 SHA + `latest` 双标签同源） |
+| `make migrate-up` | 应用所有未执行 migration（`my-shop migrate up`，幂等 + `GET_LOCK` 串行） |
+| `make migrate-version` | 查看当前 migration 版本与 dirty 状态（只读） |
+| `make migrate-force` | 标记指定版本已应用（不执行 SQL，baseline 接管 / dirty 恢复）：`make migrate-force VERSION=<14位时间戳>` |
+| `make config-check` | 启动前统一预检 `qiniu check` + `admin check`（七牛 required 配置与 bucket 可用性、超管创建条件） |
+
+`make migrate-*` / `make config-check` 复用 `make build` 的统一产物 `bin/my-shop`，需依赖容器已就绪（`make init`）且 `.env` 已填 `MYSQL_ROOT_PASSWORD`；本地直连 MySQL 时 `DATABASE_DEFAULT_PASS` 会自动回退到该值（与 app 容器同一 root 凭据）。
+
 ## 构建与测试
 
 ```bash
-go build ./...     # 编译
-go vet ./...       # 静态检查
-go test -p 1 ./... # 测试包共享本地 MySQL/Redis，串行执行
+make test         # 统一测试入口：go vet + 单元测试 + 集成测试 + Registry 校验 + 容器化静态断言
+make build        # 本地静态编译 bin/my-shop（统一参数见上文）
 ```
 
-测试前应启动依赖并完成迁移；`make test` 运行 `vet`、串行测试，以及 Prometheus / 容器化配置静态断言（凭据分离、构建上下文、镜像与编排模型）。`make test-race` 运行竞态检测，`make test-storage` 走真实七牛直传 E2E（需真实凭据）。
+`make test` 依次执行 `go vet`、单元测试（无 MySQL/Redis）、集成测试（需 MySQL/Redis）、Registry 一致性校验与容器化静态断言（凭据分离、构建上下文、镜像与编排模型）。集成测试前需先就绪依赖（`make init` 或 `make deps-start` 启动 MySQL/Redis）；测试注入开发测试 MySQL 凭据（`DATABASE_DEFAULT_PASS=root`，仅供本地/CI 测试），不影响本地 `.env`。`make docker-build` 构建发布镜像并打短 SHA 与 `latest` 双标签（同源），镜像发布与回滚语义见 [`docs/design/deployment.md`](docs/design/deployment.md)。
 
 ## 指标与可观测性
 
-秒杀指标（`flashsale_*`）默认关闭；以 `FLASH_SALE_METRICS_ENABLED=true` 运行服务后，`GET /metrics` 以 Prometheus 文本格式暴露 QPS / 成功率 / 拒绝率 / p95 / p99（标签为低基数稳定枚举，不含用户/订单/活动 ID）。Prometheus 随 `make up` 一并启动（端口 `9090`，`PROMETHEUS_PORT` 可覆盖），抓取目标为 Compose DNS 名 `app:8000`，并加载 `prometheus/rules/flashsale_latency.yml` recording rules 固化下单接口 p95/p99。
+秒杀指标（`flashsale_*`）默认关闭；以 `FLASH_SALE_METRICS_ENABLED=true` 运行服务后，`GET /metrics` 以 Prometheus 文本格式暴露 QPS / 成功率 / 拒绝率 / p95 / p99（标签为低基数稳定枚举，不含用户/订单/活动 ID）。Prometheus 随 `make up` 一并启动（端口 `9090`，`PROMETHEUS_PORT` 可覆盖），抓取配置见 `prometheus/prometheus.yml`，抓取目标为 Compose DNS 名 `app:8000`（与 app 同处 Compose 网络，不再经宿主机 `host.docker.internal` 打通），并加载 `prometheus/rules/flashsale_latency.yml` recording rules 固化下单接口 p95/p99。
 
 ```bash
-FLASH_SALE_METRICS_ENABLED=true make up
+FLASH_SALE_METRICS_ENABLED=true make up   # 在 .env 设置该变量等价
+make health                       # 校验 Nginx / App / MySQL / Redis / Prometheus 全部健康
 curl http://127.0.0.1:9090/api/v1/targets   # 查看 my-shop 目标是否 UP
 ```
 
