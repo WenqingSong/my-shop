@@ -1,0 +1,28 @@
+schema_version: 3
+task_id: backend-config-hardening-v1
+
+contract:
+  status: APPROVED
+  target: "c29ddca5d44da8be4a7eb4f74a951aa703dbbd9e"
+
+resources:
+  reservations: {}
+
+review:
+  status: NOT_REQUESTED
+  target: ""
+
+owner:
+  status: PENDING
+  review_target: ""
+
+delivery:
+  status: NOT_RUN
+  review_target: ""
+  feature_head: ""
+  develop_base: ""
+
+blocked:
+  active: false
+  by: ""
+  reason: ""
