@@ -13,8 +13,8 @@ review:
   target: "41c12a7"
 
 owner:
-  status: PENDING
-  review_target: ""
+  status: ACCEPTED
+  review_target: "41c12a7"
 
 delivery:
   status: NOT_RUN
