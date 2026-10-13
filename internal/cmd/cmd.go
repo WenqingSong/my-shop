@@ -21,17 +21,18 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/storage"
 )
 
-// 命令结构：my-shop [serve|migrate <up|force|version>|qiniu <check>|admin <check>]。
+// 命令结构：my-shop [serve|migrate <up|force|version>|qiniu <check>|admin <check>|legacy-migrate <dry-run|import>]。
 // - 无参数或 `serve`：启动 HTTP 服务（schema 就绪检查 + seed + 路由）。
 // - `migrate up`：显式执行所有未应用 migration（serve 不自动执行）。
 // - `migrate force <version>`：标记版本已应用（baseline 接管 / dirty 恢复），不执行 SQL。
 // - `migrate version`：只读查看当前版本与 dirty 状态。
 // - `qiniu check`：校验七牛云 required 配置与指定 bucket 可用性（供 make up 启动前预检）。
 // - `admin check`：校验超级管理员创建条件（供 make up 启动前预检）。
+// - `legacy-migrate <dry-run|import>`：历史电商数据迁移（staging → 目标库）。
 var (
 	Main = gcmd.Command{
 		Name:  "my-shop",
-		Usage: "my-shop [serve|migrate <up|force|version>|qiniu <check>|admin <check>]",
+		Usage: "my-shop [serve|migrate <up|force|version>|qiniu <check>|admin <check>|legacy-migrate <dry-run|import>]",
 		Brief: "my-shop 应用（HTTP 服务与数据库迁移）",
 		Func: func(ctx context.Context, parser *gcmd.Parser) error {
 			// 无参数时默认启动 HTTP 服务，保持向后兼容。
@@ -140,6 +141,9 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 	registerMetricsRoute(ctx, s)
 
 	s.Group("/", func(root *ghttp.RouterGroup) {
+		// RequestID 注册于 Response 之前（外层）：统一读取/生成 Request ID、回写响应头，
+		// 并在请求结束时输出含 request_id 的结构化访问日志（与 Nginx 访问日志关联）。
+		root.Middleware(middleware.RequestID)
 		root.Middleware(middleware.Response)
 		root.Bind(health.NewV1())
 

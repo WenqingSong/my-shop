@@ -19,6 +19,13 @@ database:
     charset: "utf8"
     debug: false
 
+# 历史数据迁移 staging 库配置（隔离 schema，仅承载 shopping.sql 全量导入）。
+# 对应环境变量：LEGACY_STAGING_NAME。
+# staging 库与目标库（database.default.name）必须不同，否则迁移工具 fail-fast（AC-002）。
+legacy:
+  staging:
+    name: "my_shop_staging"
+
 # Redis 配置（以下均为开发默认值，可通过环境变量覆盖）
 # 对应环境变量：REDIS_DEFAULT_ADDRESS / DB / PASS
 redis:

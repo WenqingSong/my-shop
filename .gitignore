@@ -28,3 +28,7 @@ logs/
 .idea/
 .vscode/
 .Trash-0/
+
+# 历史数据原始 SQL（敏感数据，禁止跟踪；AC-001 归档路径）
+/shopping.sql
+/storage/private/legacy/
