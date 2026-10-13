@@ -23,6 +23,6 @@ delivery:
   develop_base: ""
 
 blocked:
-  active: false
-  by: ""
-  reason: ""
+  active: true
+  by: OwnerGate
+  reason: "delivery-start gate FAIL：Contract Approval 已失效。contract.md 在 41c12a7 被修改（键名 server.gracefulTimeout→server.graceful_timeout），但 contract.target=8a6b545 未重新绑定，违反 INV-2。需 Analyst 做 Contract Revision 并 Owner 重新批准。"
