@@ -35,7 +35,7 @@ APPROVED
    - 关键取舍：缓存 TTL 取 3s 且建议 ≥ 未来 K8s `periodSeconds`，权衡「故障摘流恢复时延」与「探测负载」。fail-closed 由 AC-004 直接规定，非可选。
 
 3. **优雅关闭协调（R3）**：在 `serve` 中引入 `signal.NotifyContext(context.Background(), SIGINT, SIGTERM)` 作为根 ctx，替换传给三个扫描器的 ctx（扫描器 ticker 循环已 `select <-ctx.Done()` 即退出，无需改循环结构）；保留 `s.Run()` 负责 HTTP drain（GoFrame 处理同一批信号）；`s.Run()` 返回后 `sync.WaitGroup.Wait()` 等扫描器收尾。
-   - 停机时序：信号 → HTTP 停收新连接并 drain（`server.gracefulTimeout`，建议显式配置为 10s）→ 扫描器 ctx 取消 → 在途单事务回滚（安全）或自然完成 → 进程退出。每个扫描操作的原子性已由各自单事务保证，取消不产生半成品。
+   - 停机时序：信号 → HTTP 停收新连接并 drain（`server.graceful_timeout`，建议显式配置为 10s）→ 扫描器 ctx 取消 → 在途单事务回滚（安全）或自然完成 → 进程退出。每个扫描操作的原子性已由各自单事务保证，取消不产生半成品。
    - 关键取舍：接受「在途事务以回滚为主」而非「等待在途完成」。因为消费/取消/对账均为单行独立事务且短，回滚后由重启重扫 + 既有幂等/重试/对账兜底恢复，与 AC-007「完成或安全回滚」、AC-008 完全相容；无需引入跨扫描器的复杂 drain 调度。
 
 4. **AC-008 验证为主 + 回归测试（R4）**：确认既有「事务回滚 + 请求保持 queued + 重试/死信 + 缓存对账」已覆盖优雅停机打断；新增一个测试：消费事务进行中取消 ctx → 断言事务回滚、请求仍 `queued`、重启消费恰好产生一条订单（不重复、不半成品）。复用 `consumeBeforeCommitHook` 或 ctx 取消注入。
@@ -52,11 +52,11 @@ APPROVED
 
 1. **非 root（D-001）**：Dockerfile 创建专用用户 `app:app`（`uid=10001`、`gid=10001`），`USER 10001:10001`；必要目录（`/app`、`/app/storage`）提前 `chown`。不使用 alpine `nobody`（避免不同基础镜像 UID/GID 行为差异），固定运行身份便于后续 K8s `SecurityContext` 对接。保证 `/app/storage/banners` 非 root 可写。
 2. **readiness（D-002）**：`/ready` 探测 MySQL Ping + Redis PING，探测超时 1s、结果进程内缓存 TTL 3s；任一失败 → HTTP 503（`codes.CodeServiceUnavailable`），响应/日志不得泄漏数据库地址、Redis 信息、内部错误堆栈。`/health` 保持 liveness 语义不变，不依赖 DB/Redis。
-3. **优雅关闭（D-003）**：`signal.NotifyContext(SIGINT, SIGTERM)` 作为后台消费者根 ctx；`server.gracefulTimeout=10s`；在途事务采用**回滚优先**模型（当前消费为单批次单事务 + 已有幂等 + `queued` 可恢复 + 重启可重新消费）。生命周期：SIGTERM → cancel ctx → worker 回滚/退出 → HTTP graceful drain → WaitGroup 收尾。禁止：强杀消费者导致半提交、修改订单状态机、引入新的 drain 调度系统。
+3. **优雅关闭（D-003）**：`signal.NotifyContext(SIGINT, SIGTERM)` 作为后台消费者根 ctx；`server.graceful_timeout=10s`；在途事务采用**回滚优先**模型（当前消费为单批次单事务 + 已有幂等 + `queued` 可恢复 + 重启可重新消费）。生命周期：SIGTERM → cancel ctx → worker 回滚/退出 → HTTP graceful drain → WaitGroup 收尾。禁止：强杀消费者导致半提交、修改订单状态机、引入新的 drain 调度系统。
 4. **Compose healthcheck（D-004）**：Compose 保持 `/health`（liveness）作 app/nginx 探针；`/ready` 仅作未来 K8s readinessProbe 目标，不修改 Compose 启动门控（Compose 无 Service 摘流机制，用 `/ready` 作 healthcheck 会放大 DB/Redis 抖动为 unhealthy + restart 误触发）。
 
 ### 实施范围
-- 包含：Dockerfile 非 root 运行、镜像目录权限修复、`/ready` endpoint、readiness 缓存与超时、SIGTERM 生命周期管理、后台消费者 ctx 接入、`gracefulTimeout` 配置、非 root 容器测试、消费取消回滚测试。
+- 包含：Dockerfile 非 root 运行、镜像目录权限修复、`/ready` endpoint、readiness 缓存与超时、SIGTERM 生命周期管理、后台消费者 ctx 接入、`graceful_timeout` 配置、非 root 容器测试、消费取消回滚测试。
 - 不包含：Kubernetes Deployment / Probe 配置 / SecurityContext YAML / HPA / Service/Ingress。
 
 ## Interfaces and Data
@@ -66,7 +66,7 @@ APPROVED
 - `IHealth` 接口新增 `Readiness(ctx) (*ReadinessRes, error)`；实现内使用 `g.DB()`/`g.Redis()` 探测（带超时 ctx）+ 进程内缓存。
 - `serve` 生命周期：新增信号根 ctx + `sync.WaitGroup`；三个扫描器 `start*Scanner(ctx, wg)` 签名接受可取消 ctx 与 wg。
 - 新增配置（`manifest/config/config.yaml` + 环境变量）：
-  - `server.gracefulTimeout`（HTTP drain 秒，建议 10，对应 `SERVER_GRACEFUL_TIMEOUT`）；
+  - `server.graceful_timeout`（HTTP drain 秒，建议 10，对应 `SERVER_GRACEFUL_TIMEOUT`）；
   - `readiness.probe_timeout`（探测超时秒，默认 1，`READINESS_PROBE_TIMEOUT`）；
   - `readiness.cache_ttl`（结果缓存秒，默认 3，`READINESS_CACHE_TTL`）。
 - `Dockerfile`：新增 `addgroup/adduser` + `USER 10001:10001` + `chown`。
@@ -86,7 +86,7 @@ APPROVED
 
 - 成功：`/ready` 200 代表「DB 与 Redis 当前可达（受缓存窗口内可能延迟反映恢复）」；不代表刚执行 migration。`/health` 200 代表进程存活。
 - MySQL/Redis 探测失败：fail-closed 503，结果缓存 TTL 内不重复打库/打缓存；恢复后在下一 TTL 窗口返回 200。
-- 信号触发：HTTP 停收新连接 → 在途请求 drain（`gracefulTimeout`）→ 扫描器 ctx 取消 → 在途单事务回滚或完成 → `wg.Wait()` → 进程退出。
+- 信号触发：HTTP 停收新连接 → 在途请求 drain（`graceful_timeout`）→ 扫描器 ctx 取消 → 在途单事务回滚或完成 → `wg.Wait()` → 进程退出。
 - 重复/乱序/重试/部分完成：由既有幂等约束（幂等键、`uk_flash_one_per_user`、`uk_flash_idempotency`、`FOR UPDATE SKIP LOCKED`、条件更新 + `RowsAffected`）与「请求保持 queued + 指数退避 + 死信 + 缓存对账」兜底；本次不引入新机制。
 - 事实来源不变：MySQL 为业务权威；Redis 为派生缓存；无 MQ。
 
@@ -117,6 +117,6 @@ APPROVED
 
 - D-001（非 root）：采用专用 `app` 用户 `uid=10001:gid=10001`，`USER 10001:10001`，必要目录提前 `chown`，`/app/storage/banners` 非 root 可写；不使用 alpine `nobody`。适用范围：`Dockerfile` 运行时用户与目录权限。
 - D-002（readiness 参数）：探测超时 1s、缓存 TTL 3s；`/ready` = MySQL Ping + Redis PING，任一失败返回 503 且不泄漏数据库地址/Redis 信息/错误堆栈；`/health` 保持 liveness。适用范围：`/ready` 判定与探测策略。
-- D-003（优雅关闭模型）：`gracefulTimeout=10s`，在途事务回滚优先；`signal.NotifyContext(SIGINT, SIGTERM)` 作后台消费者根 ctx；禁止强杀导致半提交、修改订单状态机、引入新 drain 调度系统。适用范围：`serve` 生命周期与扫描器 ctx 接线。
+- D-003（优雅关闭模型）：`graceful_timeout=10s`，在途事务回滚优先；`signal.NotifyContext(SIGINT, SIGTERM)` 作后台消费者根 ctx；禁止强杀导致半提交、修改订单状态机、引入新 drain 调度系统。适用范围：`serve` 生命周期与扫描器 ctx 接线。
 - D-004（Compose healthcheck）：Compose 保持 `/health`（liveness）作探针；`/ready` 仅作未来 K8s readinessProbe 目标，不改 Compose 启动门控。适用范围：`docker-compose.yml` 与 `docs/design/deployment.md`。
 - 总适用范围：上述决定仅约束 `container-runtime-hardening-v1` 的容器运行时/生命周期实现，不改变业务规则、公开业务 API、错误码语义或数据模型，不产出 K8s 编排清单。

@@ -47,7 +47,7 @@ Compose 服务（`docker-compose.yml`）：
 - 依赖未就绪：Compose `depends_on: condition: service_healthy` 先行等待，app 内 `waitForDependencies`（`STARTUP_DEPENDENCY_TIMEOUT`，默认 30s）再重试兜底。
 - 启动幂等不并发：重复 `up`、容器重启、并发启动，migration 不重复、超管/权限不重复（`schema_migrations` 追踪 + `GET_LOCK` + 唯一约束 1062 兜底）。
 
-停止生命周期（优雅关闭）：`serve` 以 `signal.NotifyContext(SIGINT, SIGTERM)` 为根 ctx 驱动三个后台扫描器（订单超时取消、秒杀对账、秒杀消费）。停机时序：SIGTERM/SIGINT → 取消根 ctx → 扫描器停止领取新任务、在途单事务回滚或完成 → HTTP 停收新连接并 drain 在途请求（`server.gracefulTimeout`，默认 10s）→ `sync.WaitGroup` 收尾后进程退出。消费事务被打断时整体回滚、请求保持 `queued`，重启后由重试/对账恢复，不产生半成品或重复下单。
+停止生命周期（优雅关闭）：`serve` 以 `signal.NotifyContext(SIGINT, SIGTERM)` 为根 ctx 驱动三个后台扫描器（订单超时取消、秒杀对账、秒杀消费）。停机时序：SIGTERM/SIGINT → 取消根 ctx → 扫描器停止领取新任务、在途单事务回滚或完成 → HTTP 停收新连接并 drain 在途请求（`server.graceful_timeout`，默认 10s）→ `sync.WaitGroup` 收尾后进程退出。消费事务被打断时整体回滚、请求保持 `queued`，重启后由重试/对账恢复，不产生半成品或重复下单。
 
 ## 5. 持久化
 
@@ -99,7 +99,7 @@ Nginx 是面向外部的唯一 HTTP 入口，职责为纯反向代理（无 Lua/
 - **七牛凭据缺失 / 首次建号缺 `ADMIN_SUPER_PASSWORD`**：`serve` fail-fast 非零退出，日志指认字段名、不泄漏凭据值。
 - 部分完成：migration dirty 需人工 `force` 恢复。
 - **运行时依赖失效**：DB/Redis 不可达时 `/ready` 返回 503（fail-closed，不泄漏敏感信息），结果缓存 TTL 内不重复打库/打缓存，恢复后下一 TTL 窗口返回 200；`/health` 仍 200（liveness 不依赖依赖）。
-- **优雅停机**：SIGTERM/SIGINT 触发后 HTTP 停收新连接并 drain 在途请求（`server.gracefulTimeout`，超时强制退出），扫描器停止领取新任务、在途单事务回滚或完成；消费被打断 → 事务回滚 + 请求保持 `queued`，重启后重试/对账恢复，不产生半成品或重复下单。事实来源不变：MySQL 为业务权威、Redis 为派生缓存，无 MQ。
+- **优雅停机**：SIGTERM/SIGINT 触发后 HTTP 停收新连接并 drain 在途请求（`server.graceful_timeout`，超时强制退出），扫描器停止领取新任务、在途单事务回滚或完成；消费被打断 → 事务回滚 + 请求保持 `queued`，重启后重试/对账恢复，不产生半成品或重复下单。事实来源不变：MySQL 为业务权威、Redis 为派生缓存，无 MQ。
 
 ## 10. 安全与凭据边界
 
