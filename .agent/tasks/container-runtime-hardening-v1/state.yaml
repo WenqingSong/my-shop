@@ -1,0 +1,28 @@
+schema_version: 3
+task_id: container-runtime-hardening-v1
+
+contract:
+  status: APPROVED
+  target: "41c12a74c306ee51062db5059d24bd8d237821f3"
+
+resources:
+  reservations: {}
+
+review:
+  status: CLEAN
+  target: "41c12a7"
+
+owner:
+  status: ACCEPTED
+  review_target: "41c12a7"
+
+delivery:
+  status: PASS
+  review_target: "41c12a7"
+  feature_head: "700ddf58ab19e6b7d67386a25607995140f752af"
+  develop_base: "7b3449fa3843110f19d57765326878c2dc68ddb5"
+
+blocked:
+  active: false
+  by: ""
+  reason: ""

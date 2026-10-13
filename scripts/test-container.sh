@@ -6,7 +6,9 @@
 #   3. 镜像模型（AC-001/AC-003）：Dockerfile 多阶段、含 tzdata 时区与 ca-certificates、
 #      打包 config.yaml、以 entrypoint 启动；
 #   4. 启动生命周期（AC-006/AC-007）：entrypoint 先 migrate up 再 exec serve（migrate 失败非零退出、不对外）；
-#   5. 编排模型（AC-004/AC-005/AC-010）：compose 具备 app 服务、app_storage 卷、
+#   5. 非 root 运行（AC-001/INV-008）：Dockerfile 含 USER 10001:10001 与 /app chown；
+#   6. runtime 层内容审计（AC-011/INV-003）：运行阶段不 COPY 源码 / .env，仅从 builder 复制编译产物；
+#   7. 编排模型（AC-004/AC-005/AC-010）：compose 具备 app 服务、app_storage 卷、
 #      /health 健康检查与 depends_on condition: service_healthy，且不残留 extra_hosts 宿主机映射。
 #
 # 本脚本为纯静态断言，不依赖 Docker 可用；`make test` 已将其纳入统一测试入口。
@@ -58,7 +60,24 @@ grep -qF 'manifest/config/config.yaml' "${DOCKERFILE}" || fail "Dockerfile 未 C
 grep -q 'CGO_ENABLED=0' "${DOCKERFILE}" || fail "Dockerfile 未使用 CGO_ENABLED=0 静态编译"
 
 # ---------------------------------------------------------------------------
-# 4) 启动生命周期（AC-006/AC-007）
+# 4) 非 root 运行（AC-001/INV-008）
+# ---------------------------------------------------------------------------
+grep -qE '^USER 10001:10001$' "${DOCKERFILE}" || fail "Dockerfile 未以非 root 用户运行（应含 USER 10001:10001）"
+grep -qE 'addgroup|adduser' "${DOCKERFILE}" || fail "Dockerfile 未创建专用运行用户（addgroup/adduser）"
+grep -q 'chown' "${DOCKERFILE}" || fail "Dockerfile 未将 /app 目录 chown 给运行用户（非 root 可写运行时目录）"
+
+# ---------------------------------------------------------------------------
+# 5) runtime 层内容审计（AC-011/INV-003）：不含源码 / .env / 构建工具链
+# ---------------------------------------------------------------------------
+# 运行阶段（最后一个 FROM 之后）只能从 builder 复制二进制与静态资源，不得 COPY 源码目录或 .env。
+runtime_body="$(awk '/^FROM /{n++} n>=2' "${DOCKERFILE}")"
+if grep -qE 'COPY[[:space:]]+\.( |$)|(^|[[:space:]])\.env([[:space:]]|$)' <<<"${runtime_body}"; then
+  fail "runtime 层不应 COPY 源码或 .env"
+fi
+grep -q 'COPY --from=builder /out/my-shop /app/my-shop' "${DOCKERFILE}" || fail "runtime 层应从 builder 复制编译产物，而非源码"
+
+# ---------------------------------------------------------------------------
+# 6) 启动生命周期（AC-006/AC-007）
 # ---------------------------------------------------------------------------
 [[ -f "${ENTRYPOINT}" ]] || fail "缺少 ${ENTRYPOINT}"
 grep -q 'migrate up' "${ENTRYPOINT}" || fail "entrypoint 未执行 migrate up"
@@ -70,7 +89,7 @@ if [[ -z "${migrate_line}" || -z "${serve_line}" || "${migrate_line}" -ge "${ser
 fi
 
 # ---------------------------------------------------------------------------
-# 5) 编排模型（AC-004/AC-005/AC-010）
+# 7) 编排模型（AC-004/AC-005/AC-010）
 # ---------------------------------------------------------------------------
 [[ -f "${COMPOSE_CFG}" ]] || fail "缺少 ${COMPOSE_CFG}"
 grep -q '^  app:' "${COMPOSE_CFG}" || fail "docker-compose.yml 缺少 app 服务"

@@ -10,6 +10,9 @@ import (
 type IHealth interface {
 	// Liveness returns the service liveness status.
 	Liveness(ctx context.Context) (*v1.LivenessRes, error)
+	// Readiness returns the service readiness status: it probes DB and Redis
+	// reachability with timeout and in-process result caching (fail-closed).
+	Readiness(ctx context.Context) (*v1.ReadinessRes, error)
 }
 
 var (

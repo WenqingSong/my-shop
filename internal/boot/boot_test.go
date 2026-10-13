@@ -7,6 +7,7 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/database/gredis"
+	"github.com/gogf/gf/v2/frame/g"
 )
 
 func TestCfgStringEnvOverride(t *testing.T) {
@@ -121,6 +122,21 @@ func TestHasDST(t *testing.T) {
 	}
 	if !hasDST(ny) {
 		t.Fatal("America/New_York 应判定为含 DST")
+	}
+}
+
+// TestApplyServerConfigGracefulTimeoutEnvOverride 覆盖 CLEAN-001：
+// 优雅关闭 drain 超时的环境变量名必须为 SERVER_GRACEFUL_TIMEOUT（配置键 server.graceful_timeout 蛇形命名，
+// FormatEnvKey 才能产出该名）。若键退回 camelCase（server.gracefulTimeout），环境变量名会变成
+// SERVER_GRACEFULTIMEOUT，此处的 SERVER_GRACEFUL_TIMEOUT 将被静默忽略、回落默认值 10，本测试失败。
+func TestApplyServerConfigGracefulTimeoutEnvOverride(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("SERVER_GRACEFUL_TIMEOUT", "42")
+
+	applyServerConfig(ctx)
+
+	if got := g.Server().GetGracefulTimeout(); got != 42 {
+		t.Fatalf("expected graceful timeout 42 from SERVER_GRACEFUL_TIMEOUT, got %d", got)
 	}
 }
 
