@@ -31,18 +31,18 @@
 | 20261001000006 | cart_items | db-migration | ACTIVE | 基线 |
 | 20261001000007 | orders | order-v1 | ACTIVE | orders + order_items |
 | 20261001000008 | refresh_tokens | iam-v4 | ACTIVE | IAM V4 refresh token 表（前台用户域） |
-| 20261001000009 | reviews | product-review-v1 | RESERVED | reviews 评价表 |
-| 20261001000010 | favorites | product-favorite-v1 | RESERVED | favorites 收藏表 |
-| 20261001000011 | flash_sale | flash-sale-v1 | RESERVED | flash_sale_activities + flash_sale_activity_skus + flash_sale_orders |
-| 20261001000012 | product_view_count | product-view-count-v1 | RESERVED | products.view_count 浏览量计数字段 |
-| 20261001000013 | product_likes | product-like-v1 | RESERVED | product_likes 点赞表 |
-| 20261001000014 | banners | banner-v1 | RESERVED | banners 轮播图表 |
-| 20261001000015 | flash_sale_order_requests | flash-sale-v3 | RESERVED | flash_sale_order_requests 异步下单请求表 |
-| 20261001000016 | recommend | recommendation-v1 | RESERVED | recommend_positions + recommend_items 推荐位两表 |
-| 20261001000017 | articles | article-cms-v1 | RESERVED | articles + article_likes + article_favorites 文章三表 |
-| 20261001000018 | flash_sale_request_audits | flash-sale-v4 | RESERVED | flash_sale_request_audits 秒杀请求人工修复审计表 |
-| 20261001000019 | user_status | iam-v5 | RESERVED | users 增 status/auth_epoch、refresh_tokens 增 auth_epoch、新增 user_status_audits 审计表 |
-| 20261001000020 | refund | order-refund-v1 | RESERVED | refund_requests + refund_audits 退款两表 |
-| 20261001000021 | coupon | coupon-v1 | RESERVED | coupon_templates + user_coupons 优惠券两表 |
-| 20261001000022 | order_coupon_amounts | coupon-v1 | RESERVED | orders 增 original_amount/discount_amount/user_coupon_id 三列 + 回填 |
-| 20261001000023 | legacy_id_map | legacy-data-migration | RESERVED | 目标库新增 legacy_id_map 旧 ID→新 ID 映射表 |
+| 20261001000009 | reviews | product-review-v1 | ACTIVE | reviews 评价表 |
+| 20261001000010 | favorites | product-favorite-v1 | ACTIVE | favorites 收藏表 |
+| 20261001000011 | flash_sale | flash-sale-v1 | ACTIVE | flash_sale_activities + flash_sale_activity_skus + flash_sale_orders |
+| 20261001000012 | product_view_count | product-view-count-v1 | ACTIVE | products.view_count 浏览量计数字段 |
+| 20261001000013 | product_likes | product-like-v1 | ACTIVE | product_likes 点赞表 |
+| 20261001000014 | banners | banner-v1 | ACTIVE | banners 轮播图表 |
+| 20261001000015 | flash_sale_order_requests | flash-sale-v3 | ACTIVE | flash_sale_order_requests 异步下单请求表 |
+| 20261001000016 | recommend | recommendation-v1 | ACTIVE | recommend_positions + recommend_items 推荐位两表 |
+| 20261001000017 | articles | article-cms-v1 | ACTIVE | articles + article_likes + article_favorites 文章三表 |
+| 20261001000018 | flash_sale_request_audits | flash-sale-v4 | ACTIVE | flash_sale_request_audits 秒杀请求人工修复审计表 |
+| 20261001000019 | user_status | iam-v5 | ACTIVE | users 增 status/auth_epoch、refresh_tokens 增 auth_epoch、新增 user_status_audits 审计表 |
+| 20261001000020 | refund | order-refund-v1 | ACTIVE | refund_requests + refund_audits 退款两表 |
+| 20261001000021 | coupon | coupon-v1 | ACTIVE | coupon_templates + user_coupons 优惠券两表 |
+| 20261001000022 | order_coupon_amounts | coupon-v1 | ACTIVE | orders 增 original_amount/discount_amount/user_coupon_id 三列 + 回填 |
+| 20261001000023 | legacy_id_map | legacy-data-migration | ACTIVE | 目标库新增 legacy_id_map 旧 ID→新 ID 映射表 |
