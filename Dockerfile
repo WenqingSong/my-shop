@@ -33,6 +33,10 @@ FROM alpine:3.20
 # ca-certificates 提供七牛云对象存储 HTTPS 调用所需的根证书。
 RUN apk add --no-cache tzdata ca-certificates
 
+# 创建专用非 root 运行用户 app:app（固定 uid=10001/gid=10001，便于未来 K8s SecurityContext 对接）。
+# 不使用 alpine nobody：不同基础镜像 UID/GID 行为差异，固定身份可预测。
+RUN addgroup -g 10001 app && adduser -D -u 10001 -G app app
+
 WORKDIR /app
 
 COPY --from=builder /out/my-shop /app/my-shop
@@ -42,7 +46,11 @@ COPY scripts/docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
 
 # 本地文件存储根目录挂载点（app_storage named volume）。
-RUN mkdir -p /app/storage
+# 提前 chown 给运行用户：named volume 首次挂载会继承镜像目录 owner，保证非 root 可写 /app/storage。
+RUN mkdir -p /app/storage && chown -R app:app /app
+
+# 非 root 运行：主进程有效 UID 非 0（容器运行时加固，K8s runAsNonRoot 可直接对接）。
+USER 10001:10001
 
 EXPOSE 8000
 

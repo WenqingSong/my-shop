@@ -1,30 +1,31 @@
 #!/usr/bin/env bash
-# 统一测试入口：先静态检查（go vet），再执行单元测试（go test），最后跑容器化静态断言。
+# 统一测试入口（make test）：完整质量门禁。
+# 依次执行：静态检查（go vet）→ lib.sh 加载语义校验 → 单元测试（无 DB）→ 集成测试（需 DB）→ 容器化静态断言。
 #
-# 环境隔离：本脚本刻意不 source lib.sh，因为 lib.sh 会加载 .env 并把真实凭据
-# （七牛 AK/SK、JWT secret、超管密码等）导出到环境变量，污染 go test 结果。
-# 测试在干净环境变量下运行，结果与本地 .env 无关。
-#
-# 凭据分离（Contract D5）：config.yaml 已清空 database.default.pass，测试代码不注入
-# MySQL 密码，故在此注入开发测试凭据 DATABASE_DEFAULT_PASS（默认 root，与 compose 一致），
-# 使各集成测试可连接由 make init / make up 提前就绪的 MySQL。AUTH_JWT_SECRET /
-# ADMIN_SUPER_PASSWORD 已由各测试自身 t.Setenv 注入，无需在此导出。
+# 环境隔离：LIB_SKIP_ENV=1 跳过 lib.sh 的 .env 加载，避免 .env 中真实凭据（七牛 AK/SK、
+# JWT secret、超管密码等）被导出到环境变量并污染 go test 结果；测试在干净环境变量下运行，
+# 结果与本地 .env 无关。单元/集成测试的凭据注入分别由 test-unit.sh / test-integration.sh 负责。
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-
-log_info() { printf '\033[32m[INFO]\033[0m %s\n' "$*"; }
-
-# 开发测试 MySQL 凭据（与 docker-compose.yml 的 ${MYSQL_ROOT_PASSWORD:-root} 一致，仅供本地/CI）。
-export DATABASE_DEFAULT_PASS="${DATABASE_DEFAULT_PASS:-root}"
+LIB_SKIP_ENV=1
+source "${SCRIPT_DIR}/lib.sh"
 
 log_info "go vet ./..."
 ( cd "${ROOT_DIR}" && go vet ./... )
 
-# 各测试包共享同一个 MySQL/Redis 实例（docker-compose），并会清理/写入 admins、roles、
-# permissions 等同一批表；跨包并行执行会产生数据竞争导致 flaky。因此用 -p 1 串行执行。
-log_info "go test -p 1 ./..."
-( cd "${ROOT_DIR}" && go test -p 1 ./... )
+log_info "校验 lib.sh 加载语义（空值不覆盖默认值等，AC-003 回归）..."
+"${SCRIPT_DIR}/test-lib.sh"
+
+log_info "单元测试（无 MySQL/Redis）..."
+"${SCRIPT_DIR}/test-unit.sh"
+
+log_info "集成测试（需 MySQL/Redis）..."
+"${SCRIPT_DIR}/test-integration.sh"
+
+# 全局资源 Registry 一致性校验（Migration 版本冲突 + 错误码域漂移），纯静态、无需 DB。
+# 检测到冲突/漂移即非零退出，使门禁阶段失败并阻止后续构建/发布。
+log_info "校验全局资源 Registry 一致性（migration version / 错误码域）..."
+"${SCRIPT_DIR}/check-registry.sh"
 
 log_info "校验 Prometheus 接入配置..."
 "${SCRIPT_DIR}/test-prometheus.sh"

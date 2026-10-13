@@ -32,9 +32,8 @@ const (
 	defaultDBHost    = "127.0.0.1"
 	defaultDBPort    = "3306"
 	defaultDBUser    = "root"
-	defaultDBPass    = "root"
 	defaultDBName    = "my_shop"
-	defaultDBCharset = "utf8"
+	defaultDBCharset = "utf8mb4"
 )
 
 // migrationDir 是内嵌文件系统中存放迁移文件的子目录。
@@ -94,7 +93,11 @@ func Force(ctx context.Context, version uint) error {
 func Status(ctx context.Context) (current uint, dirty bool, latest uint, err error) {
 	latest = latestVersion()
 
-	db, err := sql.Open("mysql", buildDSN(ctx))
+	dsn, err := buildDSN(ctx)
+	if err != nil {
+		return 0, false, latest, err
+	}
+	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return 0, false, latest, gerror.Wrap(err, "打开数据库连接")
 	}
@@ -120,7 +123,11 @@ func newMigrate(ctx context.Context) (*migrate.Migrate, error) {
 		return nil, gerror.Wrap(err, "初始化 migration source")
 	}
 
-	db, err := sql.Open("mysql", buildDSN(ctx))
+	dsn, err := buildDSN(ctx)
+	if err != nil {
+		return nil, err
+	}
+	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return nil, gerror.Wrap(err, "打开数据库连接")
 	}
@@ -146,10 +153,16 @@ func closeMigrate(m *migrate.Migrate) {
 
 // buildDSN 从 database.default.* 配置构造 MySQL DSN，启用 multiStatements 以支持
 // 单文件多语句迁移（baseline 为多语句单文件）。
-func buildDSN(ctx context.Context) string {
+// 密码无内置默认回退：缺失（config 空且无 DATABASE_DEFAULT_PASS）时 fail-fast，
+// 不回退 "root" 等默认密码（docs/design/migration.md §5）。
+func buildDSN(ctx context.Context) (string, error) {
+	pass := cfgString(ctx, "database.default.pass", "")
+	if pass == "" {
+		return "", gerror.New("未配置 database.default.pass（DATABASE_DEFAULT_PASS）：数据库密码无内置默认值，必须显式注入")
+	}
 	cfg := go_mysql.NewConfig()
 	cfg.User = cfgString(ctx, "database.default.user", defaultDBUser)
-	cfg.Passwd = cfgString(ctx, "database.default.pass", defaultDBPass)
+	cfg.Passwd = pass
 	cfg.Net = "tcp"
 	cfg.Addr = net.JoinHostPort(
 		cfgString(ctx, "database.default.host", defaultDBHost),
@@ -160,7 +173,7 @@ func buildDSN(ctx context.Context) string {
 		"charset": cfgString(ctx, "database.default.charset", defaultDBCharset),
 	}
 	cfg.MultiStatements = true
-	return cfg.FormatDSN()
+	return cfg.FormatDSN(), nil
 }
 
 // latestVersion 返回内嵌迁移文件的最高版本号（按数字升序取最大值）。

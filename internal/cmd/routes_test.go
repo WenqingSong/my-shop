@@ -81,6 +81,7 @@ func TestRouteTable(t *testing.T) {
 		"GET /qiniu/upload/token",
 		// 健康检查。
 		"GET /health",
+		"GET /ready",
 		// 后台公开接口。
 		"POST /admin/login",
 		"POST /admin/logout",

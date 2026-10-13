@@ -214,7 +214,7 @@ func (s *sFlashSale) runGate(ctx context.Context, activityID, skuID, userID int6
 		time.Now().Unix(), hash, flashSaleGraceTTL,
 	)
 	if err != nil {
-		return "", fmt.Errorf("执行秒杀闸门 Lua: %w", err)
+		return "", codes.Wrap(codes.CodeInternalError, fmt.Errorf("执行秒杀闸门 Lua: %w", err))
 	}
 	return gateResult(v.String()), nil
 }
@@ -250,10 +250,10 @@ func (s *sFlashSale) syncActivityCache(ctx context.Context, activityID int64) er
 		flashSaleFieldStart:  strconv.FormatInt(a.StartTs, 10),
 		flashSaleFieldEnd:    strconv.FormatInt(a.EndTs, 10),
 	}); err != nil {
-		return fmt.Errorf("预热活动元数据: %w", err)
+		return codes.Wrap(codes.CodeInternalError, fmt.Errorf("预热活动元数据: %w", err))
 	}
 	if _, err := g.Redis().Expire(ctx, flashSaleActivityKey(activityID), ttl); err != nil {
-		return fmt.Errorf("设置活动 TTL: %w", err)
+		return codes.Wrap(codes.CodeInternalError, fmt.Errorf("设置活动 TTL: %w", err))
 	}
 	for _, b := range skus {
 		remaining := b.TotalStock - b.Sold - inflight[b.SkuId]
@@ -261,19 +261,19 @@ func (s *sFlashSale) syncActivityCache(ctx context.Context, activityID int64) er
 			remaining = 0
 		}
 		if err := g.Redis().SetEX(ctx, flashSaleStockKey(activityID, b.SkuId), strconv.FormatInt(remaining, 10), ttl); err != nil {
-			return fmt.Errorf("预热库存: %w", err)
+			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("预热库存: %w", err))
 		}
 		// 排队软上限计数收敛为权威值（MySQL COUNT(status=queued)），幂等 SET + 活动 TTL。
 		if err := s.convergeQueueCount(ctx, activityID, b.SkuId, inflight[b.SkuId], ttl); err != nil {
-			return fmt.Errorf("收敛排队计数: %w", err)
+			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("收敛排队计数: %w", err))
 		}
 	}
 	if _, err := g.Redis().Del(ctx, flashSaleNullKey(activityID)); err != nil {
-		return fmt.Errorf("清除空值标记: %w", err)
+		return codes.Wrap(codes.CodeInternalError, fmt.Errorf("清除空值标记: %w", err))
 	}
 	for _, b := range skus {
 		if _, err := g.Redis().Del(ctx, flashSaleSoldoutKey(activityID, b.SkuId)); err != nil {
-			return fmt.Errorf("清除售罄标记: %w", err)
+			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("清除售罄标记: %w", err))
 		}
 	}
 	return nil
@@ -286,7 +286,7 @@ func (s *sFlashSale) invalidateActivityCache(ctx context.Context, activityID int
 		keys = append(keys, flashSaleStockKey(activityID, b.SkuId), flashSaleSoldoutKey(activityID, b.SkuId))
 	}
 	if _, err := g.Redis().Del(ctx, keys...); err != nil {
-		return fmt.Errorf("失效活动缓存: %w", err)
+		return codes.Wrap(codes.CodeInternalError, fmt.Errorf("失效活动缓存: %w", err))
 	}
 	return s.setNullMarker(ctx, activityID)
 }
@@ -294,7 +294,7 @@ func (s *sFlashSale) invalidateActivityCache(ctx context.Context, activityID int
 // setNullMarker 写入空值/负缓存标记（短 TTL），使不存在/下架/未预热活动快速失败。
 func (s *sFlashSale) setNullMarker(ctx context.Context, activityID int64) error {
 	if err := g.Redis().SetEX(ctx, flashSaleNullKey(activityID), "1", flashSaleNullTTL); err != nil {
-		return fmt.Errorf("写入空值标记: %w", err)
+		return codes.Wrap(codes.CodeInternalError, fmt.Errorf("写入空值标记: %w", err))
 	}
 	return nil
 }
@@ -455,11 +455,11 @@ func (s *sFlashSale) convergeEndedActivity(ctx context.Context, activityID int64
 		}
 		totalInflight += inflight[b.SkuId]
 		if err := g.Redis().SetEX(ctx, flashSaleStockKey(activityID, b.SkuId), strconv.FormatInt(remaining, 10), ttl); err != nil {
-			return fmt.Errorf("收敛结束活动库存: %w", err)
+			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("收敛结束活动库存: %w", err))
 		}
 		// 排队软上限计数收敛为权威值（MySQL COUNT(status=queued)），幂等 SET + 活动 TTL。
 		if err := s.convergeQueueCount(ctx, activityID, b.SkuId, inflight[b.SkuId], ttl); err != nil {
-			return fmt.Errorf("收敛结束活动排队计数: %w", err)
+			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("收敛结束活动排队计数: %w", err))
 		}
 	}
 	if totalInflight > 0 {
@@ -468,15 +468,15 @@ func (s *sFlashSale) convergeEndedActivity(ctx context.Context, activityID int64
 	}
 	// 在途归零：失效活动元数据与售罄标记（stock 保留 remaining 可观测），置空值标记使后续抢购快速失败。
 	if _, err := g.Redis().Del(ctx, flashSaleActivityKey(activityID)); err != nil {
-		return fmt.Errorf("失效结束活动元数据: %w", err)
+		return codes.Wrap(codes.CodeInternalError, fmt.Errorf("失效结束活动元数据: %w", err))
 	}
 	for _, b := range skus {
 		if _, err := g.Redis().Del(ctx, flashSaleSoldoutKey(activityID, b.SkuId)); err != nil {
-			return fmt.Errorf("失效结束活动售罄标记: %w", err)
+			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("失效结束活动售罄标记: %w", err))
 		}
 		// 活动结束、在途归零：清理排队软上限计数 key（幂等 DEL）。
 		if _, err := g.Redis().Del(ctx, flashSaleQueuedKey(activityID, b.SkuId)); err != nil {
-			return fmt.Errorf("失效结束活动排队计数: %w", err)
+			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("失效结束活动排队计数: %w", err))
 		}
 	}
 	return s.setNullMarker(ctx, activityID)

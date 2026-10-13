@@ -1,0 +1,28 @@
+schema_version: 3
+task_id: backend-config-hardening-v1
+
+contract:
+  status: APPROVED
+  target: "c29ddca5d44da8be4a7eb4f74a951aa703dbbd9e"
+
+resources:
+  reservations: {}
+
+review:
+  status: CLEAN
+  target: "cee1e6aed2a7527998d662cd69347892ec9fa4c1"
+
+owner:
+  status: ACCEPTED
+  review_target: "cee1e6aed2a7527998d662cd69347892ec9fa4c1"
+
+delivery:
+  status: PASS
+  review_target: "cee1e6aed2a7527998d662cd69347892ec9fa4c1"
+  feature_head: "197ae728245345a3c1bf29e8e99581d78468df48"
+  develop_base: "359b8cceeebefe7b490f783c1ad5a118afd6e31e"
+
+blocked:
+  active: false
+  by: ""
+  reason: ""

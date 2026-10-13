@@ -4,7 +4,8 @@ services:
     container_name: my-shop-mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      # MySQL root 密码无内置默认回退：必须经 .env / 环境变量显式注入，缺失即启动失败。
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD required}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-my_shop}
     ports:
       # 回环绑定：仅宿主机本机可连（开发与压测 verify() 经 127.0.0.1 连库），不对外暴露。
@@ -52,16 +53,16 @@ services:
       DATABASE_DEFAULT_HOST: "mysql"
       DATABASE_DEFAULT_PORT: "3306"
       DATABASE_DEFAULT_USER: "root"
-      # MySQL 密码与 mysql 服务共用同一 root 凭据；开发默认 root（仅 CNB DinD 开发环境）。
-      DATABASE_DEFAULT_PASS: "${MYSQL_ROOT_PASSWORD:-root}"
+      # MySQL 密码与 mysql 服务共用同一 root 凭据，无内置默认回退：缺失即启动失败。
+      DATABASE_DEFAULT_PASS: "${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD required}"
       DATABASE_DEFAULT_NAME: "${MYSQL_DATABASE:-my_shop}"
-      DATABASE_DEFAULT_CHARSET: "utf8"
+      DATABASE_DEFAULT_CHARSET: "utf8mb4"
       DATABASE_DEFAULT_DEBUG: "false"
       REDIS_DEFAULT_ADDRESS: "redis:6379"
       REDIS_DEFAULT_DB: "0"
       REDIS_DEFAULT_PASS: ""
-      # JWT 密钥：敏感凭据，dev 默认值仅供 CNB DinD 开发环境；生产必须经平台 Secret 注入。
-      AUTH_JWT_SECRET: "${AUTH_JWT_SECRET:-c49d0fea5cf77761ca6d0275545b9501686dd40cc313b072c36972d6128fc403}"
+      # JWT 密钥：敏感凭据，无内置默认回退，必须经 .env / 环境变量 / 平台 Secret 注入，缺失即启动失败。
+      AUTH_JWT_SECRET: "${AUTH_JWT_SECRET:?AUTH_JWT_SECRET required}"
       ADMIN_SUPER_USERNAME: "${ADMIN_SUPER_USERNAME:-admin}"
       # 超管初始密码：无默认值，首次建号必须注入，否则 serve fail-fast（已有超管则幂等跳过）。
       ADMIN_SUPER_PASSWORD: "${ADMIN_SUPER_PASSWORD:-}"

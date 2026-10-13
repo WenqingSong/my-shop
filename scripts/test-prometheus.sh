@@ -20,8 +20,6 @@ COMPOSE_CFG="${ROOT_DIR}/docker-compose.yml"
 RULES_DIR="${ROOT_DIR}/prometheus/rules"
 RULES_FILE="${RULES_DIR}/flashsale_latency.yml"
 
-fail() { log_error "$*"; exit 1; }
-
 # 1) 抓取配置文件存在。
 [[ -f "${PROM_CFG}" ]] || fail "缺少抓取配置 ${PROM_CFG}"
 
@@ -32,14 +30,16 @@ grep -q '"app:8000"' "${PROM_CFG}" || fail "prometheus.yml 缺少目标 app:8000
 grep -Eq '^  scrape_interval: [0-9]+s$' "${PROM_CFG}" || fail "prometheus.yml 缺少合理的 scrape_interval"
 
 # 3) compose 配置可解析（语法/合并校验）。
-docker_compose -f "${COMPOSE_CFG}" config -q || fail "docker compose config 校验失败"
+# compose 已对 MYSQL_ROOT_PASSWORD / AUTH_JWT_SECRET 使用 ${VAR:?} 必填，语法校验时经
+# lib.sh 的 docker_compose_placeholder 注入占位值（非真实凭据）。
+docker_compose_placeholder -f "${COMPOSE_CFG}" config -q || fail "docker compose config 校验失败"
 
 # 4) prometheus 服务具备镜像内置配置与 healthcheck，且不再经宿主机网络打通。
 #    说明：rootless/嵌套容器环境 bind mount 单文件会退化为目录挂载（文件变目录），
 #    故抓取配置与 rules 改为 prometheus/Dockerfile COPY 内置（镜像层天然只读）。
 #    抓取目标为 app:8000（Compose DNS），app 与 prometheus 同处 Compose 网络，
 #    不应再出现 host.docker.internal / host-gateway 宿主机映射。
-compose_out="$(docker_compose -f "${COMPOSE_CFG}" config)"
+compose_out="$(docker_compose_placeholder -f "${COMPOSE_CFG}" config)"
 if grep -q 'host.docker.internal' <<<"${compose_out}"; then
   fail "compose 仍残留 host.docker.internal 宿主机映射（应经 Compose DNS 名 app 通信）"
 fi

@@ -10,12 +10,12 @@ SHELL := /bin/bash
 
 SCRIPTS := scripts
 
-.PHONY: help bootstrap init up down restart status logs health test test-prometheus test-container test-nginx test-lib test-storage clean
+.PHONY: help bootstrap init up down restart status logs health deps-start test test-unit test-integration test-race test-prometheus test-container test-nginx test-lib test-storage clean build docker-build docker-push migrate-up migrate-version migrate-force config-check
 
 help: ## 列出所有可用目标及说明
 	@bash $(SCRIPTS)/help.sh
 
-bootstrap: ## 一键初始化开发环境（依赖容器就绪、构建并启动应用）
+bootstrap: ## 一键初始化开发环境（init + up：先准备依赖容器与 .env，再构建并启动应用）
 	@bash $(SCRIPTS)/bootstrap.sh
 
 init: ## 两阶段初始化第一阶段：准备依赖容器与 .env（不要求七牛凭据、不启动后端）
@@ -39,8 +39,20 @@ logs: ## 查看应用与依赖容器日志
 health: ## 校验 App / MySQL / Redis / Prometheus 健康状态
 	@bash $(SCRIPTS)/health.sh
 
-test: ## 执行 go vet 与 go test（隔离 .env，不受本地环境变量污染）
+deps-start: ## 启动测试依赖（仅 MySQL/Redis）并等待健康（CI 与本地测试共用）
+	@bash $(SCRIPTS)/deps-start.sh
+
+test: ## 完整质量门禁：go vet + 单元测试 + 集成测试 + Registry/容器化静态断言（隔离 .env）
 	@bash $(SCRIPTS)/test.sh
+
+test-unit: ## 仅运行不依赖 MySQL/Redis 的纯内存单元测试
+	@bash $(SCRIPTS)/test-unit.sh
+
+test-integration: ## 仅运行依赖 MySQL/Redis 的真实集成测试（需先 make deps-start 或 make init/up）
+	@bash $(SCRIPTS)/test-integration.sh
+
+test-race: ## 执行 go test -race（进程内共享内存并发逻辑，与 DB 集成测试隔离）
+	@bash $(SCRIPTS)/test-race.sh
 
 test-prometheus: ## 校验 Prometheus 抓取配置与 compose 服务定义
 	@bash $(SCRIPTS)/test-prometheus.sh
@@ -59,3 +71,24 @@ test-storage: ## 独立真实存储 E2E：签发→直传真实 PNG→校验 fin
 
 clean: ## 清理编译产物与临时文件（不删除源码与持久数据）
 	@bash $(SCRIPTS)/clean.sh
+
+build: ## 本地静态编译 bin/my-shop（CGO_ENABLED=0 / -trimpath / -ldflags="-s -w"，与 Dockerfile 一致）
+	@bash $(SCRIPTS)/build.sh
+
+docker-build: ## 构建发布镜像并打标签（短 SHA + latest，双标签同源）
+	@bash $(SCRIPTS)/docker-build.sh
+
+docker-push: ## 推送发布镜像（短 SHA + latest，任一失败即失败）
+	@bash $(SCRIPTS)/docker-push.sh
+
+migrate-up: ## 应用所有未执行 migration（my-shop migrate up）
+	@bash $(SCRIPTS)/migrate.sh up
+
+migrate-version: ## 查看当前 migration 版本与 dirty 状态（my-shop migrate version）
+	@bash $(SCRIPTS)/migrate.sh version
+
+migrate-force: ## 标记指定版本已应用：make migrate-force VERSION=<14位时间戳>
+	@bash $(SCRIPTS)/migrate.sh force $(VERSION)
+
+config-check: ## 统一预检：qiniu check + admin check（启动前七牛与超管条件校验）
+	@bash $(SCRIPTS)/config-check.sh

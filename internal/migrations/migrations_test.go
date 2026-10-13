@@ -41,7 +41,11 @@ var allTables = append(append([]string{}, businessTables...), "schema_migrations
 // openTestDB 打开测试数据库连接（复用 buildDSN，指向与配置一致的 MySQL）。
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("mysql", buildDSN(context.Background()))
+	dsn, err := buildDSN(context.Background())
+	if err != nil {
+		t.Fatalf("build dsn: %v", err)
+	}
+	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

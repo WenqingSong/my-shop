@@ -6,21 +6,22 @@
 #   3. 镜像模型（AC-001/AC-003）：Dockerfile 多阶段、含 tzdata 时区与 ca-certificates、
 #      打包 config.yaml、以 entrypoint 启动；
 #   4. 启动生命周期（AC-006/AC-007）：entrypoint 先 migrate up 再 exec serve（migrate 失败非零退出、不对外）；
-#   5. 编排模型（AC-004/AC-005/AC-010）：compose 具备 app 服务、app_storage 卷、
+#   5. 非 root 运行（AC-001/INV-008）：Dockerfile 含 USER 10001:10001 与 /app chown；
+#   6. runtime 层内容审计（AC-011/INV-003）：运行阶段不 COPY 源码 / .env，仅从 builder 复制编译产物；
+#   7. 编排模型（AC-004/AC-005/AC-010）：compose 具备 app 服务、app_storage 卷、
 #      /health 健康检查与 depends_on condition: service_healthy，且不残留 extra_hosts 宿主机映射。
 #
 # 本脚本为纯静态断言，不依赖 Docker 可用；`make test` 已将其纳入统一测试入口。
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+LIB_SKIP_ENV=1
+source "${SCRIPT_DIR}/lib.sh"
 
 CONFIG_CFG="${ROOT_DIR}/manifest/config/config.yaml"
 DOCKERIGNORE="${ROOT_DIR}/.dockerignore"
 DOCKERFILE="${ROOT_DIR}/Dockerfile"
 ENTRYPOINT="${ROOT_DIR}/scripts/docker-entrypoint.sh"
 COMPOSE_CFG="${ROOT_DIR}/docker-compose.yml"
-
-fail() { printf '\033[31m[ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
 # 1) 凭据分离（INV-003）
@@ -58,7 +59,24 @@ grep -qF 'manifest/config/config.yaml' "${DOCKERFILE}" || fail "Dockerfile 未 C
 grep -q 'CGO_ENABLED=0' "${DOCKERFILE}" || fail "Dockerfile 未使用 CGO_ENABLED=0 静态编译"
 
 # ---------------------------------------------------------------------------
-# 4) 启动生命周期（AC-006/AC-007）
+# 4) 非 root 运行（AC-001/INV-008）
+# ---------------------------------------------------------------------------
+grep -qE '^USER 10001:10001$' "${DOCKERFILE}" || fail "Dockerfile 未以非 root 用户运行（应含 USER 10001:10001）"
+grep -qE 'addgroup|adduser' "${DOCKERFILE}" || fail "Dockerfile 未创建专用运行用户（addgroup/adduser）"
+grep -q 'chown' "${DOCKERFILE}" || fail "Dockerfile 未将 /app 目录 chown 给运行用户（非 root 可写运行时目录）"
+
+# ---------------------------------------------------------------------------
+# 5) runtime 层内容审计（AC-011/INV-003）：不含源码 / .env / 构建工具链
+# ---------------------------------------------------------------------------
+# 运行阶段（最后一个 FROM 之后）只能从 builder 复制二进制与静态资源，不得 COPY 源码目录或 .env。
+runtime_body="$(awk '/^FROM /{n++} n>=2' "${DOCKERFILE}")"
+if grep -qE 'COPY[[:space:]]+\.( |$)|(^|[[:space:]])\.env([[:space:]]|$)' <<<"${runtime_body}"; then
+  fail "runtime 层不应 COPY 源码或 .env"
+fi
+grep -q 'COPY --from=builder /out/my-shop /app/my-shop' "${DOCKERFILE}" || fail "runtime 层应从 builder 复制编译产物，而非源码"
+
+# ---------------------------------------------------------------------------
+# 6) 启动生命周期（AC-006/AC-007）
 # ---------------------------------------------------------------------------
 [[ -f "${ENTRYPOINT}" ]] || fail "缺少 ${ENTRYPOINT}"
 grep -q 'migrate up' "${ENTRYPOINT}" || fail "entrypoint 未执行 migrate up"
@@ -70,7 +88,7 @@ if [[ -z "${migrate_line}" || -z "${serve_line}" || "${migrate_line}" -ge "${ser
 fi
 
 # ---------------------------------------------------------------------------
-# 5) 编排模型（AC-004/AC-005/AC-010）
+# 7) 编排模型（AC-004/AC-005/AC-010）
 # ---------------------------------------------------------------------------
 [[ -f "${COMPOSE_CFG}" ]] || fail "缺少 ${COMPOSE_CFG}"
 grep -q '^  app:' "${COMPOSE_CFG}" || fail "docker-compose.yml 缺少 app 服务"
@@ -83,10 +101,21 @@ compose_body="$(sed '/^[[:space:]]*#/d' "${COMPOSE_CFG}")"
 if grep -q 'host.docker.internal\|host-gateway\|extra_hosts' <<<"${compose_body}"; then
   fail "docker-compose.yml 仍残留 host.docker.internal/host-gateway/extra_hosts 宿主机映射（应经 Compose DNS 通信）"
 fi
-
-# 可选：docker 可用时校验 compose 可解析（与 test-prometheus.sh 保持一致）。
-if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-  docker compose -f "${COMPOSE_CFG}" config -q || fail "docker compose config 校验失败"
+# 无内置默认回退（AC-004）：MYSQL_ROOT_PASSWORD / AUTH_JWT_SECRET 不得再出现 ${VAR:-固定默认值} 形式回退。
+if grep -Eq 'MYSQL_ROOT_PASSWORD:-|AUTH_JWT_SECRET:-' <<<"${compose_body}"; then
+  fail "docker-compose.yml 仍残留 MYSQL_ROOT_PASSWORD / AUTH_JWT_SECRET 的 \${VAR:-default} 回退（应使用 \${VAR:?} 必填）"
+fi
+# 连接字符集统一 utf8mb4（AC-006）：compose 中 DATABASE_DEFAULT_CHARSET 必须为 utf8mb4。
+if grep -Eq 'DATABASE_DEFAULT_CHARSET:[[:space:]]*"utf8"([^m]|$)' <<<"${compose_body}"; then
+  fail "docker-compose.yml 的 DATABASE_DEFAULT_CHARSET 仍为 utf8（应统一为 utf8mb4）"
 fi
 
-printf '\033[32m[INFO]\033[0m 容器化配置静态断言通过（凭据分离 / 构建上下文 / 镜像 / 生命周期 / 编排）\n'
+# 可选：docker 可用时校验 compose 可解析（与 test-prometheus.sh 保持一致）。
+# 注意：compose 已对 MYSQL_ROOT_PASSWORD / AUTH_JWT_SECRET 使用 ${VAR:?} 必填（无内置默认回退），
+# 语法校验时经 lib.sh 的 docker_compose_placeholder 注入占位值（非真实凭据）以通过必填拦截；
+# 缺失即失败由 ${VAR:?} 语义保证（AC-004）。
+if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+  docker_compose_placeholder -f "${COMPOSE_CFG}" config -q || fail "docker compose config 校验失败"
+fi
+
+log_info "容器化配置静态断言通过（凭据分离 / 构建上下文 / 镜像 / 生命周期 / 编排）"

@@ -28,41 +28,62 @@ main:
       services:
         - docker
       docker:
-        image: golang:1.24
+        image: golang:1.23
         volumes:
           - /go/pkg/mod
           - /root/.cache/go-build
       stages:
         - name: start-dependencies
           script: |
-            docker compose up -d
-            bash -c 'source scripts/lib.sh; wait_for_deps'
+            set -euo pipefail
+            # 环境准备：注入 CI 隔离测试变量（占位值，仅用于测试依赖启动，不用于生产）。
+            # MYSQL_ROOT_PASSWORD=root 与 scripts/test.sh 注入的 DATABASE_DEFAULT_PASS=root
+            # 一致，使集成测试以 root/root 连接 MySQL；AUTH_JWT_SECRET 仅为满足生产
+            # compose 的 ${AUTH_JWT_SECRET:?} 插值，各测试自身经 t.Setenv 注入密钥。
+            export MYSQL_ROOT_PASSWORD=root
+            export AUTH_JWT_SECRET=ci-placeholder-jwt-secret-not-for-prod
+            make deps-start
 
         - name: test
           script: make test
+
+        - name: race
+          script: make test-race
 
   push:
     - name: main-ci
       services:
         - docker
       docker:
-        image: golang:1.24
+        image: golang:1.23
         volumes:
           - /go/pkg/mod
           - /root/.cache/go-build
       stages:
         - name: start-dependencies
           script: |
-            docker compose up -d
-            bash -c 'source scripts/lib.sh; wait_for_deps'
+            set -euo pipefail
+            # 环境准备：与 pr-check 相同；仅用于测试依赖启动，不用于生产。
+            export MYSQL_ROOT_PASSWORD=root
+            export AUTH_JWT_SECRET=ci-placeholder-jwt-secret-not-for-prod
+            make deps-start
 
         - name: test
           script: make test
 
+        - name: race
+          script: make test-race
+
         - name: build
-          script: |
-            mkdir -p bin
-            go build -trimpath -o bin/my-shop .
+          script: make build
+
+        - name: docker-build
+          # 构建发布镜像并打标签（短 SHA + latest），工程逻辑收敛到 scripts/docker-build.sh。
+          script: make docker-build
+
+        - name: docker-push
+          # 推送发布镜像（短 SHA + latest），工程逻辑收敛到 scripts/docker-push.sh。
+          script: make docker-push
 
         - name: sync-to-github-mirror
           # 只有原仓库（framework-station/my-shop）才执行 GitHub 镜像同步。

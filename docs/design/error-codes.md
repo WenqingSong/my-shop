@@ -35,12 +35,23 @@
 | 6 | 6000-6999 | inventory | ACTIVE |
 | 7 | 7000-7999 | address | ACTIVE |
 | 8 | 8000-8999 | cart | ACTIVE |
+| 9 | 9000-9999 | order | ACTIVE |
+| 10 | 10000-10999 | product-review-v1 | ACTIVE |
+| 11 | 11000-11999 | product-favorite-v1 | ACTIVE |
+| 12 | 12000-12999 | flash-sale-v1 | ACTIVE |
+| 13 | 13000-13999 | product-like-v1 | ACTIVE |
+| 14 | 14000-14999 | banner-v1 | ACTIVE |
+| 15 | 15000-15999 | recommendation-v1 | ACTIVE |
+| 16 | 16000-16999 | article-cms-v1 | ACTIVE |
+| 17 | 17000-17999 | object-storage-upload | ACTIVE |
+| 18 | 18000-18999 | order-refund-v1 | ACTIVE |
+| 19 | 19000-19999 | coupon-v1 | ACTIVE |
 
 （本表为长期设计快照；分配状态与未来 RESERVED/ACTIVE/RELEASED 变化以 `.agent/registry/error-codes.md` 为唯一权威。）
 
 ## 5. 已落地错误码兼容性
 
-- 已落地业务错误码（`1000-8999`）是稳定 API 契约，被 Backend 测试、Frontend、API Consumer、各模块 Design、Registry 依赖为稳定事实。
+- 已落地业务错误码（`1000-19999`）是稳定 API 契约，被 Backend 测试、Frontend、API Consumer、各模块 Design、Registry 依赖为稳定事实。
 - 扩展规则不 renumber、不改变任何已落地错误码的取值、HTTP 状态映射、message 与业务含义；`7001`/`8001` 等取值在扩展前后保持原值。
 
 ## 6. immutable / reuse 政策
@@ -58,4 +69,4 @@
 
 各业务模块 Design 继续在自身「错误码域」章节记录本模块具体错误码与归属声明，不在此重复，也不要求各模块重复全局 Namespace 规则：
 
-- `iam.md`、`category.md`、`product.md`、`sku.md`、`inventory.md`、`address.md`、`cart.md`、`rbac.md`。
+- `iam.md`、`rbac.md`、`category.md`、`product.md`、`sku.md`、`inventory.md`、`address.md`、`cart.md`、`order.md`、`review.md`、`favorite.md`、`like.md`、`flash-sale.md`、`banner.md`、`recommendation.md`、`article.md`、`storage.md`、`refund.md`、`coupon.md`。

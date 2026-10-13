@@ -1,197 +1,198 @@
 # SurgeCart（my-shop）
 
-基于 [GoFrame v2](https://goframe.org) 的电商项目，以普通订单和秒杀为两条核心交易链路。仓库已包含前台用户与后台管理员身份、商品目录、购物车、库存、普通订单、秒杀，以及评价、收藏等扩展功能。当前重点是验证业务正确性与故障恢复；性能和部署结论以今后发布的实测记录为准。
+## 项目介绍
 
-> **第一次阅读？**先看[5 分钟项目导览](docs/project-overview.md)。长期设计见 [`docs/design/`](docs/design/)；`.agent/tasks/` 保留各任务的历史决策与验收证据。
+SurgeCart（`my-shop`）是基于 [GoFrame v2](https://goframe.org) 的电商后端项目。项目以**普通订单**与**秒杀**为两条核心交易链路，覆盖前台用户与后台管理员的身份与权限体系，以及商品、购物车、库存、优惠券、退款、运营内容等电商核心域。
 
-## 当前实现
+项目侧重业务正确性、一致性与故障恢复：MySQL 始终是交易事实的最终来源，关键写路径以事务、条件更新与状态机保证不超卖、不重复补偿；并以 Docker Compose 提供可复现的本地运行与测试环境。
 
-| 领域 | 仓库中的实现 |
+## 核心能力
+
+### 秒杀系统
+
+按「先正确、后加速」逐代演进，每一步保留五个业务不变量（库存不为负、成功订单数 ≤ 初始库存、一人一单、失败不建单、重复请求不重复扣库存）：
+
+- **Redis + Lua 准入闸门**：活动与库存预热到 Redis，Lua 原子完成资格校验、一人一单/幂等去重与库存预扣，无效请求在 Redis 层快速失败。
+- **MySQL 出队表异步落单**：下单拆成「入队快速响应 + 后台消费落单」两阶段，队列以 MySQL 出队表（`FOR UPDATE SKIP LOCKED`）实现。
+- **故障恢复**：幂等补偿、崩溃重投、死信修复与 append-only 审计。
+- **容量保护与可观测**：用户级/活动级限流、排队软上限、熔断降级、Prometheus 指标与逐级压测脚本。
+
+Redis 预扣仅作准入闸门，MySQL 始终是订单与已售数量的最终事实来源。详见 [秒杀设计](docs/design/flash-sale.md)。
+
+### 订单一致性
+
+- **服务端定价与快照**：下单时重读 SKU 价格，保存商品、价格、地址快照；下单后改价不影响既有订单。
+- **幂等去重**：客户端幂等键 + 数据库唯一约束，同键同内容返回既有订单、不重复扣库存。
+- **单事务落单**：创建订单 = 同一 MySQL 事务「订单 + 订单项 + 条件扣库存（+ 券预占）」，任一步失败整体回滚。
+- **状态机 + 条件更新**：待支付 → 已支付 → 已发货 → 已收货 → 已完成，以及取消、退款两条出口；条件更新 + `RowsAffected` 保证不超卖、取消/退款只补偿一次库存。
+- **超时取消**：后台扫描器逐单原子取消，多实例并发靠条件状态更新串行化。
+
+详见 [订单设计](docs/design/order.md)、[库存设计](docs/design/inventory.md)。
+
+### IAM / RBAC
+
+- **有状态会话**：JWT（HS256）作为访问凭证，Redis 会话承载存在性与撤销标记；验签后还必须通过会话有效性校验。
+- **Refresh Token 轮换**：支持轮换、Token Family 血缘与重放检测，refresh token 仅以哈希落库。
+- **双身份域隔离**：前台用户与后台管理员使用独立凭据表、独立会话前缀与独立认证中间件。
+- **细粒度 RBAC**：角色/权限/绑定四表模型，权限粒度 `资源:动作`（如 `order:ship`、`coupon:create`）；后台写接口经「认证 + 授权」双层中间件保护，逐接口校验权限。
+
+详见 [IAM 设计](docs/design/iam.md)、[RBAC 设计](docs/design/rbac.md)。
+
+### 工程化体系
+
+- **容器化交付**：Docker 多阶段构建（`CGO_ENABLED=0` 静态编译）与非 root 运行，Compose 一键编排 nginx/app/MySQL/Redis/Prometheus。
+- **版本化迁移**：golang-migrate 管理 schema，`migrate up` 幂等 + `GET_LOCK` 串行，schema 未就绪不对外。
+- **凭据分离**：敏感值仅经环境变量注入（`${VAR:?}` 必填，无内置默认回退），`config.yaml` 敏感字段保持空值。
+- **健康检查与优雅停机**：`/health` liveness、`/ready` readiness（DB/Redis 不可达返回 503），`SIGTERM` 取消根 ctx 后 drain 在途请求再退出。
+- **可观测与 CI/CD**：Prometheus 秒杀指标与 recording rules；CNB 流水线覆盖测试、竞态检测、构建与镜像发布。
+
+详见 [部署设计](docs/design/deployment.md)、[数据库迁移](docs/design/migration.md)。
+
+### 业务能力一览
+
+| 领域 | 能力 |
 | --- | --- |
-| 身份与权限 | 前台用户 JWT + Redis 会话、Refresh Token 轮换与会话撤销；后台管理员独立身份域与 RBAC |
-| 商品与购买 | 分类、商品、SKU、库存、地址、购物车；普通订单含服务端定价、快照、幂等、状态机与超时取消 |
-| 秒杀 | V1 MySQL 正确性约束、V2 Redis + Lua 准入、V3 MySQL 出队表异步落单、V4 故障恢复与审计、V5 限流/排队上限/熔断/指标与逐级压测脚本 |
-| 扩展能力 | 评价、收藏、点赞、轮播图、推荐位、文章等 |
-| 工程基础 | 版本化数据库迁移、Docker Compose 开发依赖、测试与 Makefile 生命周期脚本 |
+| 商品与库存 | 商品 SPU、分类树、SKU 独立售价、条件扣减防负库存与库存流水 |
+| 购物车与订单 | 购物车/直接购买下单、服务端定价与快照、幂等去重、订单状态机、超时取消、发货与收货 |
+| 优惠券 | 平台固定金额满减券：领取唯一、总量不超发、下单预占、核销、取消释放 |
+| 退款 | 已支付未发货整单退款：申请/审核/执行状态机与 append-only 审计 |
+| 运营能力 | 运营数据大屏、轮播图、推荐位、文章、评价、收藏、点赞 |
 
-**能力边界：**普通订单使用 Mock 支付，没有接入真实支付机构；秒杀订单下单即成交，不走普通订单的支付/取消流程。秒杀异步队列使用 MySQL 出队表，没有引入外部 MQ。V5 已提供延迟分位数指标和逐级压测脚本，但仓库尚未发布包含环境、负载和结果的稳定性能报告；Kubernetes 部署也未形成已验证结论，因此这里不声明生产容量或 P99 目标已达成。
+## 技术栈
 
-## 阅读路径
+| 层 | 技术选型 |
+| --- | --- |
+| 后端框架 | GoFrame v2 |
+| 语言 | Go 1.23（纯 Go 依赖，支持 `CGO_ENABLED=0` 静态编译） |
+| 数据库 | MySQL 8.0（业务数据与 migration 状态权威来源） |
+| 缓存 | Redis 7（登录会话、秒杀准入闸门与派生缓存） |
+| 对象存储 | 七牛云（上传直传凭证签发） |
+| 反向代理 | Nginx（对外唯一 HTTP 入口） |
+| 监控 | Prometheus（秒杀指标） |
+| 容器化 | Docker + Docker Compose |
+| CI/CD | CNB 流水线（`.cnb.yml`） |
 
-1. [项目导览](docs/project-overview.md)：了解系统和两条核心交易链路。
-2. [普通订单设计](docs/design/order.md)与[秒杀设计](docs/design/flash-sale.md)：深入状态机、业务不变量、一致性与故障处理。
-3. [订单核心逻辑验证](.agent/tasks/order-v1/core-logic.md)、[秒杀 V4 核心逻辑验证](.agent/tasks/flash-sale-v4/core-logic.md)与[秒杀 V5 交付证据](.agent/tasks/flash-sale-v5/delivery.md)：查看设计如何对应实现和测试。
-4. [Agent Workflow 设计](docs/design/agent-workflow.md)：了解项目如何记录决策、审查实现并保留验收证据。
-
-`docs/design/*` 记录持续维护的项目级设计；`.agent/tasks/*` 是按任务留存的历史资料。阅读历史任务时，应以当前代码和长期设计核对现状。
-
-## 环境要求
-
-- Go 1.23+（开发使用 1.24）
-- Docker 及 Docker Compose
-- 使用 `make` 脚本时需要 Bash；Windows 可在 WSL 中运行
-
-## 目录结构
+## 系统架构
 
 ```
-.
-├── api/                    # 对外 API 定义（请求/响应结构体）
-├── internal/
-│   ├── boot/               # 配置、依赖与数据库 schema 就绪检查
-│   ├── cmd/                # 命令行入口、路由与后台扫描器
-│   ├── controller/         # 控制器
-│   ├── logic/              # 业务逻辑实现
-│   ├── service/            # 服务接口定义
-│   └── migrations/         # 版本化数据库迁移
-├── docs/design/            # 项目级长期设计
-├── .agent/tasks/           # 任务决策与验收证据
-├── manifest/config/        # 配置文件
-│   └── config.yaml
-├── prometheus/             # Prometheus 抓取配置（测试环境）
-│   └── prometheus.yml
-├── Dockerfile              # 后端多阶段构建（镜像内不含敏感凭据）
-├── .dockerignore           # 构建上下文排除（.env / bin / tmp / storage 等）
-├── docker-compose.yml      # nginx / app / MySQL / Redis / Prometheus 统一编排
-├── Makefile                # 本地生命周期入口
-├── main.go                 # 程序入口
-└── go.mod
+                客户端（浏览器 / App / 压测脚本）
+                          │ HTTPS
+                          ▼
+              ┌─────────────────────────┐
+              │  Nginx（唯一对外 HTTP 入口）│
+              └─────────────────────────┘
+                          │ :8000（Compose 内网）
+                          ▼
+        ┌──────────────────────────────────────┐
+        │              API 层                   │
+        │  Middleware：RequestID / 认证授权 /    │
+        │  响应包装；Controller：HTTP 适配       │
+        └──────────────────────────────────────┘
+                          │
+                          ▼
+        ┌──────────────────────────────────────┐
+        │             业务模块                  │
+        │  Service（接口）→ Logic（规则/流程）    │
+        │  IAM / 订单 / 库存 / 优惠券 / 退款 /   │
+        │  秒杀 / CMS / 对象存储                │
+        └──────────────────────────────────────┘
+                          │
+              ┌───────────┴───────────┐
+              ▼                       ▼
+        ┌──────────┐          ┌──────────────┐
+        │  MySQL   │          │    Redis      │
+        │ 交易/身份 │          │ 会话/秒杀准入  │
+        │ 权威事实  │          │ 派生缓存      │
+        └──────────┘          └──────────────┘
 ```
+
+分层遵循 GoFrame 惯例：Controller 不直接操作数据库，DAO 不承载业务规则，Logic 不处理 HTTP 细节；`context.Context` 沿 Controller → Logic → 数据访问/外部依赖传播。MySQL 是订单、库存、已售数量的权威事实来源，Redis 为派生缓存；订单超时取消、秒杀消费与对账由应用内后台扫描器执行。
+
+详见 [系统架构设计](docs/design/architecture.md)。
 
 ## 快速开始
 
-### 推荐：两阶段初始化
-
-推荐使用两阶段初始化，先准备依赖容器与 `.env`，再启动后端容器（详见下文「本地开发两阶段初始化与真实 E2E」）：
+### 两阶段初始化
 
 ```bash
-make init    # 第一阶段：准备 MySQL/Redis 容器与 .env（不要求七牛凭据、不启动后端）
-# 编辑 .env 填入七牛配置与超管密码后：
-make up      # 第二阶段：构建并启动 nginx/app/MySQL/Redis/Prometheus 容器
+make init    # 第一阶段：准备 MySQL/Redis 容器与 .env（不启动后端）
+# 编辑 .env 填入 MySQL 密码、JWT 密钥、七牛配置与超管密码后：
+make up      # 第二阶段：构建并启动 nginx/app/MySQL/Redis/Prometheus
+make health  # 校验全部容器健康
 ```
 
-`make up` 会构建后端与 Nginx 镜像并启动 nginx/app/MySQL/Redis/Prometheus 五个容器：app 容器 entrypoint 先执行幂等 migration（`migrate up`），再由 `serve` 校验七牛配置与超管创建条件并启动 HTTP 服务（缺失 fail-fast）。Nginx 为对外唯一 HTTP 入口，默认访问 `http://127.0.0.1:8080/health`（`NGINX_PORT` 可覆盖）；`make down` 停止并移除容器、保留数据卷；更多目标见 `make help`。
+也可用 `make bootstrap` 一键完成（等价于 `make init` + `make up`）。
 
-### 其他启动方式
+`make up` 会构建后端、Nginx 与 Prometheus 镜像并启动五个容器；app 容器 entrypoint 先执行幂等 migration，再启动 HTTP 服务（缺失关键配置 fail-fast）。Nginx 为对外唯一 HTTP 入口，默认 `http://127.0.0.1:8080/health`（`NGINX_PORT` 可覆盖）；`make down` 停止并移除容器、保留数据卷。
 
-`make bootstrap` 一键初始化开发环境：与 `make up` 相同，构建并启动完整容器栈（首次启动需提供本地超级管理员密码）：
+### 健康检查
 
 ```bash
-export ADMIN_SUPER_PASSWORD='your-local-password'
-make bootstrap
-make health
+curl http://127.0.0.1:8080/health   # liveness：进程存活即 200
 ```
 
-也可以在宿主机手动启动（非容器化，仅调试用）。`serve` 只检查 schema、不自动建表，因此必须先执行迁移；config.yaml 已清空敏感默认值，需显式注入 JWT 密钥与 MySQL 密码：
+## 配置说明
+
+默认配置位于 [`manifest/config/config.yaml`](manifest/config/config.yaml)，可通过环境变量覆盖：配置键中的 `.` 替换为 `_` 并转为大写（如 `database.default.pass` → `DATABASE_DEFAULT_PASS`）。
+
+敏感凭据（JWT 密钥、MySQL/Redis 密码、七牛 AK/SK/bucket/domain、超管密码）**仅经环境变量注入**：本地放 `.env`（由 `make init` 从 `.env.example` 生成，`.env` 已被 Git 忽略），`config.yaml` 中敏感字段保持空值，`docker-compose.yml` 对必填项使用 `${VAR:?}` 语法，缺失即启动失败，无内置默认回退。
+
+| 环境变量 | 说明 |
+| --- | --- |
+| `AUTH_JWT_SECRET` | JWT 签名密钥（HS256，必填，≥32 字节） |
+| `DATABASE_DEFAULT_PASS` | MySQL 密码（必填） |
+| `ADMIN_SUPER_PASSWORD` | 超级管理员初始密码（仅超管不存在时创建需要） |
+| `QINIU_ACCESS_KEY` / `QINIU_SECRET_KEY` / `QINIU_BUCKET` / `QINIU_DOMAIN` | 七牛直传凭证与访问域名（启动 required dependency） |
+
+完整配置项与默认值见 `manifest/config/config.yaml`。
+
+## 开发命令
+
+统一用 `make` 管理项目生命周期，`make help` 可查看全部目标。
+
+| 命令 | 说明 |
+| --- | --- |
+| `make bootstrap` | 一键初始化：`make init` + `make up` |
+| `make init` | 准备 MySQL/Redis 容器与 `.env` |
+| `make up` | 构建并启动完整容器栈 |
+| `make down` | 停止并移除容器（保留数据卷） |
+| `make restart` | 先停后启 |
+| `make status` | 查看各服务运行状态 |
+| `make logs` | 查看容器日志 |
+| `make health` | 校验各服务健康状态 |
+| `make build` | 本地静态编译 `bin/my-shop`（与 Dockerfile 一致） |
+| `make docker-build` | 构建发布镜像并打标签（短 SHA + `latest`） |
+| `make migrate-up` | 应用所有未执行 migration |
+| `make migrate-version` | 查看当前 migration 版本与 dirty 状态 |
+| `make migrate-force` | 标记指定版本已应用（`make migrate-force VERSION=<14位时间戳>`） |
+| `make config-check` | 启动前预检（七牛与超管条件校验） |
+| `make clean` | 清理编译产物与临时文件 |
+
+其余目标（`deps-start` / `docker-push` / `test-unit` / `test-integration` / `test-prometheus` / `test-container` / `test-nginx` / `test-lib`）见 `make help`。
+
+## 测试
 
 ```bash
-docker compose up -d mysql redis
-export DATABASE_DEFAULT_PASS='root'      # 与 compose 的 MYSQL_ROOT_PASSWORD 开发默认值一致
-export AUTH_JWT_SECRET='<你的随机 ≥32 字节密钥>'
-export ADMIN_SUPER_PASSWORD='your-local-password'
-go run . migrate up
-go run . serve
+make test       # 统一入口：go vet + 单元测试 + 集成测试 + Registry 校验 + 容器化静态断言
+make test-race  # 竞态检测
 ```
 
-首次拉起容器后，应等 MySQL 和 Redis 就绪再执行迁移。服务默认监听 `:8000`。
+`make test` 依次执行 `go vet`、单元测试（不依赖 MySQL/Redis）、集成测试（需 MySQL/Redis）、Registry 一致性校验与容器化静态断言。集成测试前需先就绪依赖（`make init` 或 `make deps-start`）。独立目标：`test-unit` / `test-integration` / `test-race` / `test-prometheus` / `test-container` / `test-nginx` / `test-lib` / `test-storage`（真实存储 E2E，需七牛凭据）。
 
-### 访问健康检查接口
+## 部署
 
-```bash
-curl http://127.0.0.1:8080/health
-# {"code":0,"message":"OK","data":{"status":"ok","time":"..."}}
-```
+- **本地/单机**：Docker Compose 编排 nginx/app/MySQL/Redis/Prometheus 五个服务，Nginx 为对外唯一入口，app 仅暴露 Compose 内网端口；`make init` + `make up` 两阶段拉起。
+- **镜像发布**：`make docker-build` / `make docker-push` 构建并推送短 SHA + `latest` 双标签镜像（同源同 digest）。
+- **CI/CD**：CNB 流水线（`.cnb.yml`）按「测试 → 竞态检测 → 构建 → 镜像发布」顺序执行，任一阶段失败即中断；`latest` 仅指向测试全绿的构建。
 
-## 容器化部署模型
+详细部署模型、启动生命周期、持久化与健康检查语义见 [部署设计](docs/design/deployment.md)。
 
-后端与 MySQL、Redis、Prometheus、Nginx 统一经 Docker Compose 编排：Nginx 为对外唯一 HTTP 入口（`${NGINX_PORT:-8080}`），`app:8000` 为稳定的 Compose 内部入口（供 Nginx 与 Prometheus 使用，不映射宿主机端口）。要点：
+## 文档索引
 
-- **镜像与配置**：`Dockerfile` 多阶段构建（Go 1.23 静态编译 → alpine + tzdata + ca-certificates），镜像内仅打包「已清空敏感默认值」的 `manifest/config/config.yaml`；`.dockerignore` 排除 `.env`/`bin`/`tmp`/`storage`，凭据不进镜像与构建上下文。
-- **启动生命周期**：容器 entrypoint 先 `my-shop migrate up`（幂等 + golang-migrate `GET_LOCK` 串行），再 `exec my-shop serve`（复用 serve 自身的依赖重试、schema 就绪只读校验、七牛校验与超管/权限 seed fail-fast）。
-- **依赖编排与健康检查**：`app` 通过 `depends_on: condition: service_healthy` 依赖 mysql/redis，`/health`（liveness）作为健康检查——serve 仅在全部启动校验通过后才监听端口，可响应即代表依赖与 schema 已就绪。
-- **持久化**：`mysql_data`/`redis_data`/`app_storage`（→ `/app/storage`）三个 named volume，`down`（保留卷）+ `up` 重建不丢数据。
-- **Prometheus**：抓取目标为 `app:8000`（Compose DNS），`/metrics` 仅在 `FLASH_SALE_METRICS_ENABLED=true` 时暴露。
+- [项目导览](docs/project-overview.md)：系统与两条核心交易链路的总览。
+- [系统架构](docs/design/architecture.md)：分层结构、模块边界、核心业务流程与基础设施。
+- 核心设计：[订单](docs/design/order.md)、[秒杀](docs/design/flash-sale.md)、[商品](docs/design/product.md)、[分类](docs/design/category.md)、[SKU](docs/design/sku.md)、[库存](docs/design/inventory.md)、[购物车](docs/design/cart.md)、[IAM](docs/design/iam.md)、[RBAC](docs/design/rbac.md)、[优惠券](docs/design/coupon.md)、[退款](docs/design/refund.md)。
+- 部署与运维：[容器化部署](docs/design/deployment.md)、[数据库迁移](docs/design/migration.md)、[错误码](docs/design/error-codes.md)、[对象存储](docs/design/storage.md)。
+- 运营与内容：[轮播图](docs/design/banner.md)、[文章](docs/design/article.md)、[推荐位](docs/design/recommendation.md)、[评价](docs/design/review.md)、[数据大屏](docs/design/dashboard.md)、[收藏](docs/design/favorite.md)、[点赞](docs/design/like.md)。
 
-详细的服务编排、启动生命周期、持久化、网络与健康检查语义见 [`docs/design/deployment.md`](docs/design/deployment.md)。
-
-## 构建与测试
-
-```bash
-go build ./...     # 编译
-go vet ./...       # 静态检查
-go test -p 1 ./... # 测试包共享本地 MySQL/Redis，串行执行
-```
-
-测试前应启动依赖并完成迁移；`make test` 运行 `vet`、串行测试，以及 Prometheus / 容器化配置静态断言（凭据分离、构建上下文、镜像与编排模型）。测试会注入开发测试 MySQL 凭据（`DATABASE_DEFAULT_PASS=root`，与 compose 一致），不影响本地 `.env`。
-
-## 配置与环境变量覆盖
-
-默认配置位于 `manifest/config/config.yaml`，可通过环境变量覆盖关键配置项（无需修改代码或配置文件）。
-
-环境变量命名规则：配置键中的 `.` 替换为 `_` 并转为大写。
-
-| 配置键 | 环境变量 | 默认值 | 说明 |
-| --- | --- | --- | --- |
-| `server.address` | `SERVER_ADDRESS` | `:8000` | HTTP 监听地址 |
-| `database.default.type` | `DATABASE_DEFAULT_TYPE` | `mysql` | 数据库类型 |
-| `database.default.host` | `DATABASE_DEFAULT_HOST` | `127.0.0.1` | MySQL 主机 |
-| `database.default.port` | `DATABASE_DEFAULT_PORT` | `3306` | MySQL 端口 |
-| `database.default.user` | `DATABASE_DEFAULT_USER` | `root` | MySQL 账号 |
-| `database.default.pass` | `DATABASE_DEFAULT_PASS` | 空 | MySQL 密码（敏感，仅环境变量注入；容器经 compose 注入 `${MYSQL_ROOT_PASSWORD:-root}` 开发默认值） |
-| `database.default.name` | `DATABASE_DEFAULT_NAME` | `my_shop` | 数据库名 |
-| `redis.default.address` | `REDIS_DEFAULT_ADDRESS` | `127.0.0.1:6379` | Redis 地址 |
-| `redis.default.db` | `REDIS_DEFAULT_DB` | `0` | Redis DB |
-| `redis.default.pass` | `REDIS_DEFAULT_PASS` | 空 | Redis 密码 |
-| `auth.jwt.secret` | `AUTH_JWT_SECRET` | 空 | JWT 签名密钥（HS256，敏感，≥32 字节；容器经 compose 注入 dev 默认值，生产必须替换） |
-| `admin.super.username` | `ADMIN_SUPER_USERNAME` | `admin` | 超级管理员用户名 |
-| `admin.super.password` | `ADMIN_SUPER_PASSWORD` | 空 | 超级管理员初始密码（仅超管不存在时创建需要，生产必须注入） |
-| `startup.dependency.timeout` | `STARTUP_DEPENDENCY_TIMEOUT` | `30` | 启动依赖校验超时（秒） |
-| `qiniu.access_key` | `QINIU_ACCESS_KEY` | 空 | 七牛 AccessKey（凭据标识，仅环境变量注入） |
-| `qiniu.secret_key` | `QINIU_SECRET_KEY` | 空 | 七牛 SecretKey（机密，仅环境变量注入） |
-| `qiniu.bucket` | `QINIU_BUCKET` | 空 | 七牛存储空间名（非敏感） |
-| `qiniu.domain` | `QINIU_DOMAIN` | 空 | 七牛对外访问域名（非敏感） |
-| `qiniu.region` | `QINIU_REGION` | `z2` | 七牛区域 |
-| `qiniu.token_ttl` | `QINIU_TOKEN_TTL` | `3600` | 上传凭证有效期（秒） |
-| `qiniu.max_file_size` | `QINIU_MAX_FILE_SIZE` | `10485760` | 单文件大小上限（字节） |
-
-示例：
-
-```bash
-SERVER_ADDRESS=:8080 DATABASE_DEFAULT_HOST=10.0.0.5 go run . serve
-```
-
-### 本地 .env 与敏感凭据
-
-- 模板 `.env.example`（仅变量名/安全示例，可提交）；`make init` 会在 `.env` 不存在时自动从 `.env.example` 复制生成 `.env`（已存在则保留不覆盖），填写本地真实值（`.env` 已被 `.gitignore` 忽略，绝不提交）。
-- Docker Compose 自动读取根目录 `.env` 作变量替换，经 app 服务 `environment` 注入容器；`manifest/config/config.yaml` 中的敏感字段（`auth.jwt.secret`、`database.default.pass`）保持空值，不写入任何真实凭据，镜像内亦不含凭据。
-- 敏感凭据（`MYSQL_ROOT_PASSWORD`、`AUTH_JWT_SECRET`、`ADMIN_SUPER_PASSWORD`、`QINIU_ACCESS_KEY`/`QINIU_SECRET_KEY` 等）**仅通过环境变量注入**：本地放 `.env`，CI/生产经平台 Secret / 环境变量注入；缺失时 serve 启动 fail-fast、不回退公开默认密钥。
-
-> 说明：`docker-compose.yml` 中的 `${VAR:-default}` 仅提供开发默认值（如 MySQL `root`、dev JWT secret，明确标记仅供 CNB DinD 开发环境）；生产环境务必经环境变量/平台 Secret 注入真实凭据，代码中不硬编码任何生产凭据。
-
-## 启动连通性校验行为
-
-- 服务启动时校验 MySQL、Redis 与数据库 schema；迁移缺失或 dirty 时拒绝启动。
-- 依赖尚未就绪时会以 1 秒为间隔重试，最长持续 `STARTUP_DEPENDENCY_TIMEOUT` 秒。
-- 超时或失败时，进程会输出明确的错误日志并以非零状态退出，不会静默忽略。
-
-## 指标与 Prometheus（测试环境）
-
-秒杀指标（`flashsale_*`）默认关闭；需以 `flash_sale.metrics.enabled=true` 运行服务（环境变量 `FLASH_SALE_METRICS_ENABLED=true`）后，`GET /metrics` 才会以 Prometheus 文本格式暴露。Prometheus 随 `make up` 一并启动（端口 `9090`，可用 `PROMETHEUS_PORT` 覆盖），抓取配置见 `prometheus/prometheus.yml`，其抓取目标为 Compose DNS 名 `app:8000`（与 app 同处 Compose 网络，不再经宿主机 `host.docker.internal` 打通）。
-
-```bash
-export ADMIN_SUPER_PASSWORD='your-local-password'
-FLASH_SALE_METRICS_ENABLED=true make up
-make health                       # 校验 Nginx / App / MySQL / Redis / Prometheus 全部健康
-curl http://127.0.0.1:9090/api/v1/targets   # 查看 my-shop 目标是否 UP
-```
-
-> 指标暴露范围与鉴权语义不变：仅在 `flash_sale.metrics.enabled=true` 时暴露，无独立鉴权入口；生产环境需保证该端点仅内网/监控网段可达。
-
-## 本地开发两阶段初始化与真实 E2E
-
-七牛云为 `serve` 启动的 required dependency：启动时会 fail-fast 校验配置（AK/SK/Bucket/Domain 存在性）并对指定 bucket 执行最小权限只读可用性检查（`GetBucketInfo`），任一失败进程非零退出。
-
-- `make init`（第一阶段）：检查 Docker/Docker Compose → 启动 MySQL/Redis 容器 → 检查根目录 `.env`（不存在则从 `.env.example` 复制生成，已存在保留不覆盖）→ 提示编辑 `.env` 填七牛 AK/SK/Bucket/Domain 与超管密码并执行 `make up`。本阶段不要求七牛凭据、不启动后端、不在终端交互输入 Secret；幂等可重复执行。
-- `make up`（第二阶段）：构建后端与 Nginx 镜像并启动 nginx/app/MySQL/Redis/Prometheus 容器。app 容器 entrypoint 先执行幂等 migration（`migrate up`，golang-migrate `GET_LOCK` 串行），再由 serve 校验七牛 required 配置与超管创建条件（结构 + 存在性 + 真实 bucket 可用性），任一失败非零退出、容器不对外，`restart: unless-stopped` 重试；schema 未就绪 / dirty 时同样非零退出。
-- `make test-storage`（独立真实 E2E）：走真实 HTTP 链路「注册 → 登录 → 签发 token → 直传真实 1×1 PNG → 校验 `final_url` HTTP 200 且 Content-Type=image/png → 用返回 key 删除测试对象」；缺真实凭据或任一环节失败 → 非零退出，不用 Mock/假凭据冒充通过。
-
-`.env` 为未跟踪本地文件，不随 Git/分支/worktree/容器传播；构建与单元测试（`go build ./...`、`go test ./...`）不依赖 `.env` 存在即可通过。
+`docs/design/*` 记录持续维护的项目级长期设计，是了解各模块现状与边界的权威来源。

@@ -1,0 +1,28 @@
+schema_version: 3
+task_id: test-quality-gate-v1
+
+contract:
+  status: NOT_REQUIRED
+  target: ""
+
+resources:
+  reservations: {}
+
+review:
+  status: CLEAN
+  target: "24cfd01650e3b711c62c2a60d2656cd6ea04145c"
+
+owner:
+  status: PENDING
+  review_target: ""
+
+delivery:
+  status: NOT_RUN
+  review_target: ""
+  feature_head: ""
+  develop_base: ""
+
+blocked:
+  active: false
+  by: ""
+  reason: ""

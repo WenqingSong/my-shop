@@ -13,6 +13,7 @@ import (
 
 	v1 "cnb.cool/go-cloud-devops/my-shop/api/flashsale/v1"
 	"cnb.cool/go-cloud-devops/my-shop/internal/codes"
+	"cnb.cool/go-cloud-devops/my-shop/internal/logx"
 )
 
 // 异步请求状态（flash_sale_order_requests.status 的 DB TINYINT）。
@@ -77,6 +78,11 @@ func (s *sFlashSale) enqueue(ctx context.Context, userID, activityID, skuID int6
 	}
 	// 入队成功后近似计数 +1（软上限计数，best-effort，对账扫描器权威收敛）。
 	s.incrQueueCount(ctx, activityID, skuID)
+	logx.Info(ctx, "flashsale_accepted", "秒杀下单已受理", logx.Fields{
+		"user_id":      userID,
+		"flashsale_id": activityID,
+		"sku_id":       skuID,
+	})
 	return &v1.CreateOrderRes{
 		Status:         v1.RequestStatusQueued,
 		IdempotencyKey: idempotencyKey,

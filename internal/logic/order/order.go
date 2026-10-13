@@ -17,7 +17,6 @@ import (
 	"github.com/go-sql-driver/mysql"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/os/glog"
 	"github.com/gogf/gf/v2/os/gtime"
 
 	addressv1 "cnb.cool/go-cloud-devops/my-shop/api/address/v1"
@@ -25,6 +24,7 @@ import (
 	productv1 "cnb.cool/go-cloud-devops/my-shop/api/product/v1"
 	skuv1 "cnb.cool/go-cloud-devops/my-shop/api/sku/v1"
 	"cnb.cool/go-cloud-devops/my-shop/internal/codes"
+	"cnb.cool/go-cloud-devops/my-shop/internal/logx"
 	"cnb.cool/go-cloud-devops/my-shop/internal/service"
 )
 
@@ -203,6 +203,12 @@ func (s *sOrder) Create(ctx context.Context, userID int64, req *v1.CreateReq) (*
 	if o == nil {
 		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("创建订单后未找到记录"))
 	}
+	logx.Info(ctx, "order_created", "下单成功", logx.Fields{
+		"user_id":      userID,
+		"order_id":     o.Id,
+		"order_no":     o.OrderNo,
+		"total_amount": o.TotalAmount,
+	})
 	return &v1.CreateRes{Order: *o}, nil
 }
 
@@ -494,6 +500,11 @@ func (s *sOrder) Pay(ctx context.Context, userID, id int64) (*v1.PayRes, error) 
 		if o == nil {
 			return nil, codes.New(codes.CodeOrderNotFound)
 		}
+		logx.Info(ctx, "order_paid", "支付成功", logx.Fields{
+			"user_id":  userID,
+			"order_id": o.Id,
+			"order_no": o.OrderNo,
+		})
 		return &v1.PayRes{Order: *o}, nil
 	default:
 		return nil, codes.New(codes.CodeOrderInvalidStatusTransition)
@@ -682,7 +693,10 @@ func (s *sOrder) CancelExpired(ctx context.Context, limit int) (int, error) {
 	for _, r := range rows {
 		cancelled, err := s.cancelExpired(ctx, r.Id)
 		if err != nil {
-			glog.Warningf(ctx, "超时取消订单 %d 失败: %v", r.Id, err)
+			logx.Warning(ctx, "order_cancel_expired_failed", "超时取消订单失败", logx.Fields{
+				"order_id": r.Id,
+				"error":    err.Error(),
+			})
 			continue
 		}
 		if cancelled {
@@ -989,7 +1003,7 @@ func (s *sOrder) AdminList(ctx context.Context, req *v1.AdminListReq) (*v1.Admin
 	if status := strings.TrimSpace(req.Status); status != "" {
 		st, e := statusFromString(status)
 		if e != nil {
-			return nil, codes.New(codes.CodeInvalidArgument)
+			return nil, e
 		}
 		model = model.Where("status", st)
 	}
@@ -1172,6 +1186,6 @@ func statusFromString(s string) (int, error) {
 	case v1.StatusRefunded:
 		return statusRefunded, nil
 	default:
-		return 0, fmt.Errorf("未知订单状态: %s", s)
+		return 0, codes.New(codes.CodeInvalidArgument)
 	}
 }

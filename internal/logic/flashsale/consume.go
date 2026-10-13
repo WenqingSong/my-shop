@@ -15,6 +15,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	"cnb.cool/go-cloud-devops/my-shop/internal/codes"
+	"cnb.cool/go-cloud-devops/my-shop/internal/logx"
 	"cnb.cool/go-cloud-devops/my-shop/internal/metrics"
 )
 
@@ -59,6 +60,8 @@ type consumeOutcome struct {
 	activityID      int64
 	skuID           int64
 	userID          int64
+	orderID         int64      // 落单成功时的秒杀订单 id（供结构化日志关联）
+	errorCode       codes.Code // 终态失败时的业务/技术错误码（供结构化日志关联）
 	idempotencyKey  string
 }
 
@@ -105,6 +108,7 @@ func (s *sFlashSale) consumeOne(ctx context.Context) (bool, error) {
 		orderID, err := s.insertOrderInTx(ctx, tx, r.UserId, r.ActivityId, r.SkuId, snap, r.IdempotencyKey, r.RequestHash, generateOrderNo())
 		if err != nil {
 			business, code := classifyConsumeError(err)
+			outcome.errorCode = code
 			if business {
 				outcome.terminalFailure = true
 				outcome.leftQueue = true
@@ -122,6 +126,7 @@ func (s *sFlashSale) consumeOne(ctx context.Context) (bool, error) {
 		}
 		outcome.leftQueue = true
 		outcome.result = metrics.ResultSuccess
+		outcome.orderID = orderID
 		return s.successRequestInTx(ctx, tx, r, orderID)
 	})
 	if !processed {
@@ -140,6 +145,24 @@ func (s *sFlashSale) consumeOne(ctx context.Context) (bool, error) {
 	if outcome.terminalFailure {
 		// 终态失败（failed/dead）在事务提交后权威值收敛（幂等）+ 清除标记，释放预扣、无半成品。
 		s.convergeStockAndMarkers(ctx, outcome.activityID, outcome.skuID, outcome.userID, outcome.idempotencyKey)
+	}
+	// 结构化日志：仅记录落单成功与终态失败，技术重试（ResultError）不逐条记录，避免高频噪声。
+	switch outcome.result {
+	case metrics.ResultSuccess:
+		logx.Info(ctx, "flashsale_consumed", "秒杀异步落单成功", logx.Fields{
+			"user_id":      outcome.userID,
+			"flashsale_id": outcome.activityID,
+			"order_id":     outcome.orderID,
+			"sku_id":       outcome.skuID,
+		})
+	case metrics.ResultFailed, metrics.ResultDead:
+		logx.Warning(ctx, "flashsale_consume_failed", "秒杀异步落单终态失败", logx.Fields{
+			"user_id":      outcome.userID,
+			"flashsale_id": outcome.activityID,
+			"sku_id":       outcome.skuID,
+			"result":       outcome.result,
+			"error_code":   outcome.errorCode,
+		})
 	}
 	metrics.ObserveConsume(ctx, outcome.result, time.Since(started))
 	return processed, nil
