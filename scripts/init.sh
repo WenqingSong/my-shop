@@ -14,10 +14,6 @@ fi
 # docker_compose 封装内部会校验 docker compose / docker-compose 可用性，不可用时自动报错退出。
 docker_compose version >/dev/null 2>&1
 
-log_info "启动依赖容器（MySQL、Redis）..."
-docker_compose up -d mysql redis
-wait_for_deps
-
 ENV_FILE="${ROOT_DIR}/.env"
 ENV_EXAMPLE="${ROOT_DIR}/.env.example"
 if [[ -f "${ENV_FILE}" ]]; then
@@ -30,6 +26,10 @@ else
     log_warn "未找到 .env.example，跳过生成 .env"
   fi
 fi
+
+# 重新加载 .env（把刚生成/已填写的非空值导入当前 shell，供后续 MYSQL_ROOT_PASSWORD
+# 校验与 docker compose 使用；已导出的环境变量仍优先，与 lib.sh 语义一致）。
+_load_env_file "${ENV_FILE}"
 
 # ---------------------------------------------------------------------------
 # 缺项检测与必填提示（只提示、不改写 .env、不打印任何已填 Secret 值）
@@ -72,10 +72,11 @@ _env_value() {
   printf ''
 }
 
-# 必填配置清单（开发环境）：七牛 4 项 required + 超级管理员初始密码。
-# MySQL/Redis 密码与 JWT secret 由 docker-compose.yml 提供 dev 默认值（仅供 CNB DinD 开发环境），
-# 不强制在 .env 填写；如需自定义可覆盖 MYSQL_ROOT_PASSWORD / AUTH_JWT_SECRET。
-REQUIRED_VARS=(QINIU_ACCESS_KEY QINIU_SECRET_KEY QINIU_BUCKET QINIU_DOMAIN ADMIN_SUPER_PASSWORD)
+# 必填配置清单（开发环境）：MySQL root 密码与 JWT secret 无内置默认回退（缺失即失败），
+# 加上七牛 4 项 required 与超级管理员初始密码。
+# MYSQL_ROOT_PASSWORD 在启动 mysql 前硬校验；其余项在本阶段缺失仅提示（make up 时由 compose ${VAR:?}
+# 与 serve fail-fast 双重拦截）。
+REQUIRED_VARS=(MYSQL_ROOT_PASSWORD AUTH_JWT_SECRET QINIU_ACCESS_KEY QINIU_SECRET_KEY QINIU_BUCKET QINIU_DOMAIN ADMIN_SUPER_PASSWORD)
 
 missing_keys=""
 if [[ -f "${ENV_EXAMPLE}" && -f "${ENV_FILE}" ]]; then
@@ -89,6 +90,17 @@ for v in "${REQUIRED_VARS[@]}"; do
     empty_required+=("${v}")
   fi
 done
+
+# 硬校验：MYSQL_ROOT_PASSWORD 缺失（环境变量与 .env 均为空）则 mysql 容器无法启动，
+# 直接 fail-fast 并指认字段名（无内置默认回退、空字符串不可绕过）。
+if [[ -z "${MYSQL_ROOT_PASSWORD:-}" ]]; then
+  log_error "MYSQL_ROOT_PASSWORD 未配置：请在 ${ENV_FILE} 中填写 MySQL root 密码后重跑（无内置默认值，空字符串不可用）"
+  exit 1
+fi
+
+log_info "启动依赖容器（MySQL、Redis）..."
+docker_compose up -d mysql redis
+wait_for_deps
 
 cat <<EOF
 
@@ -108,6 +120,8 @@ if [[ "${#empty_required[@]}" -gt 0 ]]; then
   log_warn "以下必填配置在 .env 中当前为空，请填写后再执行 make up："
   for v in "${empty_required[@]}"; do
     case "${v}" in
+      MYSQL_ROOT_PASSWORD)   printf '  - MYSQL_ROOT_PASSWORD   MySQL root 密码（无内置默认值，必填）\n' ;;
+      AUTH_JWT_SECRET)       printf '  - AUTH_JWT_SECRET       JWT 签名密钥（≥32 字节，无内置默认值）\n' ;;
       QINIU_ACCESS_KEY)    printf '  - QINIU_ACCESS_KEY    七牛 AccessKey（与 SecretKey 成对注入）\n' ;;
       QINIU_SECRET_KEY)    printf '  - QINIU_SECRET_KEY    七牛 SecretKey（机密）\n' ;;
       QINIU_BUCKET)        printf '  - QINIU_BUCKET        对象存储空间名\n' ;;

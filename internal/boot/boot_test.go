@@ -62,6 +62,16 @@ func TestApplyDatabaseConfigEnvOverride(t *testing.T) {
 	}
 }
 
+// TestApplyDatabaseConfigRejectsEmptyPass 覆盖 AC-003/INV-001：数据库密码缺失
+// （config 空且无 DATABASE_DEFAULT_PASS）时 applyDatabaseConfig fail-fast，不回退 "root" 等内置默认密码。
+func TestApplyDatabaseConfigRejectsEmptyPass(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("DATABASE_DEFAULT_PASS", "")
+	if err := applyDatabaseConfig(ctx); err == nil {
+		t.Fatal("expected error for empty database password, got nil")
+	}
+}
+
 func TestDependencyTimeoutEnvOverride(t *testing.T) {
 	ctx := context.Background()
 	t.Setenv("STARTUP_DEPENDENCY_TIMEOUT", "5")

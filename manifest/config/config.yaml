@@ -6,8 +6,8 @@ server:
 # 数据库配置（以下均为开发默认值，可通过环境变量覆盖）
 # 对应环境变量：DATABASE_DEFAULT_TYPE / HOST / PORT / USER / PASS / NAME / CHARSET / DEBUG
 # ⚠️ database.default.pass 为敏感凭据，不固化默认值：此处保持空值，运行时通过环境变量
-# DATABASE_DEFAULT_PASS 注入（容器环境由 docker-compose.yml 注入 ${MYSQL_ROOT_PASSWORD:-root} 开发默认值）。
-# 缺失时 MySQL 认证失败，启动会在依赖连通重试超时后非零退出，不回退任何公开默认密码。
+# DATABASE_DEFAULT_PASS 显式注入（容器环境由 docker-compose.yml 注入 ${MYSQL_ROOT_PASSWORD:?} 必填值）。
+# 无内置默认回退：缺失时启动 fail-fast 非零退出（不回退 root 等公开默认密码），详见 docs/design/deployment.md。
 database:
   default:
     type: "mysql"
@@ -16,7 +16,7 @@ database:
     user: "root"
     pass: ""
     name: "my_shop"
-    charset: "utf8"
+    charset: "utf8mb4"
     debug: false
 
 # 历史数据迁移 staging 库配置（隔离 schema，仅承载 shopping.sql 全量导入）。
@@ -41,7 +41,7 @@ auth:
     # JWT 签名密钥（HS256）。
     # ⚠️ 敏感凭据，不固化默认值：此处保持空值，运行时通过环境变量 AUTH_JWT_SECRET 注入。
     # 缺失或过短（<32 字节）时启动 fail-fast，不回退任何公开默认密钥。
-    # 开发环境由 docker-compose.yml 提供 dev 默认值（仅供 CNB DinD 开发环境，生产必须覆盖）。
+    # 无内置默认回退：docker-compose.yml 使用 ${AUTH_JWT_SECRET:?} 必填，缺失即失败。
     secret: ""
   session:
     # 会话 TTL（秒），默认 3600，与 JWT exp 对齐；必须大于 0。

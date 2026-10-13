@@ -15,7 +15,6 @@ const (
 	defaultDBHost        = "127.0.0.1"
 	defaultDBPort        = "3306"
 	defaultDBUser        = "root"
-	defaultDBPass        = "root"
 	defaultDBName        = "my_shop"
 	defaultStagingDBName = "my_shop_staging"
 )
@@ -29,10 +28,15 @@ func OpenConnections(ctx context.Context) (source, target *sql.DB, err error) {
 	host := cfgString(ctx, "database.default.host", defaultDBHost)
 	port := cfgString(ctx, "database.default.port", defaultDBPort)
 	user := cfgString(ctx, "database.default.user", defaultDBUser)
-	pass := cfgString(ctx, "database.default.pass", defaultDBPass)
+	pass := cfgString(ctx, "database.default.pass", "")
 	targetName := cfgString(ctx, "database.default.name", defaultDBName)
 	stagingName := cfgString(ctx, "legacy.staging.name", defaultStagingDBName)
 
+	// 数据库密码无内置默认回退：缺失（config 空且无 DATABASE_DEFAULT_PASS）时 fail-fast，
+	// 不回退 "root" 等默认密码（docs/design/deployment.md §3 无内置默认回退）。
+	if pass == "" {
+		return nil, nil, fmt.Errorf("未配置 database.default.pass（DATABASE_DEFAULT_PASS）：数据库密码无内置默认值，必须显式注入")
+	}
 	if stagingName == targetName {
 		return nil, nil, fmt.Errorf("staging 库与目标库同名 %q，必须隔离（AC-002）", stagingName)
 	}
@@ -70,7 +74,7 @@ func buildDSN(host, port, user, pass, name string) string {
 	cfg.Net = "tcp"
 	cfg.Addr = net.JoinHostPort(host, port)
 	cfg.DBName = name
-	cfg.Params = map[string]string{"charset": "utf8"}
+	cfg.Params = map[string]string{"charset": "utf8mb4"}
 	cfg.MultiStatements = false
 	return cfg.FormatDSN()
 }

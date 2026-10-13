@@ -83,10 +83,21 @@ compose_body="$(sed '/^[[:space:]]*#/d' "${COMPOSE_CFG}")"
 if grep -q 'host.docker.internal\|host-gateway\|extra_hosts' <<<"${compose_body}"; then
   fail "docker-compose.yml 仍残留 host.docker.internal/host-gateway/extra_hosts 宿主机映射（应经 Compose DNS 通信）"
 fi
+# 无内置默认回退（AC-004）：MYSQL_ROOT_PASSWORD / AUTH_JWT_SECRET 不得再出现 ${VAR:-固定默认值} 形式回退。
+if grep -Eq 'MYSQL_ROOT_PASSWORD:-|AUTH_JWT_SECRET:-' <<<"${compose_body}"; then
+  fail "docker-compose.yml 仍残留 MYSQL_ROOT_PASSWORD / AUTH_JWT_SECRET 的 \${VAR:-default} 回退（应使用 \${VAR:?} 必填）"
+fi
+# 连接字符集统一 utf8mb4（AC-006）：compose 中 DATABASE_DEFAULT_CHARSET 必须为 utf8mb4。
+if grep -Eq 'DATABASE_DEFAULT_CHARSET:[[:space:]]*"utf8"([^m]|$)' <<<"${compose_body}"; then
+  fail "docker-compose.yml 的 DATABASE_DEFAULT_CHARSET 仍为 utf8（应统一为 utf8mb4）"
+fi
 
 # 可选：docker 可用时校验 compose 可解析（与 test-prometheus.sh 保持一致）。
+# 注意：compose 已对 MYSQL_ROOT_PASSWORD / AUTH_JWT_SECRET 使用 ${VAR:?} 必填（无内置默认回退），
+# 语法校验时注入占位值（非真实凭据）以通过必填拦截；缺失即失败由 ${VAR:?} 语义保证（AC-004）。
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-  docker compose -f "${COMPOSE_CFG}" config -q || fail "docker compose config 校验失败"
+  MYSQL_ROOT_PASSWORD=test-root AUTH_JWT_SECRET=0123456789abcdef0123456789abcdef \
+    docker compose -f "${COMPOSE_CFG}" config -q || fail "docker compose config 校验失败"
 fi
 
 printf '\033[32m[INFO]\033[0m 容器化配置静态断言通过（凭据分离 / 构建上下文 / 镜像 / 生命周期 / 编排）\n'

@@ -22,9 +22,8 @@ const (
 	defaultDBHost            = "127.0.0.1"
 	defaultDBPort            = "3306"
 	defaultDBUser            = "root"
-	defaultDBPass            = "root"
 	defaultDBName            = "my_shop"
-	defaultDBCharset         = "utf8"
+	defaultDBCharset         = "utf8mb4"
 	defaultRedisAddress      = "127.0.0.1:6379"
 	defaultRedisDB           = 0
 	defaultRedisPass         = ""
@@ -93,12 +92,18 @@ func applyDatabaseConfig(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// 数据库密码无内置默认回退：缺失（config 空且无 DATABASE_DEFAULT_PASS）时 fail-fast，
+	// 不回退 "root" 等默认密码（对齐 auth.Secret() 的 fail-fast 语义，见 docs/design/deployment.md §3）。
+	pass := cfgString(ctx, "database.default.pass", "")
+	if pass == "" {
+		return gerror.New("未配置 database.default.pass（DATABASE_DEFAULT_PASS）：数据库密码无内置默认值，必须显式注入")
+	}
 	node := gdb.ConfigNode{
 		Type:     cfgString(ctx, "database.default.type", defaultDBType),
 		Host:     cfgString(ctx, "database.default.host", defaultDBHost),
 		Port:     cfgString(ctx, "database.default.port", defaultDBPort),
 		User:     cfgString(ctx, "database.default.user", defaultDBUser),
-		Pass:     cfgString(ctx, "database.default.pass", defaultDBPass),
+		Pass:     pass,
 		Name:     cfgString(ctx, "database.default.name", defaultDBName),
 		Charset:  cfgString(ctx, "database.default.charset", defaultDBCharset),
 		Protocol: "tcp",

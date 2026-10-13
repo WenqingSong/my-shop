@@ -28,7 +28,7 @@ func setupEngineTest(t *testing.T) (*sql.DB, *sql.DB) {
 	host := cfgString(ctx, "database.default.host", defaultDBHost)
 	port := cfgString(ctx, "database.default.port", defaultDBPort)
 	user := cfgString(ctx, "database.default.user", defaultDBUser)
-	pass := cfgString(ctx, "database.default.pass", defaultDBPass)
+	pass := cfgString(ctx, "database.default.pass", "")
 	targetName := cfgString(ctx, "database.default.name", defaultDBName)
 
 	// root 连接（无库名）用于创建/清理 staging 测试库。

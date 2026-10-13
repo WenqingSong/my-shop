@@ -136,3 +136,13 @@ func TestSecretRejectsTooShort(t *testing.T) {
 		t.Fatal("expected error for short secret, got nil")
 	}
 }
+
+// TestSecretRejectsMissing 覆盖 AC-001/INV-001：JWT 密钥缺失（config 空且无 AUTH_JWT_SECRET）
+// 时 Secret() 返回错误，不回退任何内置默认密钥。
+func TestSecretRejectsMissing(t *testing.T) {
+	// 强制置空环境变量，模拟「config 为空且无 AUTH_JWT_SECRET」；config.yaml 中 auth.jwt.secret 已为空串。
+	t.Setenv("AUTH_JWT_SECRET", "")
+	if _, err := Secret(context.Background()); err == nil {
+		t.Fatal("expected error for missing secret, got nil")
+	}
+}
