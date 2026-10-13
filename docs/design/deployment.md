@@ -95,7 +95,19 @@ Nginx 是面向外部的唯一 HTTP 入口，职责为纯反向代理（无 Lua/
 - `make init`/`make up` 复用两阶段初始化：`make init` 只起 MySQL/Redis、生成 `.env`（不要求七牛凭据、不启动后端）；`make up` 起 app（Compose 注入 `.env` 变量）。
 - 开发命令（`make up/down/status/logs/health`）全面容器化，不再启动宿主机进程，杜绝双启动。
 
-## 11. Deferred / 已知留白
+## 11. 镜像发布、版本标识与回滚（CNB 制品库）
+
+`main` 分支更新后，CNB CI 在现有 `main.push`（`main-ci`）内以「单 job 顺序 stage」完成测试、构建与镜像发布；不引入多 job 隔离、不引入多架构构建。
+
+- **镜像仓库地址**：`docker.cnb.cool/framework-station/my-shop`，由 `${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}` 派生（`CNB_DOCKER_REGISTRY = docker.cnb.cool`，仓库路径取当前仓库 slug 小写、无子路径）。fork 后 `CNB_REPO_SLUG_LOWERCASE` 指向 fork 自身 slug，不污染上游仓库。
+- **版本标识**：同一次成功构建同时打两个标签——短 SHA 标签 `${CNB_COMMIT_SHORT}`（平台内置只读变量，完整提交 SHA 前 8 位）与 `latest`。二者由同一镜像经 `docker tag` 派生，指向同一 digest（双标签同源）。
+- **`latest` 语义**：`latest` 始终指向最近一次「测试 + 构建 + 推送全部成功」的构建；测试或构建任一失败时不推送任何标签、`latest` 不变。
+- **发布顺序**：`test` → `build`（go build）→ `docker build`（含 `docker tag :latest`）→ `docker push`（先短 SHA 后 `latest`）；任一 stage 失败即中断、后续不执行。短 SHA 先于 `latest` 推送，保证 `latest` 只会指向「短 SHA 标签已存在」的构建。
+- **目标平台**：单平台 `linux/amd64`（沿用 Dockerfile `CGO_ENABLED=0 GOOS=linux` 静态编译，native build，不显式 `--platform`、不引入 buildx/QEMU）。
+- **凭据**：制品库认证使用 CNB 内置凭据（流水线内置触发者凭据 / `CNB_TOKEN`），推送 CNB 制品库无需手动 `docker login`；`.cnb.yml` 与运行日志不出现硬编码密码。
+- **回滚方法**：部署回滚用历史成功构建的短 SHA 标签拉取并运行目标版本（`docker run docker.cnb.cool/framework-station/my-shop:<短SHA>`），不依赖 `latest`；`latest` 仅表达「默认最新」，不作为可回滚的历史锚点。
+
+## 12. Deferred / 已知留白
 
 - Kubernetes/Ingress、HTTPS/TLS、多实例负载均衡（后续任务）。
 - readiness 独立端点（当前 `/health` 语义足够，单实例无摘流量需求）。
