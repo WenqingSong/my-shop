@@ -35,7 +35,6 @@ main:
       stages:
         - name: start-dependencies
           script: |
-            set -euo pipefail
             # 环境准备：注入 CI 隔离测试变量（占位值，仅用于测试依赖启动，不用于生产）。
             # MYSQL_ROOT_PASSWORD=root 与 scripts/test.sh 注入的 DATABASE_DEFAULT_PASS=root
             # 一致，使集成测试以 root/root 连接 MySQL；AUTH_JWT_SECRET 仅为满足生产
@@ -62,7 +61,6 @@ main:
       stages:
         - name: start-dependencies
           script: |
-            set -euo pipefail
             # 环境准备：与 pr-check 相同；仅用于测试依赖启动，不用于生产。
             export MYSQL_ROOT_PASSWORD=root
             export AUTH_JWT_SECRET=ci-placeholder-jwt-secret-not-for-prod
@@ -94,7 +92,7 @@ main:
           imports:
             - https://cnb.cool/framework-station/my-shop-secrets/-/blob/main/github-mirror.yml
           script: |
-            set -euo pipefail
+            set -eu
 
             printf 'machine github.com\nlogin %s\npassword %s\n' \
               "${GITHUB_USERNAME}" "${GITHUB_TOKEN}" > "${HOME}/.netrc"
