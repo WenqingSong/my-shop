@@ -64,6 +64,24 @@ main:
             mkdir -p bin
             go build -trimpath -o bin/my-shop .
 
+        - name: docker-build
+          # 用 CNB 内置变量派生镜像名，避免在流水线里写死仓库路径与短 SHA。
+          # 先构建短 SHA 标签，再对同一镜像打 latest 标签，保证双标签同源（同一 digest）。
+          script: |
+            set -euo pipefail
+            image="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}"
+            docker build -t "${image}:${CNB_COMMIT_SHORT}" .
+            docker tag "${image}:${CNB_COMMIT_SHORT}" "${image}:latest"
+
+        - name: docker-push
+          # 先推短 SHA 标签，再推 latest；任一 push 失败则 stage 失败、latest 不被更新。
+          # 制品库认证使用 CNB 内置凭据（CNB_TOKEN 自动注入），无需手动 docker login。
+          script: |
+            set -euo pipefail
+            image="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}"
+            docker push "${image}:${CNB_COMMIT_SHORT}"
+            docker push "${image}:latest"
+
         - name: sync-to-github-mirror
           # 只有原仓库（framework-station/my-shop）才执行 GitHub 镜像同步。
           # fork 后 CNB_REPO_SLUG 会变成 fork 者的组织/仓库名，此步骤会自动跳过，
