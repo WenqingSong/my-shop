@@ -13,8 +13,8 @@ review:
   target: "6f1e2a6"
 
 owner:
-  status: PENDING
-  review_target: ""
+  status: ACCEPTED
+  review_target: "6f1e2a6"
 
 delivery:
   status: NOT_RUN
