@@ -17,10 +17,10 @@ owner:
   review_target: "6f1e2a6"
 
 delivery:
-  status: NOT_RUN
-  review_target: ""
-  feature_head: ""
-  develop_base: ""
+  status: BLOCKED
+  review_target: "6f1e2a6"
+  feature_head: "c84be901f8c5ee4223bf220947a2ea822a073ac2"
+  develop_base: "359b8cceeebefe7b490f783c1ad5a118afd6e31e"
 
 blocked:
   active: false
