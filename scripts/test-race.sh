@@ -9,9 +9,8 @@
 # （TestCircuitBreakerOpensAndRecovers 等）只编译不执行，故无需 MySQL/Redis 就绪。
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-
-log_info() { printf '\033[32m[INFO]\033[0m %s\n' "$*"; }
+LIB_SKIP_ENV=1
+source "${SCRIPT_DIR}/lib.sh"
 
 log_info "go test -race（进程内共享内存并发逻辑：flashsale 熔断器状态机）"
 ( cd "${ROOT_DIR}" && go test -race -count=1 -run 'TestCircuitBreakerStateMachine' ./internal/logic/flashsale/... )

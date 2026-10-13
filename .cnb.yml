@@ -36,15 +36,13 @@ main:
         - name: start-dependencies
           script: |
             set -euo pipefail
-            # CI 隔离测试变量：MYSQL_ROOT_PASSWORD 需与 scripts/test.sh 注入的
-            # DATABASE_DEFAULT_PASS=root 一致，使集成测试以 root/root 连接 MySQL；
-            # AUTH_JWT_SECRET 仅为满足生产 compose 的 ${AUTH_JWT_SECRET:?} 插值（占位值），
-            # 各测试自身经 t.Setenv 注入密钥，此值不用于任何服务，也不用于生产。
+            # 环境准备：注入 CI 隔离测试变量（占位值，仅用于测试依赖启动，不用于生产）。
+            # MYSQL_ROOT_PASSWORD=root 与 scripts/test.sh 注入的 DATABASE_DEFAULT_PASS=root
+            # 一致，使集成测试以 root/root 连接 MySQL；AUTH_JWT_SECRET 仅为满足生产
+            # compose 的 ${AUTH_JWT_SECRET:?} 插值，各测试自身经 t.Setenv 注入密钥。
             export MYSQL_ROOT_PASSWORD=root
             export AUTH_JWT_SECRET=ci-placeholder-jwt-secret-not-for-prod
-            # 只启动测试依赖 mysql/redis，不启动完整 compose，避免构建 backend/nginx 镜像。
-            docker compose up -d mysql redis
-            bash -c 'source scripts/lib.sh; wait_for_deps'
+            make deps-start
 
         - name: test
           script: make test
@@ -65,12 +63,10 @@ main:
         - name: start-dependencies
           script: |
             set -euo pipefail
-            # CI 隔离测试变量：与 pr-check 相同；仅用于测试依赖启动，不用于生产。
+            # 环境准备：与 pr-check 相同；仅用于测试依赖启动，不用于生产。
             export MYSQL_ROOT_PASSWORD=root
             export AUTH_JWT_SECRET=ci-placeholder-jwt-secret-not-for-prod
-            # 只启动测试依赖 mysql/redis，不启动完整 compose，避免构建 backend/nginx 镜像。
-            docker compose up -d mysql redis
-            bash -c 'source scripts/lib.sh; wait_for_deps'
+            make deps-start
 
         - name: test
           script: make test
@@ -79,27 +75,15 @@ main:
           script: make test-race
 
         - name: build
-          script: |
-            mkdir -p bin
-            go build -trimpath -o bin/my-shop .
+          script: make build
 
         - name: docker-build
-          # 用 CNB 内置变量派生镜像名，避免在流水线里写死仓库路径与短 SHA。
-          # 先构建短 SHA 标签，再对同一镜像打 latest 标签，保证双标签同源（同一 digest）。
-          script: |
-            set -euo pipefail
-            image="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}"
-            docker build -t "${image}:${CNB_COMMIT_SHORT}" .
-            docker tag "${image}:${CNB_COMMIT_SHORT}" "${image}:latest"
+          # 构建发布镜像并打标签（短 SHA + latest），工程逻辑收敛到 scripts/docker-build.sh。
+          script: make docker-build
 
         - name: docker-push
-          # 先推短 SHA 标签，再推 latest；任一 push 失败则 stage 失败、latest 不被更新。
-          # 制品库认证使用 CNB 内置凭据（CNB_TOKEN 自动注入），无需手动 docker login。
-          script: |
-            set -euo pipefail
-            image="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}"
-            docker push "${image}:${CNB_COMMIT_SHORT}"
-            docker push "${image}:latest"
+          # 推送发布镜像（短 SHA + latest），工程逻辑收敛到 scripts/docker-push.sh。
+          script: make docker-push
 
         - name: sync-to-github-mirror
           # 只有原仓库（framework-station/my-shop）才执行 GitHub 镜像同步。
