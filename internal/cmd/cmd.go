@@ -3,7 +3,10 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os/signal"
 	"strconv"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -123,12 +126,18 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 		return err
 	}
 
+	// 优雅关闭根 ctx：SIGINT/SIGTERM 触发取消，驱动三个后台扫描器停止领取新任务、在途单事务回滚或完成。
+	// HTTP 侧优雅 drain 仍由 GoFrame s.Run() 负责（其处理同一批信号），两者并存由 Go 标准库多 channel 接收保证。
+	signalCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	var wg sync.WaitGroup
 	// 启动后台超时取消扫描器：扫描 status=待支付 且 expire_at 已过的订单，逐单原子取消并恢复库存。
-	startOrderCancelScanner(ctx)
+	startOrderCancelScanner(signalCtx, &wg)
 	// 启动秒杀缓存对账扫描器：按「活动 × SKU」粒度将 Redis remaining 刷成 total_stock - sold - inflight_queued，并回补缺失预热。
-	startFlashSaleReconcileScanner(ctx)
+	startFlashSaleReconcileScanner(signalCtx, &wg)
 	// 启动秒杀异步消费扫描器：出队 queued 请求并事务落单/失败/重试/死信。
-	startFlashSaleConsumeScanner(ctx)
+	startFlashSaleConsumeScanner(signalCtx, &wg)
 
 	s := g.Server()
 	// 初始化本地图片存储：seed 轮播图占位图，并将 banner 目录映射为静态路由 /storage/banners。
@@ -151,6 +160,8 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 		RegisterAdminRoutes(root)
 	})
 	s.Run()
+	// s.Run() 返回后（HTTP 已完成优雅 drain），等待后台扫描器停止领取新任务并收尾后进程退出。
+	wg.Wait()
 	return nil
 }
 
@@ -191,12 +202,15 @@ const orderCancelScanBatch = 100
 // startOrderCancelScanner 启动订单超时取消后台扫描器（goroutine + ticker）。
 // 周期由 order.cancel_scan_interval 配置（秒，默认 60）；多实例并发依赖「条件状态更新 + RowsAffected」
 // 原子闸门保证同一订单只被取消并恢复一次库存，故无需优雅停机通知。
-func startOrderCancelScanner(ctx context.Context) {
+// ctx 取消（SIGINT/SIGTERM）时停止领取新任务；在途单事务由数据库原子性保证回滚或完成，无半成品。
+func startOrderCancelScanner(ctx context.Context, wg *sync.WaitGroup) {
 	interval := g.Cfg().MustGet(ctx, "order.cancel_scan_interval", 60).Int()
 	if interval <= 0 {
 		interval = 60
 	}
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		ticker := time.NewTicker(time.Duration(interval) * time.Second)
 		defer ticker.Stop()
 		for {
@@ -221,12 +235,15 @@ const flashSaleConsumeScanBatch = 100
 // startFlashSaleConsumeScanner 启动秒杀异步消费后台扫描器（goroutine + ticker）。
 // 周期由 flash_sale.consume_scan_interval 配置（秒，默认 1，保证低延迟落单）；
 // 出队依赖 FOR UPDATE SKIP LOCKED + 状态原子更新保证同一请求只被处理一次，多实例并发安全。
-func startFlashSaleConsumeScanner(ctx context.Context) {
+// ctx 取消时停止领取新任务；在途消费单事务回滚后请求保持 queued，重启后由重试/对账恢复。
+func startFlashSaleConsumeScanner(ctx context.Context, wg *sync.WaitGroup) {
 	interval := g.Cfg().MustGet(ctx, "flash_sale.consume_scan_interval", 1).Int()
 	if interval <= 0 {
 		interval = 1
 	}
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		ticker := time.NewTicker(time.Duration(interval) * time.Second)
 		defer ticker.Stop()
 		for {
@@ -245,12 +262,15 @@ func startFlashSaleConsumeScanner(ctx context.Context) {
 // startFlashSaleReconcileScanner 启动秒杀缓存对账后台扫描器（goroutine + ticker）。
 // 周期由 flash_sale.reconcile_scan_interval 配置（秒，默认 60）；对账为无状态、幂等写入
 // 权威值（remaining = total_stock - sold），多实例并发安全。
-func startFlashSaleReconcileScanner(ctx context.Context) {
+// ctx 取消时停止领取新任务；对账为幂等 SET，中断无副作用。
+func startFlashSaleReconcileScanner(ctx context.Context, wg *sync.WaitGroup) {
 	interval := g.Cfg().MustGet(ctx, "flash_sale.reconcile_scan_interval", 60).Int()
 	if interval <= 0 {
 		interval = 60
 	}
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		ticker := time.NewTicker(time.Duration(interval) * time.Second)
 		defer ticker.Stop()
 		for {

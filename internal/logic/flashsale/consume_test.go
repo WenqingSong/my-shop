@@ -288,6 +288,74 @@ func TestCreateOrderIdempotencyConflictCompensatesOnce(t *testing.T) {
 	}
 }
 
+// TestConsumeInterruptedByCtxCancel 覆盖 AC-008/INV-005 的「优雅停机打断在途消费」路径：
+// 消费事务进行中取消根 ctx（模拟 SIGTERM/SIGINT）→ 事务整体回滚、请求仍 queued、无订单、不扣库存；
+// 清除打断后重投，重启消费恰好产生一条订单（不重复、无半成品）。
+// 若消费事务在 ctx 取消时未整体回滚（残留订单/扣减），本测试会失败。
+func TestConsumeInterruptedByCtxCancel(t *testing.T) {
+	setupConsumeTest(t)
+	s := New()
+	skuID := consumeTestSku(t, "interrupt-sku")
+	activityID := consumeTestActivity(t, skuID)
+
+	const (
+		userID = int64(884000)
+		key    = "k-interrupt"
+	)
+
+	// 直接写入 queued 请求（测试消费者，不经过闸门）。
+	if _, err := g.DB().Model("flash_sale_order_requests").Ctx(context.Background()).Data(g.Map{
+		"user_id":         userID,
+		"activity_id":     activityID,
+		"sku_id":          skuID,
+		"idempotency_key": key,
+		"request_hash":    requestHash(activityID, skuID),
+		"status":          requestStatusQueued,
+	}).InsertAndGetId(); err != nil {
+		t.Fatalf("insert request: %v", err)
+	}
+
+	consumeCtx, cancel := context.WithCancel(context.Background())
+	// 注入「事务进行中取消根 ctx」：落单后、状态更新前触发停机取消，事务整体回滚。
+	consumeBeforeCommitHook = func(ctx context.Context, r *orderRequestRow) error {
+		cancel()
+		return context.Canceled
+	}
+	defer func() { consumeBeforeCommitHook = nil }()
+
+	if _, err := s.ConsumeQueued(consumeCtx, 1); err == nil {
+		t.Fatalf("expected consume to fail (interrupted by ctx cancel)")
+	}
+
+	// 回滚后：请求仍 queued、无订单、不扣库存。
+	req := consumeRequestRow(t, userID, key)
+	if req.Status != requestStatusQueued {
+		t.Fatalf("after interruption status=%d want queued", req.Status)
+	}
+	if n, _ := g.DB().Model("flash_sale_orders").Ctx(context.Background()).Where("activity_id", activityID).Count(); n != 0 {
+		t.Fatalf("interrupted consume must not leave order, count=%d want 0", n)
+	}
+	if _, sold := consumeBindingStock(t, activityID, skuID); sold != 0 {
+		t.Fatalf("interrupted consume must not deduct stock, sold=%d want 0", sold)
+	}
+
+	// 清除打断，重启消费：恰好产生一条订单。
+	consumeBeforeCommitHook = nil
+	if n, err := s.ConsumeQueued(context.Background(), 1); err != nil || n != 1 {
+		t.Fatalf("redeliver consume: n=%d err=%v", n, err)
+	}
+	req = consumeRequestRow(t, userID, key)
+	if req.Status != requestStatusSuccess {
+		t.Fatalf("after redeliver status=%d want success", req.Status)
+	}
+	if n, _ := g.DB().Model("flash_sale_orders").Ctx(context.Background()).Where("activity_id", activityID).Count(); n != 1 {
+		t.Fatalf("redelivered order count=%d want 1", n)
+	}
+	if _, sold := consumeBindingStock(t, activityID, skuID); sold != 1 {
+		t.Fatalf("redelivered sold=%d want 1", sold)
+	}
+}
+
 // TestConsumeCrashBeforeCommitRedeliversOnce 覆盖 AC-003/INV-015（崩溃重投幂等）：
 // 消费者领取请求后、事务提交前崩溃（经 consumeBeforeCommitHook 注入 error → 整个事务回滚），
 // 断言请求回到 queued、无订单、不扣库存；清除故障点后重投，只产生一次业务效果（订单数/库存扣减各一次）。

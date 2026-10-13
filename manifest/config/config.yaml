@@ -2,6 +2,17 @@
 server:
   # HTTP 监听地址，可通过环境变量 SERVER_ADDRESS 覆盖，例如 ":8080"
   address: ":8000"
+  # 优雅关闭 HTTP drain 超时（秒）：SIGINT/SIGTERM 后停收新连接、等待在途请求完成的最长时间，
+  # 超时后强制退出。对应环境变量 SERVER_GRACEFUL_TIMEOUT。
+  gracefulTimeout: 10
+
+# 就绪探针（readiness）配置：/ready 探测 DB 与 Redis 连通性，fail-closed。
+# 对应环境变量：READINESS_PROBE_TIMEOUT / READINESS_CACHE_TTL
+readiness:
+  # 依赖探测超时（秒），防止 DB/Redis 异常时探针无限阻塞。
+  probe_timeout: 1
+  # 探测结果进程内缓存 TTL（秒），缓存窗口内重复 /ready 不新增 DB/Redis 探测。
+  cache_ttl: 3
 
 # 数据库配置（以下均为开发默认值，可通过环境变量覆盖）
 # 对应环境变量：DATABASE_DEFAULT_TYPE / HOST / PORT / USER / PASS / NAME / CHARSET / DEBUG

@@ -29,6 +29,7 @@ const (
 	defaultRedisDB           = 0
 	defaultRedisPass         = ""
 	defaultDependencyTimeout = 30 * time.Second
+	defaultGracefulTimeout   = 10
 	checkRetryInterval       = time.Second
 )
 
@@ -86,6 +87,9 @@ func dependencyTimeout(ctx context.Context) time.Duration {
 
 func applyServerConfig(ctx context.Context) {
 	g.Server().SetAddr(cfgString(ctx, "server.address", defaultServerAddress))
+	// 优雅关闭 HTTP drain 超时（秒）：SIGINT/SIGTERM 后停收新连接、等待在途请求完成的最长时间。
+	// 对应环境变量 SERVER_GRACEFUL_TIMEOUT；默认 10s，超时后 GoFrame 强制退出。
+	g.Server().SetGracefulTimeout(cfgInt(ctx, "server.gracefulTimeout", defaultGracefulTimeout))
 }
 
 func applyDatabaseConfig(ctx context.Context) error {
