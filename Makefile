@@ -10,7 +10,7 @@ SHELL := /bin/bash
 
 SCRIPTS := scripts
 
-.PHONY: help bootstrap init up down restart status logs health test test-prometheus test-container test-nginx test-lib test-storage clean
+.PHONY: help bootstrap init up down restart status logs health test test-prometheus test-container test-nginx test-lib test-storage test-ci clean
 
 help: ## 列出所有可用目标及说明
 	@bash $(SCRIPTS)/help.sh
@@ -56,6 +56,9 @@ test-lib: ## 校验 lib.sh 加载语义（空值不覆盖默认值等，AC-003 �
 
 test-storage: ## 独立真实存储 E2E：签发→直传真实 PNG→校验 final_url→删除（需真实七牛凭据）
 	@bash $(SCRIPTS)/test-storage.sh
+
+test-ci: ## 校验 CNB 流水线配置（镜像发布 / 双标签同源 / 失败不更新 latest / 凭据安全）
+	@bash $(SCRIPTS)/test-ci.sh
 
 clean: ## 清理编译产物与临时文件（不删除源码与持久数据）
 	@bash $(SCRIPTS)/clean.sh

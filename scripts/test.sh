@@ -35,4 +35,7 @@ log_info "校验容器化配置（Dockerfile / .dockerignore / compose / config 
 log_info "校验 Nginx 反向代理配置..."
 "${SCRIPT_DIR}/test-nginx.sh"
 
+log_info "校验 CNB 流水线配置（镜像发布 / 双标签 / 凭据安全）..."
+"${SCRIPT_DIR}/test-ci.sh"
+
 log_info "测试全部通过"
