@@ -20,7 +20,7 @@ Compose 服务（`docker-compose.yml`）：
 | 服务 | 镜像 | 端口 | 持久化卷 | 健康检查 |
 | --- | --- | --- | --- | --- |
 | `nginx` | `my-shop-nginx:local`（`nginx/Dockerfile` 构建，配置 COPY 内置） | `8080`（`NGINX_PORT` 可覆盖，唯一对外入口） | — | `wget /health`（透传 app） |
-| `app` | `my-shop-app`（多阶段构建，见 §3） | 无（仅 Compose 网络 `8000`，不映射宿主机） | `app_storage` | `wget /health` |
+| `app` | `my-shop-app:local`（多阶段构建，见 §3） | 无（仅 Compose 网络 `8000`，不映射宿主机） | `app_storage` | `wget /health` |
 | `mysql` | `mysql:8.0` | `127.0.0.1:3306`（回环绑定） | `mysql_data` | `mysqladmin ping` |
 | `redis` | `redis:7-alpine` | `127.0.0.1:6379`（回环绑定） | `redis_data` | `redis-cli ping` |
 | `prometheus` | `my-shop-prometheus:local`（`prometheus/Dockerfile` 构建，配置 COPY 内置） | `9090` | — | `wget /-/ready` |

@@ -36,7 +36,21 @@
 | `20261001000006` | `cart_items` | `cart_items`（用户购物车条目，`uk_user_sku` 唯一，软引用无 FK） |
 | `20261001000007` | `orders` | `orders` + `order_items`（订单主数据 + 订单项，快照软引用，`uk_order_no`/`uk_user_idempotency` 唯一，`idx_status_expire` 支撑超时扫描） |
 | `20261001000008` | `refresh_tokens` | `refresh_tokens`（前台 refresh token，`uk_token_hash` 唯一 + `idx_family`/`idx_user`/`idx_sid`，无 FK） |
+| `20261001000009` | `reviews` | `reviews`（商品评价表） |
+| `20261001000010` | `favorites` | `favorites`（商品收藏表） |
+| `20261001000011` | `flash_sale` | `flash_sale_activities` + `flash_sale_activity_skus` + `flash_sale_orders`（秒杀活动/活动 SKU/秒杀订单） |
+| `20261001000012` | `product_view_count` | `products` 增 `view_count`（商品浏览量计数） |
+| `20261001000013` | `product_likes` | `product_likes`（商品点赞表） |
+| `20261001000014` | `banners` | `banners`（轮播图表） |
+| `20261001000015` | `flash_sale_order_requests` | `flash_sale_order_requests`（秒杀异步下单请求出队表） |
+| `20261001000016` | `recommend` | `recommend_positions` + `recommend_items`（推荐位两表） |
+| `20261001000017` | `articles` | `articles` + `article_likes` + `article_favorites`（文章三表） |
+| `20261001000018` | `flash_sale_request_audits` | `flash_sale_request_audits`（秒杀请求人工修复审计表） |
 | `20261001000019` | `user_status` | `users` 增 `status`/`auth_epoch`、`refresh_tokens` 增 `auth_epoch`、新增 `user_status_audits`（用户账号状态 + 认证版本 + 审计，单文件） |
+| `20261001000020` | `refund` | `refund_requests` + `refund_audits`（退款申请 + 退款审计两表） |
+| `20261001000021` | `coupon` | `coupon_templates` + `user_coupons`（优惠券模板 + 用户券两表） |
+| `20261001000022` | `order_coupon_amounts` | `orders` 增 `original_amount`/`discount_amount`/`user_coupon_id`（优惠券抵扣金额与用券回填） |
+| `20261001000023` | `legacy_id_map` | `legacy_id_map`（历史数据旧 ID→新 ID 映射表） |
 
 ### 2.2 baseline 模型
 

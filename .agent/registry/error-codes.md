@@ -35,13 +35,13 @@
 | 7000-7999 | address | ACTIVE | 基线 |
 | 8000-8999 | cart | ACTIVE | 基线 |
 | 9000-9999 | order | ACTIVE | order-v1 订单域（域序 9 = max(8)+1） |
-| 10000-10999 | product-review-v1 | RESERVED | product-review-v1 评价域（域序 10 = max(9)+1） |
-| 11000-11999 | product-favorite-v1 | RESERVED | product-favorite-v1 收藏域（域序 11 = max(10)+1） |
-| 12000-12999 | flash-sale-v1 | RESERVED | flash-sale-v1 秒杀域（域序 12 = max(11)+1） |
-| 13000-13999 | product-like-v1 | RESERVED | product-like-v1 点赞域（域序 13 = max(12)+1） |
-| 14000-14999 | banner-v1 | RESERVED | banner-v1 轮播图域（域序 14 = max(13)+1） |
-| 15000-15999 | recommendation-v1 | RESERVED | recommendation-v1 推荐位域（域序 15 = max(14)+1） |
-| 16000-16999 | article-cms-v1 | RESERVED | article-cms-v1 文章域（域序 16 = max(15)+1） |
-| 17000-17999 | object-storage-upload | RESERVED | object-storage-upload 上传/存储域（域序 17 = max(16)+1） |
-| 18000-18999 | order-refund-v1 | RESERVED | order-refund-v1 退款域（域序 18 = max(17)+1） |
-| 19000-19999 | coupon-v1 | RESERVED | coupon-v1 优惠券域（域序 19 = max(18)+1） |
+| 10000-10999 | product-review-v1 | ACTIVE | product-review-v1 评价域（域序 10 = max(9)+1） |
+| 11000-11999 | product-favorite-v1 | ACTIVE | product-favorite-v1 收藏域（域序 11 = max(10)+1） |
+| 12000-12999 | flash-sale-v1 | ACTIVE | flash-sale-v1 秒杀域（域序 12 = max(11)+1） |
+| 13000-13999 | product-like-v1 | ACTIVE | product-like-v1 点赞域（域序 13 = max(12)+1） |
+| 14000-14999 | banner-v1 | ACTIVE | banner-v1 轮播图域（域序 14 = max(13)+1） |
+| 15000-15999 | recommendation-v1 | ACTIVE | recommendation-v1 推荐位域（域序 15 = max(14)+1） |
+| 16000-16999 | article-cms-v1 | ACTIVE | article-cms-v1 文章域（域序 16 = max(15)+1） |
+| 17000-17999 | object-storage-upload | ACTIVE | object-storage-upload 上传/存储域（域序 17 = max(16)+1） |
+| 18000-18999 | order-refund-v1 | ACTIVE | order-refund-v1 退款域（域序 18 = max(17)+1） |
+| 19000-19999 | coupon-v1 | ACTIVE | coupon-v1 优惠券域（域序 19 = max(18)+1） |
