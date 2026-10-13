@@ -10,7 +10,7 @@ resources:
 
 review:
   status: CLEAN
-  target: "2080965c719907e4548d03a51aa525d9ee20d7a3"
+  target: "24cfd01650e3b711c62c2a60d2656cd6ea04145c"
 
 owner:
   status: PENDING

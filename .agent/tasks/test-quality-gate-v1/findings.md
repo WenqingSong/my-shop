@@ -4,9 +4,9 @@
 
 - 任务：`test-quality-gate-v1`（自动化测试与代码质量门禁）
 - 任务基线（Base）：`359b8cceeebefe7b490f783c1ad5a118afd6e31e`（分支 `test/test-quality-gate-v1`，起始 working tree clean，local == origin/develop == origin/feature）
-- Implementation Evidence Commit C1（review.target）：`2080965c719907e4548d03a51aa525d9ee20d7a3`（`feat(ci): 新增自动化测试与代码质量门禁（race 与 registry 校验）`）
-- Coder metadata commit C2：`daa6a61c354bed79f51c9c66c42128e8e24c40c6`（仅写入 `state.yaml` 的 `review.status=PENDING` / `review.target=C1`，本次审查对象为 C1，非 C2）
-- 审查方式：以 `git diff 359b8cc..2080965` 为完整相关变更（含新增文件），未仅看默认 `git diff`。
+- Implementation Evidence Commit C1（review.target）：`24cfd01650e3b711c62c2a60d2656cd6ea04145c`（`feat(ci): 新增自动化测试与代码质量门禁（race 与 registry 校验）`）
+- Coder metadata commit C2：`61789f52f94422cb400a45e01b22db181613fca6`（仅写入 `state.yaml` 的 `review.status=PENDING` / `review.target=C1`，本次审查对象为 C1，非 C2）
+- 审查方式：以 `git diff 359b8cc..24cfd01` 为完整相关变更（含新增文件），未仅看默认 `git diff`。
 
 C1 涉及文件（6 个，均为 CI/脚本/测试，无生产代码、无 `.agent/registry/*`、无 `docs/design/*`）：
 
@@ -58,7 +58,7 @@ CLEAN
 
 环境说明：本地 Go 工具链 `go1.24.1`（≥ `go 1.23.0`，可编译）；MySQL/Redis 由 docker-compose 提供且 healthy（供 `make test` DB 集成测试）；race 门禁无需 DB（已在无 `DATABASE_DEFAULT_PASS` 注入下独立跑通）；check-registry 仅需源码文件。
 
-Mutation 均在隔离临时 worktree（`git worktree add -d /tmp/my-shop-cleaner-mutation 2080965`）执行，已 `git worktree remove` 清理，未在 Review Target working tree 直接改动、未 commit、未遗留。
+Mutation 均在隔离临时 worktree（`git worktree add -d /tmp/my-shop-cleaner-mutation 24cfd01`）执行，已 `git worktree remove` 清理，未在 Review Target working tree 直接改动、未 commit、未遗留。
 
 ## Findings
 
