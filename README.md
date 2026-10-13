@@ -50,39 +50,11 @@
 
 秒杀按「先正确、后加速」逐代演进，每一步保留五个业务不变量（库存不为负、成功订单数 ≤ 初始库存、一人一单、失败不建单、重复请求不重复扣库存），MySQL 始终是最终事实来源：
 
-<<<<<<< HEAD
-```
-.
-├── api/                    # 对外 API 定义（请求/响应结构体）
-├── internal/
-│   ├── boot/               # 配置、依赖与数据库 schema 就绪检查
-│   ├── cmd/                # 命令行入口、路由注册
-│   ├── controller/         # 控制器
-│   ├── logic/              # 业务逻辑实现
-│   ├── service/            # 服务接口定义
-│   ├── worker/             # 后台扫描器（订单超时取消、秒杀对账/消费）
-│   └── migrations/         # 版本化数据库迁移
-├── test/e2e/               # 集成/E2E 测试（真实 MySQL/Redis，串行执行）
-├── docs/design/            # 项目级长期设计
-├── .agent/tasks/           # 任务决策与验收证据
-├── manifest/config/        # 配置文件
-│   └── config.yaml
-├── prometheus/             # Prometheus 抓取配置（测试环境）
-│   └── prometheus.yml
-├── Dockerfile              # 后端多阶段构建（镜像内不含敏感凭据）
-├── .dockerignore           # 构建上下文排除（.env / bin / tmp / storage 等）
-├── docker-compose.yml      # nginx / app / MySQL / Redis / Prometheus 统一编排
-├── Makefile                # 本地生命周期入口
-├── main.go                 # 程序入口
-└── go.mod
-```
-=======
 - **V1（MySQL 正确性）**：条件库存扣减 + 唯一约束，先证明不超卖与幂等。
 - **V2（Redis + Lua 准入）**：活动/库存预热到 Redis，Lua 原子完成资格校验、一人一单/幂等去重与库存预扣，售罄与穿透请求在 Redis 层快速失败。Redis 预扣仅是闸门，最终正确性由 MySQL 兜底。
 - **V3（异步落单）**：把下单拆成「入队快速响应 + 后台消费落单」两阶段，队列用 **MySQL 出队表**（`FOR UPDATE SKIP LOCKED` 出队），不引入外部 MQ。
 - **V4（故障恢复）**：幂等补偿、崩溃重投、活动结束终态收敛、死信人工修复与 append-only 审计。
 - **V5（容量保护与可观测）**：用户级/活动级限流、排队软上限、Redis 闸门熔断降级、Prometheus 指标与逐级压测脚本。
->>>>>>> 04f807bebd8c76170a43ed1af190086be9e06505
 
 ### 商品与库存
 
