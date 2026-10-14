@@ -112,6 +112,30 @@ Redis 预扣仅作准入闸门，MySQL 始终是订单与已售数量的最终�
 
 ## 快速开始
 
+### 开发环境镜像（可选）
+
+为降低开发环境搭建成本，项目提供基于 JetBrains GoLand 的公开开发环境镜像，可用于搭建 SurgeCart 开发环境。
+
+**镜像地址：**
+
+```text
+docker.cnb.cool/arthur-cloud-native/jetbrains/goland:5.0.1
+```
+
+**拉取镜像：**
+
+```bash
+docker pull docker.cnb.cool/arthur-cloud-native/jetbrains/goland:5.0.1
+```
+
+开发者可使用该镜像创建开发容器，在容器内获取 SurgeCart 源码并开展 Go 后端开发、调试与测试。
+
+**注意事项：**
+
+- 该镜像用于提供开发工具环境，不包含 SurgeCart 业务服务的完整部署。
+- MySQL、Redis、Nginx 等依赖仍需按照下方「两阶段初始化」流程配置与启动。
+- 具体开发容器的启动参数、端口和 Docker 权限要求，以该镜像的实际配置为准。
+
 ### 两阶段初始化
 
 ```bash
