@@ -13,8 +13,8 @@ review:
   target: a2d68709af9dd7d927930707c219637e3d476c0a
 
 owner:
-  status: PENDING
-  review_target: ""
+  status: ACCEPTED
+  review_target: a2d68709af9dd7d927930707c219637e3d476c0a
 
 delivery:
   status: NOT_RUN
