@@ -10,7 +10,7 @@ SHELL := /bin/bash
 
 SCRIPTS := scripts
 
-.PHONY: help bootstrap init up down restart status logs health deps-start test test-unit test-integration test-race test-prometheus test-container test-nginx test-lib test-storage clean build docker-build docker-push migrate-up migrate-version migrate-force config-check
+.PHONY: help bootstrap init up down restart status logs health deps-start test test-unit test-integration test-race test-flashsale-regression test-prometheus test-container test-nginx test-lib test-storage clean build docker-build docker-push migrate-up migrate-version migrate-force config-check
 
 help: ## 列出所有可用目标及说明
 	@bash $(SCRIPTS)/help.sh
@@ -53,6 +53,9 @@ test-integration: ## 仅运行依赖 MySQL/Redis 的真实集成测试（需先 
 
 test-race: ## 执行 go test -race（进程内共享内存并发逻辑，与 DB 集成测试隔离）
 	@bash $(SCRIPTS)/test-race.sh
+
+test-flashsale-regression: ## 秒杀正确性回归（Kafka 改造前后对比，需 MySQL/Redis 就绪）
+	@bash $(SCRIPTS)/test-flashsale-regression.sh
 
 test-prometheus: ## 校验 Prometheus 抓取配置与 compose 服务定义
 	@bash $(SCRIPTS)/test-prometheus.sh

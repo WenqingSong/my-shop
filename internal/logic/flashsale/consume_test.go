@@ -40,6 +40,7 @@ func setupConsumeTest(t *testing.T) {
 	}
 	for _, table := range []string{
 		"flash_sale_request_audits", "flash_sale_order_requests", "flash_sale_orders", "flash_sale_activity_skus", "flash_sale_activities",
+		"inventory_logs", "inventories", // 先清库存流水/库存（fk_*_sku → skus RESTRICT），避免残留库存行阻塞删除 skus。
 		"skus", "product_images", "products", "categories",
 	} {
 		if _, err := g.DB().Exec(ctx, "DELETE FROM "+table); err != nil {
