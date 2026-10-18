@@ -69,13 +69,18 @@ type DeductRes struct {
 	Inventory
 }
 
-// ListLogsReq 查询库存流水请求。
+// ListLogsReq 查询库存流水请求（分页，id 倒序）。
 type ListLogsReq struct {
 	g.Meta `path:"/admin/inventories/:sku_id/logs" method:"get" tags:"库存" summary:"查询库存流水"`
 	SkuId  int64 `json:"sku_id" in:"path" v:"required" dc:"SKU id"`
+	Page   int   `json:"page" in:"query" d:"1" dc:"页码，默认 1"`
+	Size   int   `json:"size" in:"query" d:"20" dc:"每页条数，默认 20，最大 100"`
 }
 
-// ListLogsRes 库存流水响应（id 倒序）。
+// ListLogsRes 库存流水响应（id 倒序，分页）。
 type ListLogsRes struct {
-	Items []*Log `json:"items" dc:"流水列表（id 倒序）"`
+	Items []*Log `json:"items" dc:"当前页流水（id 倒序）"`
+	Total int    `json:"total" dc:"符合条件的流水总数"`
+	Page  int    `json:"page" dc:"生效页码"`
+	Size  int    `json:"size" dc:"生效每页条数"`
 }
