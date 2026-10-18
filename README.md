@@ -203,6 +203,23 @@ make test-race  # 竞态检测
 
 `make test` 依次执行 `go vet`、单元测试（不依赖 MySQL/Redis）、集成测试（需 MySQL/Redis）、Registry 一致性校验与容器化静态断言。集成测试前需先就绪依赖（`make init` 或 `make deps-start`）。独立目标：`test-unit` / `test-integration` / `test-race` / `test-prometheus` / `test-container` / `test-nginx` / `test-lib` / `test-storage`（真实存储 E2E，需七牛凭据）。
 
+## Task 管理（Agent Workflow）
+
+历史 Task 位于 `.agent/tasks/`（截至 2026-10-18 共 51 个，全部为 schema 2/3/0 或无 State 的历史格式）。人类可读导航与兼容说明见 [Task 管理入口](docs/task-management/README.md)：
+
+- [Task 目录](docs/task-management/task-catalog.md)：51 项的状态、领域、交付与证据。
+- [Task 关系图](docs/task-management/task-relationships.md)：版本演进、前置依赖与业务关联。
+- [Owner 决策清单](docs/task-management/owner-decisions.md)：仍需人类决定的事项。
+
+```bash
+.agent/bin/workflow-status index                 # 官方派生索引（非审批证据）
+.agent/bin/workflow-status inspect <task-id>     # 单任务诊断
+.agent/bin/workflow-status recovery-check <id>   # 恢复可行性（只读）
+make check-task-docs                             # 校验目录与索引一致
+```
+
+历史 schema 2/3 只读（T0）；继续需 Owner 按 T1 新建 schema 4 Task，当前版本不提供原地升级（T2）。
+
 ## 部署
 
 - **本地/单机**：Docker Compose 编排 nginx/app/MySQL/Redis/Prometheus 五个服务，Nginx 为对外唯一入口，app 仅暴露 Compose 内网端口；`make init` + `make up` 两阶段拉起。
@@ -217,6 +234,7 @@ make test-race  # 竞态检测
 - [系统架构](docs/design/architecture.md)：分层结构、模块边界、核心业务流程与基础设施。
 - 核心设计：[订单](docs/design/order.md)、[秒杀](docs/design/flash-sale.md)、[商品](docs/design/product.md)、[分类](docs/design/category.md)、[SKU](docs/design/sku.md)、[库存](docs/design/inventory.md)、[购物车](docs/design/cart.md)、[IAM](docs/design/iam.md)、[RBAC](docs/design/rbac.md)、[优惠券](docs/design/coupon.md)、[退款](docs/design/refund.md)。
 - 部署与运维：[容器化部署](docs/design/deployment.md)、[数据库迁移](docs/design/migration.md)、[错误码](docs/design/error-codes.md)、[对象存储](docs/design/storage.md)。
+- Task 管理：[Task 管理入口](docs/task-management/README.md)、[Task 目录](docs/task-management/task-catalog.md)、[Task 关系图](docs/task-management/task-relationships.md)、[Owner 决策清单](docs/task-management/owner-decisions.md)。
 - 运营与内容：[轮播图](docs/design/banner.md)、[文章](docs/design/article.md)、[推荐位](docs/design/recommendation.md)、[评价](docs/design/review.md)、[数据大屏](docs/design/dashboard.md)、[收藏](docs/design/favorite.md)、[点赞](docs/design/like.md)。
 
 `docs/design/*` 记录持续维护的项目级长期设计，是了解各模块现状与边界的权威来源。
