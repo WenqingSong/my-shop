@@ -26,3 +26,7 @@ FAIL/ERROR：交出方修复本角色证据，权限外问题报 BLOCKED；接�
 | OwnerGate | Merger | 三种 Task 类型 | Owner ACCEPT 后各自出口 Gate | 强制 |
 
 TaskBuilder 收 Intake 用 discovery-handoff；收到已存在 Task 的正式交接时才使用 handoff-entry。Collector/Assembler 的 Program 边见 `.agent/specs/workflows/CoordinatedWorkflow.md`，不调用 Task Gate。修复退回边同样遵守上述 Task 作用域与证据规则。
+
+## 公共入口的路径与机器身份
+
+Discovery/TaskBuilder 的完整 Prompt 统一在 roles 根目录，机器 next_role/acked_by 仍为 Discovery/TaskBuilder 等既有枚举，不使用文件路径或 ENTRY。Intake 的 discovery-start 不要求 task_type；批准后的 Task Handoff.workflow 必须是 NORMAL/COMPLEX/DESIGN。TaskBuilder 首次交出按已批准类型选择 Coder/Analyst/Architect。历史 Handoff 中已存在的 SHA/路径不因 Prompt 迁移而重写，映射见 `.agent/roles/README.md`；Program 保留自己的交接协议。

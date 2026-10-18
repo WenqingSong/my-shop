@@ -86,8 +86,12 @@ Analyst 资源分配只修改机器配置声明的 Registry 文件，单独提�
 
 ## 完整 Role 与 Program SHA 证明
 
-角色权威规则在框架源码维护区单一维护，确定性生成 normal/complex/design/program 下 25 份完整 Prompt；宿主只复制完整文件，可本地定制并按准确上游三方更新。11 个机器身份及 Handoff 枚举不变。
+角色权威规则在框架源码维护区单一维护，确定性生成两个公共入口 Discovery/TaskBuilder，以及 normal/complex/design/program 下 19 份后续 Prompt，共 21 份完整 Prompt；宿主只复制完整文件，可本地定制并按准确上游三方更新。11 个机器身份及 Handoff 枚举不变。
 
 Program Registry.delivery_sha 仍是实际被验证 snapshot；交付 metadata 的远端 tip 另行核验：受限 delivery-neutral tail、State 只允许 Delivery 变化，Contract/Review/Owner/资源/Git 基线不变。集成固定该真实 tip，Merger 在测试前后精确核验来源和父分支；非 MERGE-L1 不能视为集成成功。原始 JSON 集成收据在 C1 后由 Assembler 登记，C0 不自引用自己。
 
 内部 .agent/AGENTS.md 属框架通用导航，显式读取；宿主根 AGENTS.md 可选且项目拥有。新内部路径进入 Merger L3 保护，review/delivery neutral 白名单不扩大。验收前后拒绝被测树持久变化，输出使用工作树外临时目录；不声称可证明执行期间从未修改后恢复。
+
+## 公共任务入口
+
+新需求先经公共 Discovery 调查，流程选择发生在调查之后，由 Owner 确认；公共 TaskBuilder 只按获批 task_type 加载专属初始化规范。Program 仍由 Owner 规划，子 Task 单独获批。入口规则见 [EntryWorkflow](workflows/EntryWorkflow.md)。Engine 依赖机器 Role 与 State/Git Evidence，不读取 Prompt 的物理路径；本次不新增 Gate/Schema，也不改变 Handoff/ACK 权限。旧路径迁移见 [Role 索引](../roles/README.md)，历史批准和路径不改写。

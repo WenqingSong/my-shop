@@ -4,8 +4,8 @@ Discovery → TaskBuilder → Architect → DocsSpecWriter → Cleaner → Owner
 
 | 顺序 | 打开并完整复制 | 交接输入 |
 | --- | --- | --- |
-| 1 | [DiscoveryAgent.md](DiscoveryAgent.md) | 需求、intake_id；finalize 给 Owner 决策 |
-| 2 | [TaskBuilderAgent.md](TaskBuilderAgent.md) | 已批准 Intake |
+| 1 | [公共 Discovery](../DiscoveryAgent.md) | 需求、intake_id；无须预选类型，调查后 Owner 决策 |
+| 2 | [公共 TaskBuilder](../TaskBuilderAgent.md) | 已批准类型/范围/基线的 Intake；自动加载本流程初始化规范 |
 | 3 | [ArchitectAgent.md](ArchitectAgent.md) | Task ID 或 task.md 路径、上一角色正式 Handoff |
 | 4 | [DocsSpecWriterAgent.md](DocsSpecWriterAgent.md) | Task ID 或 task.md 路径、上一角色正式 Handoff |
 | 5 | [CleanerAgent.md](CleanerAgent.md) | Task ID 或 task.md 路径、上一角色正式 Handoff |

@@ -34,3 +34,5 @@
 
 ## Relevant Context
 <已核实事实、假设、未决问题；禁止代 Owner 批准>
+
+新任务先走公共 Discovery，再由 Owner 确认类型；公共 TaskBuilder 读取已批准 Intake 和 EntryWorkflow 后填本模板，类型不是用户启动调查的前置输入。Program 整体不使用 Task 模板，子 Task 独立批准。

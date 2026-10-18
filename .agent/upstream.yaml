@@ -1,34 +1,58 @@
 schema_version: 1
 repository: https://cnb.cool/framework-station/agent-workflow
-commit: 1fc5c6dc88fc7f417374e37e7354a3a6c4e07a65
-version: "4.2.1"
+commit: 0c62d1c07bc9a98120c7a11b9cd3bbeae104a2f0
+version: "4.3.0-dev"
 subdirectory: .agent
 
-# 本次更新的旧上游基线（Workflow V3 最后一次同名状态）：
-# 由项目 V3 框架文件与上游历史逐文件 blob 哈希核验得出，不是凭 VERSION 猜测。
+# 本次采用的远端引用：refs/heads/main 与远端 HEAD 均指向该提交（git ls-remote 核验）。
+# 4.3.0-dev 是开发版本标识，不是正式发布的 V4.3.0。
+ref: refs/heads/main
+
+# 上一版上游基线（该项目 V4.2.1 升级时采用）：
+# 由框架文件逐文件比较核验：项目 .agent 与 v4.2.1 tag 内容一致，仅 README 本地小节与 upstream.yaml 不同。
 previous:
+  commit: 1fc5c6dc88fc7f417374e37e7354a3a6c4e07a65
+  version: "4.2.1"
+  verified_by: .agent 框架文件与上游 v4.2.1 tag 逐文件比较（仅 README 本地小节不同）
+
+# 更早的历史基线（V3，保留追溯）：
+legacy:
   commit: 7727e0a64f47bc33b6f042f27421e1889224e7f3
   version: "3.0.0"
   verified_by: 框架文件 blob 哈希逐项匹配（roles/specs/engine/templates）
 
-# 保留的项目本地定制与项目拥有资产（不随框架更新覆盖）：
-# - .agent/README.md 追加 “Separate: Project Mastery Workflow” 小节
-# - .agent/mastery/（独立 Project Mastery Workflow 资产，不参与生产 Workflow 状态机）
-# - .agent/workflow.yaml（项目机器配置：integration_branch=develop、两个资源 Registry）
-# - .agent/registry/、.agent/tasks/、.agent/programs/、.agent/intake/（运行数据）
-# - 宿主根 AGENTS.md（业务规则，默认原字节保留）
-# 详见 .agent/specs/adoption/WorkflowAdoption.md “已有项目更新”。
-local_changes: |
-  README.md：在官方 README 末尾保留 Project Mastery Workflow 小节（项目本地定制）。
-  mastery/：项目独有的 Mastering Workflow 资产，不属于上游框架；V4 项目兼容收尾时仅将 5 处
-  活动指令中的旧版 Workflow 描述改为 V4.2.1（其余学习记录未改）。
-  未保留的旧定制：V3 README 曾移除 GOWORK=off 前缀；V4 官方以 GOWORK=off 隔离宿主 go.work，
-  项目无 go.work，采用官方写法不改变构建结果，故随上游同步。
+# 本次迁移范围（仅框架资产；未整目录覆盖）：
+migration:
+  entry:
+    - 新增公共入口 .agent/roles/DiscoveryAgent.md、.agent/roles/TaskBuilderAgent.md（由 complex 目录重命名而来，内容按目标版本更新）
+    - 删除 normal/complex/design 下 6 份重复 Discovery/TaskBuilder Prompt
+    - 新增 .agent/specs/workflows/EntryWorkflow.md，定义新需求→调查→Owner 确认→按类型初始化的唯一入口
+  engine:
+    - .agent/engine/internal/workflow/taskbuilder_gate.go：新增 initialTaskPolicy 初始 State/首位角色校验、当前 Task Worktree 与 HEAD/Base 祖先校验
+    - 新增 taskbuilder_initialization_test.go、unified_entry_test.go（目标版本真实实现配套测试）
+  docs:
+    - .agent/AGENTS.md、README.md、assistant-context.md、roles/README.md 与各流程 README
+    - .agent/specs/（协作规范、职责边界、架构、适配、Gate/Handoff 协议、四流程规范）
+    - .agent/templates/state.yaml.template、task.template.md
+  project:
+    - 宿主根 AGENTS.md Workflow 入口段（版本与公共入口路径；业务工程规范正文未改）
+    - docs/design/agent-workflow.md 归档头版本/Commit 引用（V3 正文保留）
+    - .agent/mastery/ 中 2 处生产 Workflow 版本描述（学习记录与证据未改）
 
-# V4.2.1 项目级兼容收尾（本次任务，均已获 Owner 授权）：
-project_compat:
-  - AGENTS.md：Workflow 入口从 V3 更新为 V4.2.1（V4 规范路径、四流程、六 CLI、T0/T1/T2 边界）；业务工程规范正文未改。
-  - .agent/registry/error-codes.md、migrations.md：仅将失效的 Five-AgentResponsibilityBoundary.md 引用改为 AgentResponsibilityBoundary.md。
-  - docs/design/agent-workflow.md：采用历史归档策略，顶部加 ARCHIVED 标识并指向 .agent/specs/Architecture.md；V3 正文保留。
-  - .agent/mastery/：活动指令中的旧版 Workflow 描述更新为 V4.2.1，学习记录与证据不变。
-  - 历史 Task（含 schema 2/3 与 3 个 pre-schema State）保持只读，未做 T2 原地升级。
+# 保留的项目本地定制与项目拥有资产（不随框架更新覆盖）：
+local_changes: |
+  README.md：在官方 README 末尾保留 “Separate: Project Mastery Workflow” 小节（项目本地定制）。
+  mastery/：项目独有的 Mastering Workflow 资产，不属于上游框架；本次仅将 2 处活动描述中的
+  生产 Workflow 版本改为 V4.3.0-dev，其余学习记录、证据与结构未改。
+  workflow.yaml：项目机器配置（integration_branch=develop、两个资源 Registry）。
+  tasks/、programs/、intake/、registry/：运行数据与共享资源事实源，逐字节保留。
+  AGENTS.md：宿主业务工程规范正文（第 1–12 节）保持原样，仅更新 Workflow 入口段。
+  未复制上游仓库级维护材料（CHANGELOG.md、PACKAGE_MANIFEST.md、examples/、tools/、scripts/、
+  .cnb.yml），它们不属于 .agent 分发内容，且本仓库同名文件为业务资产。
+
+# 未解决的兼容限制：
+compat:
+  - 历史 schema 2/3 Task 只读（T0）；继续需 Owner 逐任务授权 T1 新 Task 承继；不提供 T2 原地升级。
+  - 旧 Task 分支内的 Role 路径与 Prompt 保留原版本；本次不重写历史 Evidence/SHA/Handoff。
+  - V4.3.0-dev 为开发版本，未冒充正式 V4.3.0；上游后续正式发布需重新核验后再升级。
+  - 本次未执行真实 Agent E2E（不伪造 Owner 批准/Task），仅完成静态一致性、Engine 测试与 CLI 验证。

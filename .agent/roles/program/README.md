@@ -1,6 +1,6 @@
 # Program / COORDINATED
 
-Owner 先确认 Program 规划与子 Task。各子 Task 独立执行自己的 NORMAL/COMPLEX/DESIGN 流程，Merger 只验证，不更新父分支。
+新需求先用 [公共 Discovery](../DiscoveryAgent.md) 调查和推荐；Program 由 Owner 确认规划与子 Task，不经 TaskBuilder 初始化整体。各子 Task 用 [公共 TaskBuilder](../TaskBuilderAgent.md) 接收自己获批的 Intake。各子 Task 独立执行自己的 NORMAL/COMPLEX/DESIGN 流程，Merger 只验证，不更新父分支。
 
 Collector → Assembler → Cleaner → OwnerGate → Merger
 

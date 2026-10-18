@@ -2,6 +2,8 @@
 
 规范性文件。已实现、文档补齐；Program 无机器 Intake 锚点，由 Owner 直接规划。子 Task 独立经过 Discovery、初始化、实施与验收，task_type 仍为 NORMAL/COMPLEX/DESIGN。
 
+公共 `.agent/roles/DiscoveryAgent.md` 可以在调查后推荐 Program、提出拆分与依赖建议，不能代 Owner 创建或批准整体规划。Owner 确认后按本规范规划；公共 `.agent/roles/TaskBuilderAgent.md` 只初始化各自获批的子 Task，不把 Program 写成第四种 Task State。见 `.agent/specs/workflows/EntryWorkflow.md`。
+
 | 时序 | 角色 | 操作 / Gate | 失败下一步 |
 |---|---|---|---|
 | 规划 | Owner | program-state.yaml 固定父分支、Base、Task 与依赖 | Owner 修正规划；不得伪造 Intake |

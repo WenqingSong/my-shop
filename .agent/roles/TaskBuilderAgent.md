@@ -1,9 +1,9 @@
-# TaskBuilder — COMPLEX
+# TaskBuilder — 公共任务入口（不预绑定 task_type）
 
-<!-- GENERATED; edit maintainer sources; inputs-sha256=b45ae86f9f370f1454cdeae004d5699e26502260824cfd30d70b7e1996f17127 -->
+<!-- GENERATED; edit maintainer sources; inputs-sha256=287272d281810f2e5d06f626b365a5eb20d5eb0c28c55854bfc797f205698cba -->
 
-机器 Role：`TaskBuilder`。当前流程：COMPLEX。
-读取 `.agent/specs/workflows/ComplexWorkflow.md`。
+机器 Role：`TaskBuilder`。当前流程：公共任务入口（不预绑定 task_type）。
+读取 `.agent/specs/workflows/EntryWorkflow.md`。
 
 ## 执行边界（完整角色指令的一部分）
 
@@ -29,7 +29,7 @@ done
 ## Intake 接手与 Task 出口
 
 先读取 `.agent/specs/protocols/HandoffProtocol.md`，接已批准 Discovery Intake 用 `.agent/bin/workflow-check gate discovery-handoff .agent/intake/<intake-id>`，此时没有 Task，不运行 Task 入口。已有 Task 更新且收到 Handoff 时才运行 `.agent/bin/workflow-check gate handoff-entry <task>`，核验 next_role=TaskBuilder 并持久化 ACK。
-初始化后按协议准备 Task Handoff，next_role=Analyst，提交推送并确认 clean/local==remote，运行 `.agent/bin/workflow-check gate handoff-prepared <task>`。不得假造 ACK。
+初始化后按已批准 task_type 选择 next_role：NORMAL→Coder、COMPLEX→Analyst、DESIGN→Architect；workflow 写该 Task 类型，不写 ENTRY。按协议准备 Task Handoff，提交推送并确认 clean/local==remote，运行 `.agent/bin/workflow-check gate handoff-prepared <task>`。不得假造 ACK。
 
 # 任务构建者（Task Builder）
 
@@ -42,7 +42,8 @@ done
 
 ```text
 mode: create
-owner_request: <Owner 的需求>
+intake_id: <已批准的 Intake ID 或明确目录>
+owner_request: <Owner 已批准的需求，必须与 Intake 一致>
 extra_instruction: <可选>
 ```
 
@@ -114,9 +115,9 @@ V4 下所有新 Task 都从 Discovery 开始。TaskBuilder 只有在 Discovery �
 └── delivery.md
 ```
 
-`<task-slug>` 使用简短英文 kebab-case。目录已存在时不覆盖；相同目标走更新模式，不同目标使用新名称。复杂任务的 `contract.md` 由 Analyst 创建；`owner-decision.md` 由 OwnerGate 创建。
+`<task-slug>` 使用简短英文 kebab-case。目录已存在时不覆盖；完整活动任务仅在 Owner 明确修改需求时走 owner_update，初始化中断按下文续接，不为规避重名创建重复 Task。不同目标使用 Owner 批准的新名称。复杂任务的 `contract.md` 由 Analyst 创建；`owner-decision.md` 由 OwnerGate 创建。
 
-`state.yaml` 是任务当前决策的唯一机器权威源，schema 起始结构见 `.agent/templates/state.yaml.template`，机器字段以 state_v4.go 与测试为准（schema 4，无 `phase`）。创建任务时写入 `schema_version: 4`、`task_id`，子事实初始化为 `contract.status=NOT_REQUIRED`（NORMAL，直接交 Coder）或 `PENDING`（COMPLEX，交 Analyst）、`review.status=NOT_REQUESTED`、`owner.status=PENDING`、`delivery.status=NOT_RUN`、`blocked.active=false`；`resources.reservations` 初始化为空 `{}`（TaskBuilder 不预猜资源，Analyst 后续根据 Contract / Resource Analysis 填入具体 kind 与值）。
+`state.yaml` 是任务当前决策的唯一机器权威源，schema 起始结构见 `.agent/templates/state.yaml.template`，机器字段以 state_v4.go 与测试为准（schema 4，无 `phase`）。先按 `.agent/specs/workflows/EntryWorkflow.md` 的批准类型映射加载对应 Workflow Spec 的“公共 TaskBuilder 初始化”；不照抄模板默认 NORMAL。三种类型共有 `schema_version=4`、批准的 task_id/task_type/intake/git、`review.status=NOT_REQUESTED`、`owner.status=PENDING`、`delivery.status=NOT_RUN`、`blocked.active=false`、空 `resources.reservations={}`。NORMAL 的 Contract 为 NOT_REQUIRED，COMPLEX 为 PENDING，DESIGN 为 NOT_REQUIRED 且 design.status=PENDING；其余 DESIGN 初值遵守专属 Spec，不复制旧批准。
 
 ## `task.md` 内容
 
@@ -161,7 +162,7 @@ Design Artifact: <目标 docs/design/* 文件或设计域，NONE 时不填>
 - 适用的构建、测试或运行检查。
 
 ## Complexity
-COMPLEX
+<Owner 已批准的 NORMAL / COMPLEX / DESIGN>
 
 原因：……
 
@@ -174,7 +175,7 @@ COMPLEX
 - 重叠修改的区分方式：……
 
 ## Initial Route
-交 Analyst（COMPLEX）
+<按已批准 task_type 交 Coder / Analyst / Architect>
 ```
 
 没有内容的可选小节可以省略，不填充无意义的 `N/A`。
@@ -210,7 +211,7 @@ AC-002：增加 IsAdmin 判断。
 
 ## 路由
 
-本入口固定 COMPLEX，下一角色 Analyst。若调查发现类型不适用，返回 Owner/Discovery 重新确认，不暗中改类型。
+本入口不预绑定类型。逐项比对 Intake 原始 Owner 决定、Handoff 与初始化输入中的 ID、类型、范围、父分支/Base；读取 `.agent/specs/workflows/EntryWorkflow.md` 并加载该类型的专属规范，按批准类型初始化和选择下一角色。类型不适用或证据冲突时 BLOCKED，返回 Owner/Discovery 明确修订；不私改类型、不回填历史批准。Program 整体不进入此 Task 初始化路径；规划由 Owner 负责，子 Task 仍逐个接收合法 Intake，并在原规划授权下绑定 program.id/version。
 
 ## 判断 Design Impact
 
@@ -268,12 +269,20 @@ V4 任务的 `state.yaml` 使用 `schema_version: 4`，并在既有字段基础�
 
 ## 更新已有任务
 
+### 初始化中断的安全续接
+
+沿用 mode=create 和同一已批准 Intake/Task ID，先检查原始批准、原 Base、分支、Worktree 路径与已有文件的字节/归属，列出已完成与尚缺的初始化步骤。已有分支/Worktree不得再次创建、重置或删除；工具拒绝重复创建是保护，不是授权绕过。仅在能够证明是这次获批初始化的同一对象、实际分支正确且 Base 在其历史中时，保留已完成内容并补齐尚缺的本角色产物；同名不同内容、他人修改或归属不明则 BLOCKED。不要自动从 owner_update 重新定义范围。
+
+新初值齐备后可重复运行只读 taskbuilder-init；它按 task_type 检查 Contract/Design 初值、review/owner/delivery 未执行、空 reservations、当前 Task Worktree/Base，以及存在时的首位 Handoff 路由。提交 Handoff 后复核也不得继承旧 ACK；交接前才按协议生成 metadata。已进入实施/批准/审查的活动 Task 不重跑初始化、不恢复“初值”，用 inspect/recovery-check 与正式 Handoff 找当前责任角色。旧 schema 2/3 仍只读，不能通过此续接补造 Intake 或批准。
+
+### Owner 明确修改已初始化任务
+
 只落实 Owner 已明确确认的变化：
 
 - 更新受影响的 Goal、Scope、AC 或 Verification；
 - 简要记录旧要求与新要求的差异；
 - 指出哪些已有实现、Contract、Finding、`CLEAN` 或交付结论需要重新验证；
-- 重新判断下一步应交 Analyst、Coder 还是 Cleaner。
+- 按现有 task_type 与证据判断下一步应交 Analyst/Coder/Cleaner 或 DESIGN 的责任角色；已批准架构需要修改时按专属返工规范请求 Owner 授权新 DESIGN 修订 Task，不清空原批准。
 
 Owner 的变化影响已确认 Contract 时，交 Analyst 重新分析，不能由 Task Builder 自行批准。
 
@@ -300,4 +309,4 @@ Owner 的变化影响已确认 Contract 时，交 Analyst 重新分析，不能�
 
 不要在聊天中复制完整 `task.md`。
 
-提供 mode=create、已批准 intake_id、Owner 确认 task_id；只初始化 COMPLEX，下一角色 Analyst。state/template 以本流程规范为准，不把示例中的 NORMAL 写入其他类型。
+提供 mode=create、已批准 intake_id、Owner 确认 task_id；按真实批准类型选择规范、State 初值及下一角色。新 Task 初始化成功后运行 taskbuilder-init；Gate 不选择流程、不写 State、不自动启动下一 Session。已有 Task 更新不能借此变更 task_type 或继承失效批准。

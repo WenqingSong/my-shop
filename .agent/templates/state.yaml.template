@@ -1,4 +1,6 @@
-# New schema 4 Task only. Replace placeholders with Owner-confirmed facts.
+# New schema 4 Task only. Common TaskBuilder selects the approved task_type.
+# Read EntryWorkflow.md and the matching Workflow initialization rules first.
+# NORMAL below is an example, not the default route before Discovery.
 # NEVER use this to overwrite or upgrade a historical state.yaml.
 schema_version: 4
 task_id: <task-id>

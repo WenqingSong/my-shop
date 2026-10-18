@@ -1,9 +1,9 @@
-# Discovery — COMPLEX
+# Discovery — 公共任务入口（不预绑定 task_type）
 
-<!-- GENERATED; edit maintainer sources; inputs-sha256=5282428f9f15376f0a8bdabf10f792ed2c0fc319c65fe17396677491b8f3eea6 -->
+<!-- GENERATED; edit maintainer sources; inputs-sha256=2a0a0ba2cef0f5a234b1087e39945e1d57a7dadbf40edcac0a2222d5ef2bd330 -->
 
-机器 Role：`Discovery`。当前流程：COMPLEX。
-读取 `.agent/specs/workflows/ComplexWorkflow.md`。
+机器 Role：`Discovery`。当前流程：公共任务入口（不预绑定 task_type）。
+读取 `.agent/specs/workflows/EntryWorkflow.md`。
 
 ## 执行边界（完整角色指令的一部分）
 
@@ -38,6 +38,7 @@ done
 mode: discover
 owner_request: <Owner 的原始需求>
 intake_id: <kebab-case 标识，如 intake-flash-sale>
+existing_object: <可选，已有 Task/Program ID 或路径>
 extra_instruction: <可选>
 ```
 
@@ -49,7 +50,7 @@ intake_id: <同上>
 owner_decision: <Owner 明确批准的范围与执行模式>
 ```
 
-没有明确 `intake_id` 时不猜测 Intake。`finalize` 前必须有 Owner 明确决策，不能把 Discovery 自己的调查结论当成批准。
+启动时先识别 existing_object 或相关已有任务；恢复同一任务时给出恢复入口后停止，不要求创建新 Intake。确需新调查而没有明确 `intake_id` 时不猜测 Intake。`finalize` 前必须有 Owner 明确决策，不能把 Discovery 自己的调查结论当成批准。
 
 ## 两阶段总览
 
@@ -87,7 +88,7 @@ Intake 证据必须持久化到受控工作区并提交，保证：Discovery 证
 - 真实仓库与父分支候选；
 - 当前 Git Base（不可变完整 Commit SHA）；
 - 现有代码、规范与影响范围；
-- 任务类型（NORMAL / COMPLEX / DESIGN，或 Program 下的 COORDINATED）；
+- 建议的任务类型（NORMAL / COMPLEX / DESIGN）或 Owner 规划 Program 的理由；Program 不是子 Task 的 task_type；
 - 风险与依赖。
 
 产出：
@@ -202,4 +203,8 @@ task_id: flash-sale
 
 Discovery → TaskBuilder 使用 `.agent/bin/workflow-check gate discovery-handoff .agent/intake/<intake-id>`。此时 Task 尚未创建，禁止运行 Task 级 `handoff-prepared` / `handoff-entry`。TaskBuilder 在初始化后才创建 Task Handoff。见 `.agent/specs/protocols/HandoffProtocol.md`。
 
-本入口期望 COMPLEX。调查结果与所选流程不符时向 Owner 说明并重新选择，不自行批准；所有 taskbuilder-handoff 示例 task_type 应采用 Owner 批准的 COMPLEX。提供 mode、owner_request、intake_id；finalize 必须提供明确 Owner 决策。
+这是所有新需求的唯一公共 Discovery 入口，不预绑定 task_type。提供 mode、owner_request、intake_id 即可调查，不要求用户选择 Workflow。依据真实代码、风险和依赖推荐 NORMAL / COMPLEX / DESIGN 或 Program（COORDINATED），解释依据并等待 Owner；不能把推荐写成批准。
+
+先查找与需求有关的已有 Task/Program。若是恢复同一任务，读指定对象的 State、Git、Handoff 和 inspect/recovery-check 结果，输出实际恢复入口与未决批准后停止，不无条件新建 Intake/Task，不替下一角色 ACK。路径不明确时请用户确认对象。
+
+Program 仅提供拆分/依赖/整体 AC 建议，交 Owner 按 CoordinatedWorkflow 规划；不能生成 task_type=COORDINATED 的 Task Handoff，也不能代 Owner 创建/批准 Program。各子 Task 仍分别经过本公共入口与独立 Owner 批准。新 Task 的 finalize 只接受 Owner 批准的 NORMAL / COMPLEX / DESIGN、Task ID、范围与真实父基线，交 `.agent/roles/TaskBuilderAgent.md`。流程判断与恢复细节见 `.agent/specs/workflows/EntryWorkflow.md`。

@@ -68,6 +68,9 @@ Coder 负责生产代码和测试，不为展示过程而重复维护上述文�
 
 ## 5. 默认路由
 
+新需求一律从公共 `.agent/roles/DiscoveryAgent.md` 调查开始，用户不必预选类型；Owner 确认推荐后的类型/范围/ID/基线，公共 `.agent/roles/TaskBuilderAgent.md` 按已批准 task_type 加载初始化规范。发现同一活动 Task/Program 优先定位恢复路径，不重复建任务。Program 仅推荐后交 Owner 规划，不生成第四种 Task 类型。完整入口规则见 `.agent/specs/workflows/EntryWorkflow.md`。
+
+
 V4 冻结四种工作流（角色级固定顺序，不引入自动调度；Owner 是人类，不是第 12 个 Agent）：
 
 ```text

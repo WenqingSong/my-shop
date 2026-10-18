@@ -56,12 +56,12 @@ Owner 不修改 `contract.md`、`owner-decision.md`、`state.yaml`（由对应�
 
 Discovery 回答：真实仓库与需求是什么、影响范围与任务类型是什么、Owner 需要就哪些范围问题做决定？
 
-Discovery 只调查、只记录，不实现代码、不替 Owner 决策、不创建 Task 分支、不启动任何其他 Agent。所有新工作流（NORMAL / COMPLEX / DESIGN / COORDINATED）都从 Discovery 开始。
+公共入口为 `.agent/roles/DiscoveryAgent.md`，不预绑定流程；调查后推荐类型，Owner 确认，已有任务优先定位恢复。Program 只建议并交 Owner 规划。Discovery 只调查、只记录，不实现代码、不替 Owner 决策、不创建 Task 分支、不启动任何其他 Agent。所有新 Task 都从公共 Discovery 开始；Program 只推荐并交 Owner 规划，各子 Task 再单独调查/批准。
 
 负责：
 
 - 用受控 Intake 工作区（`.agent/intake/<intake-id>/`）调查真实仓库、父分支候选与当前 Git Base；
-- 判断任务类型（NORMAL / COMPLEX / DESIGN，或 Program 下的 COORDINATED）与风险、依赖；
+- 调查后推荐 Task 类型（NORMAL / COMPLEX / DESIGN）或 Program 规划建议，说明风险与依赖；不把 COORDINATED 写成子 Task 类型；
 - 产出 `discovery-report.md` 与 `intake.yaml`，进入 `WAITING_FOR_OWNER_DECISION` 后停止；
 - Owner 决策后核对范围与执行模式，产出可被 TaskBuilder 机器校验的 `taskbuilder-handoff.md`。
 
@@ -82,7 +82,7 @@ TaskBuilder 回答：本次究竟交付什么，怎样判断完成？
 
 不负责：写生产代码、替 Analyst 完成复杂设计、Review 实现，或替 Owner 创造关键业务规则。
 
-TaskBuilder 只按 Owner 已批准的分支名和原 Base，使用受控工具 workflow-git 创建 Task 分支/Worktree；不得删除、重命名或覆盖已有分支，也不得自行选择父分支或基线。
+公共入口为 `.agent/roles/TaskBuilderAgent.md`；按已批准 task_type 加载 `.agent/specs/workflows/EntryWorkflow.md` 指向的初始化规范，NORMAL→Coder、COMPLEX→Analyst、DESIGN→Architect；Program 整体不走此 Task 初始化。TaskBuilder 只按 Owner 已批准的分支名和原 Base，使用受控工具 workflow-git 创建 Task 分支/Worktree；不得删除、重命名或覆盖已有分支，也不得自行选择父分支或基线。
 
 ## 5. Analyst
 
@@ -263,7 +263,7 @@ Discovery → Owner → TaskBuilder → Architect → Owner 架构批准 → Doc
 → OwnerGate → Owner 最终批准 → Merger
 
 COORDINATED：
-Program Discovery → Owner 规划 → TaskBuilder 初始化 → 子 Task 独立实施、验收 → Collector
+公共 Discovery 建议 → Owner 规划 Program → 子 Task 各自公共 Discovery/TaskBuilder → 子 Task 独立实施、验收 → Collector
 → Assembler → Program Cleaner → OwnerGate → Owner 最终批准 → Merger
 ```
 

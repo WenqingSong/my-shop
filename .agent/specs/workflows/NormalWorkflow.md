@@ -2,6 +2,11 @@
 
 规范性文件。Task 由 Discovery → Owner → TaskBuilder → Coder → Cleaner → OwnerGate → Owner ACCEPT → Merger；不自动调度。
 
+## 公共 TaskBuilder 初始化
+
+使用 `.agent/roles/DiscoveryAgent.md` 调查后由 Owner 确认 NORMAL，再交 `.agent/roles/TaskBuilderAgent.md`。流程选择不是启动调查的前置条件，入口协议见 `.agent/specs/workflows/EntryWorkflow.md`。
+按已批准 Intake 建 schema 4 Task；task_type=NORMAL、contract.status=NOT_REQUIRED，不创建已批准 Contract；review=NOT_REQUESTED、owner=PENDING、delivery=NOT_RUN、blocked.active=false、resources.reservations={}，intake/git 绑定原始批准。初始 Handoff next_role=Coder、workflow=NORMAL，交 normal/CoderAgent.md。新资源分配/独立 Contract 需求先交 Owner，不自行改类型。
+
 | 阶段 | Gate | 失败下一步 |
 |---|---|---|
 | Intake 调查、决策、交出 | discovery-start / discovery-decision / discovery-handoff | Discovery 补证据，批准由 Owner 决定 |
