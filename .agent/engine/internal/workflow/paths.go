@@ -11,18 +11,25 @@ import "path"
 // 其他目录、其他 task 的同名文件（如 .agent/tasks/other/state.yaml）一律判 substantive。
 
 // reviewNeutralBasenames 是 review tail 允许的文件名（精确匹配，不含子目录）。
+//
+// events.md 是当前 task 的诊断事件日志（见 EventLogProtocol.md），属于 neutral metadata，
+// 与 state.yaml 同级。它必须严格位于 .agent/tasks/<task>/ 下，由 taskScoped 精确限定；
+// 其他 task 的同名文件、子目录下的同名文件、以及 .agent/programs/*/events.md 一律 substantive
+// （Program 事件路径不进入 task-scoped 白名单，单独考虑作用域，default-deny）。
 var reviewNeutralBasenames = map[string]struct{}{
 	"findings.md":       {},
 	"core-logic.md":     {},
 	"owner-decision.md": {},
 	"delivery.md":       {},
 	"state.yaml":        {},
+	"events.md":         {},
 }
 
 // deliveryNeutralBasenames 是 delivery tail 允许的文件名（更窄）。
 var deliveryNeutralBasenames = map[string]struct{}{
 	"delivery.md": {},
 	"state.yaml":  {},
+	"events.md":   {},
 }
 
 // taskScoped 报告路径 p 是否精确位于 .agent/tasks/<task>/ 下（不含更深的子目录）。

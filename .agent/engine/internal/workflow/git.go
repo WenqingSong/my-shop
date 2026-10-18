@@ -33,6 +33,10 @@ type Git interface {
 	StatusPorcelain() ([]string, error)
 	// CurrentBranch 返回当前分支名；detached HEAD 时返回 "HEAD"。
 	CurrentBranch() (string, error)
+	// BranchExists 报告 name 分支（本地 refs/heads 或远端 refs/remotes/origin）是否存在。
+	BranchExists(name string) (bool, error)
+	// WorktreeExists 报告当前仓库是否存在 checkout 到 branch 的 worktree（含主 worktree）。
+	WorktreeExists(branch string) (bool, error)
 }
 
 // ExecGit 是基于 os/exec 调用 git 的只读实现，工作在指定仓库根目录。
@@ -159,6 +163,28 @@ func (g *ExecGit) CurrentBranch() (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(out), nil
+}
+
+func (g *ExecGit) BranchExists(name string) (bool, error) {
+	out, err := g.run("for-each-ref", "--format=%(refname)", "refs/heads/"+name, "refs/remotes/origin/"+name)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) != "", nil
+}
+
+func (g *ExecGit) WorktreeExists(branch string) (bool, error) {
+	out, err := g.run("worktree", "list", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	want := "branch refs/heads/" + branch
+	for _, line := range splitLines(out) {
+		if line == want {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func splitLines(s string) []string {

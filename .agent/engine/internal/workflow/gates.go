@@ -41,6 +41,9 @@ func (v *Validator) GateCoderStart(taskDir string) Result {
 	if res := v.handoffReady(); res.Status != StatusPass {
 		return res
 	}
+	if res := v.coderEntryContract(taskSlug, s); res.Status != StatusPass {
+		return res
+	}
 	if res := v.contractValid(taskSlug, s); res.Status != StatusPass {
 		return res
 	}
@@ -48,6 +51,45 @@ func (v *Validator) GateCoderStart(taskDir string) Result {
 		return res
 	}
 	return Result{Status: StatusPass}
+}
+
+// coderEntryContract 校验 V4 Task 工作流模式与 Contract 状态的一致性（Coder 入口校验，Task 08）。
+//
+//   - NORMAL：无 Analyst 环节，contract.status 必须为 NOT_REQUIRED；
+//   - COMPLEX：必须经 Analyst → Owner Contract Approval，contract.status 必须为 APPROVED，
+//     未获得批准 Contract 时不得进入 Coder；
+//   - DESIGN：Contract 入口由 Phase 05 独立实现，本 Gate 不额外约束。
+//
+// V2/V3（无 task_type）不参与此校验，保持旧行为不回归。
+func (v *Validator) coderEntryContract(taskSlug string, s State) Result {
+	if s.SchemaVersion != SchemaV4 {
+		return Result{Status: StatusPass}
+	}
+	switch s.TaskType {
+	case TaskTypeNormal:
+		if s.Contract.Status != ContractNotRequired {
+			return failResult(taskSlug, "Coder Entry (Task Type)",
+				fmt.Sprintf("task_type=NORMAL contract.status=%s", s.Contract.Status),
+				"NOT_REQUIRED",
+				"NORMAL 任务无 Analyst 环节，Contract 必须为 NOT_REQUIRED")
+		}
+		return Result{Status: StatusPass}
+	case TaskTypeComplex:
+		if s.Contract.Status != ContractApproved {
+			return failResult(taskSlug, "Coder Entry (Task Type)",
+				fmt.Sprintf("task_type=COMPLEX contract.status=%s", s.Contract.Status),
+				"APPROVED",
+				"COMPLEX 任务必须在 Owner 批准 Contract 后才能进入 Coder")
+		}
+		return Result{Status: StatusPass}
+	case TaskTypeDesign:
+		return Result{Status: StatusPass}
+	default:
+		return failResult(taskSlug, "Coder Entry (Task Type)",
+			fmt.Sprintf("task_type=%s", s.TaskType),
+			"NORMAL | COMPLEX | DESIGN",
+			"非法 task_type")
+	}
 }
 
 // GateCleanerStart 确认 Cleaner 拿到的是可复核、已发布到 feature remote 的 implementation snapshot。
@@ -59,6 +101,12 @@ func (v *Validator) GateCleanerStart(taskDir string) Result {
 	}
 	if issues := schemaValidation(s); len(issues) > 0 {
 		return Result{Status: StatusFail, Issues: issues}
+	}
+	if s.Blocked.Active {
+		return failResult(taskSlug, "Cleaner Start", "blocked.active=true", "false", "任务被阻塞，不得进入 Cleaner")
+	}
+	if res := v.contractValid(taskSlug, s); res.Status != StatusPass {
+		return res
 	}
 	if s.Review.Status != ReviewPending {
 		return failResult(taskSlug, "Cleaner Start", fmt.Sprintf("review.status=%s", s.Review.Status), "PENDING", "Cleaner 只能审查 Coder 已发起的 PENDING Review Request")
@@ -96,6 +144,9 @@ func (v *Validator) GateOwnerGateStart(taskDir string) Result {
 	}
 	if s.Blocked.Active {
 		return failResult(taskSlug, "Owner Gate Start", "blocked.active=true", "false", "任务被阻塞，不得请求 Owner 决策")
+	}
+	if res := v.contractValid(taskSlug, s); res.Status != StatusPass {
+		return res
 	}
 	if res := v.handoffReady(); res.Status != StatusPass {
 		return res
@@ -224,6 +275,9 @@ func (v *Validator) currentRemoteFeatureHead() (string, error) {
 func (v *Validator) contractValid(taskSlug string, s State) Result {
 	switch s.Contract.Status {
 	case ContractNotRequired:
+		if res := v.contractRevisionValid(taskSlug, s); res.Status != StatusPass {
+			return res
+		}
 		return Result{Status: StatusPass}
 	case ContractApproved:
 		if s.Contract.Target == "" {
@@ -253,6 +307,9 @@ func (v *Validator) contractValid(taskSlug string, s State) Result {
 		}
 		if approvedContract != currentContract {
 			return failResult(taskSlug, "Contract (INV-2)", "contract.md 内容已偏离 approved target", "与 contract.target 一致", "Contract Approval 已失效")
+		}
+		if res := v.contractRevisionValid(taskSlug, s); res.Status != StatusPass {
+			return res
 		}
 		return Result{Status: StatusPass}
 	default:

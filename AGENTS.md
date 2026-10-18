@@ -1,44 +1,54 @@
 # AGENTS
 
-本仓库使用 **Workflow V3**。Agent 进入仓库后，先按职责定位规则，再阅读下方长期工程规范。当前版本与入口见 `.agent/VERSION`、`.agent/README.md`；`workflow-v2-engine` 是保留的历史模块名。
+本仓库使用 **Agent Workflow V4.2.1**。Agent 进入仓库后，先按职责定位规则，再阅读下方长期工程规范。当前版本与入口见 `.agent/VERSION`、`.agent/README.md`；`workflow-v2-engine` 是保留的历史技术标识，不代表产品版本。
 
 ## Workflow 入口
 
-执行 Workflow Task 前，根据职责读取：
+执行 Workflow Task 前，按顺序显式读取：
 
-1. 协作规范：`.agent/specs/AgentCollaborationSpecification.md`
-2. 职责边界：`.agent/specs/Five-AgentResponsibilityBoundary.md`
-3. 本角色 Prompt：`.agent/roles/<Role>.md`
-4. 机器配置：`.agent/workflow.yaml`
-5. 当前任务事实：`.agent/tasks/<task-id>/` 下的 `task.md` / `state.yaml` / `contract.md` 等
+1. 框架内部指令：`.agent/AGENTS.md`
+2. 协作规范：`.agent/specs/AgentCollaborationSpecification.md`
+3. 职责边界：`.agent/specs/AgentResponsibilityBoundary.md`
+4. 流程规范：按 `task.md` 的 `task_type` 选择 `.agent/specs/workflows/` 下的 `NormalWorkflow.md` / `ComplexWorkflow.md` / `DesignWorkflow.md` / `CoordinatedWorkflow.md`
+5. 本角色 Prompt：先看 `.agent/roles/README.md`，再打开对应流程目录的完整 Role 文件（`normal|complex|design|program/<Role>Agent.md`）
+6. 机器配置：`.agent/workflow.yaml`
+7. 当前任务事实：`.agent/tasks/<task-id>/` 下的 `task.md` / `state.yaml` / `contract.md` / Handoff 等
+
+协议细节：Gate 目录 `.agent/specs/protocols/GateCatalogue.md`、Handoff `.agent/specs/protocols/HandoffProtocol.md`、CLI 参数 `.agent/specs/protocols/CLI.md`、Event Log `.agent/specs/protocols/EventLogProtocol.md`。
 
 架构 Design（WHY / architecture）：
 
-`docs/design/agent-workflow.md`
+`.agent/specs/Architecture.md`（V4 当前框架架构）。`docs/design/agent-workflow.md` 是 V3 历史归档，不作为当前规范。
 
-首次跨项目 Adoption：
+首次跨项目 Adoption / 已有项目更新：
 
-`.agent/specs/WorkflowAdoption.md` + `.agent/templates/PROJECT_ADAPTATION.template.md`
+`.agent/specs/adoption/WorkflowAdoption.md` + `.agent/templates/PROJECT_ADAPTATION.template.md`
+
+历史 Task 兼容：schema 2/3 只读（T0）；新任务承继需 Owner 逐任务授权（T1）；不提供 T2 原地升级。历史 Deliverer 见 `.agent/roles/legacy/DelivererAgent.md`，新任务的最终交付由 Merger 执行。
 
 `.agent/` namespace 索引见 `.agent/README.md`。
 
-Workflow Engine（只读 Gate Validator `workflow-check`）是独立 Go Module，位于 `.agent/engine/`（`module workflow-v2-engine`），不依赖本仓库业务 Go Module、不通过 `go.work`/`replace` 关联：
+Workflow Engine 是独立 Go Module，位于 `.agent/engine/`（`module workflow-v2-engine`），不依赖本仓库业务 Go Module、不通过 `go.work`/`replace` 关联。六个 CLI：`workflow-check`（Gate 校验）、`workflow-git`（分支/Worktree）、`workflow-status`（诊断与派生索引）、`workflow-event`（事件日志）、`workflow-program`（Program）、`workflow-deliver`（受控交付）。每个 Worktree 从自身已提交源码构建：
 
 ```text
-# 构建本地 binary（进入 .agent/bin/，被 Git ignore）
-go -C .agent/engine build -o ../bin/workflow-check ./cmd/workflow-check
+# 构建（产物进入 .agent/bin/，被 Git ignore；GOWORK=off 隔离宿主 go.work）
+GOWORK=off go -C .agent/engine build -o ../bin/workflow-check ./cmd/workflow-check
+for cli in workflow-check workflow-git workflow-status workflow-event workflow-program workflow-deliver; do
+  GOWORK=off go -C .agent/engine build -o "../bin/$cli" "./cmd/$cli" || exit
+done
 
-# 运行（正式 Gate 机器入口优先 direct binary，保留 0/1/2 exit code）
+# 运行（保留 0=PASS / 1=FAIL / 2=ERROR exit code）
 .agent/bin/workflow-check gate <gate> <task>
+.agent/bin/workflow-check config
 ```
 
-Engine 测试与业务测试分开：Engine 用 `go -C .agent/engine test ./...`；业务模块仍在 repo 根用 `go test ./...`（不含 Engine）。
+Engine 测试与业务测试分开：Engine 用 `GOWORK=off go -C .agent/engine test ./...`；业务模块仍在 repo 根用 `go test ./...`（不含 Engine）。
 
 注意：不要从历史 `.agent/tasks/*` 推断当前 Workflow 规则。当前 Workflow 权威来源是：
 
-- `docs/design/agent-workflow.md`（Architecture）
-- `.agent/specs/*`（Execution Specifications）
-- `.agent/roles/*`（Role Instructions）
+- `.agent/specs/Architecture.md`（Architecture）
+- `.agent/specs/*`（Execution Specifications，含 `workflows/` 与 `protocols/`）
+- `.agent/roles/*`（Role Instructions，入口为 `.agent/roles/README.md`）
 - `.agent/workflow.yaml`（Machine Configuration）
 
 ---

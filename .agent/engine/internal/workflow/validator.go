@@ -18,8 +18,8 @@ func (v *Validator) developRef() string {
 	return "origin/" + v.Config.Git.IntegrationBranch
 }
 
-// loadStateFile 读取并解析 taskDir/state.yaml，支持 schema v3（generic）与 v2（legacy 兼容）。
-// 非 V2/V3 任务（含 Legacy V1）与 schema 错误返回 ERROR（exit 2）。
+// loadStateFile 读取并解析 taskDir/state.yaml，支持 schema v4 / v3（generic）与 v2（legacy 兼容）。
+// 非 V2/V3/V4 任务（含 Legacy V1）与 schema 错误返回 ERROR（exit 2）。
 func (v *Validator) loadStateFile(taskDir string) (State, Result) {
 	statePath := filepath.Join(v.Root, taskDir, "state.yaml")
 	raw, err := os.ReadFile(statePath)

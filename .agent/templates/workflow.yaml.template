@@ -1,0 +1,13 @@
+# Workflow V4 Machine Configuration 模板
+# Adoption 时 materialize 为宿主项目的 `.agent/workflow.yaml`（长期机器配置，非临时文件）。
+#
+# - git.integration_branch：宿主项目共享集成分支（由 Adoption 确定，不预设 develop）
+# - resources：宿主项目实际声明的 Shared Resource Kind → registry 路径映射
+#   kind 名必须为合法 lower_snake_case（^[a-z][a-z0-9_]*$），registry 路径必须严格位于 `.agent/registry/` 下。
+#   宿主项目无共享资源时保留空 `{}`。
+schema_version: 1
+
+git:
+  integration_branch: <ADOPTION_REQUIRED>
+
+resources: {}
