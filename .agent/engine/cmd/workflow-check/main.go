@@ -5,6 +5,7 @@
 //
 // 用法：
 //
+//	workflow-check config [--root DIR]
 //	workflow-check gate <coder-start|cleaner-start|owner-gate-start|delivery-start|merge-ready> <task> [--root DIR]
 //
 // exit code：
@@ -28,11 +29,23 @@ func main() {
 }
 
 var validGates = map[string]bool{
-	"coder-start":      true,
-	"cleaner-start":    true,
-	"owner-gate-start": true,
-	"delivery-start":   true,
-	"merge-ready":      true,
+	"coder-start":                 true,
+	"cleaner-start":               true,
+	"owner-gate-start":            true,
+	"delivery-start":              true,
+	"merge-ready":                 true,
+	"handoff-prepared":            true,
+	"handoff-entry":               true,
+	"discovery-start":             true,
+	"discovery-decision":          true,
+	"discovery-handoff":           true,
+	"taskbuilder-init":            true,
+	"design-architect-start":      true,
+	"design-architecture-review":  true,
+	"design-docsspecwriter-start": true,
+	"design-cleaner-start":        true,
+	"design-owner-gate-start":     true,
+	"design-final-approval":       true,
 }
 
 func run(args []string) int {
@@ -55,8 +68,19 @@ func run(args []string) int {
 		}
 	}
 
+	if len(positional) == 1 && positional[0] == "config" {
+		if root == "" {
+			root = findRoot()
+		}
+		if _, err := workflow.LoadConfig(root); err != nil {
+			fmt.Fprintln(os.Stderr, "ERROR config:", err)
+			return 2
+		}
+		fmt.Println("PASS config: workflow.yaml schema/registry paths valid (not Owner approval)")
+		return 0
+	}
 	if len(positional) < 1 || positional[0] != "gate" {
-		fmt.Fprintln(os.Stderr, "usage: workflow-check gate <coder-start|cleaner-start|owner-gate-start|delivery-start|merge-ready> <task> [--root DIR]")
+		fmt.Fprintln(os.Stderr, "usage: workflow-check gate <coder-start|cleaner-start|owner-gate-start|delivery-start|merge-ready|handoff-prepared|handoff-entry|discovery-start|discovery-decision|discovery-handoff|taskbuilder-init|design-architect-start|design-architecture-review|design-docsspecwriter-start|design-cleaner-start|design-owner-gate-start|design-final-approval> <task|intake> [--root DIR]")
 		return 2
 	}
 	if len(positional) < 3 {
@@ -101,6 +125,30 @@ func run(args []string) int {
 		res = v.GateDeliveryStart(taskDir)
 	case "merge-ready":
 		res = v.GateMergeReady(taskDir)
+	case "handoff-prepared":
+		res = v.GateHandoffPrepared(taskDir)
+	case "handoff-entry":
+		res = v.GateHandoffEntry(taskDir)
+	case "discovery-start":
+		res = v.GateDiscoveryStart(taskDir)
+	case "discovery-decision":
+		res = v.GateDiscoveryDecision(taskDir)
+	case "discovery-handoff":
+		res = v.GateDiscoveryHandoff(taskDir)
+	case "taskbuilder-init":
+		res = v.GateTaskBuilderInit(taskDir)
+	case "design-architect-start":
+		res = v.GateDesignArchitectStart(taskDir)
+	case "design-architecture-review":
+		res = v.GateDesignArchitectureReview(taskDir)
+	case "design-docsspecwriter-start":
+		res = v.GateDesignDocsSpecWriterStart(taskDir)
+	case "design-cleaner-start":
+		res = v.GateDesignCleanerStart(taskDir)
+	case "design-owner-gate-start":
+		res = v.GateDesignOwnerGateStart(taskDir)
+	case "design-final-approval":
+		res = v.GateDesignFinalApproval(taskDir)
 	}
 	return printResult(gateName, res)
 }

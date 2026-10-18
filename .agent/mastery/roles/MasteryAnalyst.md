@@ -22,7 +22,7 @@
 4. `.agent/mastery/templates/MASTER_PLAN.template.md`
 5. 与 Learning Target 相关的真实 Design / Source / Tests
 
-项目使用 Workflow V2 时，可读取 `.agent/workflow.yaml` 识别 integration branch；但 Mastery Workflow 不依赖生产 Workflow V2 才能存在，也不需要读取所有生产 Role Prompt。
+项目使用 Workflow V4 时，可读取 `.agent/workflow.yaml` 识别 integration branch；但 Mastery Workflow 不依赖生产 Workflow V4 才能存在，也不需要读取所有生产 Role Prompt。
 
 ## 输入模型
 

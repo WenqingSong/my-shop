@@ -1,0 +1,7 @@
+# Project-owned provenance. Fill from VERIFIED upstream, never host HEAD.
+schema_version: 1
+repository: https://cnb.cool/framework-station/agent-workflow
+commit: null # unknown until actual upstream full SHA is verified
+version: null # actual upstream .agent/VERSION text
+subdirectory: .agent
+local_changes: null # preserved customizations or project-owned notes path

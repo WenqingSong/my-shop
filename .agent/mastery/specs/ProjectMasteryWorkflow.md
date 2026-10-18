@@ -8,9 +8,9 @@ Project Mastery Workflow 是一个轻量学习体系，把真实项目源码转�
 
 它解决的问题不是「有没有看过代码」，而是「能否在不依赖源码的情况下解释这个功能」。
 
-它与生产 Workflow V2（TaskBuilder → Analyst → Coder → Cleaner → OwnerGate → Deliverer）是两个不同目的的体系：
+它与生产 Workflow V4.2.1（NORMAL / COMPLEX / DESIGN / Program 四流程，角色见 `.agent/roles/README.md`）是两个不同目的的体系：
 
-- **Workflow V2**：负责把软件正确交付。
+- **Workflow V4**：负责把软件正确交付。
 - **Project Mastery Workflow**：负责让开发者真正掌握已经存在的项目实现，用于面试、复习、技术表达、设计解释与源码理解。
 
 衡量标准是 **Mastery Capability**，而不是 Generated Word Count。
@@ -262,7 +262,7 @@ Tutorial Writer 发现 Task Card 依赖 Analyst 未发现的关键前置知识�
 
 允许：read / search / `git show` / `git grep` / `git log` / inspect tests / 写 `docs/学习/*`。
 
-禁止：修改业务代码、修 bug、改 migration、改测试、改 Registry、改 Workflow V2 state、顺手优化源码。
+禁止：修改业务代码、修 bug、改 migration、改测试、改 Registry、改 Workflow V4 state、顺手优化源码。
 
 学习中发现真实代码问题，只记录 `SOURCE_FINDING`，不修。
 
