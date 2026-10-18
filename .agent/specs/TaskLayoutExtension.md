@@ -29,8 +29,9 @@
 2. 解析候选顺序：清单登记的 `category/<id>` → 旧平铺 `.agent/tasks/<id>` → 其余分类目录。
 3. 同一 ID 出现在多个目录属于**错误**（`duplicate`），解析直接失败，不静默选一个。
 4. CLI 位置参数接受：实际目录、`.agent/tasks/<id>`（旧简写）、`.agent/tasks/<category>/<id>`、裸 `<id>`。旧简写只在 ID 唯一时解析到真实目录。
-5. 未找到返回包装了 `os.ErrNotExist` 的错误，供 Program 快照回退区分；事件日志读取把「目录不存在」视为「无事件」。
-6. review/delivery neutral 判定按**同一 Task 的全部候选目录**匹配，因此目录移动本身不会把 Artifact tail 误判为实质变化；其他 Task 的同名文件仍为 substantive。
+5. Engine 的 Gate/Validator 接口接收**真实目录**（相对仓库根）；旧简写由 CLI 先行解析后传入。直接把不存在的旧路径交给 Validator 会显式 ERROR，不会静默读到错误位置。
+6. 未找到返回包装了 `os.ErrNotExist` 的错误，供 Program 快照回退区分；事件日志读取把「目录不存在」视为「无事件」。
+7. review/delivery neutral 判定按**同一 Task 的全部候选目录**匹配，因此目录移动本身不会把 Artifact tail 误判为实质变化；其他 Task 的同名文件仍为 substantive。
 
 ## 4. 分类语义与证据要求
 

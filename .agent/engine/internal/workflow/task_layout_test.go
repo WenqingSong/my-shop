@@ -237,3 +237,31 @@ func hasLayoutIssue(issues []TaskLayoutIssue, kind, id string) bool {
 	}
 	return false
 }
+
+// TestGatesAndEventPathsAfterLayoutMigration 验证迁移后 Gate 与事件路径仍走同一解析规则。
+func TestGatesAndEventPathsAfterLayoutMigration(t *testing.T) {
+	r, _ := setupTaskBuilderRepo(t)
+	writeLayoutManifest(t, r, TaskLayoutEntry{ID: "demo", Category: TaskCategoryActive, Basis: TaskLayoutBasisState})
+	plan, issues, err := PlanTaskLayout(r.dir)
+	if err != nil || len(issues) != 0 {
+		t.Fatalf("预检失败: %v %v", issues, err)
+	}
+	if _, err := ApplyTaskLayout(r.dir, plan, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if res := r.validator().GateTaskBuilderInit(".agent/tasks/active/demo"); res.Status != StatusPass {
+		t.Fatalf("迁移后 taskbuilder-init 应 PASS: %+v", res)
+	}
+	// Gate 接收的是真实目录（相对仓库根）：旧简写由 CLI 的 ResolveTaskArg 解析后再传入，
+	// 直接把不存在的旧路径交给 Validator 必须显式 ERROR，不能静默读取错误位置。
+	if res := r.validator().GateTaskBuilderInit(".agent/tasks/demo"); res.Status != StatusError {
+		t.Fatalf("不存在的旧目录应 ERROR: %+v", res)
+	}
+	if resolved, err := ResolveTaskArg(r.dir, ".agent/tasks/demo"); err != nil || resolved != ".agent/tasks/active/demo" {
+		t.Fatalf("命令行解析旧简写失败: %q %v", resolved, err)
+	}
+	rel, err := NewEventWriter(r.dir).Path(ScopeTask, "demo")
+	if err != nil || rel != ".agent/tasks/active/demo/events.md" {
+		t.Fatalf("事件路径 = %q, err=%v", rel, err)
+	}
+}
