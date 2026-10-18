@@ -54,7 +54,7 @@
 
 ## 5. 安全与权限边界
 
-- 所有地址接口挂载 `middleware.Auth`（前台用户身份域，`type=user`），无 `RequirePermission`（前台用户侧无 RBAC，见 `AGENTS.md` 第 11 节「权限/RBAC 留白」）。
+- 所有地址接口挂载 `middleware.Auth`（前台用户身份域，`type=user`），无 `RequirePermission`（前台用户侧无 RBAC，见 [engineering-guidelines.md](engineering-guidelines.md) 第 11 节「当前能力与任务边界」）。
 - 身份信任：`user_id` 仅取自已认证 `Principal.UserID`，不接受请求体/参数中的 `user_id`；`Principal` 是唯一身份来源。
 - 数据隔离：详情/更新/删除一律 `WHERE id AND user_id=Principal.UserID`，不存在与「他人地址」统一 404，避免存在性/归属 Oracle。
 - 未认证（无/非法/过期/会话失效 token）→ 401（1002），fail-closed，无写入。

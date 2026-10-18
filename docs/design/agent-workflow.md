@@ -669,7 +669,7 @@ Workflow 有三层事实：
 
 1. **Workflow Core**：Roles、Authority、Evidence Snapshot、Handoff、Gate、Completion Contract、Git safety model、Registry coordination concept——跨项目稳定，固化在 `.agent/engine/internal/workflow/*` 与 `.agent/specs/*`、`.agent/roles/*`。
 2. **Machine Configuration**：`.agent/workflow.yaml`——「跨项目会变化、且 Workflow Engine runtime 必须知道的最小参数」。
-3. **Project Policy**：README / Makefile / `docs/design/*` / `AGENTS.md` 等——项目工程约束，供 Agent 读取，不供 `workflow-check` 机器解析。
+3. **Project Policy**：README / Makefile / `docs/design/*`（含 engineering-guidelines.md）等——项目工程约束，供 Agent 读取，不供 `workflow-check` 机器解析。
 
 `.agent/workflow.yaml` 是长期机器配置，**不是** `PROJECT_ADAPTATION.md`（一次性临时工作单）、不是 Task Artifact、不是业务配置。它在 Adoption 完成后长期存在，供 `workflow-check` 读取。
 

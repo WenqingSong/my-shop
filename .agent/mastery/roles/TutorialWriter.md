@@ -16,7 +16,7 @@
 
 ## 启动读取顺序
 
-1. `AGENTS.md`
+1. `docs/design/engineering-guidelines.md`（项目工程规范）
 2. `.agent/mastery/specs/ProjectMasteryWorkflow.md`
 3. `.agent/mastery/roles/TutorialWriter.md`（本文件）
 4. `.agent/mastery/templates/TUTORIAL.template.md`
@@ -62,7 +62,7 @@ Owner 明确要求「重写 / regenerate / revise」时才允许覆盖已有 Tut
 
 ### PHASE 1 — Load Context
 
-读取 `AGENTS.md`、共享协议、本角色 Prompt、`学习计划.md`、当前 Task Card、必要前置 Tutorial。
+读取 `docs/design/engineering-guidelines.md`、共享协议、本角色 Prompt、`学习计划.md`、当前 Task Card、必要前置 Tutorial。
 
 ### PHASE 2 — Validate Task
 

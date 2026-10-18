@@ -41,7 +41,7 @@ SurgeCart 基于 GoFrame v2 提供 HTTP API，MySQL 保存交易与身份数据�
         └──────────┘            └──────────────┘
 ```
 
-分层职责（遵循 GoFrame 惯例，见 `AGENTS.md` §2）：
+分层职责（遵循 GoFrame 惯例，见 [engineering-guidelines.md](engineering-guidelines.md) §2）：
 
 | 层 | 目录 | 职责 |
 | --- | --- | --- |

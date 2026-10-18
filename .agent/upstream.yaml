@@ -41,7 +41,8 @@ migration:
     - Gate/Handoff/Event/Delivery/Program 全部改用统一路径解析；neutral tail 按同一 Task 候选目录匹配
     - Task 目录：.agent/tasks/<id>/ → .agent/tasks/<category>/<id>/（51 项，见 layout.yaml 与 layout-journal.yaml）
   project_docs:
-    - 宿主根 AGENTS.md、.agent/AGENTS.md、.agent/README.md、.agent/specs/protocols/CLI.md、roles/TaskBuilderAgent.md、specs/AgentCollaborationSpecification.md
+    - 根 AGENTS.md：已删除（业务规范迁至 docs/design/engineering-guidelines.md，见 local_changes）
+    - .agent/AGENTS.md、.agent/README.md、.agent/specs/protocols/CLI.md、roles/TaskBuilderAgent.md、specs/AgentCollaborationSpecification.md
     - docs/task-management/*（路径、分类、查询）、scripts/check-task-docs.sh、Makefile
 
 # 保留的项目本地定制与项目拥有资产（不随框架更新覆盖）：
@@ -50,7 +51,8 @@ local_changes: |
   mastery/：项目独有的 Mastering Workflow 资产，不参与生产 Workflow 状态机；本次仅更新版本描述。
   workflow.yaml：项目机器配置（integration_branch=develop、两个资源 Registry）。
   tasks/、programs/、intake/、registry/：运行数据与共享资源事实源；历史 Task 只移动目录，State/Evidence/审批逐字节保留。
-  AGENTS.md：宿主业务工程规范正文（第 1–12 节）保持原样，仅更新 Workflow 入口与 Task 目录规则。
+  根 AGENTS.md：2026-10-18 按 Owner 指令删除（框架声明为可选、非阻断入口）。第 1–12 节业务工程规范
+  原样迁至 docs/design/engineering-guidelines.md；引用该文件的 address.md、architecture.md、mastery Role 已改为新路径。
   未复制上游仓库级维护材料（CHANGELOG.md、PACKAGE_MANIFEST.md、examples/、tools/、scripts/、.cnb.yml），
   它们不属于 .agent 分发内容，且本仓库同名文件为业务资产。
 

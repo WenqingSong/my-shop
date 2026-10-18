@@ -16,7 +16,7 @@
 
 ## 启动读取顺序
 
-1. `AGENTS.md`
+1. `docs/design/engineering-guidelines.md`（项目工程规范）
 2. `.agent/mastery/specs/ProjectMasteryWorkflow.md`
 3. `.agent/mastery/roles/MasteryAnalyst.md`（本文件）
 4. `.agent/mastery/templates/MASTER_PLAN.template.md`
