@@ -17,6 +17,10 @@ Discovery / TaskBuilder / Handoff 由工作包 A 提供；Merger 由工作包 B 
 
 ## 2. State 字段绑定（复用 Schema V4，不新增字段）
 
+### 公共 TaskBuilder 初始化
+
+从 `.agent/roles/DiscoveryAgent.md` 调查，经 Owner 批准 DESIGN 后交 `.agent/roles/TaskBuilderAgent.md`，见 `.agent/specs/workflows/EntryWorkflow.md`。schema 4 的 task_type=DESIGN、contract.status=NOT_REQUIRED、design.status=PENDING；approved_version/final_version=0，各 approved_target/review_target/final_target 为空，不能复制旧批准。review=NOT_REQUESTED、owner=PENDING、delivery=NOT_RUN、blocked.active=false、resources.reservations={}，intake/git 绑定原批准。初始 Handoff next_role=Architect、workflow=DESIGN，交 design/ArchitectAgent.md；AC 面向设计成果，不默认要求生产代码。完整字段以 State 模板和现有解析器为准。
+
 | 字段 | 含义 | 写入者 | 时机 |
 | --- | --- | --- | --- |
 | `design.status` | 架构审批状态 | Architect（File Writer） | Owner 批准后置 `APPROVED` |
@@ -139,4 +143,4 @@ Task Handoff 按 `.agent/specs/protocols/HandoffProtocol.md` 执行，完整字�
 ## 已批准架构返工
 旧 Task 已有 approved_target 时，不清空批准、不在原 Task 强行运行 design-architect-start。发现架构 Finding，先冻结该旧任务的后续交付，将问题、旧 Task 路径、A1/D1/CLEAN/Owner 的完整 SHA 交 Owner 决定修订范围。
 
-Owner 明确授权后，用 design/Discovery 和 TaskBuilder 创建新的 DESIGN 修订 Task、独立分支/Worktree 与新 Intake。在新 task.md 记录前驱 Task、旧批准 SHA、Finding、修订范围和为何需要重新批准；旧 Task、Contract、Review、批准与 Git 历史保持原样。新 Task 从其自身 PENDING、review=NOT_REQUESTED、owner=PENDING、delivery=NOT_RUN 开始，不复制旧批准/CLEAN/final 字段。Architect 只在新任务经过批准 Intake、taskbuilder-init 及正式 Handoff/ACK 后进入 design-architect-start；新架构重新请求 Owner 批准，再走 DocsSpecWriter、独立 Cleaner、最终 OwnerGate。纯规范表述问题且架构不变时返回原 DocsSpecWriter 重新发起审查，不必另建架构任务。Owner 未授权则 BLOCKED。旧版本的版本号属于旧 Task，新 Task 的批准版本按自身从正整数开始。
+Owner 明确授权后，用公共 Discovery 和 TaskBuilder 创建新的 DESIGN 修订 Task、独立分支/Worktree 与新 Intake。在新 task.md 记录前驱 Task、旧批准 SHA、Finding、修订范围和为何需要重新批准；旧 Task、Contract、Review、批准与 Git 历史保持原样。新 Task 从其自身 PENDING、review=NOT_REQUESTED、owner=PENDING、delivery=NOT_RUN 开始，不复制旧批准/CLEAN/final 字段。Architect 只在新任务经过批准 Intake、taskbuilder-init 及正式 Handoff/ACK 后进入 design-architect-start；新架构重新请求 Owner 批准，再走 DocsSpecWriter、独立 Cleaner、最终 OwnerGate。纯规范表述问题且架构不变时返回原 DocsSpecWriter 重新发起审查，不必另建架构任务。Owner 未授权则 BLOCKED。旧版本的版本号属于旧 Task，新 Task 的批准版本按自身从正整数开始。

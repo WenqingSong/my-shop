@@ -95,3 +95,11 @@ schema 2/3 只读不回写、不追溯补 Discovery；历史 Deliverer 见 `.age
 T1 的新 Task 必须通过真实 taskbuilder-init 和对应工作流；批准仍由人类完成。检查旧数据字节/路径/SHA 未变、新引用可追溯、项目规则保留和适用工具结果。仅完成静态比较只能称静态准备完成，不报告真实 Agent/业务 E2E 通过。失败按本规范撤回本次拥有的框架差异，不恢复整套旧 .agent 覆盖后续运行数据。
 
 新初始化会重新核对 Intake 原始 Owner 决策的 intake_id/task_id/task_type/parent_branch/base_commit 与 Handoff。旧版只有 decision 的批准保留历史读取；不能补造绑定，需 Owner 明确重新确认并创建新 Intake 后初始化新任务。已初始化的旧 Task 不因此重写审批或强制重跑 taskbuilder-init。
+
+## V4.2.x → 公共入口版本（4.3.0）
+
+这是一项公开 Prompt 路径变化，不是 Task State 升级。两个公共完整入口在 `.agent/roles/DiscoveryAgent.md`、`.agent/roles/TaskBuilderAgent.md`，用户不再先选流程；Discovery 调查后推荐，Owner 批准后 TaskBuilder 加载专属 Workflow 初始化规范。原有 11 个机器 Role、六 CLI、20 Gate、Schema 与 Handoff/ACK 不变。
+
+六个旧相对路径与新入口的逐项映射见 [Role 索引](../../roles/README.md)。新版不保留重复 Prompt 权威定义；历史 commit 中的旧路径仍从原 commit 读取，禁止改写历史 Evidence。活跃 Task 保留原分支内工具/Prompt，可在副本验证兼容性后再由 Owner 决定是否采用新版；不能仅因移动 Role 就重做批准或修改 task_type。
+
+更新时特别比较六份项目旧 Prompt 的本地定制：B→L 差异与上游合并不同。共同规则适配到公共完整 Prompt，流程专有部分保留在项目 Workflow Spec；相互冲突的本地定制由 Owner 决定，不整目录删除。只改当前入口导航/自动化配置中的旧路径，宿主根 AGENTS.md 的融合仍需明确授权，历史 Task/Program/Registry/审批/SHA 保持原字节与原路径。旧上游未知时如实报告，不能推断没有定制。来源记录只在完成安全更新后更新。

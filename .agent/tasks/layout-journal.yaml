@@ -1,0 +1,517 @@
+# DERIVED FROM MIGRATION — 分类迁移日志，不是审批证据。
+schema_version: 1
+migrated_at: "2026-10-18T15:04:50.856118947Z"
+source_sha: 8a2ae2a610d960c9664748c9b318195853feafdc
+tasks:
+    - id: admin-identity-rbac
+      from: .agent/tasks/admin-identity-rbac
+      to: .agent/tasks/blocked/admin-identity-rbac
+      files:
+        contract.md: fe49d5426f12f0bdf3788b01adbeaa703cf4107710c234ea8d907ab5dea09570
+        core-logic.md: 03aeedc1d7def8fed5c0ce35df2fe4b390aa9b7997293019503a0d03e2200534
+        delivery.md: 2a73f444101767fc37b0cad4dbb8d94b22fed495ea61c4afc3c2074f7a8308ca
+        findings.md: 04b0dc0726c53e8593076dd802a9bb15e203142da9f742e56fc3ac9d6b7fd3f3
+        task.md: ab3fa3155cbbf425a76f6f0c9590021720e1169727d6e8b11cd34bbc760da25f
+    - id: admin-order-management
+      from: .agent/tasks/admin-order-management
+      to: .agent/tasks/completed/admin-order-management
+      files:
+        contract.md: 75238a3d05540e6027ee518f456a9c4829879fd7d49a30d6a6c10d4e8b8a9358
+        core-logic.md: 1adfb1e4e7128e2d15b57531a3939fcd287ee8b7c37897a5c08249897f5d4ef1
+        delivery.md: ee432b130ed2fcd7306607d37f7a35b256a8104a22372690470a4ec061d95ec1
+        findings.md: 5832bce9963f0777dfeeb98c2c2076025517dd1fc96a05c877b016afb19cdd31
+        owner-decision.md: 2adbcd756d37cf05af90444fabc7839550355a352b73b06e7a824077197a86b2
+        state.yaml: eb55162e54797d11e146b5238f9615f6edf6fd3e3ea2fffae81ea06138f87928
+        task.md: a0ad9844a652a1e597520acf3b98af143ae715a7271de80e699aa0b7a1755176
+    - id: agent-workflow-owner-confirmation
+      from: .agent/tasks/agent-workflow-owner-confirmation
+      to: .agent/tasks/archive/agent-workflow-owner-confirmation
+      files:
+        contract.md: d12fbbd98fa286e6de460adef290d04d09f22c890ca64d11b2e4f7432c840297
+        core-logic.md: dd6bc3893d28bf3001c3ac68ce40ca3ccfb2e7eb19737c2ecd691fa963485876
+        delivery.md: 86111ccbae2a5e7d6133c442f6ee3b119c0233aa0920c758e6a361bd067f52f9
+        findings.md: ae48ea72b970bcf801f80e8d409da5120801ad791cfe621b116099730e8cf72a
+        task.md: c0f830ed49fe1910f025c59feda44080d5789e009e4c8c830d83dcb7c17ba25c
+    - id: agent-workflow-state-machine-v1
+      from: .agent/tasks/agent-workflow-state-machine-v1
+      to: .agent/tasks/archive/agent-workflow-state-machine-v1
+      files:
+        contract.md: 3807a04bccf5c55f96663f6ed838573a252b071e6eaace90403f6c24a55f0d11
+        core-logic.md: a8ac13019dd289a85650047f80efccbc5d3af5c368ba01d909204326b84bfdac
+        delivery.md: e4f1f859a4e9c75f6161ff0e3e11a77ac9ae7d212fe86720829c624e70ba0860
+        findings.md: 1cb5d9960ea49484bb56de242b29c2578ec31e286110789a3503df727ad97942
+        task.md: 62f398b13cb5db1cee6ad03388fab45e73d24405cc106a99771010fc6c1f779c
+    - id: article-cms-v1
+      from: .agent/tasks/article-cms-v1
+      to: .agent/tasks/completed/article-cms-v1
+      files:
+        contract.md: efd7346e44d439a90ea324ed13f0b1d405bf349f267ecfa33e1603aa8784a134
+        core-logic.md: 9c890eceb51b90cc3b0b50ae591c70e8a9711ad982567495b8c18f3cdf68114a
+        delivery.md: 46be697b7a4d9052deae061f1e7180de14551551d19de2d47fc7ea5b48a5ff3d
+        findings.md: f9209a65c158c82fa3f8cb0e6b55ed1286a60451a9402fe2d0385fb31b558f9b
+        owner-decision.md: 00a9446871db80db7905c4090c117683fb58513a2c874154cf3dc06eddbbfe21
+        state.yaml: abf5159c6e191ef59d661a19da081cc053860fe26688e16420a4c5f925c363cf
+        task.md: 98e4094d41b1ea9d189d95560bb9918a73051c74af1993fe000ac112fa8b0a8b
+    - id: backend-config-hardening-v1
+      from: .agent/tasks/backend-config-hardening-v1
+      to: .agent/tasks/completed/backend-config-hardening-v1
+      files:
+        contract.md: b011d5f80b17c497c05c3c95136b5e77caee9908eabd90fd63e3a4a290246c43
+        core-logic.md: ea98a9fdf251d7c644f25084f7e5340aa2cedb60f8202909cdad7a605f081227
+        delivery.md: 8fbb67c4bd11d91f60fe82c629d603fca31aafa277d9db083fc215fc4568eac9
+        findings.md: 610ecce8ca862bcf5b20bd61a1c8d7d92a3990688174e1bf266e1fd98ac79e30
+        owner-decision.md: 82eab4ae2a45608687f6338c7dd449ede218d3530a129ac925773ae7a7690467
+        state.yaml: 019390eb96bdd3240b2a74f5eea015778a548a96afda48abf460e5a289596105
+        task.md: 6784e7039dc10624e081d7c98734f58511b9aa72223994931da0fd670d38cfc6
+    - id: backend-container-v1
+      from: .agent/tasks/backend-container-v1
+      to: .agent/tasks/completed/backend-container-v1
+      files:
+        contract.md: 46a6727d480a1c35d30720ecbc34dad2a30ea78db861c94584944e20cbf3eda5
+        core-logic.md: e9ee26304c67f699bae57392b9797c0af33996d09bf2eec9ead9c3069ff89059
+        delivery.md: d58172cd9471c065033f9faf112b4934569ed400fe815d599d24c2ccbe3d8993
+        findings.md: 4fbda04eba6d6d1dacb9b9cd55de5d6ac214bcce5d038dfb262f7d88d029deb6
+        owner-decision.md: 46715b9507fef4594c1751873241c3ada1cf7ce3ee9021f4d1ba7ea61362f6a1
+        state.yaml: 4b02c411f44bbc8bd2bd1b4da5543e8635985cc0731ac8d0d0d10fbb7f221f52
+        task.md: 02c859ca1760be66b748f481f8dd454f9bd16cd368d24b0bbb68478808584d59
+    - id: banner-v1
+      from: .agent/tasks/banner-v1
+      to: .agent/tasks/completed/banner-v1
+      files:
+        contract.md: 4ab0471645ce7cf164bc446048be2188574767314eecf672437e854ff94ae58c
+        core-logic.md: e749d83ef07d1e7980a481941359e0c826e8f2eefbca150753d3f578a7be9607
+        delivery.md: 70f7b0960c1cefd4fa288b7199f356f8d507cbe112b261a59565fc0ad6548d25
+        findings.md: ccfc0f9dd2c11bdf885d3a804b3ebf9473c4866e9044710934256ac979b5da90
+        owner-decision.md: 5a2c2101571eabc6c04bcfbe11cdcd446fc19fb3f91128c59f1eb24a49ac756c
+        state.yaml: 87f749b352739f3f806bf1378f14078b736399411a220e399add0ea1e24838fc
+        task.md: c75c3f26ca78789ca0a282afc7888c33964fc2fcfda0da8dcd6e702d8edf4d5c
+    - id: cart-v1
+      from: .agent/tasks/cart-v1
+      to: .agent/tasks/completed/cart-v1
+      files:
+        contract.md: 780ff37707273c4989b60b6272b798c9eb68c7e0a29a709680af55ab85017396
+        core-logic.md: 5cfc228bc6968576b28074e0a767cad1c4dae53160c1f24c7edb534a8f94919f
+        delivery.md: 82b9b3f2dfc738e1cd063eef18e08d7d1d4c5008bf8bed453f0dfe69fc3951c0
+        findings.md: fc48ad906a6b038d93ad77caa2fda6f97a78f76730756928bc447ad70f6680f5
+        task.md: 450071c172e8afdc649f314a0fc28df9669885f567e6a9c0e7926640dadd3f6e
+    - id: categories-v1
+      from: .agent/tasks/categories-v1
+      to: .agent/tasks/archive/categories-v1
+      files:
+        core-logic.md: d31cadc2bb2c20bcb75c50c7dcbdb734914080ba4d8c4e6db25ca429320bf5ed
+        delivery.md: 86111ccbae2a5e7d6133c442f6ee3b119c0233aa0920c758e6a361bd067f52f9
+        findings.md: 419a0c1a3c3a1a33a708ae91dbb0a0f1051d73250a38626d8f4d8afd9a47d370
+        task.md: 713b5524baf1ba9578bf252a53302c15c39068dc6acef43277c4b35dbd9aea39
+    - id: ci-image-publish-v1
+      from: .agent/tasks/ci-image-publish-v1
+      to: .agent/tasks/blocked/ci-image-publish-v1
+      files:
+        contract.md: 838f5fa498e8b40df98e97da29eb5d62e7264b7684e5c6304e727a4c1007db7f
+        core-logic.md: abd8a5c86ce3d602993ab81430b04149e6046b8064ea23d858c8fd5168316bd8
+        delivery.md: c920be4004d1887b8e9e7746683a7b182e2ba962349ca93e02f11a26280075a8
+        findings.md: e40c18eda30aafb994ce78b8bd286b5ab1c1c80e7ddf0c90e23d21cb91aaaa4f
+        owner-decision.md: 971813cc416782ec55ed49c589a97e261c87a2a45708884e5cb5ca993be019e6
+        state.yaml: 9abeb761a35b623429d4bd4fedd9550b95900136fb293a8ab3e5334583ca8048
+        task.md: 7110c5ceca624a3e5f0500ab0dbed70b28adb174fae1f0c182ce323749bb7d92
+    - id: container-runtime-hardening-v1
+      from: .agent/tasks/container-runtime-hardening-v1
+      to: .agent/tasks/completed/container-runtime-hardening-v1
+      files:
+        contract.md: d89fc18679d145ceac02cc721d6d4d5014363ffa92beb792d8ca314d74b59d4d
+        core-logic.md: a6b3c6cc21772fc5f575b3daeb05b0c37fb5a440e1550ed0ec11df4e3f410b19
+        delivery.md: 309930d764e1574500a0c2492eeddf8f0e450520fb5ce5b13dd234b275ad0b2e
+        findings.md: c6bed46527d699ba4d0a283d82857dc467ba913791f79a41a6f48c58e3d8eaa9
+        owner-decision.md: 7636170af1f67810818ae180a3b6612aefa893722c652aba312b1a8fc1e8b01f
+        state.yaml: e2efad7e52eadb3823d78db52532739c553eed0b32c342ca815e3fae882ec990
+        task.md: d0601946f8440098502b942f776a93fc907fd59bee88e72b63fa20937f403b0b
+    - id: coupon-v1
+      from: .agent/tasks/coupon-v1
+      to: .agent/tasks/completed/coupon-v1
+      files:
+        contract.md: 777b52719aac50e627d6276ec33c9a6ebe3accddba79623f4c8175a29ed4fe41
+        core-logic.md: 2a5407747b657b38ecce76ededba453b727aa778dd8c8415a6b408d27f7a7562
+        delivery.md: 439779e1384cc0b9aa090c45e2968fbae896bab63f07440409ca237e2aefb132
+        findings.md: c425d8e00f4686e470adf8cb58df37b7ba85a1321e6756d615eebdb9f0472fe8
+        owner-decision.md: cda0cb30b19645560862cdb0ccb4a2981aba96d4a91a75277d4990fd7ae3f3f4
+        state.yaml: 29277a9b81ed88b792dbb63f13041184e8608eabb250d229a4eb7942fd0ab637
+        task.md: d571594ce135e0c0b3ed01bf1e89b54b92ebc6db65d11b91159c6cd929f1cd56
+    - id: dashboard-v1
+      from: .agent/tasks/dashboard-v1
+      to: .agent/tasks/completed/dashboard-v1
+      files:
+        contract.md: 71c66237883509e93c93ea48c74b28f741df44b35d11086628bb98bfff2c1fdf
+        core-logic.md: 8d6f7bd17e1f197ef0a7fd256cb9f326967ea62c1c3ed48ec472cde741548047
+        delivery.md: 414c2f1943394813c3992a3b91229d599c8a753b64838427aba56646d017846f
+        findings.md: d66820c1882df46f94253a0e994f1e6e37184ef419b35957acf63483380f37c2
+        owner-decision.md: 38948a6aa09457376cae0b48498cfdc04cb2d8def79f848f019cae819b8be3c7
+        state.yaml: 1f18ea2952fa10f79a76de28639daf6addc215bf586bc46d517eef9e2020e985
+        task.md: 18589cb4ba93016da6e9255e6e112f0da45ed62a7f6cc7b02a087dfcadf0490a
+    - id: db-migration
+      from: .agent/tasks/db-migration
+      to: .agent/tasks/completed/db-migration
+      files:
+        contract.md: 6d130048fb681aac8197782c06eb743658d0def1d484a0b460b36fc72ef74e39
+        core-logic.md: 2f34eca198c67f9f680476a827918a9e4213b25c88acf38775d2a5bfe5367444
+        delivery.md: 1346594d589f0efdc4627db7b5eba21e304d95f6d2dd0f72371f1262b3171b3a
+        findings.md: 1bfb0980e77d9f4c420aea3b42d5dfebb8d6f71c4a002833c62122d87844e2b4
+        task.md: 2e0b299ea729f28adcb4dea60c4df244d3b943d92116d79fdeb2bef65a9a4e30
+    - id: design-debt-backfill
+      from: .agent/tasks/design-debt-backfill
+      to: .agent/tasks/completed/design-debt-backfill
+      files:
+        contract.md: 99924e0a943137376e303aeed33962f7ff7ffbda756c524596e5a064ee6ef123
+        core-logic.md: af1d7f39c41ad726b926e406c272f679efa6dca7004c9b5099290d691797d73e
+        delivery.md: 77aa874bd562de20799b2be32f5c1d5a1308d00521ee871e303f22e7cb3a52e5
+        findings.md: 5b30730816058933a009a095f3b6c120bcb154a78038dc96f3b14cc8e11ee145
+        task.md: a70fa580abe693601813064da4493180070146b22f1e3ff9967caf925639cff9
+    - id: design-doc-governance
+      from: .agent/tasks/design-doc-governance
+      to: .agent/tasks/completed/design-doc-governance
+      files:
+        contract.md: af1cb8eb6eb5720708327ee0b0207e6830c9319eb708a8fd6a06fbae274c6e3a
+        core-logic.md: 89c27a4f2aed23a706dffd139c688e8fdf5e3f76527831e3621451e443595946
+        delivery.md: b0b007a55332be4fa4a86cc273278084e3c7fe0888e5a0afbe3f5b50c9f4458e
+        findings.md: 44e0a78719d9ae0ef2ec2b7f45e24aa176cf4ca63f9802b95a858c37c5861456
+        task.md: 1b81419922a8762531edae5fdddb542de63ca858f8c039deae38bd179ed67aaf
+    - id: dev-environment-setup
+      from: .agent/tasks/dev-environment-setup
+      to: .agent/tasks/completed/dev-environment-setup
+      files:
+        contract.md: 644aa39efc6409a2363b446f819070fc50e1e03ad25bde872785afa858c945da
+        core-logic.md: f2f98f2e05e9e4b607f55fb6d33395244e62cbdbb456efe5c86f58b9c1c8bc83
+        delivery.md: 75fc84c5a5970f295d7bc6b547f75ca1318d5dc3b2918c4ddba4ef31f8a5c9c6
+        findings.md: af99b70e934de855ce64e7724e2a4b444bcd393d9dd202d298d39b301e018150
+        owner-decision.md: 3d94169a71fa13edf304358106f048bc49df997f979ca9ec909a862e32165770
+        state.yaml: 0d80fb2e134fc14c8016b984c8a55055c7a779bc340b3ef7b47ec42350954221
+        task.md: 1d91051b91180632a72f4a9adb6914cccb00fc53644cee99cdae4d36d513e350
+    - id: error-code-namespace-expansion
+      from: .agent/tasks/error-code-namespace-expansion
+      to: .agent/tasks/archive/error-code-namespace-expansion
+      files:
+        contract.md: 8d387bfbf921516aa7863291e7fbe12a4aa1375f3448ffae36c1fe33ba42b5a8
+        core-logic.md: 0f86f7f60ae84c29097668679597be63922aac90c2bbd18a10379a51d661abd2
+        delivery.md: 86111ccbae2a5e7d6133c442f6ee3b119c0233aa0920c758e6a361bd067f52f9
+        findings.md: 074957214dd5255eadffc23beffa3163d616ebe5e206bb0eef085d16362840a7
+        task.md: 49c3a80ce4950ffea3d70affb866f5f45d951055f6fa9648d2b427637b221fde
+    - id: flash-sale-v1
+      from: .agent/tasks/flash-sale-v1
+      to: .agent/tasks/blocked/flash-sale-v1
+      files:
+        contract.md: 8f6827b6dd3e46a4b10a388c7fa9e17d0bb87f549aca0abe027624362988a317
+        core-logic.md: aae4d458c5a9ef712083cff7009f8a212c4d6e8d058a9aa274deb1d2b922aca1
+        delivery.md: ca195493bf6b19745f86505cd6ace5ae5e02d096196cf0fe237aa929ef3c44d8
+        findings.md: 02c7a03b1f7f9fb52aabdfbec023857d689f71dd9bdab1535da101a795cbca53
+        state.yaml: 98617c1cdb3365b9220b811859be766825e8f2bead29dc0cba82f9b3388f162e
+        task.md: 21d7446dfce6ffa9e4f2fc4cddcfad17b9399960da4b4f8c60801c3730612848
+    - id: flash-sale-v2
+      from: .agent/tasks/flash-sale-v2
+      to: .agent/tasks/completed/flash-sale-v2
+      files:
+        contract.md: f31805e7f29c3b2c21960eede817043672a0c14f30c4456964d6957f2ae7f93e
+        core-logic.md: 6910d55d9cca3c25673d197a6ce412a815a77de8ce9b235cd71d234a8afc63e0
+        delivery.md: 32f99bda57617c139332267465aebec4c9a439409becfc74903efcfac54cce73
+        findings.md: 884255fad653dfc40d3e4d06b692961369c7aaf2829b040a68cfe5952a46c936
+        owner-decision.md: 018e503b56d58130b6245ba3d3f57e24eba1d7f4d5040c9d7b06dc0aadc68cf4
+        state.yaml: de6dd6fb098c0453d555e5b7ddb24374fd7337a525ac03e97b1095f1d1b7fcbd
+        task.md: f67d7dac8ccaf6ef2a1d3771b1e402dda25add13313f05534cf54693be8481ad
+    - id: flash-sale-v3
+      from: .agent/tasks/flash-sale-v3
+      to: .agent/tasks/blocked/flash-sale-v3
+      files:
+        contract.md: 2998c436de51ab365a5dbd46fda0c92b613dd10071be8c73672b023a0e820fdf
+        core-logic.md: e1a9b6f1bf958b209cd4b320b4b50ae14a6eea6febee8a9fa6298b8fb8d40d57
+        delivery.md: e4f1f859a4e9c75f6161ff0e3e11a77ac9ae7d212fe86720829c624e70ba0860
+        findings.md: 532a00de85758db3787eae5ff383a13e7b0a48183d773d2e00bff0f5eb08c571
+        owner-decision.md: d67a9d64dc4cdf599cb03f27c9e9542953133cdb43bdf39c3178f54faf699d3c
+        state.yaml: cc95148fb1235c6bfcc430a3382de0e02b984a9f942f3864975a12560caed187
+        task.md: e30cc5f961cabc96fd4812243507bc8a26fcb295b5c8ec5e1e68bab173eb4ab2
+    - id: flash-sale-v4
+      from: .agent/tasks/flash-sale-v4
+      to: .agent/tasks/completed/flash-sale-v4
+      files:
+        contract.md: d65986d90e0b5e0a58ea87e460b8738016fc4519a47000a38e7e4813caf85ab4
+        core-logic.md: 97fe85c4471f7473caf4a5e7d74811866affb55104b9464bb8334321c58ed358
+        delivery.md: 9bbe4d45cc42d285dbba13a40c65cb33b7c65c8e0a0d532e34fe3774efc652d2
+        findings.md: 925d189b000379d87b79d178fd166311a1d9b5996f1bc0bc644a27fd6a99b92b
+        owner-decision.md: a82d110e5849118f8f84a128165bdbfd1d37285e50ab33b75bb41bea270b291c
+        state.yaml: eb3fd1c16a247ae7690b0f5b05c73d05af22e64b655f0f5f8c2436b6d986b516
+        task.md: d50f85e1c929b16a9e76c8f1d11797d2325910d47b9e75aa3533e0242d80947c
+    - id: flash-sale-v5
+      from: .agent/tasks/flash-sale-v5
+      to: .agent/tasks/completed/flash-sale-v5
+      files:
+        contract.md: 15db0641a3e4f8a1dc54bedf7f48bb31d6406cffb086c47cfed8ae2537e7cef9
+        core-logic.md: d42fa7a9ed8e2a8d1a5f5255f07bda63c4b4a1d4d3b6e543efb6f60b12ff63a1
+        delivery.md: 11022b902790471a103159e8ec7006b421b1831185249516a3e71c8ad19eeda4
+        findings.md: 24bda8a613b297d59ce3b9e275fbe15b7d673f8812f284bb10918115e5d201d9
+        owner-decision.md: c793ac620ef8bc6d582f7a9aab965f98eca454967aca9f1adf6f805c7d58d6ee
+        state.yaml: 95609cf09ec20434b5f0b0af439dd36773447a90844d6c96ba321fcac1efa50a
+        task.md: 650d5f230bbe02b702f2e9c3d1a3090a463dc11b8ad7b12cb22a8fa8cfc75c19
+    - id: flashsale-p95-p99-query
+      from: .agent/tasks/flashsale-p95-p99-query
+      to: .agent/tasks/completed/flashsale-p95-p99-query
+      files:
+        core-logic.md: f530e3c66c565e605efea1208e46104510cffebe57ca5ecf40d5bff6e728e26f
+        delivery.md: c29dc66567caa6768d8232102a1ccaa4427e165d2d562c0daa88661466226d73
+        findings.md: 62b8850b9d70a663c4f3b88bc0aff7256f6cd9b5402d61c978d1052c60380626
+        owner-decision.md: 38c290024fc00bfa09f73be76f85a1cf991ca006cea5bc121fa451c861bfe9cc
+        state.yaml: fc1e24c7dea8657c26a18c201642e99f095c376087bf3259369dd56993680095
+        task.md: 089f2aa5e7715f150ea4a650e27317245fcde94c8181a60c89601914e201de4a
+    - id: flashsale-performance-baseline
+      from: .agent/tasks/flashsale-performance-baseline
+      to: .agent/tasks/completed/flashsale-performance-baseline
+      files:
+        core-logic.md: f00b81d96ee29b8f9bab82b4208683eaf27d6353348f91261acfb996f3f1e3bc
+        delivery.md: c2b7f62360e3794bd7d2eece9e5833e9c2ac83e10005c7ee4363343786e6838e
+        findings.md: 74b753b0016a2358ff24f1c891c3956409483949acff5dc813b09cf947b27885
+        owner-decision.md: d35c49c4a0db1baba0a814715ac21692b74b154a5f9a111e85d3025a8cfd84c1
+        state.yaml: 4c950d2cb7db8ac526cc3066e477e82509acf264baa8eaddf0f574fb14d64768
+        task.md: 6fefd41bea71efe9c0374f92161967917e651eb68ebd92b88aa14beb468467b9
+    - id: flashsale-v5-loadtest
+      from: .agent/tasks/flashsale-v5-loadtest
+      to: .agent/tasks/completed/flashsale-v5-loadtest
+      files:
+        core-logic.md: eff19b6d771bab75527e340012ee6e18cc1c2376de21527471999eb297753140
+        delivery.md: 5cdd42c20bf8f6ba990e41256bf1534d41d31b94fd68b5f5b1c3b722a1e1185a
+        findings.md: 34127cef2b6d24a6b5b0bc935694b72dbee521ee9b4445a0569136709292da53
+        owner-decision.md: b9e9f596ee48c90c21852b9c48a08815fd1459a3e00efbc2a392ceb2268efc0c
+        state.yaml: 2bdc3a644d56cfffefe1af03c7068510dd1ca9428d39eddd4f83d4947e3c7f64
+        task.md: f4eff753e618c96c0815fabe7e72edb23c6cac843de673d8295bc7624550183e
+    - id: global-resource-reservation
+      from: .agent/tasks/global-resource-reservation
+      to: .agent/tasks/archive/global-resource-reservation
+      files:
+        contract.md: e0a57be158898fae3cb85b0e261abe1e23d1d4c9019dae79d4b991ab9fbdf534
+        core-logic.md: cb9b97daa6153357151f806c9d74f8b5865ce842ac000218942d9c89c6698d21
+        delivery.md: aa1141ea9f20b7a92b6430447f9ff3a8773bb885237678b59eed460ed3602cc0
+        findings.md: 779ec0e38347c31d4df20b72dd9dc1069f9dba55242ead922dbc94ef904aa97d
+        task.md: 6aca10992b4040b4c11b1336a5d41877449f224f4a7824606228d008c46c5193
+    - id: iam-v2
+      from: .agent/tasks/iam-v2
+      to: .agent/tasks/completed/iam-v2
+      files:
+        contract.md: 21fc7656215d1155e57511b4f316884a12eb531d5e6df2104d18117d3fdf7a40
+        core-logic.md: dae1dafad87dab68075660ed291a50bcb9ce2abb4ac942803bc48b1bb49cc24a
+        delivery.md: 34b1a39e2c023a4e63046c04f41f243aa39fb5a00f24f2c68884e13d15bd5a5c
+        findings.md: dd6865f1017ba4d2ce8b5cbde1c88ba5a543f97b287ccb9cbc16d22a6c82a0ab
+        task.md: 452c6485530abe0904f566b558aceafcb32e3f558c1d5e12cc2a60bbcfdb4a39
+    - id: iam-v3
+      from: .agent/tasks/iam-v3
+      to: .agent/tasks/completed/iam-v3
+      files:
+        contract.md: 45b5e1ecd92c9841944f85efbb81887d19298b2d4c1037ff5e5dcde06288f9d3
+        core-logic.md: 75fc2dcb4a80dd2a8ca71623d9bd8628276ecdbf14f534718d20003a8fe9d7ca
+        delivery.md: 3d34703a39b29daead1e835966d0c509a2cf952903067033ac3f50179f697beb
+        findings.md: 896534708804bcce912d8eed9b88c48bdb0643b5eb21426b37ceb57fd6cc6d7d
+        task.md: 7e4de8bdb2deb546fdbda37ee552bd304d6a385b78e1a56b7357c7b57ace694b
+    - id: iam-v4
+      from: .agent/tasks/iam-v4
+      to: .agent/tasks/completed/iam-v4
+      files:
+        contract.md: 8f8254fdfde3e80ca7df3701b6932204ef712db5c64888024f3ef090cd094de0
+        core-logic.md: f13959ad47b4f6a7bc2d02946a002a078513cc982e17b1462efb2188095e128d
+        delivery.md: 7d7ac09d1564c377d43224494f6d58e22e6504aa6b5bfbd997f8f0abb31d19ff
+        findings.md: 1350c1774a7b43525822f72825a17de380b29c59aab47a23b561e64e0d47b9fb
+        task.md: 92eaf6ace90ee53da5dda6ed350c3166274c1ff2c2ed6ec46caace2903f628b3
+    - id: iam-v5
+      from: .agent/tasks/iam-v5
+      to: .agent/tasks/completed/iam-v5
+      files:
+        contract.md: f84dc1921bc5c7ce10f3ae01bd8a65a31c9dd8672fec78778c182f400e28f722
+        core-logic.md: ed92c1d2889407d8804e71a463145e7bd76f01af4e1e9a8f64e09dc105e5669e
+        delivery.md: a19024053a9beae14e7c6f87a684e929229797ab59a2fd4c5e2e4d6215f2d7a1
+        findings.md: 043a24de1923fb3fb2fc27d293666c12f93f3dfc34296a4db681c4fb36db9a6b
+        owner-decision.md: c5e3d8db4f99ac4d2f772b2cbcab8456dc9080ee5195c646e821bb088fde02a6
+        state.yaml: 4f41782e01ace672138ee600dbc3f38cd2d95194c6c00309b11dfe86b1f4b714
+        task.md: f1a332a8a08780b0aac9a9577de89e232cc616a7f0fabc59039f28e7bde463ad
+    - id: identity-domain-isolation
+      from: .agent/tasks/identity-domain-isolation
+      to: .agent/tasks/completed/identity-domain-isolation
+      files:
+        core-logic.md: 5479a698c6c961b94d67a2c78b6637cf5e40383e07dd30880188b186d9683f4a
+        delivery.md: 1315f08bc4cee7ed7a6e2c2450beffbc67eb7a9d827a0b84b329ab8bb9b182a9
+        findings.md: 7dd4714a710ce52397b880ec8a2aa8cda251fcf1a4f4faa723cd62ee0fb2400f
+        task.md: 2876569cec2aedf03391d471c829d3de5f2206cbc20d2034115b5c3b879778a4
+    - id: inventory-v1
+      from: .agent/tasks/inventory-v1
+      to: .agent/tasks/completed/inventory-v1
+      files:
+        contract.md: 7be8c1dd3d870c722d8eaa2994dd7f877101aed8278b9d7712fca4574a6d96e9
+        core-logic.md: 51b976c7c0370856cfcba30c74f1e9d7a07491272451c821d20099f99d031851
+        delivery.md: b1fdda504bbbdc3a2fa55b8728eb52adf5ee916559b54053981cedb07c3c5616
+        findings.md: fec7b5a4959ff1a40e87fd94716cc3be34640d8ce9ab288ec112d75f108fa9aa
+        task.md: 280c761b1b8d7a7df358e52094e4957e2e0eabd17bb52dc2add5a9e56e4cb548
+    - id: legacy-data-migration
+      from: .agent/tasks/legacy-data-migration
+      to: .agent/tasks/completed/legacy-data-migration
+      files:
+        contract.md: 19c2176f5c08867d00ccc1fe31d781b59be427109534d8d57fe725af04362eba
+        core-logic.md: 6dbd8090dcfe413372bb1cdb33760149aa1026dc1220a04025bef6816cf29035
+        delivery.md: 3700e67b22450d2b457439fbb0a32a2efc0af06f21d3279ca70b11cc71eaf7a4
+        findings.md: b44ec2e8dbe53c7fb43285b3979be7a56f3992351f0f4fa745056c9363644920
+        owner-decision.md: 2c25269f35844cfc82b0b131508f33ec9f458432150924aafb286a1d60a67f78
+        state.yaml: 012de5ac944e6b6b3fc86de073361acf12ee190a575fa2ce5758d8ba30860953
+        task.md: a0cdb9febe82e707a763f4a0e0560290d2020c0da8077744fde6d1a0e4c42333
+    - id: nginx-reverse-proxy-v1
+      from: .agent/tasks/nginx-reverse-proxy-v1
+      to: .agent/tasks/completed/nginx-reverse-proxy-v1
+      files:
+        contract.md: f39a0bb65e53be50402d6893f3c9183ba9299ad85baf746c192a511367faac81
+        core-logic.md: 14ed069a7b6f17345cf052dea7e5b38d127cedcb9592fd8ca18d5a7e26b213f2
+        delivery.md: dd6ff12ede69714b849a24eb0de4ed503e85c6c0ad3992b81a59af8df46105d9
+        findings.md: 2a9a96a31cb72208bea457a4e5f8b4b6e7c1968f153ba8d36fc057fe4d6c1715
+        owner-decision.md: d4a56b80ad082cab74f1675230c579be0699a43320e36990545ee7ed9f520481
+        state.yaml: 7971b34bbb3c5035a23249ee1cad49dd56ab7b7a1c16e1eb2670ac79baf7a2eb
+        task.md: 43af1276395f4b01305ac84d499c0161ecdfd094715be44aada55eb1a47011b5
+    - id: object-storage-upload
+      from: .agent/tasks/object-storage-upload
+      to: .agent/tasks/completed/object-storage-upload
+      files:
+        contract.md: 286f5d0284a21bda7338bed8a719195f311074eb77cfca9255adef0b022cd4b7
+        core-logic.md: 8ab8c4b1c843c67a7faccd5fc10dadcc86d1e4581a08edff3e496758092c0245
+        delivery.md: fdf0aae9ed9e59c3779f5c8c69184046645d82a960e20a187ec05901041f1999
+        findings.md: 9bf09ce503fe11bc036786962a50f67d458a7f58cb44c765c9d71d43e179c535
+        owner-decision.md: 5b0a4c96462219c1d1fef8258881ccf766864f5641a9d8e67d7df287566dab08
+        state.yaml: 69686f33fec885b67f01457af6ae894241c4d7494328f4eeaac8a843ece809ed
+        task.md: 673f6be4acad6b08dafe95b2d3349a81c1964fcbcf7d10edac52c081f9b484c7
+    - id: order-refund-v1
+      from: .agent/tasks/order-refund-v1
+      to: .agent/tasks/completed/order-refund-v1
+      files:
+        contract.md: a6245938ec1321e078ec43f215ecd57fb364bf3af8b7fb9535824b8956d29298
+        core-logic.md: 1d888f5e62aa967f7d5dc61c59a8da480d468f1d3a00b3484dabef42311535f1
+        delivery.md: ff226d741c6652e6354ca1c92fb6d86c3b08d7cb8c011ea2aac03fc5192c8c0c
+        findings.md: 8a4800855feaed982ba66c4767e702fb932f5ea3605cf5e53658fa42f8ce10c2
+        owner-decision.md: f98b54211a118edd00595b8dff34c7272ceb09f9756195f9782a6fa84d7a794d
+        state.yaml: 15283495992b3bf2e48e4e382eaf087de1181c6b530e07d04b57b6e309ac7e44
+        task.md: 7da44ac9f50b3eb7b6df3427757abf5adccc147f1df1406a2a4cf5dc5e67b91d
+    - id: order-v1
+      from: .agent/tasks/order-v1
+      to: .agent/tasks/completed/order-v1
+      files:
+        contract.md: 916eec0f70acb9b1735e2e197cd6b80ae2f8057fb899d5c3bc1ea9e626cf1136
+        core-logic.md: 8aa4c4f5ccc26e41f2da5bf046b704ea57981a690cbdf332f19f8c9c4f279014
+        delivery.md: 51c1f3b995ffdd22113335a1e24721a3098ebcf22e35062bbc796ea68c772911
+        findings.md: 5c638b57c294af1d774c24599415d47bceba4cbc167dcfa3fa49216aec32bbcf
+        task.md: 10cdceea8d43fd7b4722dd10949e8ff2351134a5dbc18e57da9d08b7eb046cb1
+    - id: product-favorite-v1
+      from: .agent/tasks/product-favorite-v1
+      to: .agent/tasks/completed/product-favorite-v1
+      files:
+        contract.md: 91ae4143a83d30ab524232fd946d454fbb93925eabc76dd3d3973f3d8b4f3e89
+        core-logic.md: 30072db4d62ff1b0c56fec61b8a2a2ce7e02434d8f389528cb23b5d2782e9e5b
+        delivery.md: 13f4dd9a70d069eeac54787911cfe4e3076da677433533fc99369c83886f256c
+        findings.md: 46f042c9b7abcae3bfd2caf64646ea44448a737bf0d79603cf732de19b491525
+        state.yaml: b5370d8a17f7945be775c2dd8b28928b75b2bdb710275985e7fd9ea21b944af8
+        task.md: 43c1242126f826e5ce5f911247285b4da5228e911f0135c5aa3130ca1c96d9e0
+    - id: product-like-v1
+      from: .agent/tasks/product-like-v1
+      to: .agent/tasks/completed/product-like-v1
+      files:
+        contract.md: c17de5432a2a7f304c2719f5fda5454f474b82c98e90fd9393050a47c279b13d
+        core-logic.md: 70710fff08f52f3b9222b4f45b08f9d0780b29dbea6fbdc0a1d5c64eace89aff
+        delivery.md: 394a525edf02716c5379a7d91f1d87e9b7e38a1adb820673dbd3cfc9e5b77715
+        findings.md: 5282ba212d1a2160e5e99a4076c6a90e362fb3c5248ac9c801f241ff6eeec046
+        owner-decision.md: d50fff8bb1e9a1d24f0f0d44c19ba39f15d5b05be178958d84894068b5d358be
+        state.yaml: 8a019884d0e742c08ff67822a1f4d2d9290bb9851fab277245057180657764b7
+        task.md: 2a2ff795e8f08c6ba0314e7f10920f087ce25bdae45c7699c7a3056527cadf6a
+    - id: product-review-v1
+      from: .agent/tasks/product-review-v1
+      to: .agent/tasks/blocked/product-review-v1
+      files:
+        contract.md: dc4118909db336a76046eb92947cba27ecfdde0f2033272766aa895633375343
+        core-logic.md: 1a613e172f6595a0f08968bcea2820f2074ab3a82ccfd7243ce1eae8e49eff28
+        delivery.md: dc0a8751d39a157f84d48c70a2ff496e9ca70f38cfd5a72c90bb83178f8b87e7
+        findings.md: 89332dc0348b2a327896394af086305ce7e82730fb447b6ebd7bdacac09335e0
+        state.yaml: 79bb2bdd837bf1b484d37e8e325066742b1794fc2b4f57d50abc52828a6dea31
+        task.md: ab9d9352b6dddf31aacc087e194b18c15006870b25e6a8602ce906bec202c30a
+    - id: product-spu-v1
+      from: .agent/tasks/product-spu-v1
+      to: .agent/tasks/completed/product-spu-v1
+      files:
+        contract.md: d00e4229f932cd23c15bd054ee7f4c8713d768494c9ffcc5a853144c57c4d796
+        core-logic.md: 5e545c2397c6f97ca76f5d16f67cb4b87953edd37c1afdc40715fbdee60ae6bb
+        delivery.md: 4ed632d8ef2d5eb0aef079e968ea0761925fa5f762900b16552fa7a3193c5cd5
+        findings.md: f3fa41d34e8c0bd6c24ed1cb0fb084f74e96fc7ab9fa18c6844d127e1ad178d3
+        task.md: bd29a53b213a8ac0d9e4bc037a825635654a9ad338efc0fd407a7745ceb95c4e
+    - id: product-view-count-v1
+      from: .agent/tasks/product-view-count-v1
+      to: .agent/tasks/completed/product-view-count-v1
+      files:
+        contract.md: 8b09c0d9173adaa1fe860da772c6735f7ba0056840800c179661c52d4ccb92de
+        core-logic.md: 30b647ccb7fc3fa1ae4f3db9979c75daef9630a5fe769ab1a6676c1aaac44248
+        delivery.md: e82040a3b551bd28bcdefddc56de2d8a28c5999e477612e4c57ef5d6837f2bc3
+        findings.md: 4a8da210c60fdc1e0d85cdb9b54feb3159d0472e81b6c5139cac632e99f46cda
+        owner-decision.md: 44db3bbf5429cd4692ab516112db2f033529b0bbee80e2f850f617783a7cf23a
+        state.yaml: bb99f51779f39c84d20acdd85ff4db60e9f436758b494017d0d2779fbc9e9d23
+        task.md: 2624733e6086c80338ccb93af7d422628d74a946977157af18653437a33fe8f6
+    - id: project-baseline-cleanup-v1
+      from: .agent/tasks/project-baseline-cleanup-v1
+      to: .agent/tasks/completed/project-baseline-cleanup-v1
+      files:
+        core-logic.md: d9d071b50f4334d21fa8377298c268167aaf67de332ffdee08ea2af0abc5e836
+        delivery.md: 109c39f708ded6000efa9c8404b67d2ead8095276bdc25cecd106b91cb06aedc
+        findings.md: cb67df0b6e18a2e3fd13fd82dbc4717b500537050cb7f8987ca5e4200688a9f8
+        owner-decision.md: 6d4108cf9c4538925cdd1312d77cb8472c59332f6d476474462409c2f62244a1
+        state.yaml: fc979f9f858ff7802aa42881c74d4bd6b165507ffa0c8403d6fd44d4a4fb5e16
+        task.md: f407c358d25fdcd32d9b2b5e06132debe989c177ec3d27b646e5c9b932ffbdef
+    - id: prometheus-integration
+      from: .agent/tasks/prometheus-integration
+      to: .agent/tasks/completed/prometheus-integration
+      files:
+        core-logic.md: 415818e66d6cc9cf50d73dc7ff1a6e950561a03d22d7e0ea9852d173af948dc7
+        delivery.md: 3c7b3ae270c0a3fe2f2fb9f3f7a470a697998431fb9859c9b6e3a00e84ade357
+        findings.md: b0ce4b985079a97bd6ab48e44616a9495f6cbf0186d65d4bba7abe49ff5cd64c
+        owner-decision.md: f524ef3db6297d4854c2918ffc04b5b74e3448892d7453d7f2551a1f4fcff567
+        state.yaml: 009441e919a89e357adbdedf41a53f95f05d3456e55de61d148b1b851c8397a1
+        task.md: cf634c2a610b33c3450d81299a774f60a56e7fcb0dba0ace927e0f37dde09f15
+    - id: recommendation-v1
+      from: .agent/tasks/recommendation-v1
+      to: .agent/tasks/completed/recommendation-v1
+      files:
+        contract.md: a9d2dd969b999e48a6e0aee06e0d015807d549163d0a2c236a03ab0f96485185
+        core-logic.md: bf2289e01ca13071351e9574f67edac124f625902933bfc8b7ea45b72a7a25ce
+        delivery.md: 9c7e305b30420d194d1ee0987824b0544715c7c4bd8a40bfe1923430fa0e00d8
+        findings.md: 3b82f6ffac41e2267de38668b3b93672433e76a723b04d85b3968e7042fa3eec
+        owner-decision.md: e8cb39389ed255422de5f38bae89b94b670ea2e8e552834dfcbb23a9994213a6
+        state.yaml: c5e77205646cf5bd3379ae8a32d1873afc6ff2ab1995b538a95c2a3a622660c8
+        task.md: 3a6c177fb38b450ae8577f191afc4b57694fef37a13f497e6dcb38891ed91fcf
+    - id: shipping-address-v1
+      from: .agent/tasks/shipping-address-v1
+      to: .agent/tasks/completed/shipping-address-v1
+      files:
+        contract.md: e2dc67cdd84a8658aaebee93e2dce3f44ba3a7e9916e137d4a2a56da4c7d30df
+        core-logic.md: b032fd8fcb262c8bdde095f7e24f03af7805d1feb22dac9b7f121155ed843bfa
+        delivery.md: 7e5780af32699211f9d423da437f2e244f561fe9b98a848da977757c9c774454
+        findings.md: 25c499c960eedf0de75501aac35a53f875772ee5f240d0c1e2fc1df84d74361c
+        task.md: 19ad615f1e03f1b2b0408af01c7b2e5286e5cc62b6dfad95cc241b0bedaa2d41
+    - id: sku-v1
+      from: .agent/tasks/sku-v1
+      to: .agent/tasks/completed/sku-v1
+      files:
+        contract.md: fc1b3603ef07b7572d78dd55e9cf1b559af2895fa868f1578305fabbf9dd6f39
+        core-logic.md: 5f9968e5f6e58b51d9be1ace2c50cf040e48499878eb6445f007f45e8634a12f
+        delivery.md: e9ffc5410b96cfb1fd2a68d14d42f4484671dda0d6f91e1a2c8354aeeb8882ef
+        findings.md: 786c10c3764d86179aae0aedeb8a1b4cb763c7f3ae82739fbbcedc80b2cc05b0
+        task.md: f3cca8bde62ebce471663d794c20545b1d2cccaae298af35bdedb8c2e8f70530
+    - id: test-quality-gate-v1
+      from: .agent/tasks/test-quality-gate-v1
+      to: .agent/tasks/blocked/test-quality-gate-v1
+      files:
+        core-logic.md: a2d80bfc76ce8b6b9571ebdee3e6cea3bbde5c57f92391a2caf215e35642c05d
+        delivery.md: e4f1f859a4e9c75f6161ff0e3e11a77ac9ae7d212fe86720829c624e70ba0860
+        findings.md: 835d5926314d98d3aab67d8600257ff3819566f8b1ce13955c6a1a6879a98ac8
+        owner-decision.md: 1fe146e0f5376b1eca03929431123c015e421d57062d1df9387d538b54512763
+        state.yaml: 8eda1d17c729890053373e1e98124ebf8fcb5855d267933a9ed4ddf12b69d36a
+        task.md: eff3621cfc3b946170f5efd40cec94f3a975098ea837e8c9826f5edea6c27336
+    - id: verify-metrics-histogram
+      from: .agent/tasks/verify-metrics-histogram
+      to: .agent/tasks/completed/verify-metrics-histogram
+      files:
+        contract.md: 1e3057fe2f3a398c9ed5434ab7a87c09497d86042e247e9295cf20c39b9663ee
+        core-logic.md: 420e882525b94308338f473336a0d5f5acc57dcef60b2659a7e80f056c90d0e9
+        delivery.md: e801bef494a114ec20a987e5e9dc3ebddbe9f94f96c730095ead6aa2d6946484
+        findings.md: c10863462c256a146b2c0c26e61bd0d05408474961a97e6fc83a61ca9a0dfc7d
+        owner-decision.md: ce7c2b86028706208c1dbd0291bcc4d1f901b1ed946c2aab2425bfdcccff9d3b
+        state.yaml: 663c4676c28dc2b5fac401a0d5b73957fe24deb937e277aae514fd5b379ce07f
+        task.md: d1f259605b1ed78c08f25a233beaf2ef1d1e61c1ec11bc82884a4535b03add6e

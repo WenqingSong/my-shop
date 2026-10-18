@@ -32,6 +32,30 @@ Owner 是人类，Deliverer 为历史兼容资料。四流的执行顺序分别�
 
 Contract.target、review.target、Owner 绑定、delivery 三 SHA 指向真实 commit。批准不是对任意后续版本的无限授权：批准的 Contract 必须与工作树内容一致；CLEAN 后实质变化使旧审查失效；交付验证绑定参与验证的 feature_head 与父分支基线。
 
+下图展示普通 Task 的证据关系；它不省略任何 Workflow 专属 Gate，也不表示 Engine 会替 Owner 签名。不同 Role 在各自 Session 读取实际 Git/State 后接力，图中的“当前 Role”在交付前分别由 TaskBuilder、执行者、OwnerGate 与 Merger 承担。
+
+```mermaid
+sequenceDiagram
+    participant O as 人类 Owner
+    participant R as 当前 Role Session
+    participant G as Go Engine
+    participant C as 独立 Cleaner
+    participant E as Git 与 State
+    O->>R: 确认 Task 类型、范围和基线
+    R->>G: 运行适用的初始化及入口 Gate
+    G->>E: 校验原始批准、State 和 Git SHA
+    G-->>R: PASS 或明确拒绝
+    R->>E: 提交实现与 Handoff Evidence
+    O->>C: 启动独立审查 Session
+    C->>G: 核对审查入口与目标
+    G->>E: 验证目标版本及证据
+    C->>E: 写入绑定目标 SHA 的审查结论
+    C-->>O: Finding 或 CLEAN，供 OwnerGate 呈报
+    O->>R: 接受具体审查目标；另行授权交付
+    R->>G: Merger 执行 plan、verify、execute
+    G->>E: 复核来源、父基线与验收快照
+```
+
 Review-neutral 白名单仅限当前 Task 直属的 findings.md、core-logic.md、owner-decision.md、delivery.md、state.yaml、events.md。Delivery-neutral 更窄，仅 state.yaml/delivery.md/events.md。其他 Task 同名文件、嵌套路径、architecture.md/design.md/contract.md、代码、测试、项目设计均属 substantive。采用 default-deny，避免用文件名伪装任意变化。
 
 ## 四种工作流的差异
@@ -65,7 +89,7 @@ OD-4 收口修正：任意模块中精确文件名 go.mod/go.sum 均属于依赖
 | 不变量 | V4.1 架构约束 |
 |---|---|
 | INV-1 Shared Branch Authority | 人类控制共享分支的生命周期和最终集成授权。TaskBuilder 用受控工具创建任务分支；Analyst 的 Registry-only 集成分支提交是限定例外；Merger 仅在人类绑定来源/目标授权后受控交付。不得沿用历史“Agent 绝不建分支”误述当前行为。 |
-| INV-2 Implement Authorization | Coder 前 Contract 必须有效；资源值必须由 origin/配置集成分支的 Registry 授权，owner 为本 Task 且状态 RESERVED/ACTIVE。 |
+| INV-2 Implement Authorization | COMPLEX 的 Coder 前须有仍有效的 APPROVED Contract；NORMAL 不要求虚构 Contract，可在获批 Task 范围内复用已合法分配的 ACTIVE 资源。任何新全局资源分配须经 Owner 授权与合法 COMPLEX 承继；资源使用仍须符合配置集成分支的 Registry、归属与状态约束。DESIGN/Program 按各自批准和子任务规范执行。 |
 | INV-3 Immutable Review | Cleaner 只对明确 Evidence Commit 给出 CLEAN，不 CLEAN 工作树。 |
 | INV-4 Review Freshness | substantive change 使旧 CLEAN 机械失效，不持久化 STALE。 |
 | INV-5 Owner Binding | owner.review_target 必须等于当前 CLEAN 的 review.target，接受仅来自明确人类决定。 |
@@ -86,8 +110,12 @@ Analyst 资源分配只修改机器配置声明的 Registry 文件，单独提�
 
 ## 完整 Role 与 Program SHA 证明
 
-角色权威规则在框架源码维护区单一维护，确定性生成 normal/complex/design/program 下 25 份完整 Prompt；宿主只复制完整文件，可本地定制并按准确上游三方更新。11 个机器身份及 Handoff 枚举不变。
+角色权威规则在框架源码维护区单一维护，确定性生成两个公共入口 Discovery/TaskBuilder，以及 normal/complex/design/program 下 19 份后续 Prompt，共 21 份完整 Prompt；宿主只复制完整文件，可本地定制并按准确上游三方更新。11 个机器身份及 Handoff 枚举不变。
 
 Program Registry.delivery_sha 仍是实际被验证 snapshot；交付 metadata 的远端 tip 另行核验：受限 delivery-neutral tail、State 只允许 Delivery 变化，Contract/Review/Owner/资源/Git 基线不变。集成固定该真实 tip，Merger 在测试前后精确核验来源和父分支；非 MERGE-L1 不能视为集成成功。原始 JSON 集成收据在 C1 后由 Assembler 登记，C0 不自引用自己。
 
 内部 .agent/AGENTS.md 属框架通用导航，显式读取；宿主根 AGENTS.md 可选且项目拥有。新内部路径进入 Merger L3 保护，review/delivery neutral 白名单不扩大。验收前后拒绝被测树持久变化，输出使用工作树外临时目录；不声称可证明执行期间从未修改后恢复。
+
+## 公共任务入口
+
+新需求先经公共 Discovery 调查，流程选择发生在调查之后，由 Owner 确认；公共 TaskBuilder 只按获批 task_type 加载专属初始化规范。Program 仍由 Owner 规划，子 Task 单独获批。入口规则见 [EntryWorkflow](workflows/EntryWorkflow.md)。Engine 依赖机器 Role 与 State/Git Evidence，不读取 Prompt 的物理路径；本次不新增 Gate/Schema，也不改变 Handoff/ACK 权限。旧路径迁移见 [Role 索引](../roles/README.md)，历史批准和路径不改写。

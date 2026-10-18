@@ -21,6 +21,9 @@ func TestRunUsageErrors(t *testing.T) {
 
 func TestRunAppendHappyPath(t *testing.T) {
 	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".agent", "tasks", "demo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	code := run([]string{
 		"append",
 		"--scope-kind", "task",

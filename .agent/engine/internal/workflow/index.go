@@ -28,9 +28,12 @@ type IndexTask struct {
 	ReviewTarget, DeliveryHead, OwnerTarget   string
 	Blocked                                   bool
 	Branch, Base, Intake, LastCommit, Updated string
-	Flags                                     []string
-	Reason                                    string
-	stamp                                     int64
+	// Category 来自项目本地 Task 目录分类扩展（layout.yaml / 物理目录），
+	// 只是导航分类，不是审批证据；未分类时为空。
+	Category string
+	Flags    []string
+	Reason   string
+	stamp    int64
 }
 
 type IndexProgram struct {
@@ -121,7 +124,11 @@ func BuildIndex(root string, now time.Time) (IndexSnapshot, error) {
 		}
 		snap.Programs = append(snap.Programs, p)
 	}
-	entries, err = indexDirs(root, ".agent/tasks")
+	layoutManifest, err := LoadTaskLayout(root)
+	if err != nil {
+		return snap, err
+	}
+	taskDirs, err := ListTaskDirs(root)
 	if err != nil {
 		return snap, err
 	}
@@ -131,12 +138,15 @@ func BuildIndex(root string, now time.Time) (IndexSnapshot, error) {
 	}
 	branches := map[string]branchInfo{}
 	taskPrograms := map[string]string{}
-	for _, e := range entries {
-		if !e.IsDir() && e.Type()&os.ModeSymlink == 0 {
-			continue
+	for _, d := range taskDirs {
+		rel := filepath.ToSlash(filepath.Join(d.Rel, "state.yaml"))
+		t := IndexTask{ID: d.ID, Path: rel, Category: TaskCategoryOf(layoutManifest, taskDirs, d.ID)}
+		if t.Category == "" {
+			t.Flags = append(t.Flags, "unclassified")
 		}
-		rel := filepath.Join(".agent/tasks", e.Name(), "state.yaml")
-		t := IndexTask{ID: e.Name(), Path: filepath.ToSlash(rel)}
+		if d.Legacy {
+			t.Flags = append(t.Flags, "legacy-layout")
+		}
 		raw, readErr := indexRead(root, rel)
 		var state State
 		if readErr == nil {
@@ -157,7 +167,7 @@ func BuildIndex(root string, now time.Time) (IndexSnapshot, error) {
 		t.Schema = strconv.Itoa(state.SchemaVersion)
 		t.Type = state.TaskType
 		t.Workflow = state.TaskType
-		if t.ID != e.Name() {
+		if t.ID != d.ID {
 			t.Flags = append(t.Flags, "ghost")
 			t.Reason = "task_id differs from directory"
 		}
@@ -187,7 +197,7 @@ func BuildIndex(root string, now time.Time) (IndexSnapshot, error) {
 				t.Reason = joinReason(t.Reason, "Program missing, corrupt, or does not list Task")
 			}
 		}
-		taskPrograms[e.Name()] = t.Program
+		taskPrograms[d.ID] = t.Program
 		info, ok := branches[t.Branch]
 		if !ok && t.Branch != "" {
 			for _, prefix := range []string{"refs/heads/", "refs/remotes/origin/"} {
@@ -282,10 +292,10 @@ func (s IndexSnapshot) TSV() string {
 	b.WriteString("# DERIVED — 不得作为审批证据\n")
 	w := csv.NewWriter(&b)
 	w.Comma = '\t'
-	_ = w.Write([]string{"task_id", "path", "schema", "task_type", "workflow", "program", "contract", "review", "owner", "delivery", "review_target", "delivery_head", "owner_target", "blocked", "branch", "base", "intake", "last_commit", "updated", "flags", "reason"})
+	_ = w.Write([]string{"task_id", "path", "schema", "task_type", "workflow", "program", "contract", "review", "owner", "delivery", "review_target", "delivery_head", "owner_target", "blocked", "branch", "base", "intake", "last_commit", "updated", "flags", "reason", "category"})
 	corrupt := 0
 	for _, t := range s.Tasks {
-		row := []string{t.ID, t.Path, t.Schema, t.Type, t.Workflow, t.Program, t.Contract, t.Review, t.Owner, t.Delivery, t.ReviewTarget, t.DeliveryHead, t.OwnerTarget, strconv.FormatBool(t.Blocked), t.Branch, t.Base, t.Intake, t.LastCommit, t.Updated, strings.Join(t.Flags, ","), t.Reason}
+		row := []string{t.ID, t.Path, t.Schema, t.Type, t.Workflow, t.Program, t.Contract, t.Review, t.Owner, t.Delivery, t.ReviewTarget, t.DeliveryHead, t.OwnerTarget, strconv.FormatBool(t.Blocked), t.Branch, t.Base, t.Intake, t.LastCommit, t.Updated, strings.Join(t.Flags, ","), t.Reason, t.Category}
 		for _, flag := range t.Flags {
 			if flag == "corrupt" {
 				corrupt++
@@ -316,5 +326,5 @@ func (s IndexSnapshot) ProgramsMarkdown() string {
 }
 
 func (s IndexSnapshot) Metadata() string {
-	return fmt.Sprintf("# DERIVED — 不得作为审批证据\nindex_version: 1\ngenerated_at: %q\nsource_sha: %q\n", s.GeneratedAt.Format(time.RFC3339Nano), s.SourceSHA)
+	return fmt.Sprintf("# DERIVED — 不得作为审批证据\nindex_version: 2\ngenerated_at: %q\nsource_sha: %q\n", s.GeneratedAt.Format(time.RFC3339Nano), s.SourceSHA)
 }

@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -31,7 +30,7 @@ func main() {
 }
 
 func usage(w *os.File) {
-	fmt.Fprintln(w, "usage: workflow-status <inspect|recovery-check|index> <task-id> [--root DIR]")
+	fmt.Fprintln(w, "usage: workflow-status <inspect|recovery-check|index|layout> [args] [--root DIR]")
 }
 
 func run(args []string) int {
@@ -60,6 +59,11 @@ func run(args []string) int {
 	}
 
 	switch positional[0] {
+	case "layout":
+		if root == "" {
+			root = findRoot()
+		}
+		return runLayout(root, positional[1:])
 	case "index":
 		return runIndex(root, positional[1:])
 	case "inspect":
@@ -258,39 +262,11 @@ func findRoot() string {
 }
 
 // resolveTaskDir 把位置参数解析为相对仓库根的任务目录。
-// 支持直接路径（含 .agent/tasks/<id>）与 task-id 简写（自动补全 .agent/tasks/<id>）。
-// 相对路径按仓库根解析（而非当前工作目录）。
+//
+// 解析规则由 workflow.ResolveTaskArg 统一实现：支持实际路径、旧简写
+// .agent/tasks/<id>、分类路径与裸 Task ID；相对路径按仓库根解析。
 func resolveTaskDir(root, a string) (string, error) {
-	candidates := []string{a}
-	if !filepath.IsAbs(a) {
-		candidates = append(candidates, filepath.Join(".agent", "tasks", a))
-	}
-	for _, c := range candidates {
-		if rel, err := normalizeTaskRel(root, c); err == nil {
-			return rel, nil
-		}
-	}
-	return "", fmt.Errorf("未找到任务目录 %q（尝试了 %q 与 .agent/tasks/%s）", a, a, a)
-}
-
-func normalizeTaskRel(root, a string) (string, error) {
-	if !filepath.IsAbs(a) {
-		a = filepath.Join(root, a)
-	}
-	abs, err := filepath.Abs(a)
-	if err != nil {
-		return "", err
-	}
-	if info, err := os.Stat(abs); err == nil && !info.IsDir() {
-		abs = filepath.Dir(abs)
-	} else if err != nil {
-		return "", err
-	}
-	rel, err := filepath.Rel(root, abs)
-	if err != nil || strings.HasPrefix(rel, "..") || rel == "." {
-		return "", fmt.Errorf("任务路径 %s 不在仓库根 %s 内", a, root)
-	}
-	return rel, nil
+	return workflow.ResolveTaskArg(root, a)
 }
 
 // runIndex emits derived data to stdout; callers may redirect it to ignored files.

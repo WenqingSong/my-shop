@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 )
 
@@ -153,7 +152,10 @@ func (dc *DeliveryController) PlanDesign(taskSlug string) (DeliveryPlan, Result)
 	// 1. 专属 Final Gate（GateDesignFinalApproval）：覆盖 approved_target / review_target /
 	//    final_target 有效性、两个 Owner Checkpoint、批准对象实质漂移失效、父分支绑定。
 	v := &Validator{Root: dc.Root, Git: dc.Git, Config: dc.Config}
-	taskDir := filepath.Join(".agent", "tasks", taskSlug)
+	taskDir, err := TaskDirRel(dc.Root, taskSlug)
+	if err != nil {
+		return plan, Result{Status: StatusError, Error: err.Error()}
+	}
 	if res := v.GateDesignFinalApproval(taskDir); res.Status != StatusPass {
 		return plan, res
 	}

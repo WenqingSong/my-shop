@@ -30,14 +30,14 @@ import (
 
 // architecturePath 返回 Architect 技术架构方案的固定路径（相对仓库根）。
 // 该文件是「已批准架构」的 Evidence 对象，任何实质修改都会使旧批准失效。
-func architecturePath(taskSlug string) string {
-	return filepath.Join(".agent", "tasks", taskSlug, "architecture.md")
+func architecturePath(root, taskSlug string) (string, error) {
+	return taskArtifactPath(root, taskSlug, "architecture.md")
 }
 
 // designSpecPath 返回 DocsSpecWriter 正式工程设计与规范文档的固定路径（相对仓库根）。
 // 该文件是「设计交付」的 Evidence 对象，任何实质修改都会使旧审查/批准失效。
-func designSpecPath(taskSlug string) string {
-	return filepath.Join(".agent", "tasks", taskSlug, "design.md")
+func designSpecPath(root, taskSlug string) (string, error) {
+	return taskArtifactPath(root, taskSlug, "design.md")
 }
 
 // designReviewTarget 安全返回 design.review_target；design section 缺失时返回空串。
@@ -120,7 +120,11 @@ func (v *Validator) architectureApprovalValid(taskSlug string, s State) Result {
 	if d.ApprovedTarget == "" {
 		return failResult(taskSlug, "Architecture Approval", "approved_target 为空", "<evidence-commit-sha>", "已批准架构必须绑定 Evidence Commit")
 	}
-	return v.designEvidenceValid(taskSlug, d.ApprovedTarget, architecturePath(taskSlug), "Architecture Approval", true)
+	architectureRel, err := architecturePath(v.Root, taskSlug)
+	if err != nil {
+		return Result{Status: StatusError, Error: err.Error()}
+	}
+	return v.designEvidenceValid(taskSlug, d.ApprovedTarget, architectureRel, "Architecture Approval", true)
 }
 
 // designOwnerAcceptanceValid 校验 Owner 已对当前设计审查快照明确 ACCEPT（最终批准的前置，非 Cleaner PASS 可替代）。
@@ -262,7 +266,11 @@ func (v *Validator) GateDesignCleanerStart(taskDir string) Result {
 	if s.Review.Target == "" {
 		return failResult(taskSlug, "Design Cleaner Start", "review.target 为空", "<design-delivery-sha>", "review.target 必须绑定设计交付 Evidence Commit")
 	}
-	return v.designEvidenceValid(taskSlug, s.Review.Target, designSpecPath(taskSlug), "Design Review Target", false)
+	designRel, err := designSpecPath(v.Root, taskSlug)
+	if err != nil {
+		return Result{Status: StatusError, Error: err.Error()}
+	}
+	return v.designEvidenceValid(taskSlug, s.Review.Target, designRel, "Design Review Target", false)
 }
 
 // GateDesignOwnerGateStart 是 DESIGN OwnerGate 的入口 Gate。
@@ -354,7 +362,11 @@ func (v *Validator) GateDesignFinalApproval(taskDir string) Result {
 	if d.ReviewTarget != s.Review.Target {
 		return failResult(taskSlug, "Final Design Approval", fmt.Sprintf("design.review_target=%s", d.ReviewTarget), s.Review.Target, "design.review_target 必须绑定当前 review.target")
 	}
-	if res := v.designEvidenceValid(taskSlug, d.FinalTarget, designSpecPath(taskSlug), "Final Design Approval", true); res.Status != StatusPass {
+	designRel, err := designSpecPath(v.Root, taskSlug)
+	if err != nil {
+		return Result{Status: StatusError, Error: err.Error()}
+	}
+	if res := v.designEvidenceValid(taskSlug, d.FinalTarget, designRel, "Final Design Approval", true); res.Status != StatusPass {
 		return res
 	}
 	return v.designBaselineValid(taskSlug, s, d.FinalTarget)

@@ -123,7 +123,19 @@ func (v *Validator) loadDevelopRegistries(s State) (map[string][]RegistryEntry, 
 	return regs, nil
 }
 
+// taskArtifactPath 返回当前 Task 实际目录下的固定文件相对路径。
+//
+// Task 可能位于旧平铺布局或分类目录，路径一律由 TaskDirRel 解析，
+// 不允许调用方自行拼接 .agent/tasks/<id>。
+func taskArtifactPath(root, taskSlug, name string) (string, error) {
+	dir, err := TaskDirRel(root, taskSlug)
+	if err != nil {
+		return "", err
+	}
+	return filepath.ToSlash(filepath.Join(dir, name)), nil
+}
+
 // contractPath 返回当前 task 的 contract.md 相对路径。
-func contractPath(taskSlug string) string {
-	return filepath.Join(".agent", "tasks", taskSlug, "contract.md")
+func contractPath(root, taskSlug string) (string, error) {
+	return taskArtifactPath(root, taskSlug, "contract.md")
 }

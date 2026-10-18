@@ -14,7 +14,7 @@
 | discovery-start | workflow-check | Intake | Intake 记录、父分支/Base 存在且有祖先关系 | 新 Task Intake | Discovery | 调查前 | Discovery 修正基线 | REQUIRED |
 | discovery-decision | workflow-check | Intake | 基线有效、Owner decision APPROVED | 新 Task Intake | Discovery | 第二阶段开始前 | 等 Owner 明确决定 | REQUIRED |
 | discovery-handoff | workflow-check | Intake | Owner APPROVED、Handoff front-matter 与 Intake 一致 | 新 Task Intake | Discovery/TaskBuilder | Intake 交出/接收 | Discovery 补交接产物 | REQUIRED |
-| taskbuilder-init | workflow-check | Task | schema 4、原始Owner批准与Handoff的Intake/id/type/git绑定一致、task.md非空、分支/Worktree存在 | 新 schema 4 Task | TaskBuilder | 初始化完成后 | TaskBuilder 修正初始化 | REQUIRED |
+| taskbuilder-init | workflow-check | Task | schema 4、原始批准/Intake/id/type/git绑定、类型初值未执行无继承、当前Task Worktree/Base祖先、存在时首位Handoff匹配 | 新 schema 4 Task，非活动任务重置 | TaskBuilder | 初始化完成后及初始交接复核 | TaskBuilder 保留原批准并修正初始化 | REQUIRED |
 | design-architect-start | workflow-check | Task | DESIGN 类型、未阻塞、handoffReady、design=PENDING 且无既有批准 | DESIGN | Architect | 架构编写前 | 回 TaskBuilder 修正任务 | REQUIRED |
 | design-architecture-review | workflow-check | Task | design APPROVED/version/target、架构证据有效 | DESIGN | Architect | Checkpoint 1 持久化后 | Architect 补证据或重请 Owner | REQUIRED |
 | design-docsspecwriter-start | workflow-check | Task | 与 architecture-review 相同的架构批准边界 | DESIGN | DocsSpecWriter | 设计规范编写前 | 回 Architect 修正批准证据 | REQUIRED |
@@ -28,5 +28,5 @@
 ## 调用与边界
 
 Task/Intake：`.agent/bin/workflow-check gate <标识> <task或intake路径>`；Program：`.agent/bin/workflow-program gate <标识> <program-id>`。完整实现仍为机器事实基线，表中前置是操作摘要，不穷举每个 schema 子字段。
-OD-2 保留双边界；OD-6 schema 4 Task 强制，Intake/Program 不适用。通用 Gate 未按 task_type 完整隔离；Role 必须先选 Workflow。
+OD-2 保留双边界；OD-6 schema 4 Task 强制，Intake/Program 不适用。部分通用业务 Gate 未按 task_type 完整隔离；执行角色须核对已批准的任务类型。公共 Discovery 调查前不要求选择 Workflow，公共 TaskBuilder 只消费调查后的批准，不能自行分类或批准。
 OD-4 已在收口修正：任意模块中精确文件名 go.mod/go.sum 的冲突均为 L3，包含 `.agent/engine/go.mod` / `.agent/engine/go.sum`。Merger 停止并交 Owner，不自动处理依赖冲突；相似的嵌套备份文件名不因此升级。

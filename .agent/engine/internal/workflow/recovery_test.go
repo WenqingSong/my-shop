@@ -2,6 +2,8 @@ package workflow
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -158,8 +160,13 @@ func TestEventValidators(t *testing.T) {
 }
 
 func TestEventLogPaths(t *testing.T) {
-	if TaskEventLogPath("demo") != ".agent/tasks/demo/events.md" {
-		t.Fatalf("TaskEventLogPath = %q", TaskEventLogPath("demo"))
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".agent", "tasks", "demo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	taskLog, err := TaskEventLogPath(root, "demo")
+	if err != nil || taskLog != filepath.ToSlash(filepath.Join(".agent", "tasks", "demo", "events.md")) {
+		t.Fatalf("TaskEventLogPath = %q, err=%v", taskLog, err)
 	}
 	if ProgramEventLogPath("prog") != ".agent/programs/prog/events.md" {
 		t.Fatalf("ProgramEventLogPath = %q", ProgramEventLogPath("prog"))

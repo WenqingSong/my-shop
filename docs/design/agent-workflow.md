@@ -2,11 +2,11 @@
 
 > ### 历史归档（ARCHIVED）：本文描述 Workflow V3.0.0，不是当前规范
 >
-> 本文件在 **Agent Workflow V3.0.0 → V4.2.1** 升级后归档保留，只用于回溯 V3 的设计决策与演进原因。正文为 V3 原文，未改写为 V4，也不得作为当前实现的权威依据。
+> 本文件在 **Agent Workflow V3.0.0 → V4** 升级后归档保留，只用于回溯 V3 的设计决策与演进原因。正文为 V3 原文，未改写为 V4，也不得作为当前实现的权威依据。
 >
-> - 当前框架版本：`.agent/VERSION` = `4.2.1`（上游 `https://cnb.cool/framework-station/agent-workflow`，Commit `1fc5c6dc88fc7f417374e37e7354a3a6c4e07a65`）。
+> - 当前框架版本：`.agent/VERSION` = `4.3.0`（上游正式 tag `v4.3.0`；`https://cnb.cool/framework-station/agent-workflow`，Commit `229edfd18e3b6e770f803db01e5010b215ba623f`）。
 > - 当前架构与权威入口：`.agent/specs/Architecture.md`；协作规范 `.agent/specs/AgentCollaborationSpecification.md`；职责边界 `.agent/specs/AgentResponsibilityBoundary.md`；流程规范 `.agent/specs/workflows/`；协议 `.agent/specs/protocols/`；角色入口 `.agent/roles/README.md`。
-> - 迁移与历史 Task 兼容规则：`.agent/specs/adoption/WorkflowAdoption.md`（V3 → V4.2 迁移；schema 2/3 只读，不提供 T2 原地升级）。
+> - 迁移与历史 Task 兼容规则：`.agent/specs/adoption/WorkflowAdoption.md`（V3 → V4 迁移，当前 4.3.0；schema 2/3/0 只读，不提供 T2 原地升级）。
 > - 差异提示：V4 为四流程（NORMAL / COMPLEX / DESIGN / Program）+ 六 CLI + Task schema 4；本文中的 flat Role 布局、单 CLI（`workflow-check`）与 schema 3 描述均已过时。
 >
 > **Workflow V3 Baseline**（`.agent/VERSION` = `3.0.0`，归档时快照）
@@ -17,7 +17,7 @@
 >
 > 命名约定：正文中「Workflow V2」若指 V3 之前的架构名称，已被 V3 取代；若指 V1→V2 历史演进、legacy reference 或 state schema v2/v3，则保留历史含义，不随归档改写。`module workflow-v2-engine` 为 historical technical identifier，归档不改。
 
-本文是 Workflow V3 的**核心架构 Design 文档（归档原文）**：解释 V3 为什么这样设计、整个系统如何运行、各概念之间的关系、为什么需要这些 Gate / Git / Evidence 规则。V4.2.1 的现行架构说明见 `.agent/specs/Architecture.md`。
+本文是 Workflow V3 的**核心架构 Design 文档（归档原文）**：解释 V3 为什么这样设计、整个系统如何运行、各概念之间的关系、为什么需要这些 Gate / Git / Evidence 规则。V4.3.0 的现行架构说明见 `.agent/specs/Architecture.md`；Task 目录分类（项目本地扩展）见 `.agent/specs/TaskLayoutExtension.md`。
 
 本文定位是「**为什么**」。`.agent/specs/*`（协作规范、职责边界）与 `.agent/roles/*`（六个角色 Prompt）负责「**具体怎么做**」，引用本文，不重复定义。
 

@@ -42,7 +42,7 @@ V4 各 Agent 默认运行在独立 Session / 独立上下文。新 Agent 必须�
 任务级 Artifact 记录「本任务的临时事实与决策过程」，随任务结束而定稿。项目级长期 Design（`docs/design/*`）记录「跨越单个任务、长期稳定的项目级事实」。
 
 ```text
-.agent/tasks/<task-slug>/
+.agent/tasks/<category>/<task-slug>/   # 本仓库分类扩展；新任务使用 active/
 ├── task.md
 ├── state.yaml          # 机器事实源（当前决策唯一权威）
 ├── contract.md         # 仅复杂任务需要
@@ -67,6 +67,9 @@ Coder 负责生产代码和测试，不为展示过程而重复维护上述文�
 `state.yaml` 只保存 Git 无法推导的决策事实，**不保存** `phase`/`STALE`/`DONE`/`branch`/`HEAD`/`working_tree`/`changed_files`/`NEXT_ROLE`/`NEXT_ACTION`。详见 `.agent/specs/Architecture.md`。
 
 ## 5. 默认路由
+
+新需求一律从公共 `.agent/roles/DiscoveryAgent.md` 调查开始，用户不必预选类型；Owner 确认推荐后的类型/范围/ID/基线，公共 `.agent/roles/TaskBuilderAgent.md` 按已批准 task_type 加载初始化规范。发现同一活动 Task/Program 优先定位恢复路径，不重复建任务。Program 仅推荐后交 Owner 规划，不生成第四种 Task 类型。完整入口规则见 `.agent/specs/workflows/EntryWorkflow.md`。
+
 
 V4 冻结四种工作流（角色级固定顺序，不引入自动调度；Owner 是人类，不是第 12 个 Agent）：
 

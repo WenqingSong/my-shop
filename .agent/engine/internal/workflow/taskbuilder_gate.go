@@ -85,6 +85,9 @@ func (v *Validator) GateTaskBuilderInit(taskDir string) Result {
 	if h.ParentBranch != rec.ParentBranch || h.BaseCommit != rec.BaseCommit {
 		return failResult(taskSlug, "TaskBuilder Init", "taskbuilder-handoff 与 Intake 基线不一致", "一致", "TaskBuilder Handoff 未绑定 Intake 的 Git 基线")
 	}
+	if reason := initialTaskPolicy(s); reason != "" {
+		return failResult(taskSlug, "TaskBuilder Init", reason, "已批准类型的未执行初始 State/首个角色", "初始化不允许继承批准、审查或错派角色；已有活动任务应按恢复协议继续")
+	}
 
 	// 真实 Git 证据：父分支存在、base_commit 真实且为父分支祖先、task_branch 存在、worktree 存在。
 	if res := v.intakeBaselineValid(s.Intake.ID, rec); res.Status != StatusPass {
@@ -100,5 +103,64 @@ func (v *Validator) GateTaskBuilderInit(taskDir string) Result {
 	} else if !ok {
 		return failResult(taskSlug, "TaskBuilder Init", fmt.Sprintf("worktree(%s)", s.Git.TaskBranch), "真实存在的 worktree", "任务 Worktree 不存在（任务未完整初始化）")
 	}
+	branch, err := v.Git.CurrentBranch()
+	if err != nil {
+		return Result{Status: StatusError, Error: fmt.Sprintf("check current task worktree: %v", err)}
+	}
+	if branch != s.Git.TaskBranch || branch == s.Git.ParentBranch {
+		return failResult(taskSlug, "TaskBuilder Init", branch, s.Git.TaskBranch, "必须在该 Task 的独立 Worktree 核验，不能借用另一分支/父分支的文件")
+	}
+	head, err := v.Git.RevParse("HEAD")
+	if err != nil {
+		return Result{Status: StatusError, Error: err.Error()}
+	}
+	if ok, err := v.Git.IsAncestor(s.Git.BaseCommit, head); err != nil {
+		return Result{Status: StatusError, Error: err.Error()}
+	} else if !ok {
+		return failResult(taskSlug, "TaskBuilder Init", head, s.Git.BaseCommit+" 的后代", "当前 Task 历史未承继 Owner 批准的 Base")
+	}
 	return Result{Status: StatusPass}
+}
+
+// initialTaskPolicy validates NEW schema-4 task initialization only. It does
+// not classify a request, initialize State, schedule Agents, or reopen an old
+// task. The approved type still comes from the original Intake decision.
+func initialTaskPolicy(s State) string {
+	contract, firstRole := ContractNotRequired, RoleCoder
+	switch s.TaskType {
+	case TaskTypeNormal:
+	case TaskTypeComplex:
+		contract, firstRole = ContractPending, RoleAnalyst
+	case TaskTypeDesign:
+		firstRole = RoleArchitect
+	default:
+		return "Program/未知类型不适用 Task 初始化"
+	}
+	if s.Contract.Status != contract || s.Contract.Target != "" || s.Contract.Revision != 0 || len(s.Contract.History) != 0 {
+		return "contract 初值必须为 " + contract + " 且不含旧 target/revision/history"
+	}
+	if s.Review.Status != ReviewNotRequested || s.Review.Target != "" || s.Owner.Status != OwnerPending || s.Owner.ReviewTarget != "" ||
+		s.Delivery.Status != DeliveryNotRun || s.Delivery.ReviewTarget != "" || s.Delivery.FeatureHead != "" || s.Delivery.DevelopBase != "" {
+		return "review/owner/delivery 必须为未执行初值，不继承 CLEAN、接受或交付证据"
+	}
+	if s.Blocked.Active || len(s.Resources.Reservations) != 0 {
+		return "初始化必须未阻塞，资源预留留待已授权 Analyst 流程"
+	}
+	if s.TaskType == TaskTypeDesign && (s.Design == nil || s.Design.Status != DesignPending) {
+		return "DESIGN 必须有 design.status=PENDING"
+	}
+	if d := s.Design; d != nil {
+		if s.TaskType != TaskTypeDesign && d.Status != DesignNotRequired {
+			return "非 DESIGN 初始化不能携带活动架构审批"
+		}
+		if d.ApprovedVersion != 0 || d.ApprovedTarget != "" || d.FinalVersion != 0 || d.FinalTarget != "" || d.ReviewTarget != "" {
+			return "初始化不能继承旧 architecture/review/final 批准或 SHA"
+		}
+	}
+	// The initial TaskBuilder Gate precedes Handoff creation. Rechecking after
+	// that metadata commit is supported, but any supplied route must be exact.
+	if h := s.Handoff; h != nil && (h.Scope != HandoffScopeTask || h.ScopeID != s.TaskID || h.Workflow != s.TaskType || h.NextRole != firstRole) {
+		return "初始 Handoff 必须绑定本 Task/类型且 next_role=" + firstRole
+	}
+	return ""
 }

@@ -297,11 +297,15 @@ func (v *Validator) contractValid(taskSlug string, s State) Result {
 		} else if !ok {
 			return failResult(taskSlug, "Contract (INV-2)", s.Contract.Target, "当前 feature HEAD 的祖先", "contract.target 不在当前 feature 历史中")
 		}
-		approvedContract, err := v.Git.ShowFile(s.Contract.Target, contractPath(taskSlug))
+		contractRel, err := contractPath(v.Root, taskSlug)
+		if err != nil {
+			return Result{Status: StatusError, Error: err.Error()}
+		}
+		approvedContract, err := v.Git.ShowFile(s.Contract.Target, contractRel)
 		if err != nil {
 			return Result{Status: StatusError, Error: fmt.Sprintf("show contract.md@%s: %v", s.Contract.Target, err)}
 		}
-		currentContract, err := v.readWorkingTree(contractPath(taskSlug))
+		currentContract, err := v.readWorkingTree(contractRel)
 		if err != nil {
 			return Result{Status: StatusError, Error: fmt.Sprintf("read working tree contract.md: %v", err)}
 		}
@@ -320,6 +324,10 @@ func (v *Validator) contractValid(taskSlug string, s State) Result {
 // reviewTailValid 校验 review.target..featureHead 之间只允许当前 task 的 review-neutral artifacts（INV-4）。
 // 它不识别所谓「Evidence Commit 类型」，只机械检查：target 为真实 commit + tail 满足白名单。
 func (v *Validator) reviewTailValid(taskSlug string, s State, featureHead string) Result {
+	taskDirs, err := TaskDirCandidatesRel(v.Root, taskSlug)
+	if err != nil {
+		return Result{Status: StatusError, Error: err.Error()}
+	}
 	if s.Review.Target == "" {
 		return failResult(taskSlug, "Review Tail (INV-4)", "review.target 为空", "<evidence-commit-sha>", "review.target 必须绑定实现 Evidence Commit")
 	}
@@ -333,7 +341,7 @@ func (v *Validator) reviewTailValid(taskSlug string, s State, featureHead string
 		return Result{Status: StatusError, Error: fmt.Sprintf("diff %s..%s: %v", s.Review.Target, featureHead, err)}
 	}
 	for _, p := range changed {
-		if isReviewSubstantial(taskSlug, p) {
+		if isReviewSubstantial(taskDirs, p) {
 			return failResult(taskSlug, "Review Tail (INV-4)", fmt.Sprintf("%s 在 review.target 之后发生变化", p), "仅当前 task 的 review-neutral artifacts", "出现未覆盖 CLEAN 的实质变化")
 		}
 	}
@@ -367,6 +375,10 @@ func (v *Validator) ownerAcceptanceValid(taskSlug string, s State, featureHead s
 //   - feature_head..remote HEAD 只允许当前 task 的 delivery-neutral artifacts；
 //   - 当前 origin/<integration_branch> == delivery.develop_base。
 func (v *Validator) deliveryFreshness(taskSlug string, s State, remoteFeatureHead, developHead string) Result {
+	taskDirs, err := TaskDirCandidatesRel(v.Root, taskSlug)
+	if err != nil {
+		return Result{Status: StatusError, Error: err.Error()}
+	}
 	if s.Delivery.FeatureHead == "" {
 		return failResult(taskSlug, "Delivery Freshness (INV-6)", "delivery.feature_head 为空", "<evidence-commit-sha>", "delivery PASS 必须绑定 feature_head")
 	}
@@ -380,7 +392,7 @@ func (v *Validator) deliveryFreshness(taskSlug string, s State, remoteFeatureHea
 		return Result{Status: StatusError, Error: fmt.Sprintf("diff %s..%s: %v", s.Delivery.FeatureHead, remoteFeatureHead, err)}
 	}
 	for _, p := range changed {
-		if isDeliverySubstantial(taskSlug, p) {
+		if isDeliverySubstantial(taskDirs, p) {
 			return failResult(taskSlug, "Delivery Freshness (INV-6)", fmt.Sprintf("%s 在 feature_head 之后发生变化", p), "仅当前 task 的 delivery-neutral artifacts", "Delivery PASS 后出现非 delivery-neutral 变化")
 		}
 	}

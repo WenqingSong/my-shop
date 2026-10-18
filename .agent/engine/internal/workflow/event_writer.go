@@ -147,7 +147,8 @@ func (e Event) eventLine() (string, error) {
 
 // eventsRelPath 计算事件文件相对仓库根的路径，并校验 scope 参数。
 // scope_kind 必须是 task 或 program；scope_id 必须是安全单一路径段。
-func eventsRelPath(scopeKind, scopeID string) (string, error) {
+// Task 事件文件必须写入该 Task 的实际目录（旧平铺或分类布局），不允许另行拼接路径。
+func eventsRelPath(root, scopeKind, scopeID string) (string, error) {
 	if !ValidScopeKind(scopeKind) {
 		return "", fmt.Errorf("非法的 scope_kind=%q", scopeKind)
 	}
@@ -156,7 +157,11 @@ func eventsRelPath(scopeKind, scopeID string) (string, error) {
 	}
 	switch scopeKind {
 	case ScopeTask:
-		return filepath.Join(".agent", "tasks", scopeID, "events.md"), nil
+		dir, err := TaskDirRel(root, scopeID)
+		if err != nil {
+			return "", err
+		}
+		return filepath.ToSlash(filepath.Join(dir, "events.md")), nil
 	case ScopeProgram:
 		return filepath.Join(".agent", "programs", scopeID, "events.md"), nil
 	default:
@@ -180,7 +185,7 @@ func NewEventWriter(root string) *EventWriter {
 
 // Path 返回事件文件相对仓库根的路径（不做磁盘写入）。
 func (w *EventWriter) Path(scopeKind, scopeID string) (string, error) {
-	return eventsRelPath(scopeKind, scopeID)
+	return eventsRelPath(w.Root, scopeKind, scopeID)
 }
 
 // Append 校验并追加一条事件。
@@ -189,7 +194,7 @@ func (w *EventWriter) Append(e Event) error {
 	if err := e.Validate(); err != nil {
 		return err
 	}
-	rel, err := eventsRelPath(e.ScopeKind, e.ScopeID)
+	rel, err := eventsRelPath(w.Root, e.ScopeKind, e.ScopeID)
 	if err != nil {
 		return err
 	}

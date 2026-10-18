@@ -54,8 +54,12 @@ func ResolveProgramDelivery(root string, p ProgramState, taskID string) (Program
 	if err != nil {
 		return proof, err
 	}
-	path := ".agent/tasks/" + taskID + "/state.yaml"
-	raw, err := g.ShowFile(tip, path)
+	layout, err := LoadTaskLayout(root)
+	if err != nil {
+		return proof, err
+	}
+	statePaths := TaskStateCandidates(layout, taskID)
+	raw, err := showFirstFileAt(g, tip, statePaths)
 	if err != nil {
 		return proof, err
 	}
@@ -104,7 +108,7 @@ func ResolveProgramDelivery(root string, p ProgramState, taskID string) (Program
 	if err = requireProgramResult(v.resourcesAuthorized(st)); err != nil {
 		return proof, err
 	}
-	raw, err = g.ShowFile(d.DeliverySHA, path)
+	raw, err = showFirstFileAt(g, d.DeliverySHA, statePaths)
 	if err != nil {
 		return proof, err
 	}
@@ -120,7 +124,9 @@ func ResolveProgramDelivery(root string, p ProgramState, taskID string) (Program
 		if st.Design == nil || st.Design.Status != DesignApproved || st.Design.ApprovedVersion <= 0 || st.Design.FinalVersion <= 0 || st.Design.FinalTarget != st.Review.Target || designReviewTarget(st) != st.Review.Target {
 			return proof, fmt.Errorf("DESIGN final approval binding missing")
 		}
-		for target, path := range map[string]string{st.Design.ApprovedTarget: architecturePath(taskID), st.Design.FinalTarget: designSpecPath(taskID)} {
+		architecturePaths := TaskArtifactCandidates(layout, taskID, "architecture.md")
+		designPaths := TaskArtifactCandidates(layout, taskID, "design.md")
+		for target, paths := range map[string][]string{st.Design.ApprovedTarget: architecturePaths, st.Design.FinalTarget: designPaths} {
 			ok, e := g.IsAncestor(target, d.DeliverySHA)
 			if e != nil {
 				return proof, e
@@ -128,11 +134,11 @@ func ResolveProgramDelivery(root string, p ProgramState, taskID string) (Program
 			if !ok {
 				return proof, fmt.Errorf("DESIGN approved target outside tested history")
 			}
-			approved, e := g.ShowFile(target, path)
+			approved, e := showFirstFileAt(g, target, paths)
 			if e != nil {
 				return proof, e
 			}
-			current, e := g.ShowFile(tip, path)
+			current, e := showFirstFileAt(g, tip, paths)
 			if e != nil {
 				return proof, e
 			}
@@ -152,11 +158,12 @@ func ResolveProgramDelivery(root string, p ProgramState, taskID string) (Program
 		if !ok {
 			return proof, fmt.Errorf("Contract approval outside tested history")
 		}
-		approved, err := g.ShowFile(st.Contract.Target, contractPath(taskID))
+		contractPaths := TaskArtifactCandidates(layout, taskID, "contract.md")
+		approved, err := showFirstFileAt(g, st.Contract.Target, contractPaths)
 		if err != nil {
 			return proof, err
 		}
-		current, err := g.ShowFile(tip, contractPath(taskID))
+		current, err := showFirstFileAt(g, tip, contractPaths)
 		if err != nil {
 			return proof, err
 		}
