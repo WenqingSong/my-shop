@@ -305,15 +305,15 @@ func TestDesignFilesSubstantive(t *testing.T) {
 		"docs/design/foo.md",
 		".agent/tasks/demo/contract.md",
 	} {
-		if isReviewNeutral("demo", p) {
+		if isReviewNeutral([]string{".agent/tasks/demo"}, p) {
 			t.Fatalf("%s 不应是 review-neutral（设计文档默认 substantive）", p)
 		}
-		if !isReviewSubstantial("demo", p) {
+		if !isReviewSubstantial([]string{".agent/tasks/demo"}, p) {
 			t.Fatalf("%s 应判定为 substantive", p)
 		}
 	}
 	// 中性 metadata 仍应是 neutral（对照），确保只锁定设计文档的 default-deny。
-	if !isReviewNeutral("demo", ".agent/tasks/demo/state.yaml") {
+	if !isReviewNeutral([]string{".agent/tasks/demo"}, ".agent/tasks/demo/state.yaml") {
 		t.Fatal("state.yaml 应是 review-neutral")
 	}
 }

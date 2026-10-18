@@ -171,3 +171,76 @@ func TestRunIndexFormatsAndErrors(t *testing.T) {
 		t.Fatalf("non-repo: %d", code)
 	}
 }
+
+// --- 项目本地 Task 目录分类扩展 ---
+
+const layoutManifestDemoActive = `schema_version: 1
+extension: test layout
+categories:
+  - active
+  - completed
+  - blocked
+  - archive
+tasks:
+  - id: demo
+    category: active
+    basis: state
+`
+
+func writeLayoutManifestFile(t *testing.T, dir, content string) {
+	t.Helper()
+	full := filepath.Join(dir, ".agent", "tasks", "layout.yaml")
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunLayoutLifecycle(t *testing.T) {
+	dir := v4CliRepo(t, false, "NOT_REQUIRED")
+	writeLayoutManifestFile(t, dir, layoutManifestDemoActive)
+
+	if code := run([]string{"layout", "list", "--root", dir}); code != 0 {
+		t.Fatalf("layout list 期望 exit 0，实际 %d", code)
+	}
+	// 尚未迁移：磁盘仍是旧平铺布局 → check 报 legacy-layout。
+	if code := run([]string{"layout", "check", "--root", dir}); code != 1 {
+		t.Fatalf("迁移前 layout check 期望 exit 1，实际 %d", code)
+	}
+	if code := run([]string{"layout", "migrate", "--root", dir}); code != 0 {
+		t.Fatalf("dry-run 期望 exit 0，实际 %d", code)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".agent", "tasks", "demo")); err != nil {
+		t.Fatal("dry-run 不应移动目录")
+	}
+	if code := run([]string{"layout", "migrate", "--apply", "--root", dir}); code != 0 {
+		t.Fatalf("layout migrate --apply 期望 exit 0，实际 %d", code)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".agent", "tasks", "active", "demo", "state.yaml")); err != nil {
+		t.Fatalf("迁移后 state 不在 active/：%v", err)
+	}
+	if code := run([]string{"layout", "check", "--root", dir}); code != 0 {
+		t.Fatalf("迁移后 layout check 期望 exit 0，实际 %d", code)
+	}
+	if code := run([]string{"inspect", "demo", "--root", dir}); code != 0 {
+		t.Fatalf("迁移后 inspect 期望 exit 0，实际 %d", code)
+	}
+	if code := run([]string{"layout", "rollback", "--apply", "--root", dir}); code != 0 {
+		t.Fatalf("layout rollback 期望 exit 0，实际 %d", code)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".agent", "tasks", "demo", "state.yaml")); err != nil {
+		t.Fatalf("回滚后 state 不在旧路径：%v", err)
+	}
+}
+
+func TestRunLayoutResolveNotFound(t *testing.T) {
+	dir := v4CliRepo(t, false, "NOT_REQUIRED")
+	if code := run([]string{"layout", "resolve", "absent", "--root", dir}); code != 2 {
+		t.Fatalf("未知 Task 解析期望 exit 2，实际 %d", code)
+	}
+	if code := run([]string{"layout", "bogus", "--root", dir}); code != 2 {
+		t.Fatalf("未知子命令期望 exit 2，实际 %d", code)
+	}
+}

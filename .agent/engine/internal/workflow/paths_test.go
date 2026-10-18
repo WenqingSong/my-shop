@@ -1,6 +1,18 @@
 package workflow
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
+
+// testTaskDirs 返回旧平铺与分类布局的候选目录，验证两种布局都能被 neutral 判定识别。
+func testTaskDirs(slug string) []string {
+	return []string{
+		filepath.ToSlash(filepath.Join(".agent", "tasks", slug)),
+		filepath.ToSlash(filepath.Join(".agent", "tasks", "active", slug)),
+		filepath.ToSlash(filepath.Join(".agent", "tasks", "completed", slug)),
+	}
+}
 
 // TestWhitelistTaskScoped 覆盖 task-scoped 白名单：禁止 basename-only，
 // 其他 task / 其他目录的同名文件必须判 substantive。
@@ -34,10 +46,10 @@ func TestWhitelistTaskScoped(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isReviewNeutral(tt.slug, tt.path); got != tt.reviewNeut {
+			if got := isReviewNeutral(testTaskDirs(tt.slug), tt.path); got != tt.reviewNeut {
 				t.Fatalf("isReviewNeutral(%q, %q) = %v, 期望 %v", tt.slug, tt.path, got, tt.reviewNeut)
 			}
-			if got := isDeliveryNeutral(tt.slug, tt.path); got != tt.deliveryNeut {
+			if got := isDeliveryNeutral(testTaskDirs(tt.slug), tt.path); got != tt.deliveryNeut {
 				t.Fatalf("isDeliveryNeutral(%q, %q) = %v, 期望 %v", tt.slug, tt.path, got, tt.deliveryNeut)
 			}
 		})

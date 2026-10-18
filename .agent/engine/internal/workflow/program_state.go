@@ -130,10 +130,15 @@ func LoadProgramState(root, programID string) (ProgramState, error) {
 }
 
 // LoadTaskStateFile 从仓库根读取指定 task 的 state.yaml（供 Collector/Assembler 复用）。
+// 路径由 TaskStateRel 统一解析，兼容旧平铺与分类布局。
 func LoadTaskStateFile(root, taskID string) (State, error) {
-	raw, err := os.ReadFile(filepath.Join(root, ".agent", "tasks", taskID, "state.yaml"))
+	rel, err := TaskStateRel(root, taskID)
 	if err != nil {
-		return State{}, fmt.Errorf("读取 .agent/tasks/%s/state.yaml: %w", taskID, err)
+		return State{}, err
+	}
+	raw, err := os.ReadFile(filepath.Join(root, rel))
+	if err != nil {
+		return State{}, fmt.Errorf("读取 %s: %w", rel, err)
 	}
 	return parseState(raw)
 }

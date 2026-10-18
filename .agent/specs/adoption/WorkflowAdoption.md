@@ -96,7 +96,7 @@ T1 的新 Task 必须通过真实 taskbuilder-init 和对应工作流；批准�
 
 新初始化会重新核对 Intake 原始 Owner 决策的 intake_id/task_id/task_type/parent_branch/base_commit 与 Handoff。旧版只有 decision 的批准保留历史读取；不能补造绑定，需 Owner 明确重新确认并创建新 Intake 后初始化新任务。已初始化的旧 Task 不因此重写审批或强制重跑 taskbuilder-init。
 
-## V4.2.x → 公共入口版本（当前开发分支）
+## V4.2.x → 公共入口版本（4.3.0）
 
 这是一项公开 Prompt 路径变化，不是 Task State 升级。两个公共完整入口在 `.agent/roles/DiscoveryAgent.md`、`.agent/roles/TaskBuilderAgent.md`，用户不再先选流程；Discovery 调查后推荐，Owner 批准后 TaskBuilder 加载专属 Workflow 初始化规范。原有 11 个机器 Role、六 CLI、20 Gate、Schema 与 Handoff/ACK 不变。
 

@@ -1,6 +1,6 @@
 # Owner 决策清单
 
-- 快照日期：2026-10-18
+- 快照日期：2026-10-18（同日完成 Workflow 4.3.0 升级与 Task 分类迁移；第 6 项已落地）
 - 本清单只列**仍需 Owner 决定**的事项；文档、导航、索引核验等安全工作已直接完成。
 - 任何 Agent 不得代替 Owner 记录 `ACCEPTED`、合并交付分支、改写历史 SHA 或补写 State。
 
@@ -13,7 +13,7 @@
 | 3 | `flash-sale-v3` 受控集成 | `develop=NOT_RUN`，分支 `a905e1c` 有 PASS | 受控合并该 metadata commit | `develop` 视图与真实证据不一致 |
 | 4 | 历史 State 矛盾（`flash-sale-v1`、`product-review-v1`） | schema 0，State 与 `delivery.md` 冲突 | 只读归档，不做 T2 | 历史记录无法机器核验，但不影响现状 |
 | 5 | `recommendation-v1` SHA 不可追溯 | `DONE/STATE`，旧 SHA 不在 `develop` 祖先链 | 接受“内容已交付、SHA 不可追溯”，或 T1 追溯 | 旧 CLEAN/PASS 不能直接复用 |
-| 6 | 是否新增历史归档标记规范 | 当前无此能力 | 暂不新增；先以本目录导航 | 无机器可读归档标记，只能人工判断 |
+| 6 | ~~是否新增历史归档标记规范~~ | **已授权并实现**（2026-10-18 升级任务）：Task 目录分类扩展 + `layout` CLI | 维护 `layout.yaml` 并按需迁移 | 无（已落地） |
 
 ## 1. `test-quality-gate-v1` 的 Owner 接受与交付状态
 
@@ -155,6 +155,8 @@
 
 ## 6. 是否新增正式的历史归档标记规范
 
+**状态：已由 2026-10-18 升级任务授权并实现（项目本地扩展）。**
+
 **问题**：当前版本没有“已归档 / 已废弃”标记；无 State 的 V2 任务只能靠文档区分。
 
 **已确认事实**
@@ -173,9 +175,13 @@
 - 是否修改 Workflow 规范或 Engine，增加正式的归档标记/命令。
 - 若修改，需要单独的设计（State 兼容、Gate 影响、历史数据只读策略）与 Owner 批准。
 
-**推荐方案**：暂不扩展 Engine；保持“索引 + 人工目录”的双层方式。若历史任务继续增多，再以独立 DESIGN 任务提出规范。
+**已实施**：`.agent/specs/TaskLayoutExtension.md` + `workflow-status layout`（list/check/plan/migrate/rollback/resolve）。
+分类清单为 `.agent/tasks/layout.yaml`，迁移日志为 `.agent/tasks/layout-journal.yaml`；分类不是审批证据，
+`archive` 不等于完成，`completed` 必须有 State 或交付文档证据。
 
-**不处理的影响**：归档状态不是机器可读；需要人工维护本目录。
+**仍由 Owner 决定**：把某个 `blocked` 任务改成 `archive` 还是新建 T1 任务；分类变化需先改清单并写明证据。
+
+**不处理的影响**：已消除；布局与分类可由 `layout check` 机器校验。
 
 **依据**：`.agent/specs/Architecture.md`、`.agent/specs/protocols/CLI.md`、`.agent/specs/adoption/WorkflowAdoption.md`。
 

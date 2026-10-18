@@ -73,7 +73,11 @@ func (v *Validator) contractRevisionValid(taskSlug string, s State) Result {
 				"当前 feature HEAD 的祖先",
 				"历史 Evidence SHA 不在当前 feature 历史中")
 		}
-		if ok, err := v.Git.PathExistsAt(h.Target, contractPath(taskSlug)); err != nil {
+		contractRel, err := contractPath(v.Root, taskSlug)
+		if err != nil {
+			return Result{Status: StatusError, Error: err.Error()}
+		}
+		if ok, err := v.Git.PathExistsAt(h.Target, contractRel); err != nil {
 			return Result{Status: StatusError, Error: fmt.Sprintf("check contract.md@%s: %v", h.Target, err)}
 		} else if !ok {
 			return failResult(taskSlug, check,

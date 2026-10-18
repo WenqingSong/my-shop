@@ -28,6 +28,7 @@ func writerEvent(typ, reason string) Event {
 // BLOCKED / COMPLETED 全枚举，并按文件顺序多事件往返，验证行号定位准确。
 func TestWriterReaderRoundTripAllEventTypes(t *testing.T) {
 	dir := t.TempDir()
+	prepareTaskDir(t, dir, "demo")
 	w := NewEventWriter(dir)
 
 	types := []string{EventStart, EventHandoffPrepared, EventAck, EventBlocked, EventCompleted}
@@ -65,6 +66,7 @@ func TestWriterReaderRoundTripAllEventTypes(t *testing.T) {
 // TestWriterReaderSpecialCharsReason 覆盖 reason 中含引号、反斜杠、换行等特殊字符的往返。
 func TestWriterReaderSpecialCharsReason(t *testing.T) {
 	dir := t.TempDir()
+	prepareTaskDir(t, dir, "demo")
 	w := NewEventWriter(dir)
 	reason := "含\"引号\"、\\反斜杠、\n换行、<标签>&符号"
 	if err := w.Append(writerEvent(EventBlocked, reason)); err != nil {
@@ -96,6 +98,7 @@ func TestWriterReaderSpecialCharsReason(t *testing.T) {
 // 保证非法 scope_id 与 BLOCKED 缺 reason 无法进入磁盘，读取端不会收到这类合法来源的非法记录。
 func TestWriterRejectsInvalidEvents(t *testing.T) {
 	dir := t.TempDir()
+	prepareTaskDir(t, dir, "demo")
 	w := NewEventWriter(dir)
 
 	t.Run("非法 scope_id 路径穿越", func(t *testing.T) {

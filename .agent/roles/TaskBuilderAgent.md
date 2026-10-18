@@ -63,7 +63,7 @@ extra_instruction: <可选>
 V4 下所有新 Task 都从 Discovery 开始。TaskBuilder 只有在 Discovery 完成、且 Owner 决策 `APPROVED` 之后，才能初始化任务。初始化前提由 `taskbuilder-init` Gate 机器校验：
 
 ```bash
-.agent/bin/workflow-check gate taskbuilder-init .agent/tasks/<task-slug>
+.agent/bin/workflow-check gate taskbuilder-init .agent/tasks/active/<task-slug>
 ```
 
 初始化前必须满足：
@@ -106,7 +106,7 @@ V4 下所有新 Task 都从 Discovery 开始。TaskBuilder 只有在 Discovery �
 创建：
 
 ```text
-.agent/tasks/<task-slug>/
+.agent/tasks/active/<task-slug>/
 ├── task.md
 ├── state.yaml
 ├── findings.md
@@ -114,6 +114,8 @@ V4 下所有新 Task 都从 Discovery 开始。TaskBuilder 只有在 Discovery �
 ├── owner-decision.md
 └── delivery.md
 ```
+
+本仓库启用 Task 目录分类（项目本地扩展）：新任务固定创建在 `active/`，旧平铺 `.agent/tasks/<task-slug>/` 仍可按 ID 解析。规则见 `.agent/specs/TaskLayoutExtension.md`。
 
 `<task-slug>` 使用简短英文 kebab-case。目录已存在时不覆盖；完整活动任务仅在 Owner 明确修改需求时走 owner_update，初始化中断按下文续接，不为规避重名创建重复 Task。不同目标使用 Owner 批准的新名称。复杂任务的 `contract.md` 由 Analyst 创建；`owner-decision.md` 由 OwnerGate 创建。
 

@@ -1,6 +1,6 @@
 # AGENTS
 
-本仓库使用 **Agent Workflow V4.3.0-dev**（开发版本，不是正式发布的 V4.3.0）。Agent 进入仓库后，先按职责定位规则，再阅读下方长期工程规范。当前版本与入口见 `.agent/VERSION`、`.agent/README.md`；`workflow-v2-engine` 是保留的历史技术标识，不代表产品版本。
+本仓库使用 **Agent Workflow V4.3.0**（上游正式版本 `refs/tags/v4.3.0`，commit `229edfd1`）。Agent 进入仓库后，先按职责定位规则，再阅读下方长期工程规范。当前版本与来源见 `.agent/VERSION`、`.agent/upstream.yaml`、`.agent/README.md`；`workflow-v2-engine` 是保留的历史技术标识，不代表产品版本。
 
 ## Workflow 入口
 
@@ -13,7 +13,7 @@
 5. 流程规范：按 `task.md` 的已批准 `task_type` 选择 `.agent/specs/workflows/` 下的 `NormalWorkflow.md` / `ComplexWorkflow.md` / `DesignWorkflow.md` / `CoordinatedWorkflow.md`
 6. 本角色 Prompt：先看 `.agent/roles/README.md`。新需求使用公共 `.agent/roles/DiscoveryAgent.md` / `.agent/roles/TaskBuilderAgent.md`；初始化后的执行角色在其流程目录（`normal|complex|design|program/<Role>Agent.md`）
 7. 机器配置：`.agent/workflow.yaml`
-8. 当前任务事实：`.agent/tasks/<task-id>/` 下的 `task.md` / `state.yaml` / `contract.md` / Handoff 等
+8. 当前任务事实：Task 目录下的 `task.md` / `state.yaml` / `contract.md` / Handoff 等。Task 实际位于 `.agent/tasks/<category>/<task-id>/`（本项目分类扩展），用 `.agent/bin/workflow-status layout resolve <task-id>` 定位；`.agent/tasks/<task-id>` 仅是旧简写
 
 协议细节：Gate 目录 `.agent/specs/protocols/GateCatalogue.md`、Handoff `.agent/specs/protocols/HandoffProtocol.md`、CLI 参数 `.agent/specs/protocols/CLI.md`、Event Log `.agent/specs/protocols/EventLogProtocol.md`。
 
@@ -25,7 +25,9 @@
 
 `.agent/specs/adoption/WorkflowAdoption.md` + `.agent/templates/PROJECT_ADAPTATION.template.md`
 
-历史 Task 兼容：schema 2/3 只读（T0）；新任务承继需 Owner 逐任务授权（T1）；不提供 T2 原地升级。历史 Deliverer 见 `.agent/roles/legacy/DelivererAgent.md`，新任务的最终交付由 Merger 执行。
+历史 Task 兼容：schema 2/3 与 schema 0 只读（T0）；新任务承继需 Owner 逐任务授权（T1）；不提供 T2 原地升级。历史 Deliverer 见 `.agent/roles/legacy/DelivererAgent.md`，新任务的最终交付由 Merger 执行。
+
+Task 目录分类（项目本地扩展，上游 V4.3.0 无此机制）：`active|completed|blocked|archive` 由 `.agent/tasks/layout.yaml` 记录，分类不是审批证据，归档不等于完成。路径解析、迁移与回滚见 `.agent/specs/TaskLayoutExtension.md`；校验命令 `.agent/bin/workflow-status layout check`。
 
 `.agent/` namespace 索引见 `.agent/README.md`。
 

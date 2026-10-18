@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -65,9 +66,13 @@ func (e EventError) Error() string {
 	return e.Problem
 }
 
-// TaskEventLogPath 返回 task 事件日志的固定路径（相对仓库根）。
-func TaskEventLogPath(taskID string) string {
-	return filepath.Join(".agent", "tasks", taskID, "events.md")
+// TaskEventLogPath 返回 task 事件日志的实际路径（相对仓库根）。
+func TaskEventLogPath(root, taskID string) (string, error) {
+	dir, err := TaskDirRel(root, taskID)
+	if err != nil {
+		return "", err
+	}
+	return filepath.ToSlash(filepath.Join(dir, "events.md")), nil
 }
 
 // ProgramEventLogPath 返回 program 事件日志的固定路径（相对仓库根）。
@@ -156,8 +161,15 @@ func parseEvent(rawJSON string) (ParsedEvent, error) {
 // ReadTaskEventLog 读取 task 事件日志并解析。
 // 文件不存在返回 (nil, nil, nil)（无事件，非错误）；其它读错误返回 error。
 func ReadTaskEventLog(root, taskID string) ([]ParsedEvent, []EventError, error) {
-	path := filepath.Join(root, TaskEventLogPath(taskID))
-	raw, err := os.ReadFile(path)
+	rel, err := TaskEventLogPath(root, taskID)
+	if err != nil {
+		// 目录不存在等价于「没有事件」；其它解析错误仍然上报。
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil, nil
+		}
+		return nil, nil, err
+	}
+	raw, err := os.ReadFile(filepath.Join(root, rel))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil, nil

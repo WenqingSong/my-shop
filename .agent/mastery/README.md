@@ -1,6 +1,6 @@
 # Project Mastery Workflow
 
-Project Mastery Workflow 是一个独立的轻量学习体系，与生产 Workflow V4.3.0-dev（NORMAL / COMPLEX / DESIGN / Program 四流程，完整角色见 `.agent/roles/README.md`）目的不同、资产隔离。
+Project Mastery Workflow 是一个独立的轻量学习体系，与生产 Workflow V4.3.0（NORMAL / COMPLEX / DESIGN / Program 四流程，完整角色见 `.agent/roles/README.md`）目的不同、资产隔离。
 
 它解决的问题不是「有没有看过代码」，而是「能否在不依赖源码的情况下解释这个功能」。
 

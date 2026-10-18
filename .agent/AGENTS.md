@@ -8,6 +8,8 @@
 
 框架配置为 .agent/workflow.yaml；Task/Program/Intake/Registry、全部批准与 Event Log 是项目运行数据，不能被框架更新覆盖或搬迁。历史 Evidence 不是当前规则。人类 Owner 才能批准；测试、CLEAN、ACK 不替代接受或交付授权。
 
+本仓库启用 Task 目录分类（项目本地扩展，上游 V4.3.0 无此机制）：Task 实际位于 `.agent/tasks/<category>/<id>/`，新任务写入 `active/`。Task ID 是唯一身份；`.agent/tasks/<id>` 只是可解析的旧简写，不再代表物理路径。路径解析、分类证据要求与迁移/回滚统一见 [TaskLayoutExtension](specs/TaskLayoutExtension.md)；不要另建目录规则，也不要为通过校验手改分类。
+
 首次接入与更新均见 [适配规范](specs/adoption/WorkflowAdoption.md)，包括内部 V3 迁移说明。项目实际 module、父分支、资源、构建测试和服务事实必须调查确认，不预设业务路径或集成分支。
 
 Git 和 Go 1.23+ 是工具要求；Engine 是 .agent/engine 下的独立 module。每个 Worktree 从其自身已提交源码构建六 CLI，不提交二进制，不用宿主 go.work/replace 拼接 Engine。

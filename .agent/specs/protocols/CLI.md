@@ -10,13 +10,15 @@ for cli in workflow-check workflow-git workflow-status workflow-event workflow-p
 done
 ```
 
-各命令支持 --root 指定仓库根；workflow-check 使用完整仓库相对 Task/Intake 路径，workflow-status 另支持 Task ID 简写。相对 Task 路径按仓库根解析。正式 Gate 避免 go run，因为它包装子进程退出码。
+各命令支持 --root 指定仓库根；workflow-check 接受仓库相对 Task/Intake 路径、旧简写 `.agent/tasks/<id>` 或裸 Task ID，workflow-status 另支持 Task ID 简写。相对 Task 路径按仓库根解析。正式 Gate 避免 go run，因为它包装子进程退出码。
+
+本仓库启用项目本地 Task 目录分类扩展（上游 V4.3.0 无此能力）：Task 实际位于 `.agent/tasks/<category>/<id>/`，解析规则见 [TaskLayoutExtension.md](../TaskLayoutExtension.md)。旧简写 `.agent/tasks/<id>` 仍然可解析，但不再代表物理路径。
 
 | CLI | 命令与副作用 |
 |---|---|
 | workflow-check | gate <gate> <task或intake>；17 个 Task/Intake Gate、config 只读配置校验（不是新增 Gate）；0 PASS/1 FAIL/2 ERROR |
 | workflow-git | verify-base --parent B --base SHA；branch-exists B；worktree-exists B；create-branch B --parent B --base SHA；create-worktree PATH B。后两项写 Git，拒绝覆盖；0 成功/1 拒绝/2 错误 |
-| workflow-status | inspect TASK；recovery-check TASK；index [--format tasks/programs/meta]。只读；inspect/index 为0产出/2错误；recovery-check 另有1不可继续 |
+| workflow-status | inspect TASK；recovery-check TASK；index [--format tasks/programs/meta]；layout list/check/plan/migrate/rollback/resolve（项目本地扩展）。只读（layout migrate/rollback 需 --apply）；inspect/index 为0产出/2错误；recovery-check 另有1不可继续；layout check/plan 为0一致/1不一致 |
 | workflow-event | append --scope-kind task或program --scope-id ID --role ROLE --event TYPE [--sha SHA] [--reason TEXT] [--timestamp RFC3339Nano]；追加 events.md；0成功/1校验失败/2错误 |
 | workflow-program | gate <assembler-start或program-cleaner或final-delivery> ID；plan ID（只读）；collect ID --task ID --expected-revision N（Registry CAS写）；assemble ID --source-branch NEW -- COMMAND ARG...（复用Merger并创建新本地C0分支，不更新父分支）；0通过/1 Gate拒绝/2错误或受控写入拒绝 |
 | workflow-deliver | plan 支持 task/program/design，只读；verify task/design 隔离测试并写交付证据（DESIGN 用专属批准链）；execute 支持三类对象，隔离重测与受控推送；0通过/1拒绝/2错误 |
@@ -28,6 +30,9 @@ done
 .agent/bin/workflow-status inspect <task-id>
 .agent/bin/workflow-status recovery-check <task-id>
 .agent/bin/workflow-status index
+.agent/bin/workflow-status layout check
+.agent/bin/workflow-status layout migrate            # dry-run，--apply 执行
+.agent/bin/workflow-status layout rollback           # dry-run，--apply 执行
 .agent/bin/workflow-event append --scope-kind task --scope-id <task-id> --role Coder --event BLOCKED --reason "<真实原因>"
 .agent/bin/workflow-program plan <program-id>
 .agent/bin/workflow-deliver plan design <task-id> --test "<真实测试命令>"
@@ -57,3 +62,8 @@ Collector 使用 collect，从准确远端 Task tip读取状态；Registry.deliv
 Assembler在已提交推送、clean的独立协调分支调用assemble，提供新来源分支与真实测试argv。成功创建本地C0分支并输出原始JSON收据，Agent普通push后冻结来源；C1后才在独立证据分支保存集成metadata。失败不会创建成功分支/State PASS，不更新父分支。没有单独的Program审批写CLI；OwnerGate按已明确的人类决定机械记录，参数和Gate不证明Owner身份。
 
 DESIGN Program子Task使用verify design并提交delivery metadata后交Collector；execute design/task都会拒绝Program子Task直接更新父分支。DESIGN验证命令应针对真实设计AC，不默认要求生产代码。
+
+
+## Task 目录分类（项目本地扩展）
+
+上游 V4.3.0 只有平铺 `.agent/tasks/<id>/`。本仓库的 `layout` 子命令移动 Task 目录到 `active|completed|blocked|archive`，只做目录移动，不改 State/Evidence，并写 `layout-journal.yaml` 供回滚。分类清单 `layout.yaml` 是分类记录，不是审批证据；语义、证据要求与回滚规则见 [TaskLayoutExtension.md](../TaskLayoutExtension.md)。

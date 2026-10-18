@@ -10,7 +10,7 @@ SHELL := /bin/bash
 
 SCRIPTS := scripts
 
-.PHONY: help bootstrap init up down restart status logs health deps-start test test-unit test-integration test-race test-prometheus test-container test-nginx test-lib test-storage clean build docker-build docker-push migrate-up migrate-version migrate-force config-check check-task-docs
+.PHONY: help bootstrap init up down restart status logs health deps-start test test-unit test-integration test-race test-prometheus test-container test-nginx test-lib test-storage clean build docker-build docker-push migrate-up migrate-version migrate-force config-check check-task-docs check-task-layout
 
 help: ## 列出所有可用目标及说明
 	@bash $(SCRIPTS)/help.sh
@@ -93,5 +93,8 @@ migrate-force: ## 标记指定版本已应用：make migrate-force VERSION=<14�
 config-check: ## 统一预检：qiniu check + admin check（启动前七牛与超管条件校验）
 	@bash $(SCRIPTS)/config-check.sh
 
-check-task-docs: ## 校验 Task 导航目录与官方索引/真实目录一致（只读）
+check-task-docs: ## 校验 Task 导航目录与官方索引/真实分类目录一致（只读）
 	@bash $(SCRIPTS)/check-task-docs.sh
+
+check-task-layout: ## 校验 Task 分类清单、磁盘布局与分类依据（只读，需先构建 .agent/bin/workflow-status）
+	@.agent/bin/workflow-status layout check

@@ -73,7 +73,7 @@ Discovery 发生在 Task 分支创建之前，因此使用独立的 Intake 记�
 └── taskbuilder-handoff.md    # 第二阶段交接产物（front-matter 机器记录）
 ```
 
-`intake.yaml` 不是另一份 State Schema：它不含 `schema_version` 生命周期、不含 phase / 状态机，只记录 Intake 阶段必须保留、且 Git 无法推导的不可变事实，用于保证「初始父分支与 Commit 不会丢失」。Task 执行状态仍以 `.agent/tasks/<id>/state.yaml` 为唯一权威。
+`intake.yaml` 不是另一份 State Schema：它不含 `schema_version` 生命周期、不含 phase / 状态机，只记录 Intake 阶段必须保留、且 Git 无法推导的不可变事实，用于保证「初始父分支与 Commit 不会丢失」。Task 执行状态仍以 Task 目录下的 `state.yaml` 为唯一权威（本仓库 Task 位于 `.agent/tasks/<category>/<id>/`，见 `.agent/specs/TaskLayoutExtension.md`）。
 
 Intake 证据必须持久化到受控工作区并提交，保证：Discovery 证据可持久化、尚无 Task 分支时也能合法调查、父分支不被直接污染、Owner 审批与对应 Intake Evidence 绑定。Task 初始化时须将经核实的 Intake 文件按准确来源 SHA 原字节带入新 Task Worktree 的同名路径，另在 task.md 引用来源，但必须保持证据来源可追踪，不得静默重写。
 

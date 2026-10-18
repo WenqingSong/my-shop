@@ -37,7 +37,10 @@ func (dc *DeliveryController) PlanTask(id string) (DeliveryPlan, Result) {
 		return p, failResult(id, "Delivery Git Binding", branch, "当前 task_branch 与配置父分支匹配", "禁止从其他分支或重解释初始化基线交付")
 	}
 	v := &Validator{Root: dc.Root, Git: dc.Git, Config: dc.Config}
-	dir := filepath.Join(".agent", "tasks", id)
+	dir, err := TaskDirRel(dc.Root, id)
+	if err != nil {
+		return p, Result{Status: StatusError, Error: err.Error()}
+	}
 	if res := v.GateDeliveryStart(dir); res.Status != StatusPass {
 		return p, res
 	}
@@ -138,7 +141,11 @@ func (dc *DeliveryController) ExecuteTask(id string, auth DeliveryAuthorization)
 		return rep, failResult(id, "Delivery Program Child", s.Program.ID, "由 Collector 登记后整体集成", "子 Task 不直接更新 Program 父分支")
 	}
 	v := &Validator{Root: dc.Root, Git: dc.Git, Config: dc.Config}
-	if res := v.GateMergeReady(filepath.Join(".agent", "tasks", id)); res.Status != StatusPass {
+	dir, err := TaskDirRel(dc.Root, id)
+	if err != nil {
+		return rep, Result{Status: StatusError, Error: err.Error()}
+	}
+	if res := v.GateMergeReady(dir); res.Status != StatusPass {
 		return rep, res
 	}
 	// NORMAL/COMPLEX authorize the actual source, not just the reviewed snapshot.
@@ -153,7 +160,11 @@ func (dc *DeliveryController) ExecuteTask(id string, auth DeliveryAuthorization)
 
 // Refuse symlinks along all writable paths. Existing task data must stay local.
 func (dc *DeliveryController) taskArtifactPaths(id string) error {
-	for _, name := range []string{filepath.Join(".agent", "tasks", id, "state.yaml"), filepath.Join(".agent", "tasks", id, "delivery.md")} {
+	dir, err := TaskDirRel(dc.Root, id)
+	if err != nil {
+		return err
+	}
+	for _, name := range []string{filepath.Join(dir, "state.yaml"), filepath.Join(dir, "delivery.md")} {
 		part := dc.Root
 		for _, component := range strings.Split(name, string(filepath.Separator)) {
 			part = filepath.Join(part, component)
@@ -176,7 +187,11 @@ func (dc *DeliveryController) recordTaskDelivery(id string, p DeliveryPlan, rep 
 	if err := dc.taskArtifactPaths(id); err != nil {
 		return err
 	}
-	dir := filepath.Join(dc.Root, ".agent", "tasks", id)
+	rel, err := TaskDirRel(dc.Root, id)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Join(dc.Root, rel)
 	path := filepath.Join(dir, "state.yaml")
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -261,7 +276,11 @@ func (dc *DeliveryController) VerifyDesign(id string) (MergeReport, Result) {
 		return rep, res
 	}
 	v := &Validator{Root: dc.Root, Git: dc.Git, Config: dc.Config}
-	if res = v.GateHandoffPrepared(filepath.Join(".agent", "tasks", id)); res.Status != StatusPass {
+	dir, err := TaskDirRel(dc.Root, id)
+	if err != nil {
+		return rep, Result{Status: StatusError, Error: err.Error()}
+	}
+	if res = v.GateHandoffPrepared(dir); res.Status != StatusPass {
 		return rep, res
 	}
 	s, err := LoadTaskStateFile(dc.Root, id)

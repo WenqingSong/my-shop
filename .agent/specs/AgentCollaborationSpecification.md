@@ -42,7 +42,7 @@ V4 各 Agent 默认运行在独立 Session / 独立上下文。新 Agent 必须�
 任务级 Artifact 记录「本任务的临时事实与决策过程」，随任务结束而定稿。项目级长期 Design（`docs/design/*`）记录「跨越单个任务、长期稳定的项目级事实」。
 
 ```text
-.agent/tasks/<task-slug>/
+.agent/tasks/<category>/<task-slug>/   # 本仓库分类扩展；新任务使用 active/
 ├── task.md
 ├── state.yaml          # 机器事实源（当前决策唯一权威）
 ├── contract.md         # 仅复杂任务需要

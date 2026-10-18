@@ -1,0 +1,269 @@
+schema_version: 1
+extension: my-shop task layout (项目本地扩展，上游 V4.3.0 无此机制)
+owner_decision: "2026-10-18 Owner 指令：升级到最新正式版并实现 Task 分类目录、迁移全部历史 Task"
+categories:
+  - active
+  - completed
+  - blocked
+  - archive
+tasks:
+  - id: admin-order-management
+    category: completed
+    basis: state
+  - id: article-cms-v1
+    category: completed
+    basis: state
+  - id: backend-config-hardening-v1
+    category: completed
+    basis: state
+  - id: backend-container-v1
+    category: completed
+    basis: state
+  - id: banner-v1
+    category: completed
+    basis: state
+  - id: container-runtime-hardening-v1
+    category: completed
+    basis: state
+  - id: coupon-v1
+    category: completed
+    basis: state
+  - id: dashboard-v1
+    category: completed
+    basis: state
+  - id: dev-environment-setup
+    category: completed
+    basis: state
+  - id: flash-sale-v2
+    category: completed
+    basis: state
+  - id: flash-sale-v4
+    category: completed
+    basis: state
+  - id: flash-sale-v5
+    category: completed
+    basis: state
+  - id: flashsale-p95-p99-query
+    category: completed
+    basis: state
+  - id: flashsale-performance-baseline
+    category: completed
+    basis: state
+  - id: flashsale-v5-loadtest
+    category: completed
+    basis: state
+  - id: iam-v5
+    category: completed
+    basis: state
+  - id: legacy-data-migration
+    category: completed
+    basis: state
+  - id: nginx-reverse-proxy-v1
+    category: completed
+    basis: state
+  - id: object-storage-upload
+    category: completed
+    basis: state
+  - id: order-refund-v1
+    category: completed
+    basis: state
+  - id: product-like-v1
+    category: completed
+    basis: state
+  - id: product-view-count-v1
+    category: completed
+    basis: state
+  - id: project-baseline-cleanup-v1
+    category: completed
+    basis: state
+  - id: prometheus-integration
+    category: completed
+    basis: state
+  - id: verify-metrics-histogram
+    category: completed
+    basis: state
+  - id: recommendation-v1
+    category: completed
+    basis: document
+    reason: "State delivery=PASS 且内容已合入 develop，但历史重写导致旧 SHA 不可追溯；按交付文档证据认定为已完成"
+    evidence:
+      - "docs/task-management/owner-decisions.md#5-recommendation-v1-的-sha-不可追溯"
+      - ".agent/tasks/recommendation-v1/delivery.md"
+  - id: cart-v1
+    category: completed
+    basis: document
+    reason: "无 State（或 schema 0），但 delivery.md 有 PASS 与构建/测试证据，实现已合入 develop"
+    evidence:
+      - "docs/task-management/task-catalog.md"
+      - ".agent/tasks/cart-v1/delivery.md"
+  - id: db-migration
+    category: completed
+    basis: document
+    reason: "无 State（或 schema 0），但 delivery.md 有 PASS 与构建/测试证据，实现已合入 develop"
+    evidence:
+      - "docs/task-management/task-catalog.md"
+      - ".agent/tasks/db-migration/delivery.md"
+  - id: design-debt-backfill
+    category: completed
+    basis: document
+    reason: "无 State（或 schema 0），但 delivery.md 有 PASS 与构建/测试证据，实现已合入 develop"
+    evidence:
+      - "docs/task-management/task-catalog.md"
+      - ".agent/tasks/design-debt-backfill/delivery.md"
+  - id: design-doc-governance
+    category: completed
+    basis: document
+    reason: "无 State（或 schema 0），但 delivery.md 有 PASS 与构建/测试证据，实现已合入 develop"
+    evidence:
+      - "docs/task-management/task-catalog.md"
+      - ".agent/tasks/design-doc-governance/delivery.md"
+  - id: iam-v2
+    category: completed
+    basis: document
+    reason: "无 State（或 schema 0），但 delivery.md 有 PASS 与构建/测试证据，实现已合入 develop"
+    evidence:
+      - "docs/task-management/task-catalog.md"
+      - ".agent/tasks/iam-v2/delivery.md"
+  - id: iam-v3
+    category: completed
+    basis: document
+    reason: "无 State（或 schema 0），但 delivery.md 有 PASS 与构建/测试证据，实现已合入 develop"
+    evidence:
+      - "docs/task-management/task-catalog.md"
+      - ".agent/tasks/iam-v3/delivery.md"
+  - id: iam-v4
+    category: completed
+    basis: document
+    reason: "无 State（或 schema 0），但 delivery.md 有 PASS 与构建/测试证据，实现已合入 develop"
+    evidence:
+      - "docs/task-management/task-catalog.md"
+      - ".agent/tasks/iam-v4/delivery.md"
+  - id: identity-domain-isolation
+    category: completed
+    basis: document
+    reason: "无 State（或 schema 0），但 delivery.md 有 PASS 与构建/测试证据，实现已合入 develop"
+    evidence:
+      - "docs/task-management/task-catalog.md"
+      - ".agent/tasks/identity-domain-isolation/delivery.md"
+  - id: inventory-v1
+    category: completed
+    basis: document
+    reason: "无 State（或 schema 0），但 delivery.md 有 PASS 与构建/测试证据，实现已合入 develop"
+    evidence:
+      - "docs/task-management/task-catalog.md"
+      - ".agent/tasks/inventory-v1/delivery.md"
+  - id: order-v1
+    category: completed
+    basis: document
+    reason: "无 State（或 schema 0），但 delivery.md 有 PASS 与构建/测试证据，实现已合入 develop"
+    evidence:
+      - "docs/task-management/task-catalog.md"
+      - ".agent/tasks/order-v1/delivery.md"
+  - id: product-favorite-v1
+    category: completed
+    basis: document
+    reason: "无 State（或 schema 0），但 delivery.md 有 PASS 与构建/测试证据，实现已合入 develop"
+    evidence:
+      - "docs/task-management/task-catalog.md"
+      - ".agent/tasks/product-favorite-v1/delivery.md"
+  - id: product-spu-v1
+    category: completed
+    basis: document
+    reason: "无 State（或 schema 0），但 delivery.md 有 PASS 与构建/测试证据，实现已合入 develop"
+    evidence:
+      - "docs/task-management/task-catalog.md"
+      - ".agent/tasks/product-spu-v1/delivery.md"
+  - id: shipping-address-v1
+    category: completed
+    basis: document
+    reason: "无 State（或 schema 0），但 delivery.md 有 PASS 与构建/测试证据，实现已合入 develop"
+    evidence:
+      - "docs/task-management/task-catalog.md"
+      - ".agent/tasks/shipping-address-v1/delivery.md"
+  - id: sku-v1
+    category: completed
+    basis: document
+    reason: "无 State（或 schema 0），但 delivery.md 有 PASS 与构建/测试证据，实现已合入 develop"
+    evidence:
+      - "docs/task-management/task-catalog.md"
+      - ".agent/tasks/sku-v1/delivery.md"
+  - id: ci-image-publish-v1
+    category: blocked
+    basis: state
+    reason: "delivery=BLOCKED（Owner 控制的发布依赖），4 项 AC 需真实 main 流水线与制品库授权"
+    evidence:
+      - "docs/task-management/owner-decisions.md#2-ci-image-publish-v1-的发布验收"
+      - ".agent/tasks/ci-image-publish-v1/delivery.md"
+  - id: test-quality-gate-v1
+    category: blocked
+    basis: document
+    reason: "等待 Owner 接受或拒绝（owner=PENDING、delivery=NOT_RUN）；实现已合入 develop"
+    evidence:
+      - "docs/task-management/owner-decisions.md#1-test-quality-gate-v1-的-owner-接受与交付状态"
+      - ".agent/tasks/test-quality-gate-v1/state.yaml"
+  - id: flash-sale-v3
+    category: blocked
+    basis: document
+    reason: "交付证据滞留在未合并分支 a905e1c，等待 Owner 授权受控集成（develop=NOT_RUN）"
+    evidence:
+      - "docs/task-management/owner-decisions.md#3-flash-sale-v3-的受控集成"
+      - ".agent/tasks/flash-sale-v3/state.yaml"
+      - "origin/feat/flash-sale-v3"
+  - id: flash-sale-v1
+    category: blocked
+    basis: unknown
+    reason: "schema 0 State（READY_FOR_REVIEW）与 delivery.md PASS 冲突，等待 Owner 决定是否作为历史不一致接受"
+    evidence:
+      - "docs/task-management/owner-decisions.md#4-历史-state-矛盾flash-sale-v1product-review-v1"
+      - ".agent/tasks/flash-sale-v1/state.yaml"
+      - ".agent/tasks/flash-sale-v1/delivery.md"
+  - id: product-review-v1
+    category: blocked
+    basis: unknown
+    reason: "schema 0 State（WAITING_FOR_OWNER_ACCEPTANCE）与 delivery.md PASS 冲突，等待 Owner 决定是否作为历史不一致接受"
+    evidence:
+      - "docs/task-management/owner-decisions.md#4-历史-state-矛盾flash-sale-v1product-review-v1"
+      - ".agent/tasks/product-review-v1/state.yaml"
+      - ".agent/tasks/product-review-v1/delivery.md"
+  - id: admin-identity-rbac
+    category: blocked
+    basis: unknown
+    reason: "无 State；交付快照基于未提交工作区，无法机器核验，等待 Owner 决定 T1 或归档"
+    evidence:
+      - "docs/task-management/task-catalog.md"
+      - ".agent/tasks/admin-identity-rbac/delivery.md"
+  - id: agent-workflow-owner-confirmation
+    category: archive
+    basis: unknown
+    reason: "无 State 且无交付验收记录；历史 Workflow 治理任务，不再推进"
+    evidence:
+      - "docs/task-management/task-catalog.md"
+      - ".agent/tasks/agent-workflow-owner-confirmation/task.md"
+  - id: agent-workflow-state-machine-v1
+    category: archive
+    basis: unknown
+    reason: "无 State 且无交付验收记录；历史 Workflow 状态机任务，已被 V4 框架替代"
+    evidence:
+      - "docs/task-management/task-catalog.md"
+      - ".agent/tasks/agent-workflow-state-machine-v1/task.md"
+  - id: categories-v1
+    category: archive
+    basis: unknown
+    reason: "无 State 且无交付验收记录；代码存在仅为线索，不能据此认定完成"
+    evidence:
+      - "docs/task-management/task-catalog.md"
+      - ".agent/tasks/categories-v1/task.md"
+  - id: error-code-namespace-expansion
+    category: archive
+    basis: unknown
+    reason: "无 State 且无交付验收记录；规则已由 .agent/registry/error-codes.md 承接"
+    evidence:
+      - "docs/task-management/task-catalog.md"
+      - ".agent/tasks/error-code-namespace-expansion/task.md"
+  - id: global-resource-reservation
+    category: archive
+    basis: unknown
+    reason: "无 State 且无交付验收记录；能力已由 .agent/registry/ 与 Workflow V4 资源规则承接"
+    evidence:
+      - "docs/task-management/task-catalog.md"
+      - ".agent/tasks/global-resource-reservation/task.md"

@@ -1,58 +1,70 @@
 schema_version: 1
 repository: https://cnb.cool/framework-station/agent-workflow
-commit: 0c62d1c07bc9a98120c7a11b9cd3bbeae104a2f0
-version: "4.3.0-dev"
+commit: 229edfd18e3b6e770f803db01e5010b215ba623f
+version: "4.3.0"
 subdirectory: .agent
 
-# 本次采用的远端引用：refs/heads/main 与远端 HEAD 均指向该提交（git ls-remote 核验）。
-# 4.3.0-dev 是开发版本标识，不是正式发布的 V4.3.0。
-ref: refs/heads/main
+# 本次采用的远端引用：refs/tags/v4.3.0（附注 tag）peel 后与 refs/heads/main、远端 HEAD 指向同一提交。
+# 核验方式：git ls-remote 与 git clone --bare 后 git rev-parse / git log，见本项目升级任务记录。
+# 4.3.0 是上游正式发布版本（tag v4.3.0），不是 4.3.0-dev。
+ref: refs/tags/v4.3.0
+tag: v4.3.0
+tag_object: ff03fe13b5d1e56e16e58cb1628bed3e388f6e92
 
-# 上一版上游基线（该项目 V4.2.1 升级时采用）：
-# 由框架文件逐文件比较核验：项目 .agent 与 v4.2.1 tag 内容一致，仅 README 本地小节与 upstream.yaml 不同。
+# 上一版上游基线（该项目上次升级采用的开发版本 0c62d1c，即 4.3.0-dev）：
+# v4.3.0 相对它只有文档/版本标识变更（README、CHANGELOG、CONTRIBUTING、PACKAGE_MANIFEST、
+# Architecture、WorkflowAdoption、docs/、examples/README、scripts/check-v41-structure.py），
+# 无 Engine / Role / Spec 语义变化。
 previous:
-  commit: 1fc5c6dc88fc7f417374e37e7354a3a6c4e07a65
-  version: "4.2.1"
-  verified_by: .agent 框架文件与上游 v4.2.1 tag 逐文件比较（仅 README 本地小节不同）
+  commit: 0c62d1c07bc9a98120c7a11b9cd3bbeae104a2f0
+  version: "4.3.0-dev"
+  verified_by: 上游 git diff 0c62d1c..229edfd 逐文件核验（仅文档与 VERSION 变化）
 
-# 更早的历史基线（V3，保留追溯）：
-legacy:
-  commit: 7727e0a64f47bc33b6f042f27421e1889224e7f3
-  version: "3.0.0"
-  verified_by: 框架文件 blob 哈希逐项匹配（roles/specs/engine/templates）
+# 更早的历史基线（V4.2.1 与 V3，保留追溯）：
+history:
+  - commit: 1fc5c6dc88fc7f417374e37e7354a3a6c4e07a65
+    version: "4.2.1"
+  - commit: 7727e0a64f47bc33b6f042f27421e1889224e7f3
+    version: "3.0.0"
 
-# 本次迁移范围（仅框架资产；未整目录覆盖）：
+# 本次迁移范围（仅框架资产；未整目录覆盖 .agent/）：
 migration:
-  entry:
-    - 新增公共入口 .agent/roles/DiscoveryAgent.md、.agent/roles/TaskBuilderAgent.md（由 complex 目录重命名而来，内容按目标版本更新）
-    - 删除 normal/complex/design 下 6 份重复 Discovery/TaskBuilder Prompt
-    - 新增 .agent/specs/workflows/EntryWorkflow.md，定义新需求→调查→Owner 确认→按类型初始化的唯一入口
-  engine:
-    - .agent/engine/internal/workflow/taskbuilder_gate.go：新增 initialTaskPolicy 初始 State/首位角色校验、当前 Task Worktree 与 HEAD/Base 祖先校验
-    - 新增 taskbuilder_initialization_test.go、unified_entry_test.go（目标版本真实实现配套测试）
-  docs:
-    - .agent/AGENTS.md、README.md、assistant-context.md、roles/README.md 与各流程 README
-    - .agent/specs/（协作规范、职责边界、架构、适配、Gate/Handoff 协议、四流程规范）
-    - .agent/templates/state.yaml.template、task.template.md
-  project:
-    - 宿主根 AGENTS.md Workflow 入口段（版本与公共入口路径；业务工程规范正文未改）
-    - docs/design/agent-workflow.md 归档头版本/Commit 引用（V3 正文保留）
-    - .agent/mastery/ 中 2 处生产 Workflow 版本描述（学习记录与证据未改）
+  upstream_sync:
+    - .agent/VERSION：4.3.0-dev → 4.3.0
+    - .agent/specs/Architecture.md：同步上游 4.3.0（新增证据关系 mermaid、INV-2 表述）
+    - .agent/specs/adoption/WorkflowAdoption.md：同步上游 4.3.0（公共入口版本标注 4.3.0）
+  local_extension:
+    - 新增 .agent/specs/TaskLayoutExtension.md（项目本地 Task 目录分类规范）
+    - Engine 新增 internal/workflow/task_layout.go、task_layout_migration.go（统一路径解析、预检、迁移、回滚）
+    - cmd/workflow-status 新增 layout 子命令（list/check/plan/migrate/rollback/resolve）
+    - 索引新增 category 列与 legacy-layout/unclassified flag，index_version 2
+    - Gate/Handoff/Event/Delivery/Program 全部改用统一路径解析；neutral tail 按同一 Task 候选目录匹配
+    - Task 目录：.agent/tasks/<id>/ → .agent/tasks/<category>/<id>/（51 项，见 layout.yaml 与 layout-journal.yaml）
+  project_docs:
+    - 宿主根 AGENTS.md、.agent/AGENTS.md、.agent/README.md、.agent/specs/protocols/CLI.md、roles/TaskBuilderAgent.md、specs/AgentCollaborationSpecification.md
+    - docs/task-management/*（路径、分类、查询）、scripts/check-task-docs.sh、Makefile
 
 # 保留的项目本地定制与项目拥有资产（不随框架更新覆盖）：
 local_changes: |
-  README.md：在官方 README 末尾保留 “Separate: Project Mastery Workflow” 小节（项目本地定制）。
-  mastery/：项目独有的 Mastering Workflow 资产，不属于上游框架；本次仅将 2 处活动描述中的
-  生产 Workflow 版本改为 V4.3.0-dev，其余学习记录、证据与结构未改。
+  README.md：保留 “Separate: Project Mastery Workflow” 与 “Local Extension: Task 目录分类” 两个项目小节。
+  mastery/：项目独有的 Mastering Workflow 资产，不参与生产 Workflow 状态机；本次仅更新版本描述。
   workflow.yaml：项目机器配置（integration_branch=develop、两个资源 Registry）。
-  tasks/、programs/、intake/、registry/：运行数据与共享资源事实源，逐字节保留。
-  AGENTS.md：宿主业务工程规范正文（第 1–12 节）保持原样，仅更新 Workflow 入口段。
-  未复制上游仓库级维护材料（CHANGELOG.md、PACKAGE_MANIFEST.md、examples/、tools/、scripts/、
-  .cnb.yml），它们不属于 .agent 分发内容，且本仓库同名文件为业务资产。
+  tasks/、programs/、intake/、registry/：运行数据与共享资源事实源；历史 Task 只移动目录，State/Evidence/审批逐字节保留。
+  AGENTS.md：宿主业务工程规范正文（第 1–12 节）保持原样，仅更新 Workflow 入口与 Task 目录规则。
+  未复制上游仓库级维护材料（CHANGELOG.md、PACKAGE_MANIFEST.md、examples/、tools/、scripts/、.cnb.yml），
+  它们不属于 .agent 分发内容，且本仓库同名文件为业务资产。
+
+# 与上游的差异（不得伪称为上游功能）：
+divergence:
+  - Task 分类目录、layout 清单、migrate/rollback CLI 与索引 category 列均为本项目扩展，上游 V4.3.0 无此机制。
+  - layout.yaml 只表达导航分类与证据类型，不是 State、不是审批证据，不参与 Gate 计算。
+  - 上游后续发布若引入同类能力，应按 .agent/specs/TaskLayoutExtension.md 第 8 节合并而非覆盖。
 
 # 未解决的兼容限制：
 compat:
-  - 历史 schema 2/3 Task 只读（T0）；继续需 Owner 逐任务授权 T1 新 Task 承继；不提供 T2 原地升级。
-  - 旧 Task 分支内的 Role 路径与 Prompt 保留原版本；本次不重写历史 Evidence/SHA/Handoff。
-  - V4.3.0-dev 为开发版本，未冒充正式 V4.3.0；上游后续正式发布需重新核验后再升级。
-  - 本次未执行真实 Agent E2E（不伪造 Owner 批准/Task），仅完成静态一致性、Engine 测试与 CLI 验证。
+  - 历史 schema 2/3 与 schema 0 Task 只读（T0）；继续需 Owner 逐任务授权 T1 新 Task 承继；不提供 T2 原地升级。
+  - 3 个 schema 0 Task 的 State 不可解析，索引仍标 corrupt；分类为 blocked/archive 并记录人工证据，不冒充完成。
+  - 19 个无 state.yaml 的 Task 依赖 delivery.md 等文档证据；basis=document/unknown，无法机器核验。
+  - recommendation-v1 的旧 SHA 不在 develop 历史中，分类为 completed/document 并在 owner-decisions 记录限制。
+  - 历史 Task 内的旧路径文本（如 .agent/tasks/<id>/）保留为历史事实，不回写。
+  - 本次未执行真实 Agent E2E（不伪造 Owner 批准/Task），仅完成 Engine 测试、CLI、迁移与业务回归验证。

@@ -153,3 +153,15 @@ Owner 接受结果与授权更新父分支是不同决定。无明确授权仅�
 ## Separate: Project Mastery Workflow（项目本地定制，非上游框架）
 
 `.agent/mastery/` 是独立的 Project Mastery Workflow（学习 / 面试掌握），与 Workflow V4 生产开发流程目的不同、资产隔离，不参与 Workflow V4 状态机。入口：`mastery/README.md`。
+## Local Extension: Task 目录分类（项目本地，非上游）
+
+上游 V4.3.0 的 Task 仍平铺在 `.agent/tasks/<id>/`。本仓库扩展为 `active|completed|blocked|archive` 分类目录，并把路径解析统一到 Engine：
+
+```bash
+.agent/bin/workflow-status layout list
+.agent/bin/workflow-status layout check
+.agent/bin/workflow-status layout migrate [--apply]
+.agent/bin/workflow-status layout rollback [--apply]
+```
+
+Task ID 仍是唯一身份，`.agent/tasks/<id>` 旧简写继续可解析；分类清单 `.agent/tasks/layout.yaml` 不是审批证据。完整规则、证据要求与上游合并注意事项见 [TaskLayoutExtension](specs/TaskLayoutExtension.md)。

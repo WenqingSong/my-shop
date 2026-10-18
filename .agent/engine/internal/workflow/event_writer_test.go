@@ -168,24 +168,49 @@ func TestValidSHA(t *testing.T) {
 // --- 路径计算与路径穿越（AC-07）---
 
 func TestEventsRelPath(t *testing.T) {
-	got, err := eventsRelPath(ScopeTask, "demo")
-	if err != nil || got != filepath.Join(".agent", "tasks", "demo", "events.md") {
-		t.Fatalf("task 路径 = %q, err=%v", got, err)
+	root := t.TempDir()
+	for _, rel := range []string{
+		filepath.Join(".agent", "tasks", "demo"),
+		filepath.Join(".agent", "tasks", "completed", "done"),
+	} {
+		if err := os.MkdirAll(filepath.Join(root, rel), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
-	got, err = eventsRelPath(ScopeProgram, "prog-1")
-	if err != nil || got != filepath.Join(".agent", "programs", "prog-1", "events.md") {
+	got, err := eventsRelPath(root, ScopeTask, "demo")
+	if err != nil || got != filepath.ToSlash(filepath.Join(".agent", "tasks", "demo", "events.md")) {
+		t.Fatalf("旧平铺 task 路径 = %q, err=%v", got, err)
+	}
+	got, err = eventsRelPath(root, ScopeTask, "done")
+	if err != nil || got != filepath.ToSlash(filepath.Join(".agent", "tasks", "completed", "done", "events.md")) {
+		t.Fatalf("分类 layout task 路径 = %q, err=%v", got, err)
+	}
+	got, err = eventsRelPath(root, ScopeProgram, "prog-1")
+	if err != nil || got != filepath.ToSlash(filepath.Join(".agent", "programs", "prog-1", "events.md")) {
 		t.Fatalf("program 路径 = %q, err=%v", got, err)
 	}
 }
 
 func TestEventsRelPathRejectsTraversal(t *testing.T) {
+	root := t.TempDir()
 	for _, id := range []string{"", "..", "../etc", "a/b", "a\\b", ".", ".hidden", "a\x00b", "a b"} {
-		if _, err := eventsRelPath(ScopeTask, id); err == nil {
+		if _, err := eventsRelPath(root, ScopeTask, id); err == nil {
 			t.Fatalf("scope_id=%q 应被拒绝（路径穿越/非法）", id)
 		}
 	}
-	if _, err := eventsRelPath("registry", "demo"); err == nil {
+	if _, err := eventsRelPath(root, "registry", "demo"); err == nil {
 		t.Fatal("非法 scope_kind 应被拒绝")
+	}
+	if _, err := eventsRelPath(root, ScopeTask, "absent"); err == nil {
+		t.Fatal("未初始化的 Task 不应解析出事件路径")
+	}
+}
+
+// prepareTaskDir 创建 Task 目录：事件写入要求 Task 已存在（分类布局同样适用）。
+func prepareTaskDir(t *testing.T, root, id string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(root, ".agent", "tasks", id), 0o755); err != nil {
+		t.Fatalf("mkdir task dir: %v", err)
 	}
 }
 
@@ -193,6 +218,7 @@ func TestEventsRelPathRejectsTraversal(t *testing.T) {
 
 func TestAppendCreatesFileWithHeader(t *testing.T) {
 	dir := t.TempDir()
+	prepareTaskDir(t, dir, "demo")
 	w := NewEventWriter(dir)
 	if err := w.Append(validEvent()); err != nil {
 		t.Fatalf("Append: %v", err)
@@ -211,6 +237,7 @@ func TestAppendCreatesFileWithHeader(t *testing.T) {
 
 func TestAppendDoesNotOverwrite(t *testing.T) {
 	dir := t.TempDir()
+	prepareTaskDir(t, dir, "demo")
 	w := NewEventWriter(dir)
 	first := validEvent()
 	if err := w.Append(first); err != nil {
@@ -237,6 +264,7 @@ func TestAppendDoesNotOverwrite(t *testing.T) {
 
 func TestAppendPreservesOrder(t *testing.T) {
 	dir := t.TempDir()
+	prepareTaskDir(t, dir, "demo")
 	w := NewEventWriter(dir)
 	events := []Event{
 		{Timestamp: "2026-10-16T05:00:00Z", Role: "Coder", Event: EventStart, ScopeKind: ScopeTask, ScopeID: "demo", SHA: "", Reason: ""},
@@ -262,6 +290,7 @@ func TestAppendPreservesOrder(t *testing.T) {
 
 func TestAppendProgramScope(t *testing.T) {
 	dir := t.TempDir()
+	prepareTaskDir(t, dir, "demo")
 	w := NewEventWriter(dir)
 	e := validEvent()
 	e.ScopeKind = ScopeProgram
@@ -279,6 +308,7 @@ func TestAppendProgramScope(t *testing.T) {
 
 func TestAppendReasonSpecialChars(t *testing.T) {
 	dir := t.TempDir()
+	prepareTaskDir(t, dir, "demo")
 	w := NewEventWriter(dir)
 	e := validEvent()
 	e.Event = EventBlocked
@@ -308,6 +338,7 @@ func TestAppendReasonSpecialChars(t *testing.T) {
 
 func TestAppendConcurrentSingleProcess(t *testing.T) {
 	dir := t.TempDir()
+	prepareTaskDir(t, dir, "demo")
 	w := NewEventWriter(dir)
 	const n = 64
 	var wg sync.WaitGroup
@@ -349,6 +380,7 @@ func TestAppendConcurrentSingleProcess(t *testing.T) {
 
 func TestAppendBlocksOnCrossProcessLock(t *testing.T) {
 	dir := t.TempDir()
+	prepareTaskDir(t, dir, "demo")
 	w := NewEventWriter(dir)
 	abs := filepath.Join(dir, ".agent", "tasks", "demo", "events.md")
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {

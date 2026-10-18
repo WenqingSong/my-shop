@@ -34,7 +34,7 @@ Owner 不是第 12 个 Agent，而是整个 Workflow 的 **Decision Authority + 
 
 共享流程、状态和文件规则见 `.agent/specs/AgentCollaborationSpecification.md`。各角色 Prompt 只说明本角色怎样工作，不重复整套工程制度。
 
-Workflow 状态模型（`state.yaml` schema、Evidence Snapshot / Neutral Tail、Gate、不变量、Global Registry 状态机、Handoff Contract）见 `.agent/specs/Architecture.md`。当前状态唯一机器权威源是 `.agent/tasks/<task-slug>/state.yaml`。
+Workflow 状态模型（`state.yaml` schema、Evidence Snapshot / Neutral Tail、Gate、不变量、Global Registry 状态机、Handoff Contract）见 `.agent/specs/Architecture.md`。当前状态唯一机器权威源是 Task 目录下的 `state.yaml`；本仓库 Task 位于 `.agent/tasks/<category>/<task-id>/`（项目本地分类扩展，见 `TaskLayoutExtension.md`），ID 仍是唯一身份。
 
 ## 2. Owner
 

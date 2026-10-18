@@ -182,9 +182,18 @@ func findRoot() string {
 	return wd
 }
 
-// resolveTaskDir 把位置参数解析为相对仓库根的任务目录；若指向 state.yaml 文件则取其父目录。
-// 相对路径按仓库根解析（而非当前工作目录）。
+// resolveTaskDir 把位置参数解析为相对仓库根的 Task/Intake 目录。
+//
+// 已存在的路径保持原语义（含 Intake 目录与 state.yaml 文件）；否则按 Task ID
+// 或旧简写 .agent/tasks/<id> 解析，兼容分类后的新布局。
 func resolveTaskDir(root, a string) (string, error) {
+	if rel, err := existingDirRel(root, a); err == nil {
+		return rel, nil
+	}
+	return workflow.ResolveTaskArg(root, a)
+}
+
+func existingDirRel(root, a string) (string, error) {
 	if !filepath.IsAbs(a) {
 		a = filepath.Join(root, a)
 	}
@@ -192,12 +201,16 @@ func resolveTaskDir(root, a string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if info, err := os.Stat(abs); err == nil && !info.IsDir() {
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
 		abs = filepath.Dir(abs)
 	}
 	rel, err := filepath.Rel(root, abs)
 	if err != nil || strings.HasPrefix(rel, "..") {
 		return "", fmt.Errorf("任务路径 %s 不在仓库根 %s 内", a, root)
 	}
-	return rel, nil
+	return filepath.ToSlash(rel), nil
 }
