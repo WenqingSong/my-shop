@@ -205,25 +205,21 @@ make test-race  # 竞态检测
 
 ## Task 管理（Agent Workflow）
 
-历史 Task 位于 `.agent/tasks/{active,completed,blocked,archive}/`（截至 2026-10-18 共 51 个，全部为 schema 2/3/0 或无 State 的历史格式）。分类目录是本项目在 Agent Workflow `4.3.0` 之上的本地扩展（规则见 [TaskLayoutExtension](.agent/specs/TaskLayoutExtension.md)），Task ID 仍是唯一身份。人类可读导航与兼容说明见 [Task 管理入口](docs/task-management/README.md)：
+当前框架为 Agent Workflow `3.2.0`（上游发布线 `refs/tags/v3.2.0`）。历史 Task 平铺在 `.agent/tasks/<task-id>/`（截至 2026-10-29 共 29 个可机器校验），22 个当前框架无法校验的历史任务隔离在 `.agent/tasks/_archive/`。人类可读导航与兼容说明见 [Task 管理入口](docs/task-management/README.md)：
 
-- [Task 目录](docs/task-management/task-catalog.md)：51 项的状态、领域、交付与证据。
+- [Task 目录](docs/task-management/task-catalog.md)：51 项的状态、领域、交付与证据（快照 2026-10-18）。
 - [Task 关系图](docs/task-management/task-relationships.md)：版本演进、前置依赖与业务关联。
 - [Owner 决策清单](docs/task-management/owner-decisions.md)：仍需人类决定的事项。
 
 ```bash
-.agent/bin/workflow-status index                 # 官方派生索引（非审批证据，含 category 列）
-.agent/bin/workflow-status inspect <task-id>     # 单任务诊断
-.agent/bin/workflow-status recovery-check <id>   # 恢复可行性（只读）
-.agent/bin/workflow-status layout list           # 按分类查任务（active/completed/blocked/archive）
-.agent/bin/workflow-status layout check          # 分类清单与磁盘布局一致性（只读）
-make check-task-docs                             # 校验导航、分类与索引一致
-make check-task-layout                           # 校验分类依据与迁移后布局（只读）
+GOWORK=off go -C .agent/engine build -o ../bin/workflow-check ./cmd/workflow-check
+.agent/bin/workflow-check route .agent/tasks/<task-id> --allow-legacy   # 路线事实自检
+.agent/bin/workflow-check gate <gate> .agent/tasks/<task-id>            # 五个 Gate
 ```
 
-新任务固定在 `.agent/tasks/active/<task-id>/`；旧简写 `.agent/tasks/<task-id>` 仍可按 ID 解析。
+新任务由 [TaskBuilderPrompt](.agent/roles/TaskBuilderPrompt.md) 以 `mode: create` 初始化到 `.agent/tasks/<task-slug>/task.md`；路线 `NORMAL` / `COMPLEX` / `ARCHITECT` 的判定见 [WorkflowRouteSelection](.agent/specs/WorkflowRouteSelection.md)。
 
-历史 schema 2/3 只读（T0）；继续需 Owner 按 T1 新建 schema 4 Task，当前版本不提供原地升级（T2）。
+29 个在用历史任务均为 schema 2/3 且未记录 `route` 事实（Engine 按 Legacy 处理）。框架替换改动了 `.agent/README.md` 等文件，落在历史任务的 `review.target` 之后，按 INV-4（Review Tail）判定为实质变化，因此这些任务的 `owner-gate-start` / `delivery-start` / `merge-ready` 复核已失效，只作为冻结事实保留；`_archive/` 下的任务不得调用 Gate。
 
 ## 部署
 

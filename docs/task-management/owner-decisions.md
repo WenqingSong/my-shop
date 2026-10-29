@@ -1,5 +1,9 @@
 # Owner 决策清单
 
+> **已过期（2026-10-29）**：本清单快照于 Agent Workflow `4.3.0`（含 Task 分类迁移）。
+> 框架已切换到 `3.2.0`，分类目录与相关 CLI 已移除，部分条目（如分类校验、`make check-task-docs`）
+> 不再适用；未决事项是否仍然有效需 Owner 重新确认。当前状态见 [README.md](README.md)。
+
 - 快照日期：2026-10-18（同日完成 Workflow 4.3.0 升级与 Task 分类迁移；第 6 项已落地）
 - 本清单只列**仍需 Owner 决定**的事项；文档、导航、索引核验等安全工作已直接完成。
 - 任何 Agent 不得代替 Owner 记录 `ACCEPTED`、合并交付分支、改写历史 SHA 或补写 State。

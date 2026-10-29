@@ -1,5 +1,10 @@
 # Task 目录（51 项）
 
+> **已过期（2026-10-29）**：本表快照于 Agent Workflow `4.3.0` 的 Task 分类布局。框架已切换到 `3.2.0`，
+> Task 目录已拍平为 `.agent/tasks/<task-id>/`，22 项移入 `.agent/tasks/_archive/`。
+> 下文的「分类目录」列（`active/completed/blocked/archive`）**不再对应物理路径**，仅作历史记录；
+> 当前快照与查询方式见 [README.md](README.md#4-当前快照2026-10-29)。
+
 - 快照日期：2026-10-18
 - 状态口径与权威边界见 [README.md](README.md#3-状态词汇本目录专用)。
 - 证据列中的路径均相对仓库根；完整命令输出见 [治理报告](../reports/2026-10-18-agent-task-governance.md)。

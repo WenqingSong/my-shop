@@ -1,7 +1,7 @@
 # 项目工程规范
 
 > 本文件是项目拥有的长期工程规范，2026-10-18 从仓库根 `AGENTS.md` 迁出，根 `AGENTS.md` 已删除。
-> Workflow 入口、Role、Spec 与协议统一由 `.agent/AGENTS.md` 提供，本文件不重复定义。
+> Workflow 入口、Role、Spec 与协议统一由 `.agent/README.md` 与 `.agent/specs/WorkflowAgentDirective.md` 提供，本文件不重复定义。
 > Workflow 运行时、Gate、CLI 不解析本文件；它约束人类与 Agent 的工程判断，属于项目 policy。
 
 本文档保留长期适用于多数任务、违反后代价明显的工程规则。当前业务目标和验收标准写入 `task.md`；关键设计写入经 Owner 确认的 `contract.md`；项目级长期设计事实（架构、数据模型、状态机、模块边界、不变量、公开协议等）沉淀在 `docs/design/*`，其职责、同步时机与 `CLEAN` 门槛由 `.agent/specs/*` 与 `.agent/roles/*` 定义；协作流程见 `.agent/specs/`。
