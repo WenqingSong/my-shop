@@ -13,8 +13,10 @@ import (
 // shared develop 的机器级保护由外部 branch protection 承担。
 type Git interface {
 	// DiffNameOnly 返回 base 到工作区（含已提交与未提交、不含未跟踪文件）的变更相对路径。
+	// 禁用 rename detection：rename 会被折叠为单一目标路径，可能把实质变更伪装成 Neutral Artifact。
 	DiffNameOnly(base string) ([]string, error)
 	// DiffNameOnlyRange 返回 from..to 已提交区间内变更的相对路径。
+	// 同样禁用 rename detection，rename 会拆成「源路径删除 + 目标路径新增」两条独立记录。
 	DiffNameOnlyRange(from, to string) ([]string, error)
 	// UntrackedFiles 返回工作区未跟踪文件（相对路径，已排除 .gitignore）。
 	UntrackedFiles() ([]string, error)
@@ -22,6 +24,10 @@ type Git interface {
 	ShowFile(ref, path string) (string, error)
 	// PathExistsAt 报告 path 在 ref 上是否存在。
 	PathExistsAt(ref, path string) (bool, error)
+	// CommitTouchesPath 报告 sha 这个 commit 自身是否改写（新增/修改/删除）了 path。
+	// 它区分「该快照就是这份证据」与「该快照只是继承了更早的历史文件」，
+	// 用于路线与 Review 证据形态的绑定，不用于判断文件内容是否合法。
+	CommitTouchesPath(sha, path string) (bool, error)
 	// RevParse 返回 ref 解析为 commit 后的完整 SHA。
 	RevParse(ref string) (string, error)
 	// CommitExists 报告 sha 是否为仓库中真实存在的 commit 对象。
@@ -33,10 +39,6 @@ type Git interface {
 	StatusPorcelain() ([]string, error)
 	// CurrentBranch 返回当前分支名；detached HEAD 时返回 "HEAD"。
 	CurrentBranch() (string, error)
-	// BranchExists 报告 name 分支（本地 refs/heads 或远端 refs/remotes/origin）是否存在。
-	BranchExists(name string) (bool, error)
-	// WorktreeExists 报告当前仓库是否存在 checkout 到 branch 的 worktree（含主 worktree）。
-	WorktreeExists(branch string) (bool, error)
 }
 
 // ExecGit 是基于 os/exec 调用 git 的只读实现，工作在指定仓库根目录。
@@ -58,8 +60,21 @@ func (g *ExecGit) run(args ...string) (string, error) {
 	return string(out), nil
 }
 
+// diffNoRenames 是 review / delivery tail 判定必须使用的 diff 选项。
+//
+// Git 默认开启 rename detection，会把 «src/keep.go → .agent/tasks/<t>/findings.md» 折叠成
+// 一条目标路径记录，导致生产代码被移走却在 tail 中「不可见」，
+// 从而错误满足 Neutral 白名单（默认允许）而放过实质变更。
+// 禁用 rename detection 后，同一次 rename 会同时暴露源路径与目标路径，
+// 由 default-deny 的 substantive 判定分别处理两个方向：
+//   - substantive → neutral：源路径 .go 判 substantive，拒绝；
+//   - neutral → substantive：目标路径判 substantive，拒绝。
+//
+// 这对「正常 Git Diff 语义」没有破坏：变更路径集合只会更完整，不会漏报。
+const diffNoRenames = "--no-renames"
+
 func (g *ExecGit) DiffNameOnly(base string) ([]string, error) {
-	out, err := g.run("diff", "--name-only", base)
+	out, err := g.run("diff", diffNoRenames, "--name-only", base)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +82,7 @@ func (g *ExecGit) DiffNameOnly(base string) ([]string, error) {
 }
 
 func (g *ExecGit) DiffNameOnlyRange(from, to string) ([]string, error) {
-	out, err := g.run("diff", "--name-only", from+".."+to)
+	out, err := g.run("diff", diffNoRenames, "--name-only", from+".."+to)
 	if err != nil {
 		return nil, err
 	}
@@ -106,6 +121,27 @@ func (g *ExecGit) PathExistsAt(ref, path string) (bool, error) {
 		return false, fmt.Errorf("git cat-file -e %s:%s: %w", ref, path, err)
 	}
 	return true, nil
+}
+
+// CommitTouchesPath 用 diff-tree 读取单个 commit 的变更路径。
+//
+// 使用 -m 保证 merge commit 也会与每个父提交比较（Evidence Commit 通常不是 merge，
+// 但这里不假设历史形状）。--no-renames 与其它 diff 判定保持一致：rename 会拆成
+// 源路径删除与目标路径新增两条记录，不会漏报。
+func (g *ExecGit) CommitTouchesPath(sha, path string) (bool, error) {
+	out, err := g.run(
+		"diff-tree", "--no-commit-id", "--no-renames", "--name-only", "-r", "-m", "--root",
+		sha, "--", path,
+	)
+	if err != nil {
+		return false, err
+	}
+	for _, line := range splitLines(out) {
+		if line == path {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (g *ExecGit) RevParse(ref string) (string, error) {
@@ -163,28 +199,6 @@ func (g *ExecGit) CurrentBranch() (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(out), nil
-}
-
-func (g *ExecGit) BranchExists(name string) (bool, error) {
-	out, err := g.run("for-each-ref", "--format=%(refname)", "refs/heads/"+name, "refs/remotes/origin/"+name)
-	if err != nil {
-		return false, err
-	}
-	return strings.TrimSpace(out) != "", nil
-}
-
-func (g *ExecGit) WorktreeExists(branch string) (bool, error) {
-	out, err := g.run("worktree", "list", "--porcelain")
-	if err != nil {
-		return false, err
-	}
-	want := "branch refs/heads/" + branch
-	for _, line := range splitLines(out) {
-		if line == want {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 func splitLines(s string) []string {

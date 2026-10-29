@@ -3,13 +3,19 @@ package workflow
 import (
 	"fmt"
 	"path/filepath"
+	"regexp"
+	"strings"
 )
 
 // 本文件实现 Workflow V2 的五个显式 Gate 及其共享判定。
 //
 // Gate 是 Handoff 前的机械出站检查，Validator 只读。
-// 共享判定围绕三个 Evidence Binding（Contract / Review / Delivery）+ 两个横切不变量
-// （resourcesAuthorized / ownerAcceptanceValid）+ handoffReady。
+// 共享判定围绕三个 Evidence Binding（Contract / Review / Delivery）+ 三个横切不变量
+// （resourcesAuthorized / ownerAcceptanceValid / routeValid）+ handoffReady。
+//
+// routeValid 自 V3.2.0 起在五个 Gate 上统一生效：它校验 state.route（路线事实）
+// 与 Contract、task.md Complexity、Contract Approval 证据和 Review 证据形态是否
+// 自洽；route 缺省的历史任务不做任何推断（见 route.go）。
 
 // failResult 构造一个单 issue 的 FAIL 结果。
 func failResult(task, check, actual, expected, reason string) Result {
@@ -25,6 +31,21 @@ func failResult(task, check, actual, expected, reason string) Result {
 	}
 }
 
+// blockedResult 构造 blocked.active 拦截结果（E-3）。
+// Actual / Expected 在五个 Gate 上完全一致，只有 Reason 描述各自被禁止的动作。
+func blockedResult(taskSlug, check, reason string) Result {
+	return failResult(taskSlug, check, "blocked.active=true", "false", reason)
+}
+
+// blockedActive 校验横切不变量「blocked.active=true 时任何 Gate 都不得 PASS」。
+// 五个 Gate 统一在 schema 校验之后立即执行，避免先运行其他昂贵检查掩盖阻塞事实。
+func blockedActive(taskSlug string, s State, check, reason string) Result {
+	if s.Blocked.Active {
+		return blockedResult(taskSlug, check, reason)
+	}
+	return Result{Status: StatusPass}
+}
+
 // GateCoderStart 确认 Coder 已经被授权开始实现（INV-2）。
 func (v *Validator) GateCoderStart(taskDir string) Result {
 	taskSlug := filepath.Base(filepath.Clean(taskDir))
@@ -35,13 +56,13 @@ func (v *Validator) GateCoderStart(taskDir string) Result {
 	if issues := schemaValidation(s); len(issues) > 0 {
 		return Result{Status: StatusFail, Issues: issues}
 	}
-	if s.Blocked.Active {
-		return failResult(taskSlug, "Coder Start", "blocked.active=true", "false", "任务被阻塞，不得开始实现")
-	}
-	if res := v.handoffReady(); res.Status != StatusPass {
+	if res := blockedActive(taskSlug, s, "Coder Start", "任务被阻塞，不得开始实现"); res.Status != StatusPass {
 		return res
 	}
-	if res := v.coderEntryContract(taskSlug, s); res.Status != StatusPass {
+	if res := v.routeValid(taskSlug, s); res.Status != StatusPass {
+		return res
+	}
+	if res := v.handoffReady(); res.Status != StatusPass {
 		return res
 	}
 	if res := v.contractValid(taskSlug, s); res.Status != StatusPass {
@@ -51,45 +72,6 @@ func (v *Validator) GateCoderStart(taskDir string) Result {
 		return res
 	}
 	return Result{Status: StatusPass}
-}
-
-// coderEntryContract 校验 V4 Task 工作流模式与 Contract 状态的一致性（Coder 入口校验，Task 08）。
-//
-//   - NORMAL：无 Analyst 环节，contract.status 必须为 NOT_REQUIRED；
-//   - COMPLEX：必须经 Analyst → Owner Contract Approval，contract.status 必须为 APPROVED，
-//     未获得批准 Contract 时不得进入 Coder；
-//   - DESIGN：Contract 入口由 Phase 05 独立实现，本 Gate 不额外约束。
-//
-// V2/V3（无 task_type）不参与此校验，保持旧行为不回归。
-func (v *Validator) coderEntryContract(taskSlug string, s State) Result {
-	if s.SchemaVersion != SchemaV4 {
-		return Result{Status: StatusPass}
-	}
-	switch s.TaskType {
-	case TaskTypeNormal:
-		if s.Contract.Status != ContractNotRequired {
-			return failResult(taskSlug, "Coder Entry (Task Type)",
-				fmt.Sprintf("task_type=NORMAL contract.status=%s", s.Contract.Status),
-				"NOT_REQUIRED",
-				"NORMAL 任务无 Analyst 环节，Contract 必须为 NOT_REQUIRED")
-		}
-		return Result{Status: StatusPass}
-	case TaskTypeComplex:
-		if s.Contract.Status != ContractApproved {
-			return failResult(taskSlug, "Coder Entry (Task Type)",
-				fmt.Sprintf("task_type=COMPLEX contract.status=%s", s.Contract.Status),
-				"APPROVED",
-				"COMPLEX 任务必须在 Owner 批准 Contract 后才能进入 Coder")
-		}
-		return Result{Status: StatusPass}
-	case TaskTypeDesign:
-		return Result{Status: StatusPass}
-	default:
-		return failResult(taskSlug, "Coder Entry (Task Type)",
-			fmt.Sprintf("task_type=%s", s.TaskType),
-			"NORMAL | COMPLEX | DESIGN",
-			"非法 task_type")
-	}
 }
 
 // GateCleanerStart 确认 Cleaner 拿到的是可复核、已发布到 feature remote 的 implementation snapshot。
@@ -102,10 +84,10 @@ func (v *Validator) GateCleanerStart(taskDir string) Result {
 	if issues := schemaValidation(s); len(issues) > 0 {
 		return Result{Status: StatusFail, Issues: issues}
 	}
-	if s.Blocked.Active {
-		return failResult(taskSlug, "Cleaner Start", "blocked.active=true", "false", "任务被阻塞，不得进入 Cleaner")
+	if res := blockedActive(taskSlug, s, "Cleaner Start", "任务被阻塞，不得开始清理复核"); res.Status != StatusPass {
+		return res
 	}
-	if res := v.contractValid(taskSlug, s); res.Status != StatusPass {
+	if res := v.routeValid(taskSlug, s); res.Status != StatusPass {
 		return res
 	}
 	if s.Review.Status != ReviewPending {
@@ -121,11 +103,9 @@ func (v *Validator) GateCleanerStart(taskDir string) Result {
 	if err != nil {
 		return Result{Status: StatusError, Error: err.Error()}
 	}
-	if ok, err := v.Git.IsAncestor(s.Review.Target, head); err != nil {
-		return Result{Status: StatusError, Error: fmt.Sprintf("is-ancestor %s HEAD: %v", s.Review.Target, err)}
-	} else if !ok {
-		return failResult(taskSlug, "Cleaner Start", s.Review.Target, "当前 feature HEAD 的祖先", "review.target 不在当前 feature 历史中")
-	}
+	// review.target 的祖先校验已下沉到 reviewTailValid（E-1），
+	// owner-gate-start / delivery-start / merge-ready 通过 cleanValidity 复用同一实现，
+	// 保证四个 Gate 的 Review Target 语义完全一致。
 	if res := v.reviewTailValid(taskSlug, s, head); res.Status != StatusPass {
 		return res
 	}
@@ -142,10 +122,10 @@ func (v *Validator) GateOwnerGateStart(taskDir string) Result {
 	if issues := schemaValidation(s); len(issues) > 0 {
 		return Result{Status: StatusFail, Issues: issues}
 	}
-	if s.Blocked.Active {
-		return failResult(taskSlug, "Owner Gate Start", "blocked.active=true", "false", "任务被阻塞，不得请求 Owner 决策")
+	if res := blockedActive(taskSlug, s, "Owner Gate Start", "任务被阻塞，不得请求 Owner 决策"); res.Status != StatusPass {
+		return res
 	}
-	if res := v.contractValid(taskSlug, s); res.Status != StatusPass {
+	if res := v.routeValid(taskSlug, s); res.Status != StatusPass {
 		return res
 	}
 	if res := v.handoffReady(); res.Status != StatusPass {
@@ -171,6 +151,12 @@ func (v *Validator) GateDeliveryStart(taskDir string) Result {
 	if issues := schemaValidation(s); len(issues) > 0 {
 		return Result{Status: StatusFail, Issues: issues}
 	}
+	if res := blockedActive(taskSlug, s, "Delivery Start", "任务被阻塞，不得开始验收"); res.Status != StatusPass {
+		return res
+	}
+	if res := v.routeValid(taskSlug, s); res.Status != StatusPass {
+		return res
+	}
 	if res := v.contractValid(taskSlug, s); res.Status != StatusPass {
 		return res
 	}
@@ -187,11 +173,16 @@ func (v *Validator) GateDeliveryStart(taskDir string) Result {
 	if s.Owner.Status != OwnerAccepted {
 		return failResult(taskSlug, "Delivery Start", fmt.Sprintf("owner.status=%s", s.Owner.Status), "ACCEPTED", "Deliverer 只能验收 Owner 已接受的实现")
 	}
-	if s.Owner.ReviewTarget != s.Review.Target {
-		return failResult(taskSlug, "Delivery Start", fmt.Sprintf("owner.review_target=%s", s.Owner.ReviewTarget), s.Review.Target, "Owner Acceptance 必须绑定当前 review.target")
+	reviewTarget, res := v.resolveImmutableCommit(taskSlug, "Delivery Start", "review.target", s.Review.Target)
+	if res.Status != StatusPass {
+		return res
 	}
-	if s.Blocked.Active {
-		return failResult(taskSlug, "Delivery Start", "blocked.active=true", "false", "任务被阻塞，不得开始验收")
+	ownerTarget, res := v.resolveImmutableCommit(taskSlug, "Delivery Start", "owner.review_target", s.Owner.ReviewTarget)
+	if res.Status != StatusPass {
+		return res
+	}
+	if ownerTarget != reviewTarget {
+		return failResult(taskSlug, "Delivery Start", fmt.Sprintf("owner.review_target=%s", s.Owner.ReviewTarget), reviewTarget, "Owner Acceptance 必须绑定当前 review.target")
 	}
 	if res := v.handoffReady(); res.Status != StatusPass {
 		return res
@@ -209,8 +200,11 @@ func (v *Validator) GateMergeReady(taskDir string) Result {
 	if issues := schemaValidation(s); len(issues) > 0 {
 		return Result{Status: StatusFail, Issues: issues}
 	}
-	if s.Blocked.Active {
-		return failResult(taskSlug, "Merge Ready", "blocked.active=true", "false", "任务被阻塞，不得 Merge Ready")
+	if res := blockedActive(taskSlug, s, "Merge Ready", "任务被阻塞，不得 Merge Ready"); res.Status != StatusPass {
+		return res
+	}
+	if res := v.routeValid(taskSlug, s); res.Status != StatusPass {
+		return res
 	}
 	if res := v.contractValid(taskSlug, s); res.Status != StatusPass {
 		return res
@@ -231,8 +225,16 @@ func (v *Validator) GateMergeReady(taskDir string) Result {
 	if s.Delivery.Status != DeliveryPass {
 		return failResult(taskSlug, "Merge Ready", fmt.Sprintf("delivery.status=%s", s.Delivery.Status), "PASS", "merge-ready 要求 delivery PASS")
 	}
-	if s.Delivery.ReviewTarget != s.Review.Target {
-		return failResult(taskSlug, "Merge Ready", fmt.Sprintf("delivery.review_target=%s", s.Delivery.ReviewTarget), s.Review.Target, "delivery 必须绑定当前 review.target")
+	reviewTarget, res := v.resolveImmutableCommit(taskSlug, "Merge Ready", "review.target", s.Review.Target)
+	if res.Status != StatusPass {
+		return res
+	}
+	deliveryTarget, res := v.resolveImmutableCommit(taskSlug, "Merge Ready", "delivery.review_target", s.Delivery.ReviewTarget)
+	if res.Status != StatusPass {
+		return res
+	}
+	if deliveryTarget != reviewTarget {
+		return failResult(taskSlug, "Merge Ready", fmt.Sprintf("delivery.review_target=%s", s.Delivery.ReviewTarget), reviewTarget, "delivery 必须绑定当前 review.target")
 	}
 	if s.Delivery.FeatureHead == "" {
 		return failResult(taskSlug, "Merge Ready", "delivery.feature_head 为空", "<evidence-commit-sha>", "delivery 必须绑定实际验证的 feature_head")
@@ -270,50 +272,92 @@ func (v *Validator) currentRemoteFeatureHead() (string, error) {
 	return v.Git.RevParse("origin/" + branch)
 }
 
+// fullSHAHexLen 是 Git 完整 Commit SHA 的十六进制长度。
+const fullSHAHexLen = 40
+
+// commitRefPattern 约束 Evidence 字段的 Commit 字面值：只允许 7~40 位十六进制 SHA 缩写。
+//
+// 这直接排除 HEAD、分支名、可移动 Tag、remote-tracking 引用等「可变引用」：
+// 它们今天指向 C1，明天可以指向任何 Commit，作为 Evidence 不可信。
+// 只接受十六进制形态同时也消除了命令注入面（>= 引用字符串不可能匹配该 pattern）。
+var commitRefPattern = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
+
+// validImmutableCommitLiteral 报告字面值是否具备不可变 Commit 引用的形态。
+func validImmutableCommitLiteral(literal string) bool {
+	return commitRefPattern.MatchString(literal)
+}
+
+// resolveImmutableCommit 把 Evidence 字段的 Commit 字面值解析为不可变完整 SHA（E-2）。
+//
+// 统一算法（fail-closed）：
+//  1. 字面值必须匹配 commitRefPattern（拒绝任何可变引用与非法形态）；
+//  2. 字面值必须能唯一解析为真实 Commit；
+//  3. 字面值必须是解析结果的前缀（小写化比较），锁死「缩写 → 具体 Commit」的唯一映射；
+//  4. 返回完整 SHA，供祖先判断与等值比较统一使用，
+//     避免历史合法短 SHA 与完整 SHA 因裸字符串比较被误拒绝。
+//
+// 无法解析 / 未通过前述任一环节的引用都不会被静默放过。
+func (v *Validator) resolveImmutableCommit(taskSlug, check, field, literal string) (string, Result) {
+	if !validImmutableCommitLiteral(literal) {
+		return "", failResult(taskSlug, check, fmt.Sprintf("%s=%q", field, literal), "7~40 位十六进制 SHA 缩写",
+			field+" 必须绑定不可变 Evidence Commit SHA，不接受 HEAD / 分支名 / Tag 等可变引用")
+	}
+	exists, err := v.Git.CommitExists(literal)
+	if err != nil {
+		return "", Result{Status: StatusError, Error: fmt.Sprintf("check %s %s: %v", field, literal, err)}
+	}
+	if !exists {
+		return "", failResult(taskSlug, check, fmt.Sprintf("%s=%q", field, literal), "真实 commit",
+			field+" 不是真实 commit")
+	}
+	full, err := v.Git.RevParse(literal)
+	if err != nil {
+		return "", Result{Status: StatusError, Error: fmt.Sprintf("rev-parse %s %s: %v", field, literal, err)}
+	}
+	full = strings.TrimSpace(full)
+	if len(full) != fullSHAHexLen {
+		return "", Result{Status: StatusError, Error: fmt.Sprintf("rev-parse %s %s: 非预期的输出 %q", field, literal, full)}
+	}
+	if !strings.HasPrefix(full, strings.ToLower(literal)) {
+		return "", failResult(taskSlug, check, fmt.Sprintf("%s=%q 解析结果 %s", field, literal, full), "字面值必须是所解析 commit 的十六进制前缀",
+			field+" 指向的不是字面值所声明的 commit（引用被移动或缩写有歧义）")
+	}
+	return full, Result{Status: StatusPass}
+}
+
 // contractValid 校验 Contract 授权（INV-2）：APPROVED 需绑定真实 Evidence Commit，
 // 且 target 中的 contract.md 与当前 contract.md 完全一致；NOT_REQUIRED 直接通过。
 func (v *Validator) contractValid(taskSlug string, s State) Result {
 	switch s.Contract.Status {
 	case ContractNotRequired:
-		if res := v.contractRevisionValid(taskSlug, s); res.Status != StatusPass {
-			return res
-		}
 		return Result{Status: StatusPass}
 	case ContractApproved:
 		if s.Contract.Target == "" {
 			return failResult(taskSlug, "Contract (INV-2)", "contract.target 为空", "<evidence-commit-sha>", "APPROVED 必须绑定批准版本 contract.md 的 Evidence Commit")
 		}
-		if ok, err := v.Git.CommitExists(s.Contract.Target); err != nil {
-			return Result{Status: StatusError, Error: fmt.Sprintf("check contract.target %s: %v", s.Contract.Target, err)}
-		} else if !ok {
-			return failResult(taskSlug, "Contract (INV-2)", s.Contract.Target, "真实 commit", "contract.target 不是真实 commit")
+		target, res := v.resolveImmutableCommit(taskSlug, "Contract (INV-2)", "contract.target", s.Contract.Target)
+		if res.Status != StatusPass {
+			return res
 		}
 		head, err := v.featureHead()
 		if err != nil {
 			return Result{Status: StatusError, Error: err.Error()}
 		}
-		if ok, err := v.Git.IsAncestor(s.Contract.Target, head); err != nil {
-			return Result{Status: StatusError, Error: fmt.Sprintf("is-ancestor %s HEAD: %v", s.Contract.Target, err)}
+		if ok, err := v.Git.IsAncestor(target, head); err != nil {
+			return Result{Status: StatusError, Error: fmt.Sprintf("is-ancestor %s HEAD: %v", target, err)}
 		} else if !ok {
-			return failResult(taskSlug, "Contract (INV-2)", s.Contract.Target, "当前 feature HEAD 的祖先", "contract.target 不在当前 feature 历史中")
+			return failResult(taskSlug, "Contract (INV-2)", target, "当前 feature HEAD 的祖先", "contract.target 不在当前 feature 历史中")
 		}
-		contractRel, err := contractPath(v.Root, taskSlug)
+		approvedContract, err := v.Git.ShowFile(target, contractPath(taskSlug))
 		if err != nil {
-			return Result{Status: StatusError, Error: err.Error()}
+			return Result{Status: StatusError, Error: fmt.Sprintf("show contract.md@%s: %v", target, err)}
 		}
-		approvedContract, err := v.Git.ShowFile(s.Contract.Target, contractRel)
-		if err != nil {
-			return Result{Status: StatusError, Error: fmt.Sprintf("show contract.md@%s: %v", s.Contract.Target, err)}
-		}
-		currentContract, err := v.readWorkingTree(contractRel)
+		currentContract, err := v.readWorkingTree(contractPath(taskSlug))
 		if err != nil {
 			return Result{Status: StatusError, Error: fmt.Sprintf("read working tree contract.md: %v", err)}
 		}
 		if approvedContract != currentContract {
 			return failResult(taskSlug, "Contract (INV-2)", "contract.md 内容已偏离 approved target", "与 contract.target 一致", "Contract Approval 已失效")
-		}
-		if res := v.contractRevisionValid(taskSlug, s); res.Status != StatusPass {
-			return res
 		}
 		return Result{Status: StatusPass}
 	default:
@@ -322,26 +366,34 @@ func (v *Validator) contractValid(taskSlug string, s State) Result {
 }
 
 // reviewTailValid 校验 review.target..featureHead 之间只允许当前 task 的 review-neutral artifacts（INV-4）。
-// 它不识别所谓「Evidence Commit 类型」，只机械检查：target 为真实 commit + tail 满足白名单。
+// 它不识别所谓「Evidence Commit 类型」，只机械检查三条：
+//  1. review.target 是不可变 Evidence Commit（E-2）；
+//  2. review.target 是当前 feature HEAD 的祖先或同一 Commit（E-1）；
+//  3. tail 满足 review-neutral 白名单。
+//
+// 第 2 条是 CLEAN 有效性的必要前提：Tree Diff 为空只说明两棵树相同，
+// 不能证明 target 属于当前 feature 历史；被历史改写孤儿化的 target
+// 即便 Tree 完全一致，也必须判 CLEAN 无效。
 func (v *Validator) reviewTailValid(taskSlug string, s State, featureHead string) Result {
-	taskDirs, err := TaskDirCandidatesRel(v.Root, taskSlug)
-	if err != nil {
-		return Result{Status: StatusError, Error: err.Error()}
-	}
 	if s.Review.Target == "" {
 		return failResult(taskSlug, "Review Tail (INV-4)", "review.target 为空", "<evidence-commit-sha>", "review.target 必须绑定实现 Evidence Commit")
 	}
-	if ok, err := v.Git.CommitExists(s.Review.Target); err != nil {
-		return Result{Status: StatusError, Error: fmt.Sprintf("check review.target %s: %v", s.Review.Target, err)}
-	} else if !ok {
-		return failResult(taskSlug, "Review Tail (INV-4)", s.Review.Target, "真实 commit", "review.target 不是真实 commit")
+	target, res := v.resolveImmutableCommit(taskSlug, "Review Tail (INV-4)", "review.target", s.Review.Target)
+	if res.Status != StatusPass {
+		return res
 	}
-	changed, err := v.Git.DiffNameOnlyRange(s.Review.Target, featureHead)
+	if ok, err := v.Git.IsAncestor(target, featureHead); err != nil {
+		return Result{Status: StatusError, Error: fmt.Sprintf("is-ancestor %s HEAD: %v", target, err)}
+	} else if !ok {
+		return failResult(taskSlug, "Review Tail (INV-4)", target, "当前 feature HEAD 的祖先或同一 commit",
+			"review.target 不在当前 feature 历史中，CLEAN 无法由此推导")
+	}
+	changed, err := v.Git.DiffNameOnlyRange(target, featureHead)
 	if err != nil {
-		return Result{Status: StatusError, Error: fmt.Sprintf("diff %s..%s: %v", s.Review.Target, featureHead, err)}
+		return Result{Status: StatusError, Error: fmt.Sprintf("diff %s..%s: %v", target, featureHead, err)}
 	}
 	for _, p := range changed {
-		if isReviewSubstantial(taskDirs, p) {
+		if isReviewSubstantial(taskSlug, p) {
 			return failResult(taskSlug, "Review Tail (INV-4)", fmt.Sprintf("%s 在 review.target 之后发生变化", p), "仅当前 task 的 review-neutral artifacts", "出现未覆盖 CLEAN 的实质变化")
 		}
 	}
@@ -364,8 +416,17 @@ func (v *Validator) ownerAcceptanceValid(taskSlug string, s State, featureHead s
 	if s.Review.Status != ReviewClean {
 		return failResult(taskSlug, "Owner Acceptance (INV-5)", fmt.Sprintf("review.status=%s", s.Review.Status), "CLEAN", "Owner ACCEPTED 要求 review CLEAN")
 	}
-	if s.Owner.ReviewTarget != s.Review.Target {
-		return failResult(taskSlug, "Owner Acceptance (INV-5)", fmt.Sprintf("owner.review_target=%s", s.Owner.ReviewTarget), s.Review.Target, "Owner Acceptance 必须绑定当前 review.target")
+	reviewTarget, res := v.resolveImmutableCommit(taskSlug, "Owner Acceptance (INV-5)", "review.target", s.Review.Target)
+	if res.Status != StatusPass {
+		return res
+	}
+	ownerTarget, res := v.resolveImmutableCommit(taskSlug, "Owner Acceptance (INV-5)", "owner.review_target", s.Owner.ReviewTarget)
+	if res.Status != StatusPass {
+		return res
+	}
+	// 完整 SHA 等值比较：历史短 SHA 与完整 SHA 若指向同一 Commit 必须判为同一绑定。
+	if ownerTarget != reviewTarget {
+		return failResult(taskSlug, "Owner Acceptance (INV-5)", fmt.Sprintf("owner.review_target=%s", s.Owner.ReviewTarget), reviewTarget, "Owner Acceptance 必须绑定当前 review.target")
 	}
 	return v.cleanValidity(taskSlug, s, featureHead)
 }
@@ -375,29 +436,34 @@ func (v *Validator) ownerAcceptanceValid(taskSlug string, s State, featureHead s
 //   - feature_head..remote HEAD 只允许当前 task 的 delivery-neutral artifacts；
 //   - 当前 origin/<integration_branch> == delivery.develop_base。
 func (v *Validator) deliveryFreshness(taskSlug string, s State, remoteFeatureHead, developHead string) Result {
-	taskDirs, err := TaskDirCandidatesRel(v.Root, taskSlug)
-	if err != nil {
-		return Result{Status: StatusError, Error: err.Error()}
-	}
 	if s.Delivery.FeatureHead == "" {
 		return failResult(taskSlug, "Delivery Freshness (INV-6)", "delivery.feature_head 为空", "<evidence-commit-sha>", "delivery PASS 必须绑定 feature_head")
 	}
-	if ok, err := v.Git.IsAncestor(s.Delivery.FeatureHead, remoteFeatureHead); err != nil {
-		return Result{Status: StatusError, Error: fmt.Sprintf("is-ancestor %s %s: %v", s.Delivery.FeatureHead, remoteFeatureHead, err)}
-	} else if !ok {
-		return failResult(taskSlug, "Delivery Freshness (INV-6)", s.Delivery.FeatureHead, "当前 remote feature HEAD 的祖先", "delivery.feature_head 不在当前 remote feature 历史中")
+	featureHead, res := v.resolveImmutableCommit(taskSlug, "Delivery Freshness (INV-6)", "delivery.feature_head", s.Delivery.FeatureHead)
+	if res.Status != StatusPass {
+		return res
 	}
-	changed, err := v.Git.DiffNameOnlyRange(s.Delivery.FeatureHead, remoteFeatureHead)
+	if ok, err := v.Git.IsAncestor(featureHead, remoteFeatureHead); err != nil {
+		return Result{Status: StatusError, Error: fmt.Sprintf("is-ancestor %s %s: %v", featureHead, remoteFeatureHead, err)}
+	} else if !ok {
+		return failResult(taskSlug, "Delivery Freshness (INV-6)", featureHead, "当前 remote feature HEAD 的祖先", "delivery.feature_head 不在当前 remote feature 历史中")
+	}
+	changed, err := v.Git.DiffNameOnlyRange(featureHead, remoteFeatureHead)
 	if err != nil {
-		return Result{Status: StatusError, Error: fmt.Sprintf("diff %s..%s: %v", s.Delivery.FeatureHead, remoteFeatureHead, err)}
+		return Result{Status: StatusError, Error: fmt.Sprintf("diff %s..%s: %v", featureHead, remoteFeatureHead, err)}
 	}
 	for _, p := range changed {
-		if isDeliverySubstantial(taskDirs, p) {
+		if isDeliverySubstantial(taskSlug, p) {
 			return failResult(taskSlug, "Delivery Freshness (INV-6)", fmt.Sprintf("%s 在 feature_head 之后发生变化", p), "仅当前 task 的 delivery-neutral artifacts", "Delivery PASS 后出现非 delivery-neutral 变化")
 		}
 	}
-	if developHead != s.Delivery.DevelopBase {
-		return failResult(taskSlug, "Delivery Freshness (INV-6)", fmt.Sprintf("%s=%s", v.developRef(), developHead), s.Delivery.DevelopBase, "develop 已前进，旧 Delivery PASS 不再 Merge Ready")
+	developBase, res := v.resolveImmutableCommit(taskSlug, "Delivery Freshness (INV-6)", "delivery.develop_base", s.Delivery.DevelopBase)
+	if res.Status != StatusPass {
+		return res
+	}
+	// 集成分支基线不变性：完整 SHA 等值比较。develop 前进（含 rebase 后的新 SHA）必须拒绝旧 Delivery Evidence。
+	if developHead != developBase {
+		return failResult(taskSlug, "Delivery Freshness (INV-6)", fmt.Sprintf("%s=%s", v.developRef(), developHead), developBase, "develop 已前进，旧 Delivery PASS 不再 Merge Ready")
 	}
 	return Result{Status: StatusPass}
 }

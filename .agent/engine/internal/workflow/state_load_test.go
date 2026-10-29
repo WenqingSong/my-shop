@@ -243,11 +243,10 @@ resources:
 }
 
 // TestStateUnsupportedSchemaVersion 覆盖不支持的 schema version → ERROR。
-// schema_version: 4 自 V4 起受支持，不再属于「不支持」；其缺失必填字段的校验见 state_v4_test.go。
 func TestStateUnsupportedSchemaVersion(t *testing.T) {
 	for _, yml := range []string{
+		"schema_version: 4\ntask_id: demo\n",
 		"schema_version: 1\ntask_id: demo\nphase: NEW\n",
-		"schema_version: 5\ntask_id: demo\n",
 		"task_id: demo\n",
 	} {
 		mustParseError(t, yml, "schema_version")

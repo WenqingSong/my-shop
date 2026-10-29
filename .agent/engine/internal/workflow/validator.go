@@ -18,8 +18,8 @@ func (v *Validator) developRef() string {
 	return "origin/" + v.Config.Git.IntegrationBranch
 }
 
-// loadStateFile 读取并解析 taskDir/state.yaml，支持 schema v4 / v3（generic）与 v2（legacy 兼容）。
-// 非 V2/V3/V4 任务（含 Legacy V1）与 schema 错误返回 ERROR（exit 2）。
+// loadStateFile 读取并解析 taskDir/state.yaml，支持 schema v3（generic）与 v2（legacy 兼容）。
+// 非 V2/V3 任务（含 Legacy V1）与 schema 错误返回 ERROR（exit 2）。
 func (v *Validator) loadStateFile(taskDir string) (State, Result) {
 	statePath := filepath.Join(v.Root, taskDir, "state.yaml")
 	raw, err := os.ReadFile(statePath)
@@ -48,6 +48,17 @@ func schemaValidation(s State) []Issue {
 			Actual:   "task_id 字段为空",
 			Expected: "<task-slug>",
 			Reason:   "state.yaml 必须包含 task_id",
+		})
+	}
+	// route 是可选的路线事实：省略表示历史任务（Legacy），不做任何推断；
+	// 一旦出现，就必须是合法枚举，避免拼写错误被当成「另一条路线」。
+	if s.Route != "" && !ValidRoute(s.Route) {
+		issues = append(issues, Issue{
+			Task:     task,
+			Check:    "route enum",
+			Actual:   s.Route,
+			Expected: "NORMAL | COMPLEX | ARCHITECT",
+			Reason:   "route 取值非法",
 		})
 	}
 	if !ValidContractStatus(s.Contract.Status) {
@@ -123,19 +134,22 @@ func (v *Validator) loadDevelopRegistries(s State) (map[string][]RegistryEntry, 
 	return regs, nil
 }
 
-// taskArtifactPath 返回当前 Task 实际目录下的固定文件相对路径。
-//
-// Task 可能位于旧平铺布局或分类目录，路径一律由 TaskDirRel 解析，
-// 不允许调用方自行拼接 .agent/tasks/<id>。
-func taskArtifactPath(root, taskSlug, name string) (string, error) {
-	dir, err := TaskDirRel(root, taskSlug)
-	if err != nil {
-		return "", err
-	}
-	return filepath.ToSlash(filepath.Join(dir, name)), nil
+// contractPath 返回当前 task 的 contract.md 相对路径。
+func contractPath(taskSlug string) string {
+	return filepath.Join(".agent", "tasks", taskSlug, "contract.md")
 }
 
-// contractPath 返回当前 task 的 contract.md 相对路径。
-func contractPath(root, taskSlug string) (string, error) {
-	return taskArtifactPath(root, taskSlug, "contract.md")
+// statePath 返回当前 task 的 state.yaml 相对路径。
+func statePath(taskSlug string) string {
+	return filepath.Join(".agent", "tasks", taskSlug, "state.yaml")
+}
+
+// taskDocPath 返回当前 task 的 task.md 相对路径。
+func taskDocPath(taskSlug string) string {
+	return filepath.Join(".agent", "tasks", taskSlug, "task.md")
+}
+
+// architecturePath 返回当前 task 的 architecture.md 相对路径（仅 ARCHITECT 路线需要）。
+func architecturePath(taskSlug string) string {
+	return filepath.Join(".agent", "tasks", taskSlug, "architecture.md")
 }
