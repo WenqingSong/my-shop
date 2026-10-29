@@ -1,0 +1,627 @@
+#!/usr/bin/env python3
+"""Workflow Git Lifecycle 只读前置/后置自检。
+
+规范：.agent/specs/WorkflowGitLifecycle.md
+- 只读：不 stage、不 commit、不 push、不修改任何文件。
+- 退出码：0 PASS / 1 FAIL / 2 ERROR。
+- 这是 SPEC_ONLY 工具，不能阻止绕过它的直接 git 写操作，也不替代 Gate。
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import subprocess
+import sys
+
+FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
+ROLES = ("TaskBuilder", "Analyst", "Architect", "Coder", "Cleaner", "OwnerGate", "Deliverer")
+MODE_ROLES = {
+    "bootstrap": {"TaskBuilder"},
+    "evidence": {"Analyst", "Architect", "Coder"},
+    "metadata": {"Analyst", "Architect", "Coder"},
+    "artifacts": {"Cleaner", "OwnerGate", "Deliverer"},
+    "forced": set(ROLES),
+    "registry": {"Analyst"},
+}
+PROTECTED_BRANCHES = {"main", "master"}
+
+
+class CheckError(Exception):
+    """Exit 1: 自检未通过（策略、scope、远端或证据事实不满足）。"""
+
+
+class ToolError(Exception):
+    """Exit 2: 无法完成自检（Git 运行级失败、环境或仓库不可用）。"""
+
+
+def run_git(root: str, *args: str) -> str:
+    cmd = ["git", *args]
+    proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise ToolError(f"git {' '.join(args)} 失败: {proc.stderr.strip() or proc.stdout.strip()}")
+    return proc.stdout
+
+
+def git_ok(root: str, *args: str) -> bool:
+    return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True).returncode == 0
+
+
+def repo_root(explicit: str | None) -> str:
+    start = os.path.abspath(explicit) if explicit else os.getcwd()
+    if not os.path.isdir(start):
+        raise CheckError(f"仓库根目录不存在: {start}")
+    try:
+        return run_git(start, "rev-parse", "--show-toplevel").strip()
+    except ToolError as exc:
+        raise ToolError(f"不是 Git 仓库: {start}: {exc}") from exc
+
+
+def current_branch(root: str) -> str:
+    branch = run_git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
+    if branch == "HEAD":
+        raise CheckError("detached HEAD，拒绝在非分支工作区执行 Git Lifecycle 自检")
+    return branch
+
+
+def head_sha(root: str) -> str:
+    return run_git(root, "rev-parse", "HEAD").strip()
+
+
+def status_porcelain(root: str) -> list[str]:
+    out = run_git(root, "status", "--porcelain")
+    return [line for line in out.splitlines() if line.strip()]
+
+
+def staged_paths(root: str) -> list[str]:
+    out = run_git(root, "diff", "--cached", "--name-only", "--no-renames")
+    return sorted({line.strip() for line in out.splitlines() if line.strip()})
+
+
+def unstaged_paths(root: str) -> list[str]:
+    out = run_git(root, "diff", "--name-only", "--no-renames")
+    return sorted({line.strip() for line in out.splitlines() if line.strip()})
+
+
+def untracked_paths(root: str) -> list[str]:
+    out = run_git(root, "ls-files", "--others", "--exclude-standard")
+    return sorted({line.strip() for line in out.splitlines() if line.strip()})
+
+
+def read_config(root: str) -> dict[str, object]:
+    """读取 .agent/workflow.yaml 的 integration_branch 与 registry 路径（最小解析）。"""
+    path = os.path.join(root, ".agent", "workflow.yaml")
+    cfg: dict[str, object] = {"integration_branch": "", "registries": []}
+    if not os.path.isfile(path):
+        return cfg
+    section = ""
+    registries: list[str] = []
+    with open(path, encoding="utf-8") as handle:
+        for raw in handle:
+            line = raw.split("#", 1)[0].rstrip()
+            if not line.strip():
+                continue
+            indent = len(line) - len(line.lstrip())
+            match = re.match(r"^\s*([A-Za-z0-9_]+):\s*(.*)$", line)
+            if not match:
+                continue
+            key, value = match.group(1), match.group(2).strip()
+            if indent == 0:
+                section = key
+                continue
+            if section == "git" and key == "integration_branch":
+                cfg["integration_branch"] = value.strip("'\"")
+            elif section == "resources" and key == "registry":
+                registries.append(value.strip("'\""))
+    cfg["registries"] = sorted(set(registries))
+    return cfg
+
+
+def parse_state(text: str) -> dict[str, str]:
+    """把 state.yaml 解析为 section.key -> value（足够本工具使用的子集）。"""
+    data: dict[str, str] = {}
+    section = ""
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].rstrip()
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip())
+        match = re.match(r"^\s*([A-Za-z0-9_]+):\s*(.*)$", line)
+        if not match:
+            continue
+        key, value = match.group(1), match.group(2).strip()
+        if indent == 0:
+            section = key
+            if value:
+                data[key] = value.strip("'\"")
+            continue
+        data[f"{section}.{key}"] = value.strip("'\"")
+    return data
+
+
+def working_state(root: str, task: str) -> dict[str, str]:
+    path = os.path.join(root, ".agent", "tasks", task, "state.yaml")
+    if not os.path.isfile(path):
+        raise CheckError(f"缺少 {path}")
+    with open(path, encoding="utf-8") as handle:
+        return parse_state(handle.read())
+
+
+def staged_state(root: str, task: str) -> dict[str, str]:
+    rel = f".agent/tasks/{task}/state.yaml"
+    try:
+        text = run_git(root, "show", f":{rel}")
+    except ToolError as exc:
+        raise CheckError(f"暂存区缺少 {rel}: {exc}") from exc
+    return parse_state(text)
+
+
+def head_state(root: str, task: str) -> dict[str, str]:
+    rel = f".agent/tasks/{task}/state.yaml"
+    if not git_ok(root, "cat-file", "-e", f"HEAD:{rel}"):
+        return {}
+    return parse_state(run_git(root, "show", f"HEAD:{rel}"))
+
+
+def changed_keys(before: dict[str, str], after: dict[str, str]) -> set[str]:
+    keys = set(before) | set(after)
+    return {key for key in keys if before.get(key, "") != after.get(key, "")}
+
+
+def resolve_commit(root: str, literal: str, field: str) -> str:
+    if not FULL_SHA.match(literal):
+        raise CheckError(f"{field} 必须是完整 40 位十六进制 SHA，实际为 {literal!r}")
+    if not git_ok(root, "cat-file", "-e", f"{literal}^{{commit}}"):
+        raise CheckError(f"{field} 不是真实 commit: {literal}")
+    full = run_git(root, "rev-parse", f"{literal}^{{commit}}").strip()
+    if full != literal:
+        raise CheckError(f"{field} 解析结果不一致: {literal} -> {full}")
+    return full
+
+
+def is_ancestor(root: str, ancestor: str, descendant: str) -> bool:
+    return subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    ).returncode == 0
+
+
+def require_ancestor(root: str, sha: str, field: str) -> None:
+    if not is_ancestor(root, sha, head_sha(root)):
+        raise CheckError(f"{field} 不在当前 HEAD 历史中: {sha}")
+
+
+def task_file(task: str, name: str) -> str:
+    return f".agent/tasks/{task}/{name}"
+
+
+def is_business_path(path: str) -> bool:
+    return not path.startswith(".agent/") and not path.startswith("docs/design/")
+
+
+def allowed_for(mode: str, role: str, task: str, cfg: dict[str, object], phase: str) -> set[str]:
+    if mode == "bootstrap":
+        return {task_file(task, "task.md"), task_file(task, "state.yaml")}
+    if mode == "metadata":
+        return {task_file(task, "state.yaml")}
+    if mode == "evidence":
+        if role == "Analyst":
+            return {task_file(task, "contract.md"), "*design*"}
+        allowed = {"*business*"}
+        if role == "Architect":
+            allowed.add(task_file(task, "architecture.md"))
+        return allowed
+    if mode == "artifacts":
+        base = {task_file(task, "state.yaml")}
+        if role == "Cleaner":
+            return base | {task_file(task, "findings.md"), task_file(task, "core-logic.md")}
+        if role == "OwnerGate":
+            v1 = base | {task_file(task, "findings.md"), task_file(task, "core-logic.md")}
+            v2 = base | {task_file(task, "owner-decision.md")}
+            if phase == "v1":
+                return v1
+            if phase == "v2":
+                return v2
+            return v1 | v2
+        if role == "Deliverer":
+            return base | {task_file(task, "delivery.md")}
+    if mode == "forced":
+        return {
+            task_file(task, "loop-ledger.md"),
+            task_file(task, "danger-report.md"),
+            task_file(task, "state.yaml"),
+        }
+    if mode == "registry":
+        return set(cfg.get("registries", []))  # type: ignore[arg-type]
+    return set()
+
+
+def role_owned_paths(role: str, task: str, cfg: dict[str, object]) -> set[str]:
+    """返回该角色在整轮执行中可能拥有的路径（不区分 Commit 类型）。
+
+    用途只有一个：判断「工作区里还有没有本角色尚未提交的成果」。
+    这与某一个 Commit 类型的 staged 白名单不同：METADATA 只允许 state.yaml，
+    但 Coder 未提交的业务代码仍属于 Coder 的 scope，必须先处置。
+    """
+    state = task_file(task, "state.yaml")
+    if role == "TaskBuilder":
+        return {task_file(task, "task.md"), state}
+    if role == "Analyst":
+        return {task_file(task, "contract.md"), state, "*design*"} | set(cfg.get("registries", []))  # type: ignore[arg-type]
+    if role == "Architect":
+        return {"*business*", task_file(task, "architecture.md"), state}
+    if role == "Coder":
+        return {"*business*", state}
+    if role == "Cleaner":
+        return {task_file(task, "findings.md"), task_file(task, "core-logic.md"), state}
+    if role == "OwnerGate":
+        return {
+            task_file(task, "owner-decision.md"),
+            task_file(task, "findings.md"),
+            task_file(task, "core-logic.md"),
+            state,
+        }
+    if role == "Deliverer":
+        return {task_file(task, "delivery.md"), state}
+    return set()
+
+
+def path_allowed(path: str, allowed: set[str]) -> bool:
+    if "*business*" in allowed and is_business_path(path):
+        return True
+    if "*design*" in allowed and path.startswith("docs/design/"):
+        return True
+    return path in allowed
+
+
+def validate_metadata(root: str, role: str, state: dict[str, str]) -> None:
+    if role == "Analyst":
+        if state.get("contract.status") != "APPROVED":
+            raise CheckError("A2 必须写入 contract.status=APPROVED")
+        target = resolve_commit(root, state.get("contract.target", ""), "contract.target")
+        require_ancestor(root, target, "contract.target")
+        return
+    if state.get("review.status") != "PENDING":
+        raise CheckError("C2/D2 必须写入 review.status=PENDING")
+    target = resolve_commit(root, state.get("review.target", ""), "review.target")
+    require_ancestor(root, target, "review.target")
+
+
+def validate_artifacts(root: str, role: str, state: dict[str, str], phase: str) -> None:
+    if role == "Cleaner":
+        if state.get("review.status") not in {"CLEAN", "CHANGES_REQUIRED"}:
+            raise CheckError("Cleaner 只能持久化 review.status=CLEAN 或 CHANGES_REQUIRED")
+        target = resolve_commit(root, state.get("review.target", ""), "review.target")
+        require_ancestor(root, target, "review.target")
+        return
+    if role == "OwnerGate":
+        if phase == "v1":
+            if state.get("review.status") not in {"CLEAN", "CHANGES_REQUIRED"}:
+                raise CheckError("OwnerGate V1 只能持久化 review.status=CLEAN 或 CHANGES_REQUIRED")
+            target = resolve_commit(root, state.get("review.target", ""), "review.target")
+            require_ancestor(root, target, "review.target")
+            return
+        if state.get("owner.status") not in {"ACCEPTED", "REJECTED"}:
+            raise CheckError("OwnerGate 只能持久化 owner.status=ACCEPTED 或 REJECTED")
+        owner_target = resolve_commit(root, state.get("owner.review_target", ""), "owner.review_target")
+        review_target = resolve_commit(root, state.get("review.target", ""), "review.target")
+        if owner_target != review_target:
+            raise CheckError("owner.review_target 必须等于 review.target")
+        require_ancestor(root, review_target, "review.target")
+        return
+    if role == "Deliverer":
+        if state.get("delivery.status") not in {"PASS", "FAIL", "BLOCKED"}:
+            raise CheckError("Deliverer 只能持久化 delivery.status=PASS / FAIL / BLOCKED")
+        review_target = resolve_commit(root, state.get("review.target", ""), "review.target")
+        delivery_target = resolve_commit(root, state.get("delivery.review_target", ""), "delivery.review_target")
+        if delivery_target != review_target:
+            raise CheckError("delivery.review_target 必须等于 review.target")
+        require_ancestor(root, review_target, "review.target")
+        feature_head = resolve_commit(root, state.get("delivery.feature_head", ""), "delivery.feature_head")
+        require_ancestor(root, feature_head, "delivery.feature_head")
+        resolve_commit(root, state.get("delivery.develop_base", ""), "delivery.develop_base")
+        return
+
+
+def check_staged_scope(root: str, role: str, task: str, mode: str, phase: str) -> None:
+    staged = staged_paths(root)
+    if not staged:
+        raise CheckError("暂存区为空：没有可校验的 Commit 内容")
+    cfg = read_config(root)
+    allowed = allowed_for(mode, role, task, cfg, phase)
+    outside = [path for path in staged if not path_allowed(path, allowed)]
+    if outside:
+        raise CheckError(f"staged 路径超出 {mode} 范围: {', '.join(outside)}")
+    if mode == "metadata" and staged != [task_file(task, "state.yaml")]:
+        raise CheckError("METADATA 只允许 stage state.yaml")
+    if mode == "evidence" and task_file(task, "state.yaml") in staged:
+        raise CheckError("EVIDENCE 不得混入 state.yaml")
+    if mode == "registry" and not allowed:
+        raise CheckError("未在 .agent/workflow.yaml 声明任何 Registry 路径")
+    if mode == "registry" and ".agent/workflow.yaml" in staged:
+        raise CheckError("Analyst 不得修改 .agent/workflow.yaml")
+
+
+def check_field_transition(root: str, role: str, task: str, mode: str, phase: str) -> None:
+    if mode == "bootstrap":
+        state = staged_state(root, task)
+        if not state.get("task_id"):
+            raise CheckError("BOOTSTRAP 的 state.yaml 缺少 task_id")
+        return
+    if mode == "forced" and task_file(task, "state.yaml") not in staged_paths(root):
+        # write-ahead 只追加账本时 state.yaml 可以不变。
+        return
+    state = staged_state(root, task)
+    before = head_state(root, task)
+    changed = changed_keys(before, state)
+    if mode == "metadata":
+        validate_metadata(root, role, state)
+        allowed = (
+            {"contract.status", "contract.target", "resources.reservations"}
+            if role == "Analyst"
+            else {"review.status", "review.target"}
+        )
+        unexpected = {key for key in changed if key not in allowed and not key.startswith("resources.")}
+        if unexpected:
+            raise CheckError(f"METADATA 修改了不允许的字段: {', '.join(sorted(unexpected))}")
+        return
+    if mode == "artifacts":
+        validate_artifacts(root, role, state, phase)
+        if role == "Cleaner":
+            allowed = {"review.status", "review.target"}
+        elif role == "OwnerGate" and phase == "v1":
+            allowed = {"review.status", "review.target"}
+        elif role == "OwnerGate":
+            allowed = {"owner.status", "owner.review_target"}
+        else:
+            allowed = {
+                "delivery.status",
+                "delivery.review_target",
+                "delivery.feature_head",
+                "delivery.develop_base",
+            }
+        unexpected = changed - allowed
+        if unexpected:
+            raise CheckError(f"ROLE_ARTIFACT 修改了不允许的字段: {', '.join(sorted(unexpected))}")
+        return
+    if mode == "forced":
+        allowed = {"blocked.active", "blocked.by", "blocked.reason"}
+        unexpected = changed - allowed
+        if unexpected:
+            raise CheckError(f"FORCED_EVIDENCE 修改了不允许的字段: {', '.join(sorted(unexpected))}")
+        return
+
+
+def remote_sha(root: str, branch: str) -> str:
+    out = run_git(root, "ls-remote", "--heads", "origin", f"refs/heads/{branch}")
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[1] == f"refs/heads/{branch}":
+            return parts[0]
+    return ""
+
+
+def cmd_preflight(args: argparse.Namespace, root: str) -> tuple[str, str]:
+    role = normalize_role(args.role)
+    branch = current_branch(root)
+    cfg = read_config(root)
+    integration = str(cfg.get("integration_branch", ""))
+    if not integration:
+        raise CheckError("缺少 .agent/workflow.yaml 的 git.integration_branch")
+    if not git_ok(root, "remote", "get-url", "origin"):
+        raise CheckError("缺少远端 origin")
+    dirty = status_porcelain(root)
+    if dirty:
+        raise CheckError(f"开工前工作区必须 clean，实际存在 {len(dirty)} 项变更: {', '.join(dirty[:5])}")
+    if args.bootstrap:
+        if role != "TaskBuilder":
+            raise CheckError("--bootstrap 只允许 TaskBuilder")
+    else:
+        if branch in PROTECTED_BRANCHES or (integration and branch == integration):
+            raise CheckError(f"{role} 不得直接工作在受保护/集成分支 {branch}")
+        remote = remote_sha(root, branch)
+        if not remote:
+            raise CheckError(f"远端不存在 origin/{branch}")
+        if remote != head_sha(root):
+            raise CheckError(f"开工前本地 HEAD 与 origin/{branch} 不同步: {head_sha(root)} != {remote}")
+    return "preflight", f"role={role} branch={branch} bootstrap={bool(args.bootstrap)}"
+
+
+def cmd_commit_check(args: argparse.Namespace, root: str) -> tuple[str, str]:
+    role = normalize_role(args.role)
+    mode = args.mode
+    check_mode_role(mode, role)
+    if role == "OwnerGate" and mode == "artifacts" and not args.phase:
+        raise CheckError("OwnerGate 必须用 --phase 区分 V1（review）与 V2（owner）")
+    branch = current_branch(root)
+    cfg = read_config(root)
+    if branch in PROTECTED_BRANCHES:
+        raise CheckError(f"不得在 {branch} 上提交")
+    if mode == "registry":
+        if str(cfg.get("integration_branch", "")) != branch:
+            raise CheckError("REGISTRY_ONLY 只在 integration branch 上允许")
+    elif str(cfg.get("integration_branch", "")) == branch:
+        raise CheckError(f"{mode} 不得直接提交到 integration branch {branch}")
+    # 只对本角色 owned scope 内的残留判 FAIL：WorkflowGitLifecycle §3.3 允许在
+    # 保留其他角色修改现场的前提下提交自己的明确路径。若本角色范围内仍有未暂存 /
+    # 未跟踪文件，说明提交不完整或 staged 范围被拆分，必须先处置（§3.3 第 3 种情况）。
+    check_staged_scope(root, role, args.task, mode, args.phase)
+    owned = role_owned_paths(role, args.task, cfg)
+    pending = set(unstaged_paths(root)) | set(untracked_paths(root))
+    leftovers = sorted(path for path in pending if path_allowed(path, owned))
+    if leftovers:
+        raise CheckError(f"本角色范围内仍有未提交修改，先处置再提交: {', '.join(leftovers)}")
+    foreign = sorted(path for path in pending if not path_allowed(path, owned))
+    if mode != "registry":
+        check_field_transition(root, role, args.task, mode, args.phase)
+    detail = f"role={role} mode={mode} task={args.task} paths={len(staged_paths(root))}"
+    if foreign:
+        detail += f" foreign_preserved={len(foreign)}"
+    return "commit-check", detail
+
+
+def cmd_push_check(args: argparse.Namespace, root: str) -> tuple[str, str]:
+    role = normalize_role(args.role)
+    branch = current_branch(root)
+    cfg = read_config(root)
+    integration = str(cfg.get("integration_branch", ""))
+    if branch in PROTECTED_BRANCHES:
+        raise CheckError(f"禁止 push {branch}")
+    if integration and branch == integration:
+        if not (role == "Analyst" and args.mode == "registry"):
+            raise CheckError("只有 Analyst 的 REGISTRY_ONLY 允许 push integration branch")
+    elif args.mode == "registry":
+        raise CheckError("REGISTRY_ONLY 必须 push integration branch")
+    if args.expect_branch and branch != args.expect_branch:
+        raise CheckError(f"当前分支 {branch} 与任务分支 {args.expect_branch} 不一致")
+    return "push-check", f"role={role} branch={branch}"
+
+
+def cmd_verify_remote(args: argparse.Namespace, root: str) -> tuple[str, str]:
+    branch = args.branch or current_branch(root)
+    local = head_sha(root)
+    remote = remote_sha(root, branch)
+    if not remote:
+        raise CheckError(f"远端不存在 origin/{branch}")
+    if args.expect_sha and args.expect_sha != local:
+        raise CheckError(f"本地 HEAD 与期望 SHA 不一致: {local} != {args.expect_sha}")
+    tracking = ""
+    if git_ok(root, "rev-parse", "--verify", f"refs/remotes/origin/{branch}"):
+        tracking = run_git(root, "rev-parse", f"origin/{branch}").strip()
+    if remote != local:
+        stale = f"；本地 tracking ref={tracking}（可能陈旧）" if tracking else ""
+        raise CheckError(f"远端 SHA 与本地 HEAD 不一致: origin/{branch}={remote}, HEAD={local}{stale}")
+    return "verify-remote", f"branch={branch} sha={local}"
+
+
+def cmd_handoff_check(args: argparse.Namespace, root: str) -> tuple[str, str]:
+    branch = current_branch(root)
+    if status_porcelain(root):
+        raise CheckError(f"工作区 dirty，不得 HANDOFF: {', '.join(status_porcelain(root)[:5])}")
+    local = head_sha(root)
+    remote = remote_sha(root, branch)
+    if not remote:
+        raise CheckError(f"远端不存在 origin/{branch}")
+    if remote != local:
+        raise CheckError(f"远端 SHA 与本地 HEAD 不一致: origin/{branch}={remote}, HEAD={local}")
+    if args.task:
+        state = working_state(root, args.task)
+        if state.get("blocked.active", "").lower() == "true":
+            raise CheckError("blocked.active=true，禁止 HANDOFF")
+    gate_result = "GATE_NOT_RUN"
+    if args.gate:
+        engine = os.path.join(root, ".agent", "bin", "workflow-check")
+        if not os.path.exists(engine):
+            raise ToolError(f"指定了 --gate 但缺少 {engine}")
+        proc = subprocess.run(
+            [engine, "gate", args.gate, f".agent/tasks/{args.task}", "--root", root],
+            cwd=root,
+            capture_output=True,
+            text=True,
+        )
+        sys.stdout.write(proc.stdout)
+        sys.stderr.write(proc.stderr)
+        if proc.returncode != 0:
+            raise CheckError(f"Gate {args.gate} 未通过（exit={proc.returncode}）")
+        gate_result = f"GATE_{args.gate}=PASS"
+    role = normalize_role(args.role) if args.role else "unknown"
+    return "handoff-check", f"role={role} branch={branch} sha={local} {gate_result}"
+
+
+def normalize_role(value: str) -> str:
+    for role in ROLES:
+        if value.lower() == role.lower():
+            return role
+    raise CheckError(f"未知角色: {value}（合法值: {', '.join(ROLES)}）")
+
+
+def check_mode_role(mode: str, role: str) -> None:
+    if mode not in MODE_ROLES:
+        raise CheckError(f"未知 mode: {mode}")
+    if role not in MODE_ROLES[mode]:
+        allowed = ", ".join(sorted(MODE_ROLES[mode]))
+        raise CheckError(f"{role} 不得使用 {mode}；允许的角色: {allowed}")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="git-lifecycle-check",
+        description="Workflow Git Lifecycle 只读自检（SPEC_ONLY）。",
+    )
+    parser.add_argument("--root", help="仓库根目录（默认取当前目录所属仓库）", default=None)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    def add_root(p: argparse.ArgumentParser) -> None:
+        # 允许 --root 写在子命令之后；SUPPRESS 避免覆盖写在子命令之前的全局值。
+        p.add_argument("--root", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+
+    pre = sub.add_parser("preflight", help="开工前自检")
+    add_root(pre)
+    pre.add_argument("--role", required=True)
+    pre.add_argument("--task", required=True)
+    pre.add_argument("--bootstrap", action="store_true", help="TaskBuilder 建分支前预检")
+
+    commit = sub.add_parser("commit-check", help="Commit 前检查 staged scope 与字段")
+    add_root(commit)
+    commit.add_argument("--role", required=True)
+    commit.add_argument("--task", required=True)
+    commit.add_argument(
+        "--mode",
+        required=True,
+        choices=["bootstrap", "evidence", "metadata", "artifacts", "forced", "registry"],
+    )
+    commit.add_argument("--phase", choices=["v1", "v2"], default="", help="OwnerGate 阶段（可选）")
+
+    push = sub.add_parser("push-check", help="Push 前检查目标分支")
+    add_root(push)
+    push.add_argument("--role", required=True)
+    push.add_argument("--task", required=True)
+    push.add_argument("--mode", choices=["normal", "registry"], default="normal")
+    push.add_argument("--expect-branch", default="")
+
+    verify = sub.add_parser("verify-remote", help="Push 后用 ls-remote 核验远端 SHA")
+    add_root(verify)
+    verify.add_argument("--task")
+    verify.add_argument("--branch", default="")
+    verify.add_argument("--expect-sha", default="")
+
+    handoff = sub.add_parser("handoff-check", help="HANDOFF 前检查 clean / 远端 / blocked / Gate")
+    add_root(handoff)
+    handoff.add_argument("--role")
+    handoff.add_argument("--task", required=True)
+    handoff.add_argument("--gate", default="", help="可选：运行指定 Gate 并要求 PASS")
+
+    return parser
+
+
+def main(argv: list[str]) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        root = repo_root(args.root)
+        handlers = {
+            "preflight": cmd_preflight,
+            "commit-check": cmd_commit_check,
+            "push-check": cmd_push_check,
+            "verify-remote": cmd_verify_remote,
+            "handoff-check": cmd_handoff_check,
+        }
+        name, detail = handlers[args.command](args, root)
+    except CheckError as exc:
+        print(f"FAIL {args.command} {exc}")
+        return 1
+    except ToolError as exc:
+        print(f"ERROR {args.command} {exc}")
+        return 2
+    except Exception as exc:  # pragma: no cover - 防御性兜底
+        print(f"ERROR {args.command} {exc}")
+        return 2
+    print(f"PASS {name} {detail}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

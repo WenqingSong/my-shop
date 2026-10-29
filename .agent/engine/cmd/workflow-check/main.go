@@ -5,8 +5,12 @@
 //
 // 用法：
 //
-//	workflow-check config [--root DIR]
 //	workflow-check gate <coder-start|cleaner-start|owner-gate-start|delivery-start|merge-ready> <task> [--root DIR]
+//	workflow-check route <task> [--allow-legacy] [--root DIR]
+//	workflow-check version [--json]
+//
+// route 子命令是路线事实自检（R-1 ~ R-4），不是 Gate：它不产生 Handoff 授权，
+// 也不改变任何 Gate 语义。默认要求 route 事实存在；历史任务需要显式 --allow-legacy。
 //
 // exit code：
 //   - 0：PASS；
@@ -29,23 +33,11 @@ func main() {
 }
 
 var validGates = map[string]bool{
-	"coder-start":                 true,
-	"cleaner-start":               true,
-	"owner-gate-start":            true,
-	"delivery-start":              true,
-	"merge-ready":                 true,
-	"handoff-prepared":            true,
-	"handoff-entry":               true,
-	"discovery-start":             true,
-	"discovery-decision":          true,
-	"discovery-handoff":           true,
-	"taskbuilder-init":            true,
-	"design-architect-start":      true,
-	"design-architecture-review":  true,
-	"design-docsspecwriter-start": true,
-	"design-cleaner-start":        true,
-	"design-owner-gate-start":     true,
-	"design-final-approval":       true,
+	"coder-start":      true,
+	"cleaner-start":    true,
+	"owner-gate-start": true,
+	"delivery-start":   true,
+	"merge-ready":      true,
 }
 
 func run(args []string) int {
@@ -67,20 +59,23 @@ func run(args []string) int {
 			positional = append(positional, a)
 		}
 	}
+	// --root 允许相对路径；必须在这里归一化，否则后面用 filepath.Rel 比较相对 root
+	// 与绝对任务路径会误判「不在仓库根内」。
+	root = absRoot(root)
 
-	if len(positional) == 1 && positional[0] == "config" {
-		if root == "" {
-			root = findRoot()
-		}
-		if _, err := workflow.LoadConfig(root); err != nil {
-			fmt.Fprintln(os.Stderr, "ERROR config:", err)
-			return 2
-		}
-		fmt.Println("PASS config: workflow.yaml schema/registry paths valid (not Owner approval)")
-		return 0
+	// version 是自描述命令：不依赖 --root、不读取 .agent/workflow.yaml，
+	// 也不参与任何 Gate 判定，因此必须在解析仓库根之前处理。
+	if len(positional) >= 1 && positional[0] == "version" {
+		return runVersion(positional[1:], os.Stdout, os.Stderr)
 	}
+
+	if len(positional) >= 1 && positional[0] == "route" {
+		return runRoute(positional[1:], root)
+	}
+
 	if len(positional) < 1 || positional[0] != "gate" {
-		fmt.Fprintln(os.Stderr, "usage: workflow-check gate <coder-start|cleaner-start|owner-gate-start|delivery-start|merge-ready|handoff-prepared|handoff-entry|discovery-start|discovery-decision|discovery-handoff|taskbuilder-init|design-architect-start|design-architecture-review|design-docsspecwriter-start|design-cleaner-start|design-owner-gate-start|design-final-approval> <task|intake> [--root DIR]")
+		fmt.Fprintln(os.Stderr, "usage: workflow-check gate <coder-start|cleaner-start|owner-gate-start|delivery-start|merge-ready> <task> [--root DIR]")
+		fmt.Fprintln(os.Stderr, "       workflow-check route <task> [--allow-legacy] [--root DIR]")
 		return 2
 	}
 	if len(positional) < 3 {
@@ -125,30 +120,6 @@ func run(args []string) int {
 		res = v.GateDeliveryStart(taskDir)
 	case "merge-ready":
 		res = v.GateMergeReady(taskDir)
-	case "handoff-prepared":
-		res = v.GateHandoffPrepared(taskDir)
-	case "handoff-entry":
-		res = v.GateHandoffEntry(taskDir)
-	case "discovery-start":
-		res = v.GateDiscoveryStart(taskDir)
-	case "discovery-decision":
-		res = v.GateDiscoveryDecision(taskDir)
-	case "discovery-handoff":
-		res = v.GateDiscoveryHandoff(taskDir)
-	case "taskbuilder-init":
-		res = v.GateTaskBuilderInit(taskDir)
-	case "design-architect-start":
-		res = v.GateDesignArchitectStart(taskDir)
-	case "design-architecture-review":
-		res = v.GateDesignArchitectureReview(taskDir)
-	case "design-docsspecwriter-start":
-		res = v.GateDesignDocsSpecWriterStart(taskDir)
-	case "design-cleaner-start":
-		res = v.GateDesignCleanerStart(taskDir)
-	case "design-owner-gate-start":
-		res = v.GateDesignOwnerGateStart(taskDir)
-	case "design-final-approval":
-		res = v.GateDesignFinalApproval(taskDir)
 	}
 	return printResult(gateName, res)
 }
@@ -172,6 +143,83 @@ func printResult(gateName string, res workflow.Result) int {
 	}
 }
 
+// runRoute 处理 `workflow-check route <task> [--allow-legacy] [--root DIR]`。
+//
+// route 自检只依赖 state.yaml / task.md 与只读 Git 事实，不读取 .agent/workflow.yaml
+// （Registry 与 integration branch 与路线事实无关），因此 Config 留空。
+func runRoute(args []string, root string) int {
+	allowLegacy := false
+	var taskArg string
+	for _, a := range args {
+		switch {
+		case a == "--allow-legacy":
+			allowLegacy = true
+		case strings.HasPrefix(a, "-"):
+			fmt.Fprintf(os.Stderr, "error: route 不支持参数 %q\n", a)
+			fmt.Fprintln(os.Stderr, "usage: workflow-check route <task> [--allow-legacy] [--root DIR]")
+			return 2
+		case taskArg == "":
+			taskArg = a
+		default:
+			fmt.Fprintln(os.Stderr, "error: route 只接受一个 task 参数")
+			return 2
+		}
+	}
+	if taskArg == "" {
+		fmt.Fprintln(os.Stderr, "usage: workflow-check route <task> [--allow-legacy] [--root DIR]")
+		return 2
+	}
+	if root == "" {
+		root = findRoot()
+	}
+	root = absRoot(root)
+	git := &workflow.ExecGit{Root: root}
+	v := &workflow.Validator{Root: root, Git: git}
+
+	taskDir, err := resolveTaskDir(root, taskArg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 2
+	}
+	return printRouteReport(taskDir, v.CheckRoute(taskDir, !allowLegacy))
+}
+
+func printRouteReport(taskDir string, rep workflow.RouteReport) int {
+	task := filepath.Base(taskDir)
+	switch rep.Result.Status {
+	case workflow.StatusPass:
+		if rep.Legacy {
+			fmt.Printf("ROUTE_LEGACY task=%s route=<absent>\n", task)
+		} else {
+			fmt.Printf("ROUTE_OK     task=%s route=%s\n", task, rep.Route)
+		}
+		return 0
+	case workflow.StatusFail:
+		for _, iss := range rep.Result.Issues {
+			fmt.Printf("ROUTE_FAIL   %s\n", iss.String())
+		}
+		return 1
+	case workflow.StatusError:
+		fmt.Printf("ROUTE_ERROR  task=%s %s\n", task, rep.Result.Error)
+		return 2
+	default:
+		fmt.Printf("ROUTE_ERROR  task=%s unknown status %q\n", task, rep.Result.Status)
+		return 2
+	}
+}
+
+// absRoot 把 --root 归一化为绝对路径；空值保持为空（由调用方解析仓库根）。
+// 相对路径按当前工作目录解析，与 Git 自身的行为一致。
+func absRoot(root string) string {
+	if root == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(root); err == nil {
+		return abs
+	}
+	return root
+}
+
 // findRoot 通过 git 定位仓库根，失败则回退到当前目录。
 func findRoot() string {
 	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
@@ -182,18 +230,9 @@ func findRoot() string {
 	return wd
 }
 
-// resolveTaskDir 把位置参数解析为相对仓库根的 Task/Intake 目录。
-//
-// 已存在的路径保持原语义（含 Intake 目录与 state.yaml 文件）；否则按 Task ID
-// 或旧简写 .agent/tasks/<id> 解析，兼容分类后的新布局。
+// resolveTaskDir 把位置参数解析为相对仓库根的任务目录；若指向 state.yaml 文件则取其父目录。
+// 相对路径按仓库根解析（而非当前工作目录）。
 func resolveTaskDir(root, a string) (string, error) {
-	if rel, err := existingDirRel(root, a); err == nil {
-		return rel, nil
-	}
-	return workflow.ResolveTaskArg(root, a)
-}
-
-func existingDirRel(root, a string) (string, error) {
 	if !filepath.IsAbs(a) {
 		a = filepath.Join(root, a)
 	}
@@ -201,16 +240,12 @@ func existingDirRel(root, a string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	info, err := os.Stat(abs)
-	if err != nil {
-		return "", err
-	}
-	if !info.IsDir() {
+	if info, err := os.Stat(abs); err == nil && !info.IsDir() {
 		abs = filepath.Dir(abs)
 	}
 	rel, err := filepath.Rel(root, abs)
 	if err != nil || strings.HasPrefix(rel, "..") {
 		return "", fmt.Errorf("任务路径 %s 不在仓库根 %s 内", a, root)
 	}
-	return filepath.ToSlash(rel), nil
+	return rel, nil
 }
