@@ -14,8 +14,8 @@ review:
   target: "1ca5445ef3d9cc04a7f11f78eb44638376d1eb78"
 
 owner:
-  status: REJECTED
-  review_target: "757ed22301b402f2cf29fbc89b80b5f8a6c9d4cb"
+  status: ACCEPTED
+  review_target: "1ca5445ef3d9cc04a7f11f78eb44638376d1eb78"
 
 delivery:
   status: NOT_RUN
