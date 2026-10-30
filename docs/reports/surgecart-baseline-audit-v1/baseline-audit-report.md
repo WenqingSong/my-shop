@@ -261,7 +261,7 @@ grep -n 'ConsumeQueued(ctx, flashSaleConsumeScanBatch)' internal/worker/scanner.
 | E9 | `make test-nginx` | 0 | PASS（含跳过项） | 静态断言通过；**`my-shop-nginx:local` 镜像未构建 → `nginx -t` 跳过** → `NOT_EXECUTED` |
 | E10 | `make test`（vet + lib + unit + integration + registry + prometheus + container + nginx） | 0 | PASS | 末尾 `测试全部通过`；`check-registry.sh` 输出「未发现 Reservation 重复或 Registry ↔ 实现明显不一致」 |
 | E11 | `go test -count=1 -p 1 ./internal/logic/flashsale/... ./internal/worker/...`（隔离库 `my_shop_audit`，`DATABASE_DEFAULT_NAME=my_shop_audit`） | 0 | PASS | `flashsale 5.673s`、`worker 0.006s`；**非缓存**，用于排除 E5 中 `(cached)` 的影响 |
-| E12 | `go test -count=1 -run 'FlashSale' ./test/e2e/...`（隔离库） | 1 | 见说明 | 19 个 `TestFlashSale*` 全部 PASS；同一 `-run` 正则还匹配到 `TestDashboardFlashSales` 并失败，失败点为夹具清理 `DELETE FROM products` 被 `fk_skus_product` 阻止（`dashboard_test.go:587`），属同库残留数据，与本链路无关 |
+| E12 | `go test -count=1 -run 'FlashSale' ./test/e2e/...`（隔离库） | 1 | 见说明 | 20 个 `TestFlashSale*` 全部 PASS；同一 `-run` 正则还匹配到 `TestDashboardFlashSales` 并失败，失败点为夹具清理 `DELETE FROM products` 被 `fk_skus_product` 阻止（`dashboard_test.go:587`），属同库残留数据，与本链路无关 |
 | E13 | `SHOW CREATE TABLE` ×5（`docker exec my-shop-mysql`） | 0 | PASS | 五表结构与 §4.1 完全一致（唯一键/索引/FK 逐项核对） |
 | E14 | 锚点抽查 grep ×6（§3.4） | 0 | PASS | 6 个行号全部命中 |
 
@@ -302,12 +302,12 @@ grep -n 'ConsumeQueued(ctx, flashSaleConsumeScanBatch)' internal/worker/scanner.
 | --- | --- | --- | --- |
 | 白盒集成（真实 MySQL/Redis） | `internal/logic/flashsale/{consume,recovery,capacity,redis,consume_metrics}_test.go` | 4+7+5+2+1 = 19 | 重试/死信、崩溃重投、孤儿标记自愈、收敛、限流/排队/熔断、指标计数 |
 | 纯内存 | `internal/logic/flashsale/{circuit_breaker,order_outcome}_test.go` | 2+1（order_outcome 含 14 个子用例） | 熔断状态机（含 race 用例）、结果→指标标签映射 |
-| HTTP 端到端（真实路由） | `test/e2e/flashsale{,_v2,_v3,_v5}_test.go` | 10+4+3+2 = 19 | 权限、时间窗、定价快照、一人一单、幂等、并发不超卖、失败无副作用、更新边界、修复审计、V2 预热/售罄/对账、V3 fail-closed/入队查询/消费幂等/补偿、V5 限流与指标端点 |
+| HTTP 端到端（真实路由） | `test/e2e/flashsale{,_v2,_v3,_v5}_test.go`（`flashsale_v2_test.go` 含 1 个 V3 用例） | 10+4+4+2 = 20 | 权限、时间窗、定价快照、一人一单、幂等、并发不超卖、失败无副作用、更新边界、修复审计、V2 预热/售罄/对账、V3 fail-closed/入队查询/消费幂等/补偿、V5 限流与指标端点（按用例语义分组：`TestFlashSaleV3FailClosed` 物理位于 `flashsale_v2_test.go`，计入 V3） |
 | 后台扫描器 | `internal/worker/scanner_test.go` | 1 | 三个扫描器 ctx 取消后退出（**单元门禁未执行**，见 E3'） |
 
 关键测试入口（供 Owner 理解，最多两个）：
 
-1. `test/e2e/flashsale_test.go:477` `TestFlashSaleConcurrentNoOversell`：20 并发抢 5 件，断言受理数=5、消费后 `sold=5`、订单数=5、`total-sold ≥ 0` —— 同时覆盖准入预扣与 MySQL 兜底。
+1. `test/e2e/flashsale_test.go:477` `TestFlashSaleConcurrentNoOversell`：20 并发抢 5 件，断言受理数=5、消费后 `sold=5`、订单数=5、`total-sold ≥ 0` —— 覆盖「Redis 准入 + 最终 MySQL 结果断言」。该用例**无法独立证明 MySQL 库存预检与条件扣减的正确性**：Redis 闸门在并发下只放行 5 条，MySQL 侧从未出现超额并发，因此同时移除 `flashsale.go:499-501` 的库存预检与 `:530-540` 的条件扣减后，该用例仍会通过；该覆盖缺口登记为 §8.2 第 14 项待核查事项。
 2. `internal/logic/flashsale/consume_test.go:363` `TestConsumeCrashBeforeCommitRedeliversOnce`：注入「订单已写、状态未更新即回滚」，断言重投只产生一次业务效果（订单 1 条、`sold=1`）——覆盖 INV-015 崩溃重投幂等。
 
 ---
@@ -431,6 +431,7 @@ grep -n 'ConsumeQueued(ctx, flashSaleConsumeScanBatch)' internal/worker/scanner.
 
 12. R5：`scripts/test-unit.sh:35` 是否应改为 `./internal/worker/...`，并同步脚本注释中的「cmd（扫描器）」描述？
 13. R11：测试夹具的清理顺序/隔离库策略是否需要独立任务处理（当前脏库局部重跑会失败）？
+14. MySQL 库存兜底缺少可独立区分正确与错误的测试覆盖：`TestFlashSaleConcurrentNoOversell`（`test/e2e/flashsale_test.go:477`）只断言「Redis 准入放行数 + 最终 MySQL 结果」，而 Redis 闸门在 20 并发下只放行 5 条，MySQL 侧从未出现超额并发，因此该用例无法检测 `flashsale.go:499-501` 的库存预检与 `flashsale.go:530-540` 的条件扣减被移除。是否需要补充能在 MySQL 侧独立证伪这两道兜底的测试，待 T02 专项核查；本任务仅登记缺口，未修改生产代码与测试。
 
 ---
 
@@ -444,7 +445,7 @@ grep -n 'ConsumeQueued(ctx, flashSaleConsumeScanBatch)' internal/worker/scanner.
 | AC-004 | §5（职责判定 + 领取/并发/重试/死信/超时/崩溃恢复 + 与设计差异 D1-D7） | 结论均指向 SQL 或代码位置 |
 | AC-005 | §6（E1-E14 命令/退出码/状态/输出 + `NOT_EXECUTED` 清单 + 静态核实） | 命令可原样复跑 |
 | AC-006 | §7（已验证事实 17 / 推断 7 / 未知 7 / 风险 11） | 每条附锚点或核验方式；设计意图未进入事实 |
-| AC-007 | §8（EV-01~EV-15 + 13 个待核查问题） | 只给锚点与问题，不推断 T02/T03 范围 |
+| AC-007 | §8（EV-01~EV-15 + 14 个待核查问题） | 只给锚点与问题，不推断 T02/T03 范围 |
 | AC-008 | 本节 | 见下 |
 
 **变更范围（AC-008）**：本任务只新增 `docs/reports/surgecart-baseline-audit-v1/baseline-audit-report.md`，C2 只修改 `.agent/tasks/surgecart-baseline-audit-v1/state.yaml`；未改动 `internal/`、`api/`、`internal/migrations/`、`Dockerfile`、`.cnb.yml`、`prometheus/`、`docs/design/`，未新增 Kafka 相关代码。复核方式：
