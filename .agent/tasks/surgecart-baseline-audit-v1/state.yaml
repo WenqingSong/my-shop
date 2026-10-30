@@ -14,8 +14,8 @@ review:
   target: "757ed22301b402f2cf29fbc89b80b5f8a6c9d4cb"
 
 owner:
-  status: PENDING
-  review_target: ""
+  status: REJECTED
+  review_target: "757ed22301b402f2cf29fbc89b80b5f8a6c9d4cb"
 
 delivery:
   status: NOT_RUN
