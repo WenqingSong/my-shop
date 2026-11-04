@@ -4,7 +4,7 @@
 >
 > 本文件在项目曾升级到 4.x 期间归档保留，只用于回溯 V3 的设计决策与演进原因。正文为 V3 原文，未改写，也不得作为当前实现的权威依据。
 >
-> - 当前框架版本：`.agent/VERSION` = `3.2.0`（上游发布线 `refs/tags/v3.2.0`；`https://cnb.cool/framework-station/agent-workflow`，Commit `ccd95f8c6e2191b4f4a13019ce15bd7dfa251e01`）。
+> - 当前框架版本：`.agent/VERSION` = `3.4.0`（上游发布线 `refs/tags/v3.4.0`；`https://cnb.cool/framework-station/agent-workflow`，Commit `263194ba83e72c1fc67f177fb22e9bffeff0780e`；2026-11-04 经 adoption 事务由 `3.2.0` 升级，见 `docs/reports/2026-11-04-agent-workflow-upgrade-v3.4.0.md`）。
 > - 当前权威入口：`.agent/README.md`（运行资产索引）；Workflow 专用指令 `.agent/specs/WorkflowAgentDirective.md`；协作规范 `.agent/specs/AgentCollaborationSpecification.md`；职责边界 `.agent/specs/Five-AgentResponsibilityBoundary.md`；路线选择 `.agent/specs/WorkflowRouteSelection.md`；角色 Prompt `.agent/roles/`（七个平铺文件）。
 > - 迁移与历史 Task 兼容规则：`.agent/specs/WorkflowAdoption.md`（安装 / 升级 / 恢复；引擎支持 state schema 2/3）。
 > - 世代说明：项目在 2026-10-29 由 4.x 未发布线（`229edfd`，上游无 tag）切回发布线 `3.2.0`。两者在 `v3.0.0`（`7727e0a`）分叉，互不为祖先；4.x 的 DESIGN / Program / 六 CLI / Task schema 4 机制在本项目已不存在。

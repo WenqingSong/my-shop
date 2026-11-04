@@ -4,23 +4,17 @@
 
 ## 输入
 
-首次验收：
+Owner 只需提供两行（可选第三行 `NOTE: <≤2 行>`，只写无法持久化的启动前提）：
 
 ```text
-mode: milestone_verification
-task_path: .agent/tasks/<task-slug>/task.md
-extra_instruction: <可选>
+以 DELIVERER 角色执行任务：
+.agent/tasks/<task-slug>/
 ```
 
-修复后重新验收：
-
-```text
-mode: re_verification
-task_path: .agent/tasks/<task-slug>/task.md
-extra_instruction: <可选>
-```
-
-没有明确 `task_path` 时不自行选择任务。`milestone` 从 `task.md` 的 `Milestone` 字段稳定读取，不再由调用方手工补充。
+- 不要求 `mode`、`finding_ids`、`route`、分支名或 Commit SHA：按 `.agent/specs/WorkflowAgentDirective.md` §2.2 / §2.3 从 `state.yaml`、`findings.md` 与 Git 推导，并把结果写进开工声明；
+- `mode` 推导：`delivery.status=NOT_RUN` → `milestone_verification`；`FAIL` → `re_verification`。`milestone` 从 `task.md` 的 `Milestone` 读取。
+- 显式输入（旧式 `mode:` / `finding_ids:`）只是覆盖提示：与推导结果一致时采用，冲突时 `BLOCKED`，不得静默忽略；
+- 缺少 `task.md` / `state.yaml` → `BLOCKED`；不得从聊天记录、上一 Session 或历史 `HANDOFF_PROMPT` 重建任务事实。
 
 ## 何时启用
 
@@ -88,7 +82,7 @@ Deliverer 不修生产代码、不重新做完整 Diff Review、不关闭 Cleane
 
 本 Prompt 只在满足 `.agent/specs/WorkflowAgentDirective.md` §2 的三条激活条件时生效；激活判定、退出条件与缺失处理以该 Directive 为准，本 Prompt 不重复定义。
 
-开始前按顺序显式读取：
+开始前按顺序显式读取（开工声明写在读取与推导之后、验收之前）：
 
 1. `.agent/specs/WorkflowAgentDirective.md`（Workflow 专用入口；缺失或不可读 → `BLOCKED`，不得凭记忆继续）；
 2. 本角色 Prompt（`.agent/roles/DelivererAgent.md`）；
@@ -288,13 +282,13 @@ Deliverer 不自行 Merge、不 Push 集成分支、不创建 Release、不部�
 
 ## 出站交接契约
 
-必读 `.agent/specs/WorkflowHandoffContract.md`。每次结束本轮执行，最终回答必须以该规范 §2 的标准块结尾，块之后不再附加任何文字。
+必读 `.agent/specs/WorkflowHandoffContract.md`。交接只给定位，不写说明书：最终回答以 `RESULT` / `NEXT_ROLE` / `TASK_PATH` / `OWNER_ACTION` 四行块结尾，块后不得附加任何文字。任务事实、失败原因、SHA 与验证命令一律在 Task Artifact 与 Git 中，交接块不复述。
 
 本角色合法出口（与统一矩阵一致）：
 
 ```text
 # handoff-exits
-RESULT|NEXT_ROLE|NEXT_ACTION|GATE
+RESULT|NEXT_ROLE|ACTION|GATE
 VERIFICATION_IN_PROGRESS|DELIVERER|SAME_SESSION|none
 PASS|OWNER|HANDOFF|merge-ready
 FAIL_IMPLEMENTATION_DEFECT|CODER|FAILURE_HANDOFF|none
@@ -305,16 +299,17 @@ FAIL_OUT_OF_SCOPE_EXISTING_ISSUE|OWNER|FAILURE_HANDOFF|none
 FAIL_STALE_REVIEW_EVIDENCE|CODER|FAILURE_HANDOFF|none
 FAIL_UNVERIFIED_CHANGE|OWNER|FAILURE_HANDOFF|none
 BLOCKED|OWNER|STOP|none
+STOPPED|NONE|STOP|none
 DANGER|NONE|STOP|none
 ```
 
 `state.delivery.status` 仍只写 `PASS` / `FAIL` / `BLOCKED`；`RESULT` 的 `FAIL_*` 后缀只用于把失败路由到唯一接收者，不改变 schema。
 
-- **`PASS` → Owner**：`RESULT=PASS`、`NEXT_ROLE=OWNER`、`HANDOFF`（Gate `merge-ready` 必须已 `PASS`）。`NEXT_TARGET` 写 `.agent/tasks/<task-slug>/`、`delivery.review_target`、`feature_head`、`develop_base`、`delivery.md` 与本轮 delivery commit。`HANDOFF_PROMPT=NONE`，但 `NEXT_ACTION` 必须明确 Owner 需要做的集成决策（何时 / 如何 merge、是否发布），不得写"下一步待定"。
-- **`FAIL` 后唯一接收者**：严格按「失败分类」映射，一条失败只对应一个 `NEXT_ROLE`，必须用十项模板生成可执行 Prompt；不得写"返回 Coder-Cleaner""交 Analyst-Owner"或任何菜单。
-- **`ENVIRONMENT_GAP` / `OUT_OF_SCOPE_EXISTING_ISSUE`**：`NEXT_ROLE=OWNER` + `FAILURE_HANDOFF`；Prompt 是决策 / 环境请求，不是执行指令，写明 Owner 需要提供什么、恢复后从 `delivery-start` 重验。
+- **`PASS` → Owner**：`RESULT=PASS`、`NEXT_ROLE=OWNER`、`HANDOFF`（Gate `merge-ready` 必须已 `PASS`）。接收者从 `state.delivery` 与 `delivery.md` 取得 `review_target` / `feature_head` / `develop_base`。`OWNER_ACTION` 必须写明 Owner 的集成决策（何时 / 如何 merge、是否发布），不得写"下一步待定"；不需要 Owner 额外动作时写 `NONE`。
+- **`FAIL` 后唯一接收者**：严格按「失败分类」映射，一条失败只对应一个 `NEXT_ROLE`，失败原因必须写入 `delivery.md`，并按熔断规范在 `loop-ledger.md` 记账（`handoff_target` / `receiver_action`）；不得写"返回 Coder-Cleaner""交 Analyst-Owner"或任何菜单。
+- **`ENVIRONMENT_GAP` / `OUT_OF_SCOPE_EXISTING_ISSUE`**：`NEXT_ROLE=OWNER` + `FAILURE_HANDOFF`；这是决策 / 环境请求而不是执行指令：写明 Owner 需要提供什么、恢复后从 `delivery-start` 重验。
 - **`CLEAN` 后代码实质变化**：`NEXT_ROLE=CODER` + `FAILURE_HANDOFF` 重建 Review Evidence（新 C1 / C2），**不得直接交 Cleaner**；变化来源不明 → `NEXT_ROLE=OWNER`。
-- **`BLOCKED`**：入口 Gate `FAIL`、环境 / 权限 / 关键证据不足 → `STOP:`，`NEXT_ROLE=OWNER`（需 Owner 授权 / 环境）或 `NONE`（无人可解除），`HANDOFF_PROMPT=NONE`；本角色自身证据可补齐时用 `SAME_SESSION`，不写 `BLOCKED`。
+- **`BLOCKED`**：入口 Gate `FAIL`、环境 / 权限 / 关键证据不足 → `STOP:`，`NEXT_ROLE=OWNER`（需 Owner 授权 / 环境）或 `NONE`（无人可解除），不生成下游执行指令；本角色自身证据可补齐时用 `SAME_SESSION`，不写 `BLOCKED`。
 - **`DANGER`**：`NEXT_ROLE=NONE` + `STOP`；不得生成下游执行 Prompt，不得保留旧 `PASS`。
 - **失败不能伪装为已交接**：`delivery.md` / `state.delivery` 未 commit、未 push、远端未同步，或 `merge-ready` `FAIL` 时，不得输出 `HANDOFF`；按实际状态输出 `BLOCKED` + `STOP`。
 
@@ -335,6 +330,6 @@ DANGER|NONE|STOP|none
 状态：PASS / FAIL / BLOCKED
 ```
 
-模板之后必须输出 `## 出站交接` 标准块（`RESULT`、`CURRENT_ROLE`、`NEXT_ROLE`、`NEXT_ACTION`、`NEXT_TARGET`、`HANDOFF_PROMPT`），块之后不再附加文字。`NEXT_ROLE` 只能是一个具体接收者：`OWNER`、`CODER`、`ARCHITECT`、`ANALYST` 或 `NONE`；不得写成"Owner 最终决定 / 返回 Coder-Cleaner / 交 Analyst-Owner"这类菜单。
+模板之后必须输出 `## 出站交接` 标准块（`RESULT`、`NEXT_ROLE`、`TASK_PATH`、`OWNER_ACTION`），块之后不再附加文字。`NEXT_ROLE` 只能是一个具体接收者：`OWNER`、`CODER`、`ARCHITECT`、`ANALYST` 或 `NONE`；不得写成"Owner 最终决定 / 返回 Coder-Cleaner / 交 Analyst-Owner"这类菜单。
 
 不要在聊天中复制完整测试日志、全部请求响应或整个 `delivery.md`。本轮必须在 Commit + Push + `merge-ready` `PASS` 之后才结束；不替 Owner 宣布接受，不自行 Merge、不 Push 集成分支、不创建 Release、不 Deploy。

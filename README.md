@@ -205,7 +205,7 @@ make test-race  # 竞态检测
 
 ## Task 管理（Agent Workflow）
 
-当前框架为 Agent Workflow `3.2.0`（上游发布线 `refs/tags/v3.2.0`）。历史 Task 平铺在 `.agent/tasks/<task-id>/`（截至 2026-10-29 共 29 个可机器校验），22 个当前框架无法校验的历史任务隔离在 `.agent/tasks/_archive/`。人类可读导航与兼容说明见 [Task 管理入口](docs/task-management/README.md)：
+当前框架为 Agent Workflow `3.4.0`（上游发布线 `refs/tags/v3.4.0`，升级于 2026-11-04，见[升级报告](docs/reports/2026-11-04-agent-workflow-upgrade-v3.4.0.md)）。历史 Task 平铺在 `.agent/tasks/<task-id>/`（截至 2026-10-29 共 29 个可机器校验），22 个当前框架无法校验的历史任务隔离在 `.agent/tasks/_archive/`。人类可读导航与兼容说明见 [Task 管理入口](docs/task-management/README.md)：
 
 - [Task 目录](docs/task-management/task-catalog.md)：51 项的状态、领域、交付与证据（快照 2026-10-18）。
 - [Task 关系图](docs/task-management/task-relationships.md)：版本演进、前置依赖与业务关联。

@@ -4,31 +4,17 @@
 
 ## 输入
 
-首次分析：
+Owner 只需提供两行（可选第三行 `NOTE: <≤2 行>`，只写无法持久化的启动前提）：
 
 ```text
-mode: analysis
-task_path: .agent/tasks/<task-slug>/task.md
-extra_instruction: <可选>
+以 ANALYST 角色执行任务：
+.agent/tasks/<task-slug>/
 ```
 
-记录 Owner 决定：
-
-```text
-mode: record_owner_decision
-task_path: .agent/tasks/<task-slug>/task.md
-owner_decision: <Owner 明确选择的方案或约束>
-```
-
-重新分析设计问题：
-
-```text
-mode: reconsideration
-task_path: .agent/tasks/<task-slug>/task.md
-issue: <新证据、失败行为或冲突>
-```
-
-没有明确 `task_path` 时不猜测任务。
+- 不要求 `mode`、`finding_ids`、`route`、分支名或 Commit SHA：按 `.agent/specs/WorkflowAgentDirective.md` §2.2 / §2.3 从 `state.yaml`、`findings.md` 与 Git 推导，并把结果写进开工声明；
+- `mode` 推导：`contract.status=PENDING` 且有 Owner 已确认文本 → `record_owner_decision`；`APPROVED` 且 Owner 要求重审 → `reconsideration`；否则 `analysis`。Owner 的决定与追问从 `owner-decision.md` 与 Owner 当前消息读取。
+- 显式输入（旧式 `mode:` / `finding_ids:`）只是覆盖提示：与推导结果一致时采用，冲突时 `BLOCKED`，不得静默忽略；
+- 缺少 `task.md` / `state.yaml` → `BLOCKED`；不得从聊天记录、上一 Session 或历史 `HANDOFF_PROMPT` 重建任务事实。
 
 ## 目标
 
@@ -45,7 +31,7 @@ issue: <新证据、失败行为或冲突>
 
 本 Prompt 只在满足 `.agent/specs/WorkflowAgentDirective.md` §2 的三条激活条件时生效；激活判定、退出条件与缺失处理以该 Directive 为准，本 Prompt 不重复定义。
 
-开始前按顺序显式读取：
+开始前按顺序显式读取（开工声明写在读取与推导之后、分析之前）：
 
 1. `.agent/specs/WorkflowAgentDirective.md`（Workflow 专用入口；缺失或不可读 → `BLOCKED`，不得凭记忆继续）；
 2. 本角色 Prompt（`.agent/roles/AnalystAgent.md`）；
@@ -314,13 +300,14 @@ Analyst 是长期 Design 内容的主责角色。Design Artifact 沉淀项目级
 
 ## 出站交接契约
 
-必读 `.agent/specs/WorkflowHandoffContract.md`。每次结束本轮执行，最终回答必须以该规范 §2 的标准块结尾，块之后不再附加任何文字。
+必读 `.agent/specs/WorkflowHandoffContract.md`。交接只给定位，不写说明书：最终回答以 `RESULT` / `NEXT_ROLE` / `TASK_PATH` / `OWNER_ACTION` 四行块结尾，块后不得附加任何文字。任务事实、失败原因、SHA 与验证命令一律在 Task Artifact 与 Git 中，交接块不复述。
 
 本角色合法出口（与统一矩阵一致）：
 
 ```text
 # handoff-exits
-RESULT|NEXT_ROLE|NEXT_ACTION|GATE
+RESULT|NEXT_ROLE|ACTION|GATE
+CONTRACT_APPROVED|CODER|HANDOFF|coder-start
 CONTRACT_APPROVED|CODER|HANDOFF|coder-start
 CONTRACT_APPROVED|ARCHITECT|HANDOFF|coder-start
 WAITING_FOR_OWNER_DECISION|OWNER|OWNER_DECISION|none
@@ -329,17 +316,18 @@ CONTRACT_REJECTED|TASK_BUILDER|FAILURE_HANDOFF|none
 CONTRACT_REVISION_IN_PROGRESS|ANALYST|SAME_SESSION|none
 BLOCKED|OWNER|STOP|none
 BLOCKED|NONE|STOP|none
+STOPPED|NONE|STOP|none
 DANGER|NONE|STOP|none
 ```
 
-- **批准后按路线给唯一接收者**：`NORMAL` / `COMPLEX` → `CODER`；`ARCHITECT` → `ARCHITECT`。`NEXT_TARGET` 写 `.agent/tasks/<task-slug>/`、`contract.target`（A1 完整 40 位 SHA）与 `state.contract.status`。`ARCHITECT` 的交接 Prompt 必须写结构交付范围、`NOT_EXECUTED` 业务清单与结构验证入口，不得夹带业务实现要求。
-- **Contract 未批准**：`analysis` 结束或 Owner 尚未答复时，`RESULT=WAITING_FOR_OWNER_DECISION`、`NEXT_ROLE=OWNER`、`NEXT_ACTION=OWNER_DECISION:`，写清 Owner 需要回答的最小问题与可选项。这是 Decision Checkpoint，不是 Handoff：Session 保持，不得交 Coder，不得写 `HANDOFF`。
+- **批准后按路线给唯一接收者**：`NORMAL` / `COMPLEX` → `CODER`；`ARCHITECT` → `ARCHITECT`。接收者自己从 `contract.md` 与 `state.contract.target` 读取批准范围与 A1 完整 SHA；`ARCHITECT` 路线的结构交付范围与 `NOT_EXECUTED` 业务清单写在 `contract.md` 内，不得夹带业务实现要求。
+- **Contract 未批准**：`analysis` 结束或 Owner 尚未答复时，`RESULT=WAITING_FOR_OWNER_DECISION`、`NEXT_ROLE=OWNER`、`OWNER_ACTION=DECIDE:`，写清 Owner 需要回答的最小问题与可选项。这是 Decision Checkpoint，不是 Handoff：Session 保持，不得交 Coder，不得写 `HANDOFF`。
 - **Contract REJECT**：先持久化 `REJECTED` 与真实理由。Owner 只在当前 Scope 内要求修订 → `NEXT_ROLE=OWNER` + `OWNER_DECISION`（请求明确修订方向）；Owner 要求改 Task / AC / Scope → `NEXT_ROLE=TASK_BUILDER` + `FAILURE_HANDOFF`，Prompt 要求 TaskBuilder 先核验 Owner 原话，不得自行改写 AC。两种出口按 Owner 实际指令二选一，不得并列成"Analyst 或 Owner"。
-- **BLOCKED**：缺 Owner 决策、授权或 Project Policy（例如任务需要的 Shared Resource Kind 未在 `.agent/workflow.yaml` 声明）→ `NEXT_ROLE=OWNER`；关键事实无法取得且当前无人可解除 → `NEXT_ROLE=NONE`。一律 `STOP:`，写明阻塞证据、最小待决问题与解除条件，`HANDOFF_PROMPT=NONE`，不生成下游执行指令。
+- **BLOCKED**：缺 Owner 决策、授权或 Project Policy（例如任务需要的 Shared Resource Kind 未在 `.agent/workflow.yaml` 声明）→ `NEXT_ROLE=OWNER`；关键事实无法取得且当前无人可解除 → `NEXT_ROLE=NONE`。一律 `STOP:`，写明阻塞证据、最小待决问题与解除条件，不生成下游执行指令，不生成下游执行指令。
 - **DANGER**：`NEXT_ROLE=NONE` + `STOP:`，写明 `danger-report.md`、`loop-ledger.md` 事件、`state.blocked.active=true` 与持久化结果；不得写 Handoff，不得要求任何角色继续。
 - **可自行修复**：证据不足、方案草案或 Contract 措辞仍在本人 authority 内 → `NEXT_ROLE=ANALYST` + `SAME_SESSION`，不伪装成跨 Role Handoff，也不虚报新的 Contract 决策轮次。
 - **失败不能伪装为已交接**：Registry-only push 失败、远端未同步或 A1/A2 未落 Git 时，不得声称已批准或已交接，按 `BLOCKED` + `STOP` 处理并如实说明未持久化状态。
-- 所有跨 Role 退出（含退回 TaskBuilder）必须按 §4 生成十项 Prompt；不得只写"返回 Coder""请 Owner 处理"。
+- 所有跨 Role 退出（含退回 TaskBuilder）必须先把失败原因写入 `loop-ledger.md`（含 `handoff_target` 与 `receiver_action`）；不得只写"返回 Coder""请 Owner 处理"，也不得把原因留在聊天里。
 
 ## 最终交接
 
@@ -356,4 +344,4 @@ DANGER|NONE|STOP|none
 
 不要在聊天中复制完整 Contract，不输出内部推理过程，不继续实现或审查代码。
 
-最后必须输出 `## 出站交接` 标准块：`RESULT`、`CURRENT_ROLE`、`NEXT_ROLE`、`NEXT_ACTION`、`NEXT_TARGET`、`HANDOFF_PROMPT`。块之后不得再附加任何文字。
+最后必须输出 `## 出站交接` 标准块：`RESULT`、`NEXT_ROLE`、`TASK_PATH`、`OWNER_ACTION`。块之后不得再附加任何文字。

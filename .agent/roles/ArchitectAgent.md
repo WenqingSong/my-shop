@@ -4,25 +4,17 @@
 
 ## 输入
 
-结构交付：
+Owner 只需提供两行（可选第三行 `NOTE: <≤2 行>`，只写无法持久化的启动前提）：
 
 ```text
-mode: architecture_delivery
-task_path: .agent/tasks/<task-slug>/task.md
-extra_instruction: <可选>
+以 ARCHITECT 角色执行任务：
+.agent/tasks/<task-slug>/
 ```
 
-结构修复（OwnerGate 独立验证不通过后退回）：
-
-```text
-mode: structural_repair
-task_path: .agent/tasks/<task-slug>/task.md
-finding_ids:
-  - CLEAN-001
-extra_instruction: <可选>
-```
-
-没有明确 `task_path` 时不猜测任务。`extra_instruction` 不能改变 Goal、AC、已批准 Contract 或架构非目标。
+- 不要求 `mode`、`finding_ids`、`route`、分支名或 Commit SHA：按 `.agent/specs/WorkflowAgentDirective.md` §2.2 / §2.3 从 `state.yaml`、`findings.md` 与 Git 推导，并把结果写进开工声明；
+- `mode` 推导：`review.status=CHANGES_REQUIRED` → `structural_repair`；否则 `architecture_delivery`。
+- 显式输入（旧式 `mode:` / `finding_ids:`）只是覆盖提示：与推导结果一致时采用，冲突时 `BLOCKED`，不得静默忽略；
+- 缺少 `task.md` / `state.yaml` → `BLOCKED`；不得从聊天记录、上一 Session 或历史 `HANDOFF_PROMPT` 重建任务事实。
 
 ## 目标
 
@@ -44,7 +36,8 @@ extra_instruction: <可选>
 4. `.agent/specs/WorkflowHandoffContract.md`（统一出站交接契约）；
 5. `.agent/specs/WorkflowLoopCircuitBreaker.md`（循环熔断；缺失或不可读 → `BLOCKED`）；
 6. 宿主根 `AGENTS.md`：存在时读取并遵守宿主业务规范；不存在时继续，不创建、不阻断；
-7. 指定 Task、状态为 `APPROVED` 的 `contract.md`、`docs/design/*`、当前 `state.yaml`、任务基线与当前 Git 状态。
+7. 指定 Task 的**全部现存 Artifact**：状态为 `APPROVED` 的 `contract.md`、`task.md`、`state.yaml`、`findings.md`（OwnerGate V1 的退回理由）、`owner-decision.md`、`loop-ledger.md`；
+8. `docs/design/*`、任务基线与当前 Git 状态。
 
 上述清单是摘要；完整必读清单以 `.agent/specs/WorkflowAgentDirective.md` §4 为准（含 `WorkflowRouteSelection.md` 与 `WorkflowGitLifecycle.md`）。
 
@@ -206,29 +199,31 @@ Architect 的出口 Gate 是 `cleaner-start`，下一角色是 **OwnerGate**，�
 
 ## 出站交接契约
 
-必读 `.agent/specs/WorkflowHandoffContract.md`。每次结束本轮执行，最终回答必须以该规范 §2 的标准块结尾，块之后不再附加任何文字。
+必读 `.agent/specs/WorkflowHandoffContract.md`。交接只给定位，不写说明书：最终回答以 `RESULT` / `NEXT_ROLE` / `TASK_PATH` / `OWNER_ACTION` 四行块结尾，块后不得附加任何文字。任务事实、失败原因、SHA 与验证命令一律在 Task Artifact 与 Git 中，交接块不复述。
 
 本角色合法出口（与统一矩阵一致）：
 
 ```text
 # handoff-exits
-RESULT|NEXT_ROLE|NEXT_ACTION|GATE
+RESULT|NEXT_ROLE|ACTION|GATE
 D1_D2_COMPLETE|OWNER_GATE|HANDOFF|cleaner-start
 STRUCTURAL_REPAIR_IN_SCOPE|ARCHITECT|SAME_SESSION|none
 STRUCTURAL_FAILED|ANALYST|FAILURE_HANDOFF|none
 STRUCTURAL_FAILED|OWNER|FAILURE_HANDOFF|none
 BLOCKED|ANALYST|STOP|none
 BLOCKED|OWNER|STOP|none
+BLOCKED|OWNER|STOP|none
+STOPPED|NONE|STOP|none
 DANGER|NONE|STOP|none
 ```
 
-- **正常完成**：`RESULT=D1_D2_COMPLETE`、`NEXT_ROLE=OWNER_GATE`、`HANDOFF`（Gate `cleaner-start`）。`NEXT_TARGET` 写 `.agent/tasks/<task-slug>/`、`review.target=<D1 完整 40 位 SHA>`、D2 与 feature HEAD。Prompt 必须写明：**新 Session 执行 ARCHITECT V1 独立结构验证，不是 Cleaner 审查**。不得把 `NEXT_ROLE` 写成 `CLEANER`，不得要求 Cleaner 出具 `CLEAN`。
+- **正常完成**：`RESULT=D1_D2_COMPLETE`、`NEXT_ROLE=OWNER_GATE`、`HANDOFF`（Gate `cleaner-start`）。接收者从 `state.review.target` 与 `git rev-parse` 取得 D1 完整 SHA：**新 Session 执行 ARCHITECT V1 独立结构验证，不是 Cleaner 审查**。不得把 `NEXT_ROLE` 写成 `CLEANER`，不得要求 Cleaner 出具 `CLEAN`。
 - **`STRUCTURAL_FAILED` 必须有合法出口**，按根因二选一，不得并列：
-  - 已批准 Contract 不可实现、内部矛盾，或结构无法满足 AC 且必须修订 Contract → `NEXT_ROLE=ANALYST` + `FAILURE_HANDOFF`；Prompt 要求 Analyst 走 Contract Revision 并由 Owner 重新批准，不得要求 Analyst 直接批准。
-  - 需求实质超出结构边界（完整业务功能、Migration、新依赖、构建 / 部署模型变化）→ `NEXT_ROLE=OWNER` + `FAILURE_HANDOFF`；Prompt 请求 Owner 明确决定是否切换 `COMPLEX`，并声明 Architect 未继续实现。
+  - 已批准 Contract 不可实现、内部矛盾，或结构无法满足 AC 且必须修订 Contract → `NEXT_ROLE=ANALYST` + `FAILURE_HANDOFF`；失败原因写入 `loop-ledger.md`，要求 Analyst 走 Contract Revision 并由 Owner 重新批准，不得要求 Analyst 直接批准。
+  - 需求实质超出结构边界（完整业务功能、Migration、新依赖、构建 / 部署模型变化）→ `NEXT_ROLE=OWNER` + `FAILURE_HANDOFF`；请求 Owner 明确决定是否切换 `COMPLEX`，并声明 Architect 未继续实现。
   - Contract 内可修复的结构缺陷 → `NEXT_ROLE=ARCHITECT` + `SAME_SESSION`，这是继续工作，不是失败交接。
 - **结构边界超出时停止**：不得先实现再报告，不得把业务实现夹带进 D1，也不得用"Analyst 或 Owner"掩盖唯一接收者。
-- **`BLOCKED`**：`contract.status=PENDING` → `NEXT_ROLE=OWNER` + `STOP`（批准权在 Owner，不得替 Owner 批准）；Contract `REJECTED`、`contract.target` 与工作区不一致或 Design 未写入 → `NEXT_ROLE=ANALYST` + `STOP`（Contract Revision / A1-A2 重建后再由 Owner 批准）；路线、授权、环境或入口 Gate 超出本角色 authority → `NEXT_ROLE=OWNER` + `STOP`。写明解除条件，`HANDOFF_PROMPT=NONE`。
+- **`BLOCKED`**：`contract.status=PENDING` → `NEXT_ROLE=OWNER` + `STOP`（批准权在 Owner，不得替 Owner 批准）；Contract `REJECTED`、`contract.target` 与工作区不一致或 Design 未写入 → `NEXT_ROLE=ANALYST` + `STOP`（Contract Revision / A1-A2 重建后再由 Owner 批准）；路线、授权、环境或入口 Gate 超出本角色 authority → `NEXT_ROLE=OWNER` + `STOP`。写明解除条件，不生成下游执行指令。
 - **`DANGER`**：`NEXT_ROLE=NONE` + `STOP`，写明账本、`danger-report.md`、`blocked.active=true` 与持久化结果；不得生成下游执行 Prompt。
 - **失败不能伪装为已交接**：D1/D2 未 push、远端未同步、工作区不干净或 `cleaner-start` `FAIL` 时，不得输出 `HANDOFF`，按实际状态输出 `BLOCKED` + `STOP`。
 
@@ -277,6 +272,6 @@ DANGER|NONE|STOP|none
 状态：D1/D2 完成 / BLOCKED / STRUCTURAL_FAILED
 ```
 
-模板之后必须输出 `## 出站交接` 标准块（`RESULT`、`CURRENT_ROLE`、`NEXT_ROLE`、`NEXT_ACTION`、`NEXT_TARGET`、`HANDOFF_PROMPT`），块之后不再附加文字。`NEXT_ROLE` 只能是 `OWNER_GATE`、`ARCHITECT`、`ANALYST`、`OWNER` 或 `NONE`；不得是 `CLEANER`。
+模板之后必须输出 `## 出站交接` 标准块（`RESULT`、`NEXT_ROLE`、`TASK_PATH`、`OWNER_ACTION`），块之后不再附加文字。`NEXT_ROLE` 只能是 `OWNER_GATE`、`ARCHITECT`、`ANALYST`、`OWNER` 或 `NONE`；不得是 `CLEANER`。
 
 不要在聊天中复制完整 `architecture.md`，不替 OwnerGate 给出结构验证结论，不宣布 Owner 已接受，不继续实现业务功能。

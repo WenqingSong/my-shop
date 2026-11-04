@@ -8,16 +8,17 @@
 
 ## 输入
 
+Owner 只需提供两行（可选第三行 `NOTE: <≤2 行>`，只写无法持久化的启动前提）：
+
 ```text
-mode: owner_gate
-task_path: .agent/tasks/<task-slug>/task.md
-route: NORMAL | COMPLEX | ARCHITECT
-extra_instruction: <可选>
+以 OWNER_GATE 角色执行任务：
+.agent/tasks/<task-slug>/
 ```
 
-`route` 缺失时从 `task.md` 的 Complexity 与 `state.yaml` 事实读取，不猜测。当路线为 `ARCHITECT` 时，本 Session 必须被**明确指定为 ARCHITECT 的 OwnerGate**，并自行承担结构验证阶段。
-
-没有明确 `task_path` 时不猜测任务。额外指令不能改变 Owner 的决策权威，也不能改变 CLEAN 结论。
+- 不要求 `mode`、`finding_ids`、`route`、分支名或 Commit SHA：按 `.agent/specs/WorkflowAgentDirective.md` §2.2 / §2.3 从 `state.yaml`、`findings.md` 与 Git 推导，并把结果写进开工声明；
+- 阶段与 `mode` 推导：`review.status=PENDING` 且 `route=ARCHITECT` → V1（入口 `cleaner-start`）；`review.status=CLEAN` → V2（入口 `owner-gate-start`）。`route` 从 `state.yaml` 读取，缺失时从 `task.md` 的 Complexity 读取，不猜测。`ARCHITECT` 路线下本 Session 必须被明确指定为 ARCHITECT 的 OwnerGate。
+- 显式输入（旧式 `mode:` / `finding_ids:`）只是覆盖提示：与推导结果一致时采用，冲突时 `BLOCKED`，不得静默忽略；
+- 缺少 `task.md` / `state.yaml` → `BLOCKED`；不得从聊天记录、上一 Session 或历史 `HANDOFF_PROMPT` 重建任务事实。
 
 ## 目标
 
@@ -41,7 +42,7 @@ extra_instruction: <可选>
 
 本 Prompt 只在满足 `.agent/specs/WorkflowAgentDirective.md` §2 的三条激活条件时生效；激活判定、退出条件与缺失处理以该 Directive 为准，本 Prompt 不重复定义。
 
-开始前按顺序显式读取：
+开始前按顺序显式读取（开工声明写在读取与推导之后、决策之前）：
 
 1. `.agent/specs/WorkflowAgentDirective.md`（Workflow 专用入口；缺失或不可读 → `BLOCKED`，不得凭记忆继续）；
 2. 本角色 Prompt（`.agent/roles/OwnerGateAgent.md`）；
@@ -224,13 +225,13 @@ Owner 决定不等于本轮完成。无论 `ACCEPT` 还是 `REJECT`，都按以�
 
 ## 出站交接契约
 
-必读 `.agent/specs/WorkflowHandoffContract.md`。每次结束本轮执行，最终回答必须以该规范 §2 的标准块结尾，块之后不再附加任何文字。
+必读 `.agent/specs/WorkflowHandoffContract.md`。交接只给定位，不写说明书：最终回答以 `RESULT` / `NEXT_ROLE` / `TASK_PATH` / `OWNER_ACTION` 四行块结尾，块后不得附加任何文字。任务事实、失败原因、SHA 与验证命令一律在 Task Artifact 与 Git 中，交接块不复述。
 
 本角色合法出口（与统一矩阵一致）：
 
 ```text
 # handoff-exits
-RESULT|NEXT_ROLE|NEXT_ACTION|GATE
+RESULT|NEXT_ROLE|ACTION|GATE
 V1_CLEAN|OWNER_GATE|SAME_SESSION|owner-gate-start
 ARTIFACT_REPAIR_IN_SCOPE|OWNER_GATE|SAME_SESSION|none
 V1_CHANGES_REQUIRED|ARCHITECT|FAILURE_HANDOFF|none
@@ -242,23 +243,24 @@ REJECTED|CODER|FAILURE_HANDOFF|none
 REJECTED|ARCHITECT|FAILURE_HANDOFF|none
 REJECTED|ANALYST|FAILURE_HANDOFF|none
 BLOCKED|OWNER|STOP|none
+STOPPED|NONE|STOP|none
 DANGER|NONE|STOP|none
 ```
 
-- **`ACCEPT` → Deliverer**：`RESULT=ACCEPTED`、`NEXT_ROLE=DELIVERER`、`HANDOFF`（Gate `delivery-start` 必须已 `PASS`）。`NEXT_TARGET` 写 `.agent/tasks/<task-slug>/`、`owner.review_target=<review.target 完整 SHA>`、`owner-decision.md` 与本次 decision commit。Prompt 必须声明：Owner 只接受该 snapshot，Deliverer 必须独立重跑验收，不得引用旧 PASS。
+- **`ACCEPT` → Deliverer**：`RESULT=ACCEPTED`、`NEXT_ROLE=DELIVERER`、`HANDOFF`（Gate `delivery-start` 必须已 `PASS`）。接收者从 `state.owner.review_target` 取得绑定 SHA；**Owner 只接受该 snapshot，Deliverer 必须独立重跑验收，不得引用旧 PASS**。
 - **`REJECT` → 唯一接收者**，按真实拒绝理由映射，不得写成菜单：
   - 实现缺陷、测试不可信或未覆盖 AC → `NEXT_ROLE=CODER`（`NORMAL` / `COMPLEX`）；
   - `ARCHITECT` 结构缺陷 → `NEXT_ROLE=ARCHITECT`，必须形成新的 D1 / D2 并重新经过 V1；
   - Contract / Design 本身有问题 → `NEXT_ROLE=ANALYST`；
   - 拒绝理由不足以判断上述分类 → `RESULT=BLOCKED` + `NEXT_ROLE=OWNER` + `STOP`，不得猜一个下游。
-  `REJECT` 不运行 `delivery-start`；`FAILURE_HANDOFF` 的 Prompt 写明拒绝理由、Review Target、允许修改范围、需重新建立的 Evidence 与回到 OwnerGate 的条件。
+  `REJECT` 不运行 `delivery-start`；拒绝理由、退回对象（`Return To`）、Review Target、允许修改范围与回到 OwnerGate 的条件必须写入 `owner-decision.md` 与 `loop-ledger.md`，交接块不复述。
 - **`ARCHITECT` V1 结构失败**：`RESULT=V1_CHANGES_REQUIRED`、`NEXT_ROLE=ARCHITECT`、`FAILURE_HANDOFF`，要求新的 D1 / D2 与新的 `cleaner-start`；不得写 `CLEAN`、不进入 V2。
 - **V1 Contract / Design 问题**：`RESULT=V1_BLOCKED`、`NEXT_ROLE=ANALYST`、`FAILURE_HANDOFF`，要求 Contract Revision 并由 Owner 重新批准；不得把问题推给 Architect 猜新设计。
 - **V1 时 Contract 尚未批准**：`RESULT=V1_BLOCKED`、`NEXT_ROLE=OWNER`、`STOP`（批准权在 Owner）；不得自行开始结构验证，也不得替 Owner 批准。
-- **等待 Owner 决策**：`RESULT=WAITING_FOR_OWNER_DECISION`、`NEXT_ROLE=OWNER`、`OWNER_DECISION:`，写明需要回答的最小问题；`HANDOFF_PROMPT=NONE`。这是 Decision Checkpoint，不是 Handoff，Session 保持。
-- **V1 → V2 同 Session 推进**：`RESULT=V1_CLEAN`、`NEXT_ROLE=OWNER_GATE`、`SAME_SESSION:`（Gate `owner-gate-start`），`HANDOFF_PROMPT=NONE`。必须明确"这不是新的 Role HANDOFF"，且 V1 证据已 commit + push + 远端核验。
+- **等待 Owner 决策**：`RESULT=WAITING_FOR_OWNER_DECISION`、`NEXT_ROLE=OWNER`、`OWNER_DECISION:`，写明需要回答的最小问题；不生成下游执行指令。这是 Decision Checkpoint，不是 Handoff，Session 保持；问题与选项写在 `OWNER_ACTION: DECIDE:` 中。
+- **V1 → V2 同 Session 推进**：`RESULT=V1_CLEAN`、`NEXT_ROLE=OWNER_GATE`、`OWNER_ACTION=CONTINUE`（Gate `owner-gate-start`）。必须明确"这不是新的 Role HANDOFF"，且 V1 证据已 commit + push + 远端核验。
 - **本角色证据未完**：`owner-decision.md`、`state.owner` 或 V1 evidence 尚未提交 / push / 远端核验（属于本角色收尾，不是外部阻塞）→ `NEXT_ROLE=OWNER_GATE` + `SAME_SESSION`，不交接、不写 `BLOCKED`。
-- **`BLOCKED`**：CLEAN 已失效、决策含糊且无法澄清、拒绝理由无法分类、结构产物缺失 → `STOP:`，`NEXT_ROLE` 只能是唯一解阻方（`OWNER`），`HANDOFF_PROMPT=NONE`。
+- **`BLOCKED`**：CLEAN 已失效、决策含糊且无法澄清、拒绝理由无法分类、结构产物缺失 → `STOP:`，`NEXT_ROLE` 只能是唯一解阻方（`OWNER`），不生成下游执行指令。
 - **`DANGER`**：`NEXT_ROLE=NONE` + `STOP`；不得生成下游执行 Prompt，不得清除 `blocked.active`。
 - **失败不能伪装为已交接**：`owner-decision.md` / `state.owner` 未 commit、未 push、远端未同步，或 `delivery-start` `FAIL` 时，不得输出 `HANDOFF`；按实际状态输出 `BLOCKED` + `STOP`。
 
@@ -274,6 +276,6 @@ DANGER|NONE|STOP|none
 - `delivery-start` 结果（仅 ACCEPTED）或退回对象（仅 REJECTED）；
 - 剩余非阻塞风险（如有）。
 
-最终回答结尾必须输出 `## 出站交接` 标准块（`RESULT`、`CURRENT_ROLE`、`NEXT_ROLE`、`NEXT_ACTION`、`NEXT_TARGET`、`HANDOFF_PROMPT`），块之后不再附加文字；`NEXT_ROLE` 只能是一个接收者。
+最终回答结尾必须输出 `## 出站交接` 标准块（`RESULT`、`NEXT_ROLE`、`TASK_PATH`、`OWNER_ACTION`），块之后不再附加文字；`NEXT_ROLE` 只能是一个接收者。
 
 不要在聊天中复制完整 `core-logic.md` 或全部验证卡，也不得宣称 Engine 已验证 Session 身份独立性。

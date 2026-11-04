@@ -1,4 +1,4 @@
-# Workflow Git Lifecycle 规范（V3.2.0）
+# Workflow Git Lifecycle 规范（V3.3.0）
 
 > 适用对象：所有已激活的 Workflow Role Session——TaskBuilder、Analyst、Architect、Coder、Cleaner、OwnerGate、Deliverer。
 > 规范地位：本文是「角色何时可以 Stage / Commit / Push / HANDOFF」以及「失败、DANGER、Registry 等强制证据如何落 Git」的**唯一规范事实源**。
@@ -55,7 +55,7 @@ REMOTE_VERIFIED
   │  下一角色入口 Gate PASS
   ▼
 GATED
-  │  输出 HANDOFF（NEXT_ROLE / NEXT_TARGET / NEXT_ACTION）
+  │  输出四字段交接（RESULT / NEXT_ROLE / TASK_PATH / OWNER_ACTION）
   ▼
 HANDOFFED
 ```
@@ -82,7 +82,7 @@ HANDOFFED
 
 | 类型 | 内容范围 | 允许时机 | 完成条件（可复核） | 是否可 HANDOFF |
 |---|---|---|---|---|
-| `BOOTSTRAP` | `.agent/tasks/<task>/task.md`、`state.yaml`（及该任务初始 Artifact） | TaskBuilder 初始化任务，或经 Owner 授权的 `TB-BRANCH-1` | 初始化字段符合路线；TB-BRANCH-1 预检 11 项全过；staged 只含任务目录 | 否（提交后可出站，出站完成才 HANDOFF） |
+| `BOOTSTRAP` | `.agent/tasks/<task>/task.md`、`state.yaml`（及该任务初始 Artifact：`findings.md`、`core-logic.md`、`owner-decision.md`、`delivery.md`） | TaskBuilder 初始化任务，或执行 `TB-BRANCH-1` | 初始化字段符合路线；基线发现与 TB-BRANCH-1 预检全过；本次提交只含任务目录（已暂存的外来内容用 pathspec 排除） | 否（提交后可出站，出站完成才 HANDOFF） |
 | `EVIDENCE` | A1：`contract.md` + 必要的 `docs/design/*`；C1：生产代码 + 测试；D1：结构骨架 + `architecture.md` + 结构测试 | 阶段交付已完整实现，且本角色验证已真实执行 | 适用测试/构建/静态检查已执行并记录；无未完成占位（结构占位必须标 `NOT_EXECUTED`）；不含 `state.yaml`；不含其他角色 artifacts | 否 |
 | `METADATA` | **仅** `.agent/tasks/<task>/state.yaml` | Evidence Commit 已存在，且其完整 SHA 可解析 | `git diff --cached --name-only` 只有 `state.yaml`；引用字段为完整 40 位 SHA；字段转移与角色一致 | 否（与 EVIDENCE 组成 Review Request） |
 | `ROLE_ARTIFACT` | 本角色 owned artifacts + `state.yaml` 对应字段：Cleaner `findings.md`/`core-logic.md`/`review.*`；OwnerGate `owner-decision.md`/`owner.*`（V1 另有 `findings.md`/`core-logic.md`/`review.*`）；Deliverer `delivery.md`/`delivery.*` | 审查 / 决策 / 验收结论真实产生，且已按结论完成持久化 | 结论有真实证据；不修改 `review.target`（Cleaner CLEAN、ARCHITECT V1 均保持 C1/D1）；不写不属于本角色的字段 | 是（CLEAN / ACCEPT / PASS 分支，仍需 Gate PASS） |
@@ -119,13 +119,15 @@ HANDOFFED
 2. 若不影响本角色 Commit 范围 → 保留现场，提交时只 stage 自己的路径，并在 HANDOFF 中说明其存在；
 3. 若影响本角色交付或无法安全区分 → `BLOCKED`（DANGER 场景按 `.agent/specs/WorkflowLoopCircuitBreaker.md` §8 记录其存在）。
 
+TaskBuilder 初始化时适用同样的保护规则：任务目录外的既有修改（含已暂存内容）可以保留，但本次 `BOOTSTRAP` 必须用 pathspec（`git commit -- .agent/tasks/<task>`）只提交任务目录；保留内容使工作区无法 clean exit 时输出 `BOOTSTRAP_HELD`，不得为了 HANDOFF 而提交、stash、reset 或 clean 他人修改。
+
 ## 4. 七角色完成条件与 Git 动作
 
 ### 4.1 总表
 
 | 角色 | 职责完成条件（`ROLE_TASK_COMPLETE`） | 本角色 Commit 类型 | Push | 出口 Gate | HANDOFF |
 |---|---|---|---|---|---|
-| TaskBuilder | `task.md` 的 Goal/Scope/Out of Scope/AC/Review Baseline/Complexity/Initial Route 完整；`state.yaml` 按路线初始化；执行 `TB-BRANCH-1` 时预检全过且只提交任务 Artifacts | `BOOTSTRAP` | 当前 feature | NORMAL：`coder-start`；COMPLEX/ARCHITECT：无 Gate，只读同步自检 | Coder / Analyst |
+| TaskBuilder | `task.md` 的 Goal/Scope/Out of Scope/AC/Dependencies/Review Baseline/Complexity/Initial Route 完整；`state.yaml` 按路线初始化；执行 `TB-BRANCH-1` 时基线自动发现完成、预检全过、只提交任务 Artifacts | `BOOTSTRAP` | 当前 feature（自动生成的 `task/<slug>`） | NORMAL：`coder-start`；COMPLEX/ARCHITECT：无 Gate，只读同步自检；保留他人修改导致 dirty 时 `BOOTSTRAP_HELD` | Coder / Analyst |
 | Analyst | Contract 内容已获 Owner 明确批准；`Design Impact=NEW/UPDATE` 时 Design 已更新；共享资源已在 `origin/<integration_branch>` 真实 `RESERVED/ACTIVE` | `EVIDENCE`（A1）→ `METADATA`（A2）；如有资源另有 `REGISTRY_ONLY` | 当前 feature；Registry-only 例外 push integration branch | `coder-start` | Coder / Architect |
 | Architect | 结构骨架、`architecture.md`、结构测试完成；构建/格式化/静态检查/结构测试真实执行；未实现业务行为标 `NOT_EXECUTED` | `EVIDENCE`（D1）→ `METADATA`（D2） | 当前 feature | `cleaner-start` | OwnerGate V1（新 Session） |
 | Coder | AC 行为完整；正常/失败/边界测试齐全；关键不变量有可区分测试；格式化/测试/静态检查/构建已执行；无无关修改 | `EVIDENCE`（C1）→ `METADATA`（C2） | 当前 feature | `cleaner-start` | Cleaner |
@@ -135,7 +137,7 @@ HANDOFFED
 
 ### 4.2 角色特有的顺序要求
 
-- **TaskBuilder**：初始化 → 显式 stage 任务目录 → commit → push → 核验远端 → （NORMAL）`coder-start` → HANDOFF。`COMPLEX` / `ARCHITECT` 在 `contract.status=PENDING` 时**不得**运行 `coder-start`，也不得为了让它通过把 Contract 改成 `NOT_REQUIRED`。
+- **TaskBuilder**：`baseline` → 预检 → 建分支 → 初始化任务目录 → 显式 stage 任务目录 → 用 pathspec commit（只含任务目录）→ push → 核验远端 → （NORMAL）`coder-start` → HANDOFF。`COMPLEX` / `ARCHITECT` 在 `contract.status=PENDING` 时**不得**运行 `coder-start`，也不得为了让它通过把 Contract 改成 `NOT_REQUIRED`。工作区保留他人修改时，不得为满足 clean exit 而提交、stash、reset 或 clean 这些修改；必须输出 `BOOTSTRAP_HELD`。
 - **Analyst**：Registry-only commit（如需）→ A1 → A2 → push → 远端核验 → `coder-start` → HANDOFF。A1 不得包含 Registry 文件；Registry 文件只出现在 `origin/<integration_branch>` 的 `REGISTRY_ONLY` commit 中。
 - **Architect**：D1 → D2 → push → 远端核验 → `cleaner-start` → HANDOFF。`architecture.md` 属于实质结构事实，必须进入 D1；D1 之后修改它必须形成新的 D1。
 - **Coder**：C1 → C2 → push → 远端核验 → `cleaner-start` → HANDOFF。C1 是 Cleaner 的审查对象；C2 不得混入业务代码。
@@ -234,7 +236,7 @@ Gate `PASS` 只证明机器事实满足约束：它不是 `CLEAN`、不是 Owner
 5. 远端 SHA 已用 `git ls-remote` 核验等于本地 HEAD；
 6. `git status --short` 为空；
 7. 下一角色入口 Gate `PASS`；
-8. `NEXT_ROLE` / `NEXT_TARGET` / `NEXT_ACTION` 明确，且不存在 `blocked.active=true` 或 DANGER 停机。
+8. `RESULT` / `NEXT_ROLE` / `TASK_PATH` / `OWNER_ACTION` 明确，且不存在 `blocked.active=true` 或 DANGER 停机。
 
 以下任一情况**禁止**输出 HANDOFF：
 
@@ -309,7 +311,7 @@ Gate FAIL 不要求为了「记录失败」而额外 commit；但不得删除、
 
 | 情况 | 是否允许 Commit | 是否允许 Push | 是否允许 HANDOFF | 必须满足的条件 | 真实技术理由 |
 |---|---|---|---|---|---|
-| TaskBuilder Bootstrap（NORMAL / COMPLEX / ARCHITECT） | 是（`BOOTSTRAP`） | 是（仅当前 feature） | 是，出站完成后 | 任务 Artifact 完整；`state.yaml` 按路线初始化；`TB-BRANCH-1` 预检全过（如执行）；staged 只含任务目录；NORMAL 需 `coder-start` PASS | 任务边界本身是一个可独立验证的交付阶段；无此提交，下游角色没有稳定事实源 |
+| TaskBuilder Bootstrap（NORMAL / COMPLEX / ARCHITECT） | 是（`BOOTSTRAP`） | 是（仅当前 feature） | 是，出站完成后 | 任务 Artifact 完整；`state.yaml` 按路线初始化；基线自动发现完成且 `TB-BRANCH-1` 预检全过（如执行）；本次提交只含任务目录；NORMAL 需 `coder-start` PASS；保留他人修改导致 dirty 时改为 `BOOTSTRAP_HELD` | 任务边界本身是一个可独立验证的交付阶段；无此提交，下游角色没有稳定事实源 |
 | Analyst A1（Contract Evidence） | 是（`EVIDENCE`） | 允许（可与 A2 一并 push） | 否 | Contract 内容与 Owner 明确批准一致；Design 已更新；不含 Registry / 业务代码 / `state.yaml`；A1 SHA 已记录 | `contract.target` 必须是不可变 Commit；批准结论需要可引用的内容快照 |
 | Analyst A2（Approval Metadata） | 是（`METADATA`） | 是（当前 feature） | 是，`coder-start` PASS 后 | 仅 `state.yaml`；`contract.status=APPROVED`；`contract.target=A1 完整 SHA`；资源已在 integration branch 验证；工作区 clean、远端同步 | 后一提交必须引用前一不可变 SHA；A2 是唯一的批准事实载体 |
 | Coder C1（Implementation Evidence） | 是（`EVIDENCE`） | 允许 | 否 | AC 实现完成；适用测试/构建/静态检查已执行；无未完成占位；不含 `state.yaml`；不含其他角色 artifacts | Cleaner 必须审查一个不可变实现快照，而不是移动的 working tree |
@@ -340,12 +342,14 @@ Gate FAIL 不要求为了「记录失败」而额外 commit；但不得删除、
 | `SRC-02` | `STRICT_REQUIREMENT_CONFLICT` | loop-ledger write-ahead 在任务未完成时提交 | 熔断要求「先记账并 push，再发请求」；此时角色职责尚未完成 | 归类为 `FORCED_EVIDENCE`，只允许账本（必要时 `state.yaml`），不宣称完成、不 HANDOFF | 已限定范围；不能取消 write-ahead，否则丢失两轮预算证据 |
 | `SRC-03` | `STRICT_REQUIREMENT_CONFLICT` | Registry-only 在交付前 push integration branch | 资源必须先在实际 integration branch 落地，才有资格进入实现 | 仅 Analyst、仅已声明 Registry 文件、仅普通 push；失败禁止 force；不作为 Handoff | 已限定；不改变「唯一 develop 写例外」 |
 | `SRC-04` | `STRICT_REQUIREMENT_CONFLICT` | ARCHITECT V1 的 CLEAN 早于 OwnerGate 整体完成 | V1 必须先持久化 CLEAN，V2 才能取得 Owner 决策；两阶段之间不能合并 | V1 / V2 分两次 `ROLE_ARTIFACT` 出站；V1 明确不是 Owner 接受 | 已定义；不能合并提交，否则 `review.target` 与 Owner 决策对象失配 |
-| `SRC-05` | `STRICT_REQUIREMENT_CONFLICT` | TaskBuilder Bootstrap 在无交付前提交 | 任务边界与初始状态必须先成为 Git 事实，下游才能开始 | 归类 `BOOTSTRAP`，只含任务目录；NORMAL 仍需 `coder-start`，COMPLEX/ARCHITECT 只读同步自检 | 已定义；无 Gate 可用是既有设计 |
+| `SRC-05` | `STRICT_REQUIREMENT_CONFLICT` | TaskBuilder Bootstrap 在无交付前提交 | 任务边界与初始状态必须先成为 Git 事实，下游才能开始 | 归类 `BOOTSTRAP`，只含任务目录；NORMAL 仍需 `coder-start`，COMPLEX/ARCHITECT 只读同步自检 | 已定义；无 Gate 可用是既有设计；V3.3.0 明确初始 Artifact 六件套均属该提交 |
 | `SRC-06` | `STRICT_REQUIREMENT_CONFLICT` | 失败 / 拒绝 / CHANGES_REQUIRED 证据提交 | 工作未完成时仍需提交负面结论，否则下一 Session 无法恢复 | 归类 `ROLE_ARTIFACT` 或 `FORCED_EVIDENCE`；只含本角色证据与状态；禁止写成成功 | 已定义；不得为了「只在完成后提交」而丢弃失败证据 |
 | `SRC-07` | `SPEC_ONLY` | Engine 的 `handoffReady` 只比较本地 remote-tracking ref | 若远端被他人推进，本地 `origin/<branch>` 可能陈旧，Gate 会在远端已变化时 PASS | 自检工具改用 `git ls-remote`（§12）；Engine 的 `handoffReady` 语义保持 V3.1.0 不变（V3.2.0 只新增路线不变量） | 已披露；`verify-remote` 与 `handoff-check` 用真实远端补足，Gate 自身仍可能误 PASS |
 | `SRC-08` | `SPEC_ONLY` | 直接 `git commit` / `git push` 无法被 Engine 阻止 | 只读 Validator 不拦截写操作，协议无法阻止恶意或误操作 | 用 Gate + 真实 Git 证据识别错误 HANDOFF；不增加 Hook / 全局配置 | 不宣称机器强制 |
 | `SRC-09` | `CLOSED` | TaskBuilder 角色 Prompt 的必读列表与 Directive §4 不一致 | Directive 要求包括 TaskBuilder 在内的所有角色读取 DANGER / Handoff / Git 规范；TaskBuilder 自身 Prompt 原本只列 4 项 | 统一入口固定在 Directive §4；TaskBuilder Prompt 已列出全部 7 项（含路线选择规范） | V3.2.0 第二阶段集成已关闭；`test_git_lifecycle.py` 的 `RoleWiringTest` 与 `test_handoff_contract.py` 覆盖 |
 | `SRC-10` | `CLOSED` | `.agent/specs/WorkflowHandoffContract.md` 由 Agent B 提供 | 独立分支不包含该文件；缺失时若 Role 自行发明 Handoff 字段会形成第二套契约 | Directive 明确引用该路径；缺失时不得自行发明，按 `BLOCKED`（`HANDOFF_CONTRACT_ABSENT`）处理 | V3.2.0 第二阶段已核验文件存在、进入 Distribution 必需成员，并接入七个角色 |
+| `SRC-11` | `RESOLVED` | V3.1.0 的 `TB-BRANCH-1` 把分支名、起始基线、完整 SHA、Task Slug 与创建授权都作为 Owner 必填输入 | 这些信息本可由 Agent 从现场发现或合理生成；强制 Owner 提供会把 Owner 变成人工配置器，并使 T02 未交付时 T03 无法初始化 | V3.3.0 改为：当前分支 / 当前 HEAD 为默认基线，Slug 与分支名自动生成，Owner 执行意图即授权；Owner 显式值仍为上层约束 | 规范与工具已更新；Git 权限边界未扩大（仍无 Merge / Rebase / Force / 删除分支 / Push 共享分支） |
+| `SRC-12` | `CLOSED` | 每个角色被要求用 `HANDOFF_PROMPT` 复述下一角色的任务说明（V3.3 及更早） | 审计证实 10 项内容中 9 项已在 Task / 共享规范中；复述导致长篇交接与事实漂移 | V3.4.0 改为四字段定位块（`RESULT` / `NEXT_ROLE` / `TASK_PATH` / `OWNER_ACTION`），失败原因落 `loop-ledger.md` 与各角色 Artifact；`WorkflowHandoffContract.md` §11 保留旧块只读兼容 | `test_handoff_contract.py` 与 `test_cold_start.py` 覆盖 |
 
 ## 12. Git 前置 / 后置自检（SPEC_ONLY）
 
@@ -359,8 +363,9 @@ Gate FAIL 不要求为了「记录失败」而额外 commit；但不得删除、
 
 | 子命令 | 用途 | 关键检查 |
 |---|---|---|
-| `preflight --role <Role> --task <task>` | 开工前 | 非 detached；工作区 clean；无遗留 staged；当前分支不是 `main` / `master` / integration（TaskBuilder bootstrap 例外）；`origin` 存在 |
-| `commit-check --role <Role> --task <task> --mode <MODE> [--phase v1\|v2]` | Commit 前 | staged 路径是否属于该 `MODE` 的白名单；`METADATA` 是否只含 `state.yaml`；`EVIDENCE` 是否混入 `state.yaml`；`FORCED_EVIDENCE` / `REGISTRY_ONLY` 是否越界；引用字段是否为完整 SHA / 可解析；`OwnerGate` 必须用 `--phase` 区分 V1/V2；**本角色 scope 内不得残留未暂存/未跟踪文件**（其他角色的无关修改按 §3.3 保留，不阻断提交，也不得被提交） |
+| `baseline --task <task> [--branch <name>]` | TaskBuilder 初始化前 | 当前分支 / 完整 HEAD / upstream / 领先落后分叉 / detached / 工作区分类 / 本地与远端同名分支 / 任务目录占用；只读，不建分支、不改文件 |
+| `preflight --role <Role> --task <task>` | 开工前 | 非 detached；非 TaskBuilder bootstrap 时要求工作区 clean、无遗留 staged、当前分支不是 `main` / `master` / integration，且本地与远端同步；TaskBuilder `--bootstrap` 允许保留任务目录外的既有修改，但报告其数量与分类；`origin` 存在 |
+| `commit-check --role <Role> --task <task> --mode <MODE> [--phase v1\|v2] [--preserve-foreign]` | Commit 前 | staged 路径是否属于该 `MODE` 的白名单；`METADATA` 是否只含 `state.yaml`；`EVIDENCE` 是否混入 `state.yaml`；`FORCED_EVIDENCE` / `REGISTRY_ONLY` 是否越界；引用字段是否为完整 SHA / 可解析；`OwnerGate` 必须用 `--phase` 区分 V1/V2；**本角色 scope 内不得残留未暂存/未跟踪文件**（其他角色的无关修改按 §3.3 保留，不阻断提交，也不得被提交）；`--preserve-foreign` 仅允许 TaskBuilder `bootstrap`，保留已暂存 / 未暂存的外来内容但要求本次提交范围仍只含任务目录 |
 | `push-check --role <Role> --task <task> [--mode normal\|registry] [--expect-branch <name>]` | Push 前 | 目标分支不是 `main` / `master` / integration（Analyst `REGISTRY_ONLY` 例外）；可选核对当前分支 == 任务分支；不处于 detached |
 | `verify-remote --task <task> [--branch <name>] [--expect-sha <sha>]` | Push 后 | `git ls-remote` 的实际远端 SHA == 本地 HEAD；本地 remote-tracking ref 是否陈旧 |
 | `handoff-check --role <Role> --task <task> [--gate <gate>]` | HANDOFF 前 | 工作区 clean；远端 SHA == 本地 HEAD；`state.yaml` 无 `blocked.active=true`；可选：要求指定 Gate `PASS` |
@@ -370,7 +375,8 @@ Gate FAIL 不要求为了「记录失败」而额外 commit；但不得删除、
 ### 12.2 使用顺序
 
 ```text
-preflight → commit-check → git commit → push-check → git push → verify-remote → gate → handoff-check → HANDOFF
+（TaskBuilder 初始化）baseline → preflight → commit-check → git commit → push-check → git push → verify-remote → route → handoff-check → HANDOFF
+（其他角色）preflight → commit-check → git commit → push-check → git push → verify-remote → gate → handoff-check → HANDOFF
 ```
 
 自检 `PASS` 不替代 Gate；自检 `FAIL` 时不得继续写 Git。自检工具无法证明 Commit 内容真实、无法认证 Session、无法阻止绕过工具的直接命令——这些边界必须在 HANDOFF 中如实承认。
@@ -381,7 +387,7 @@ preflight → commit-check → git commit → push-check → git push → verify
 
 | 角色 | 允许的 Commit 类型 | 必须通过的出口 Gate | 覆盖用例 |
 |---|---|---|---|
-| TaskBuilder | `BOOTSTRAP` | NORMAL：`coder-start`；COMPLEX / ARCHITECT：无 Gate（只读同步自检） | GL-00 |
+| TaskBuilder | `BOOTSTRAP` | NORMAL：`coder-start`；COMPLEX / ARCHITECT：无 Gate（只读同步自检） | GL-00、GL-00A～GL-00E |
 | Analyst | `EVIDENCE`（A1）、`METADATA`（A2）、`REGISTRY_ONLY` | `coder-start` | GL-01、GL-12 |
 | Architect | `EVIDENCE`（D1）、`METADATA`（D2） | `cleaner-start` | GL-03 |
 | Coder | `EVIDENCE`（C1）、`METADATA`（C2）、`FORCED_EVIDENCE`（write-ahead / DANGER） | `cleaner-start` | GL-02、GL-04～GL-09B |
@@ -393,7 +399,12 @@ preflight → commit-check → git commit → push-check → git push → verify
 
 | 编号 | 场景 | 真实证据 | 期望 |
 |---|---|---|---|
-| GL-00 | TaskBuilder Bootstrap | 任务目录内 `task.md` + `state.yaml` | `--mode bootstrap` PASS；混入业务文件 → FAIL |
+| GL-00 | TaskBuilder Bootstrap | 任务目录内六件初始 Artifact | `--mode bootstrap` PASS；混入业务文件 → FAIL；已知任务目录外修改 → `--preserve-foreign` PASS 且不被提交 |
+| GL-00A | 当前分支是 `develop` | `baseline --task <new>` | `READY`；`base_branch=develop`；不要求 Owner 提供分支名 |
+| GL-00B | detached HEAD | `baseline --task <new>` | `DETACHED_HEAD`（exit 1）；输出 HEAD 与候选分支；不建分支 |
+| GL-00C | 工作区有未提交业务修改 | `baseline` + `preflight --bootstrap` + pathspec commit | `READY_WITH_PRESERVED_CHANGES`；修改逐字节保留；Commit 只含任务目录 |
+| GL-00D | 远端领先 / 落后 / 分叉 | `baseline` | 输出 `AHEAD n` / `BEHIND n` / `DIVERGED`；不自动 pull / reset / rebase |
+| GL-00E | 本地或远端已有同名分支 | `baseline --branch <name>` | `BRANCH_CONFLICT`；不覆盖；调用方重新命名 |
 | GL-01 | 合法 A1/A2 | A1 `contract.md` + A2 `state.yaml`（APPROVED，target=A1） | `coder-start` PASS；A2 不含业务代码 |
 | GL-02 | 合法 C1/C2 | C1 代码/测试 + C2 `state.yaml`（PENDING，target=C1） | `cleaner-start` PASS |
 | GL-03 | 合法 D1/D2（含 V1） | D1 结构 + `architecture.md` + 结构测试 + D2 `state.yaml`（PENDING，target=D1）；V1 落 `findings.md` / `core-logic.md` / `review.status=CLEAN` | `cleaner-start` PASS；V1 后 `owner-gate-start` PASS |
@@ -431,3 +442,6 @@ preflight → commit-check → git commit → push-check → git push → verify
 7. 没有为了掩盖失败而修改旧 Evidence SHA、删除历史事件或改写已 Push 历史。
 8. 没有把 A1/C1/D1 描述成已审查、已接受或可交付。
 9. 没有把本文或 `workflow-check` 描述成「已禁止一切未授权 Git 写操作」。
+10. 没有未经基线发现就创建 TaskBuilder 任务分支；基线不是当前分支 / 当前 HEAD 时必须说明来源。
+11. 没有把任务目录外的既有修改写入 `BOOTSTRAP` Commit；也没有为了 clean exit 而丢弃或清理它们。
+12. 没有把 `BOOTSTRAP_HELD` / `BASE_UNRESOLVED` 描述成 HANDOFF 成功。

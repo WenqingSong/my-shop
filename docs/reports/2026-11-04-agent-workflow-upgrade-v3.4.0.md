@@ -111,4 +111,40 @@ compat:
 
 ## 5. 升级结果
 
-（升级完成后由本次事务结果回填）
+`upgrade --execute` 结果：
+
+| 项 | 值 |
+| --- | --- |
+| STATUS | `UPGRADED` |
+| 事务 / 备份 | `20261104T082133Z-d613866f` |
+| 报告 | `.git/workflow-adoption/reports/20261104T082132Z-35422cff.json` |
+| 源分发包 | `agent-workflow-src-263194ba83e7.tar.gz`（`d8c41775…e2be5`） |
+| 写入 | 19 个 `update`（roles / specs / adoption / README / VERSION / git-lifecycle-check），无删除、无 conflict |
+| `workflow_check` | 由分发包内 Engine 本地构建（`provenance=local-build`），`version` 报告 `3.4.0` / `build_source=source` |
+| 事务内校验 | `preflight_gate` / `files` / `upstream` / `snapshot` / `gate` 全部 `PASS`，`protected_unchanged=True` |
+
+升级后独立校验 `workflow-adoption verify`：
+
+```text
+STATUS: VERIFIED
+source_commit: 263194ba83e72c1fc67f177fb22e9bffeff0780e
+framework_version: 3.4.0
+verify.files: PASS
+verify.binary: PASS
+verify.gate: PASS
+verify.config_schema: 1
+verify.state_schema_preserved: 2,3
+```
+
+回归检查：`GOWORK=off go -C .agent/engine test ./...` → `cmd/workflow-check`、`internal/workflow` 均 `ok`。
+
+新 provenance 要点：`source.commit = 263194ba83e72c1fc67f177fb22e9bffeff0780e`，
+`snapshot.ref = snapshots/263194ba83e72c1fc67f177fb22e9bffeff0780e`（53 个受管文件），
+`last_upgrade.from_commit = ccd95f8c…`。
+
+## 6. 保留事项与边界
+
+- `.agent/workflow.yaml`、`.agent/tasks/**`、`.agent/registry/**` 未被修改（事务 `protected_unchanged=True`）。
+- 29 个保留 Task 仍无 `state.route` 事实，`workflow-check route <task>` 仍需 `--allow-legacy`；本次升级不补造 route。
+- 其他文档中 `3.2.0` 的表述：仅“当前版本”类陈述已同步为 `3.4.0`（根 `README.md`、`docs/design/agent-workflow.md`、`docs/task-management/README.md` 首段）；带日期的历史叙述与行为性说明保持原样，未改写。
+- 升级结果（19 个框架文件 + `upstream.yaml`）在本次操作结束时尚未提交，按项目 Git 流程由 Owner 决定提交时机。

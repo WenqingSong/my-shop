@@ -5,11 +5,14 @@
 - 只读：不 stage、不 commit、不 push、不修改任何文件。
 - 退出码：0 PASS / 1 FAIL / 2 ERROR。
 - 这是 SPEC_ONLY 工具，不能阻止绕过它的直接 git 写操作，也不替代 Gate。
+- `baseline` 只报告真实 Git 事实（当前分支 / HEAD / upstream / 领先落后 / 工作区分类 /
+  同名分支 / 任务目录占用），由 TaskBuilder 依据 TB-BASE-1 / TB-NAME-1 决策。
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -202,9 +205,12 @@ def is_business_path(path: str) -> bool:
     return not path.startswith(".agent/") and not path.startswith("docs/design/")
 
 
+BOOTSTRAP_FILES = ("task.md", "state.yaml", "findings.md", "core-logic.md", "owner-decision.md", "delivery.md")
+
+
 def allowed_for(mode: str, role: str, task: str, cfg: dict[str, object], phase: str) -> set[str]:
     if mode == "bootstrap":
-        return {task_file(task, "task.md"), task_file(task, "state.yaml")}
+        return {task_file(task, name) for name in BOOTSTRAP_FILES}
     if mode == "metadata":
         return {task_file(task, "state.yaml")}
     if mode == "evidence":
@@ -248,7 +254,7 @@ def role_owned_paths(role: str, task: str, cfg: dict[str, object]) -> set[str]:
     """
     state = task_file(task, "state.yaml")
     if role == "TaskBuilder":
-        return {task_file(task, "task.md"), state}
+        return {task_file(task, name) for name in BOOTSTRAP_FILES}
     if role == "Analyst":
         return {task_file(task, "contract.md"), state, "*design*"} | set(cfg.get("registries", []))  # type: ignore[arg-type]
     if role == "Architect":
@@ -326,13 +332,31 @@ def validate_artifacts(root: str, role: str, state: dict[str, str], phase: str) 
         return
 
 
-def check_staged_scope(root: str, role: str, task: str, mode: str, phase: str) -> None:
+def check_staged_scope(
+    root: str,
+    role: str,
+    task: str,
+    mode: str,
+    phase: str,
+    preserve_foreign: bool = False,
+) -> list[str]:
     staged = staged_paths(root)
     if not staged:
         raise CheckError("暂存区为空：没有可校验的 Commit 内容")
     cfg = read_config(root)
     allowed = allowed_for(mode, role, task, cfg, phase)
-    outside = [path for path in staged if not path_allowed(path, allowed)]
+    preserved: list[str] = []
+    if preserve_foreign:
+        if mode != "bootstrap":
+            raise CheckError("--preserve-foreign 只允许与 --mode bootstrap 同时使用")
+        task_prefix = f".agent/tasks/{task}/"
+        task_staged = [path for path in staged if path.startswith(task_prefix)]
+        if not task_staged:
+            raise CheckError("暂存区没有当前任务目录内的文件")
+        outside = [path for path in task_staged if not path_allowed(path, allowed)]
+        preserved = [path for path in staged if not path.startswith(task_prefix)]
+    else:
+        outside = [path for path in staged if not path_allowed(path, allowed)]
     if outside:
         raise CheckError(f"staged 路径超出 {mode} 范围: {', '.join(outside)}")
     if mode == "metadata" and staged != [task_file(task, "state.yaml")]:
@@ -343,6 +367,7 @@ def check_staged_scope(root: str, role: str, task: str, mode: str, phase: str) -
         raise CheckError("未在 .agent/workflow.yaml 声明任何 Registry 路径")
     if mode == "registry" and ".agent/workflow.yaml" in staged:
         raise CheckError("Analyst 不得修改 .agent/workflow.yaml")
+    return preserved
 
 
 def check_field_transition(root: str, role: str, task: str, mode: str, phase: str) -> None:
@@ -413,21 +438,231 @@ def cmd_preflight(args: argparse.Namespace, root: str) -> tuple[str, str]:
         raise CheckError("缺少 .agent/workflow.yaml 的 git.integration_branch")
     if not git_ok(root, "remote", "get-url", "origin"):
         raise CheckError("缺少远端 origin")
-    dirty = status_porcelain(root)
-    if dirty:
-        raise CheckError(f"开工前工作区必须 clean，实际存在 {len(dirty)} 项变更: {', '.join(dirty[:5])}")
     if args.bootstrap:
         if role != "TaskBuilder":
             raise CheckError("--bootstrap 只允许 TaskBuilder")
+        task_prefix = f".agent/tasks/{args.task}/"
+        if os.path.isdir(os.path.join(root, task_prefix)):
+            raise CheckError(f"任务目录已存在，不得重复初始化: {task_prefix}")
+        pending = set(staged_paths(root)) | set(unstaged_paths(root)) | set(untracked_paths(root))
+        task_changes = sorted(path for path in pending if path.startswith(task_prefix))
+        if task_changes:
+            raise CheckError(f"任务目录内已有修改，无法安全初始化: {', '.join(task_changes)}")
+        preserved = sorted(path for path in pending if not path.startswith(task_prefix))
+        detail = f"role={role} branch={branch} head={head_sha(root)} bootstrap=true"
+        if preserved:
+            detail += f" preserved_foreign={len(preserved)} sample={','.join(preserved[:3])}"
+        return "preflight", detail
+    dirty = status_porcelain(root)
+    if dirty:
+        raise CheckError(f"开工前工作区必须 clean，实际存在 {len(dirty)} 项变更: {', '.join(dirty[:5])}")
+    if branch in PROTECTED_BRANCHES or (integration and branch == integration):
+        raise CheckError(f"{role} 不得直接工作在受保护/集成分支 {branch}")
+    remote = remote_sha(root, branch)
+    if not remote:
+        raise CheckError(f"远端不存在 origin/{branch}")
+    if remote != head_sha(root):
+        raise CheckError(f"开工前本地 HEAD 与 origin/{branch} 不同步: {head_sha(root)} != {remote}")
+    return "preflight", f"role={role} branch={branch} bootstrap=false"
+
+
+def remote_branch_state(root: str, remote: str, branch: str) -> tuple[bool, str]:
+    """返回 (远端命令是否成功, 分支 SHA)；分支不存在时 SHA 为空。"""
+    proc = subprocess.run(
+        ["git", "ls-remote", "--heads", remote, f"refs/heads/{branch}"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        return False, ""
+    for line in proc.stdout.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[1] == f"refs/heads/{branch}":
+            return True, parts[0]
+    return True, ""
+
+
+def ahead_behind(root: str, spec: str) -> tuple[int, int] | None:
+    proc = subprocess.run(
+        ["git", "rev-list", "--left-right", "--count", spec],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        return None
+    parts = proc.stdout.split()
+    if len(parts) != 2:
+        return None
+    try:
+        return int(parts[0]), int(parts[1])
+    except ValueError:
+        return None
+
+
+def sync_label(ahead: int | None, behind: int | None, has_upstream: bool, has_remote: bool) -> str:
+    if ahead is None or behind is None:
+        if not has_upstream and not has_remote:
+            return "REMOTE_ABSENT"
+        if not has_upstream:
+            return "NO_UPSTREAM"
+        return "UNKNOWN_NOT_FETCHED"
+    if ahead and behind:
+        return "DIVERGED"
+    if ahead:
+        return "AHEAD"
+    if behind:
+        return "BEHIND"
+    return "IN_SYNC"
+
+
+def branch_kind(branch: str, integration: str) -> str:
+    if branch in PROTECTED_BRANCHES:
+        return "PROTECTED"
+    if integration and branch == integration:
+        return "INTEGRATION"
+    if branch.startswith("task/") or branch.startswith("feature/"):
+        return "TASK_BRANCH"
+    return "FEATURE"
+
+
+def cmd_baseline(args: argparse.Namespace, root: str) -> tuple[str, str]:
+    """只读报告 TB-BASE-1 所需的真实 Git 事实，不创建分支、不修改文件。"""
+    task = args.task
+    remote = args.remote or "origin"
+    cfg = read_config(root)
+    integration = str(cfg.get("integration_branch", ""))
+
+    proc = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        raise ToolError(f"git rev-parse --abbrev-ref HEAD 失败: {proc.stderr.strip()}")
+    branch = proc.stdout.strip()
+    detached = branch == "HEAD"
+    head = head_sha(root)
+    candidates: list[str] = []
+    if detached:
+        out = subprocess.run(
+            ["git", "branch", "--contains", head, "--format=%(refname:short)"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+        )
+        if out.returncode == 0:
+            candidates = [line.strip() for line in out.stdout.splitlines() if line.strip()]
+
+    staged = staged_paths(root)
+    unstaged = unstaged_paths(root)
+    untracked = untracked_paths(root)
+    pending = staged + unstaged + untracked
+    task_prefix = f".agent/tasks/{task}/"
+    task_dir_exists = os.path.isdir(os.path.join(root, task_prefix)) or git_ok(
+        root, "cat-file", "-e", f"HEAD:.agent/tasks/{task}"
+    )
+    task_changes = sorted({path for path in pending if path.startswith(task_prefix)})
+    preserved = sorted({path for path in pending if not path.startswith(task_prefix)})
+
+    reachable = True
+    remote_sha_current = ""
+    if not detached:
+        reachable, remote_sha_current = remote_branch_state(root, remote, branch)
+
+    upstream = ""
+    up = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    if up.returncode == 0:
+        upstream = up.stdout.strip()
+
+    ahead: int | None = None
+    behind: int | None = None
+    if upstream:
+        counts = ahead_behind(root, f"HEAD...{upstream}")
+        if counts:
+            ahead, behind = counts
+    elif remote_sha_current and git_ok(root, "cat-file", "-e", f"{remote_sha_current}^{{commit}}"):
+        counts = ahead_behind(root, f"HEAD...{remote_sha_current}")
+        if counts:
+            ahead, behind = counts
+    sync = sync_label(ahead, behind, bool(upstream), bool(remote_sha_current))
+
+    candidate = args.branch or ""
+    candidate_status = "NOT_PROVIDED"
+    if candidate:
+        valid = subprocess.run(
+            ["git", "check-ref-format", "--branch", candidate],
+            cwd=root,
+            capture_output=True,
+            text=True,
+        ).returncode == 0
+        if not valid:
+            candidate_status = "BRANCH_INVALID"
+        elif candidate in PROTECTED_BRANCHES or (integration and candidate == integration):
+            candidate_status = "BRANCH_PROTECTED"
+        elif git_ok(root, "show-ref", "--verify", f"refs/heads/{candidate}"):
+            candidate_status = "BRANCH_CONFLICT_LOCAL"
+        elif remote_branch_state(root, remote, candidate)[1]:
+            candidate_status = "BRANCH_CONFLICT_REMOTE"
+        else:
+            candidate_status = "OK"
+
+    if detached:
+        status = "DETACHED_HEAD"
+    elif not reachable:
+        status = "REMOTE_UNREACHABLE"
+    elif task_dir_exists or task_changes:
+        status = "TASK_EXISTS"
+    elif candidate_status in {"BRANCH_INVALID", "BRANCH_PROTECTED", "BRANCH_CONFLICT_LOCAL", "BRANCH_CONFLICT_REMOTE"}:
+        status = candidate_status
+    elif preserved:
+        status = "READY_WITH_PRESERVED_CHANGES"
     else:
-        if branch in PROTECTED_BRANCHES or (integration and branch == integration):
-            raise CheckError(f"{role} 不得直接工作在受保护/集成分支 {branch}")
-        remote = remote_sha(root, branch)
-        if not remote:
-            raise CheckError(f"远端不存在 origin/{branch}")
-        if remote != head_sha(root):
-            raise CheckError(f"开工前本地 HEAD 与 origin/{branch} 不同步: {head_sha(root)} != {remote}")
-    return "preflight", f"role={role} branch={branch} bootstrap={bool(args.bootstrap)}"
+        status = "READY"
+
+    report = {
+        "status": status,
+        "task": task,
+        "current_branch": "" if detached else branch,
+        "detached": detached,
+        "candidates": candidates,
+        "head": head,
+        "branch_kind": "" if detached else branch_kind(branch, integration),
+        "upstream": upstream,
+        "sync": sync,
+        "ahead": ahead,
+        "behind": behind,
+        "remote": remote,
+        "remote_branch_sha": remote_sha_current,
+        "task_dir_exists": task_dir_exists,
+        "task_dir_changes": task_changes,
+        "preserved_count": len(preserved),
+        "preserved_sample": preserved[:10],
+        "candidate_branch": candidate,
+        "candidate_status": candidate_status,
+    }
+    if args.json:
+        print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False))
+    detail = (
+        f"status={status} task={task} branch={report['current_branch']} head={head} "
+        f"kind={report['branch_kind']} sync={sync} upstream={upstream or 'NONE'} "
+        f"remote_sha={remote_sha_current or 'NONE'} preserved={len(preserved)} "
+        f"candidate={candidate or 'NONE'} candidate_status={candidate_status}"
+    )
+    if detached:
+        detail += f" detached_candidates={','.join(candidates) or 'NONE'}"
+    if task_changes:
+        detail += f" task_dir_changes={','.join(task_changes[:5])}"
+    if status in {"READY", "READY_WITH_PRESERVED_CHANGES"}:
+        return "baseline", detail
+    raise CheckError(f"STATUS: {status} {detail}")
 
 
 def cmd_commit_check(args: argparse.Namespace, root: str) -> tuple[str, str]:
@@ -448,7 +683,9 @@ def cmd_commit_check(args: argparse.Namespace, root: str) -> tuple[str, str]:
     # 只对本角色 owned scope 内的残留判 FAIL：WorkflowGitLifecycle §3.3 允许在
     # 保留其他角色修改现场的前提下提交自己的明确路径。若本角色范围内仍有未暂存 /
     # 未跟踪文件，说明提交不完整或 staged 范围被拆分，必须先处置（§3.3 第 3 种情况）。
-    check_staged_scope(root, role, args.task, mode, args.phase)
+    preserved_staged = check_staged_scope(
+        root, role, args.task, mode, args.phase, bool(getattr(args, "preserve_foreign", False))
+    )
     owned = role_owned_paths(role, args.task, cfg)
     pending = set(unstaged_paths(root)) | set(untracked_paths(root))
     leftovers = sorted(path for path in pending if path_allowed(path, owned))
@@ -460,6 +697,8 @@ def cmd_commit_check(args: argparse.Namespace, root: str) -> tuple[str, str]:
     detail = f"role={role} mode={mode} task={args.task} paths={len(staged_paths(root))}"
     if foreign:
         detail += f" foreign_preserved={len(foreign)}"
+    if preserved_staged:
+        detail += f" preserved_staged={len(preserved_staged)}"
     return "commit-check", detail
 
 
@@ -558,6 +797,13 @@ def build_parser() -> argparse.ArgumentParser:
         # 允许 --root 写在子命令之后；SUPPRESS 避免覆盖写在子命令之前的全局值。
         p.add_argument("--root", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
 
+    base = sub.add_parser("baseline", help="TaskBuilder 基线事实发现（只读）")
+    add_root(base)
+    base.add_argument("--task", required=True)
+    base.add_argument("--branch", default="", help="可选：候选分支名，校验合法性与冲突")
+    base.add_argument("--remote", default="origin")
+    base.add_argument("--json", action="store_true")
+
     pre = sub.add_parser("preflight", help="开工前自检")
     add_root(pre)
     pre.add_argument("--role", required=True)
@@ -574,6 +820,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["bootstrap", "evidence", "metadata", "artifacts", "forced", "registry"],
     )
     commit.add_argument("--phase", choices=["v1", "v2"], default="", help="OwnerGate 阶段（可选）")
+    commit.add_argument(
+        "--preserve-foreign",
+        action="store_true",
+        help="仅 TaskBuilder bootstrap：保留并排除任务目录外已暂存内容",
+    )
 
     push = sub.add_parser("push-check", help="Push 前检查目标分支")
     add_root(push)
@@ -603,6 +854,7 @@ def main(argv: list[str]) -> int:
     try:
         root = repo_root(args.root)
         handlers = {
+            "baseline": cmd_baseline,
             "preflight": cmd_preflight,
             "commit-check": cmd_commit_check,
             "push-check": cmd_push_check,

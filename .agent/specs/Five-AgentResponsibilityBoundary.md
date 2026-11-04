@@ -32,7 +32,7 @@ Owner 回答：我要什么、哪些重要方案可以接受、哪些核心逻�
 Owner 负责：
 
 - 决定 Goal、Scope、Out of Scope 和 Acceptance Criteria；
-- 决定 Task / Branch Boundary：新任务还是延续、是否开新 feature、branch 名称与基线；需要时把「创建当前任务初始分支」这一窄操作按 `TB-BRANCH-1` 明确授权给 TaskBuilder；
+- 决定 Task / Branch Boundary：新任务还是延续、是否开新 feature；需要时可显式指定 branch 名称与基线，未指定时由 TaskBuilder 按 `TB-BRANCH-1` 自主发现与生成；Owner 要求创建 / 初始化 / 执行任务即构成「创建当前任务初始分支」的窄授权；
 - 确认复杂任务的关键方案（Contract Decision）；
 - 阅读核心逻辑说明，做 Core Logic Decision（ACCEPT / REJECT / 继续询问）；
 - 决定 Shared Integration：何时/如何 merge、merge 顺序、squash 方式、并行依赖；
@@ -52,11 +52,12 @@ TaskBuilder 回答：本次究竟交付什么，怎样判断完成？
 - 判断 Design Impact（`NONE` / `UPDATE` / `NEW`）；当为 `NEW/UPDATE` 时在 `task.md` 声明目标 Design Artifact，并纳入 Scope、Deliverables 与 AC；
 - 判断任务直接交 Coder，还是先交 Analyst（Complexity）；
 - 声明全局资源需求（类型 + 语义），不写具体域号 / version 号；
-- 在 Owner 明确授权下执行 `TB-BRANCH-1`：创建当前任务的初始 Feature Branch、初始化任务 Artifact、Commit、普通 Push，并核验远端 SHA 与工作区状态。
+- 执行 `TB-BRANCH-1`：按 `TB-BASE-1` 从当前检出分支与当前 HEAD 自动发现基线，按 `TB-NAME-1` 生成 Task Slug 与 `task/<task-slug>`，创建当前任务的初始 Feature Branch、初始化任务 Artifact、Commit、普通 Push，并核验远端 SHA 与工作区状态；
+- 按 `TB-DEP-1` 区分 Blocking / Reference-only / Parallel 依赖并写入 `task.md`；只有 Blocking 依赖未交付才阻塞当前任务初始化。
 
 不负责：写生产代码、替 Analyst 完成复杂设计、Review 实现，或替 Owner 创造关键业务规则。
 
-TaskBuilder 默认不拥有分支生命周期，目标 branch 由 Owner 预先准备。唯一例外是 `TB-BRANCH-1`：Owner 逐项给出完整分支名、起始分支、起始 Commit SHA、Task Slug 并明确授权后，TaskBuilder 可为**当前任务**创建初始 Feature Branch 并完成首次 Commit / Push。TaskBuilder 仍禁止删除或重命名分支、Merge、Rebase、Force Push、Push `main` 或共享集成分支；该例外不改变 Engine、Gate 与 `state.yaml` schema。
+TaskBuilder 默认不拥有分支生命周期。唯一例外是 `TB-BRANCH-1`：Owner 明确要求创建、初始化并执行任务，即授权 TaskBuilder 为**当前任务**创建初始 Feature Branch 并完成首次 Commit / Push；Owner 显式给出的分支名与基线优先。TaskBuilder 仍禁止删除或重命名分支、Merge、Rebase、Force Push、Push `main` / `master` / 共享集成分支；该例外不改变 Engine、Gate 与 `state.yaml` schema。
 
 TaskBuilder 的提交类型是 `BOOTSTRAP`：只允许任务初始 Artifact（`task.md`、`state.yaml` 及该目录内约定文件），且必须在本任务定义、状态初始化与（如执行）`TB-BRANCH-1` 预检全部完成后提交。不得把未写完的 `task.md` 草稿、探索性修改或「先存一下」的修改作为进度提交；出站完成前不得 HANDOFF。
 
@@ -201,7 +202,7 @@ Deliverer 可使用临时目录、临时 worktree、detached HEAD 等本地集�
 
 ## 10. 默认交接与 Gate
 
-每一角色正常 Handoff 前由本角色运行下一角色的入口 Gate（`.agent/bin/workflow-check gate <name> <task>`）：
+每一角色正常 Handoff 前由本角色运行下一角色的入口 Gate（`.agent/bin/workflow-check gate <name> <task>`）。**「谁该开工」不由本节的文字顺序决定，而由 `.agent/specs/WorkflowAgentDirective.md` §2.2 的阶段推导表决定**；本节只给出 Gate 与接收者的对应关系：
 
 ```text
 Analyst   → gate coder-start      → HANDOFF Coder（NORMAL / COMPLEX）| Architect（ARCHITECT）
@@ -212,6 +213,8 @@ OwnerGate V1（ARCHITECT）→ gate owner-gate-start → OwnerGate V2（同 Sess
 OwnerGate → gate delivery-start   → HANDOFF Deliverer
 Deliverer → gate merge-ready      → HANDOFF Owner
 ```
+
+出站交接固定四字段（`RESULT` / `NEXT_ROLE` / `TASK_PATH` / `OWNER_ACTION`），不生成下一角色的任务说明书；失败原因按 `AgentCollaborationSpecification.md` §4.1 落盘。
 
 每条 Handoff 前的统一出站顺序：本阶段验证完成 → `git status --short` / `git diff` 检查归属 → 显式 stage 本角色 owned artifacts → `git diff --cached --name-status` 核对 → commit（合法类型见 `.agent/specs/WorkflowGitLifecycle.md` §2）→ 普通 push 当前 feature → `git ls-remote` 核验远端 SHA == 本地 HEAD 且 working tree clean → 运行 Gate → `PASS` 才 HANDOFF。`CHANGES_REQUIRED`、Owner `REJECT`、Deliverer `FAIL` / `BLOCKED` 与 DANGER 的退回同样必须 Commit + Push + 远端核验，只是不经过下一角色入口 Gate。
 

@@ -4,32 +4,38 @@ schema_version: 1
 
 source:
   repository: "https://cnb.cool/framework-station/agent-workflow"
-  kind: "source-distribution"
-  name: "agent-workflow-src-ccd95f8c6e21.tar.gz"
-  sha256: "00a0578749525d142688f762903009124c7808e226d13280d772541ae3d9dffc"
-  framework_version: "3.2.0"
-  commit: "ccd95f8c6e2191b4f4a13019ce15bd7dfa251e01"
-  release: "v3.2.0"
+  kind: "source-archive"
+  name: "agent-workflow-src-263194ba83e7.tar.gz"
+  sha256: "d8c417758e0e4078691fff7b398f4e27af8763e610c5619adf2f58a1901e2be5"
+  framework_version: "3.4.0"
+  commit: "263194ba83e72c1fc67f177fb22e9bffeff0780e"
+  release: ""
 
 installed:
-  action: "reconstructed"
-  at: "2026-11-04"
+  action: "upgrade"
+  at: "2026-11-04T08:21:33Z"
   owner: "owner"
   branch: "develop"
   integration_branch: "develop"
-  previous_commit: ""
+  previous_commit: "ccd95f8c6e2191b4f4a13019ce15bd7dfa251e01"
 
 snapshot:
   store: "git-dir:workflow-adoption"
-  ref: "snapshots/ccd95f8c6e2191b4f4a13019ce15bd7dfa251e01"
-  manifest_sha256: "3f797edb82d76f855279b3556b1ef3ef5951e2015e368ce676118337ebc5ab02"
+  ref: "snapshots/263194ba83e72c1fc67f177fb22e9bffeff0780e"
+  manifest_sha256: "d9848b371d24f9401d0bc7d0ee3de46c15bbbe3b594a35335c5dc006da2074f7"
   file_count: 53
 
 runtime:
   workflow_check: ".agent/bin/workflow-check"
-  workflow_check_sha256: ""
-  provenance: "unknown"
+  workflow_check_sha256: "41935fc1adae379c4450501e9ae01dec711b8a4adf15a113db38036bfd51aaa3"
+  provenance: "local-build"
 
 compatibility:
   config_schema: 1
   state_schema: "2,3"
+
+last_upgrade:
+  from_commit: "ccd95f8c6e2191b4f4a13019ce15bd7dfa251e01"
+  to_commit: "263194ba83e72c1fc67f177fb22e9bffeff0780e"
+  at: "2026-11-04T08:21:33Z"
+  distribution_sha256: "d8c417758e0e4078691fff7b398f4e27af8763e610c5619adf2f58a1901e2be5"

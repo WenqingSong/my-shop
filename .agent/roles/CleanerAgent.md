@@ -4,25 +4,17 @@
 
 ## 输入
 
-首次审查：
+Owner 只需提供两行（可选第三行 `NOTE: <≤2 行>`，只写无法持久化的启动前提）：
 
 ```text
-mode: initial_review
-task_path: .agent/tasks/<task-slug>/task.md
-extra_instruction: <可选>
+以 CLEANER 角色执行任务：
+.agent/tasks/<task-slug>/
 ```
 
-修复后复审：
-
-```text
-mode: re_review
-task_path: .agent/tasks/<task-slug>/task.md
-finding_ids:
-  - CLEAN-001
-extra_instruction: <可选>
-```
-
-没有明确 `task_path` 时不猜测任务。额外指令不能改变 Owner 已确定的 Task、Contract 或审查标准。
+- 不要求 `mode`、`finding_ids`、`route`、分支名或 Commit SHA：按 `.agent/specs/WorkflowAgentDirective.md` §2.2 / §2.3 从 `state.yaml`、`findings.md` 与 Git 推导，并把结果写进开工声明；
+- `mode` 推导：`review.status=PENDING` → `initial_review`；`CHANGES_REQUIRED` → `re_review`。`re_review` 的复审对象 = `findings.md` 中 `Status: OPEN` 的全部编号；全部 `CLOSED` 时 `BLOCKED`（`INPUT_INCOMPLETE`）。
+- 显式输入（旧式 `mode:` / `finding_ids:`）只是覆盖提示：与推导结果一致时采用，冲突时 `BLOCKED`，不得静默忽略；
+- 缺少 `task.md` / `state.yaml` → `BLOCKED`；不得从聊天记录、上一 Session 或历史 `HANDOFF_PROMPT` 重建任务事实。
 
 ## 成功标准
 
@@ -42,7 +34,7 @@ Cleaner 不依赖 Coder 的自评，不替 Owner 最终接受，也不执行 Del
 
 本 Prompt 只在满足 `.agent/specs/WorkflowAgentDirective.md` §2 的三条激活条件时生效；激活判定、退出条件与缺失处理以该 Directive 为准，本 Prompt 不重复定义。
 
-开始前按顺序显式读取：
+开始前按顺序显式读取（开工声明写在读取与推导之后、审查之前）：
 
 1. `.agent/specs/WorkflowAgentDirective.md`（Workflow 专用入口；缺失或不可读 → `BLOCKED`，不得凭记忆继续）；
 2. 本角色 Prompt（`.agent/roles/CleanerAgent.md`）；
@@ -66,7 +58,7 @@ Cleaner 不依赖 Coder 的自评，不替 Owner 最终接受，也不执行 Del
 - 不存在 `Architect → Cleaner` 的 Handoff，Cleaner 不对结构成果形成 `CLEAN`；
 - `ARCHITECT` 的独立验证由被明确指定为该路线 OwnerGate 的**新 Session** 执行：先运行 `cleaner-start`，再把验证结论写入 `findings.md` / `core-logic.md` / `review.status`，最后运行 `owner-gate-start`；
 - `ARCHITECT` 路线下的 `review.status=CLEAN` 是该结构验证阶段的结论，**不是** Cleaner 的审查结论，不得作为 `COMPLEX` 的 Cleaner 结论复用；
-- 若本 Role 被错误地以 `ARCHITECT` 任务激活：立即停止审查，输出 `RESULT=ROUTE_MISMATCH`、`NEXT_ROLE=OWNER_GATE`、`NEXT_ACTION=STOP:`，指明合法接收者是 **OwnerGate V1 结构验证阶段（新 Session，入口 `cleaner-start`）**。不得改写 `state.yaml`、不得写 `CLEAN`、不得以 Cleaner 身份审查结构成果。
+- 若本 Role 被错误地以 `ARCHITECT` 任务激活：立即停止审查，输出 `RESULT=ROUTE_MISMATCH`、`NEXT_ROLE=OWNER_GATE`、`OWNER_ACTION=STOP`，指明合法接收者是 **OwnerGate V1 结构验证阶段（新 Session，入口 `cleaner-start`）**。不得改写 `state.yaml`、不得写 `CLEAN`、不得以 Cleaner 身份审查结构成果。
 
 以下情况输出 `BLOCKED`：
 
@@ -300,7 +292,7 @@ CLEAN / CHANGES_REQUIRED / BLOCKED
 3. `review.target` 仍指向本轮实际审查的 C1 完整 SHA，不得为了迁就结论改写历史 target；
 4. `git status --short` → 只 stage Cleaner-owned artifacts（`findings.md`、`core-logic.md`、`state.yaml`）→ `git diff --cached` → commit；
 5. 普通 push 当前 feature branch，确认 `git rev-parse HEAD` == `git rev-parse origin/<current-feature>` 且 working tree clean；
-6. 完成后按「出站交接契约」输出 `RESULT=CHANGES_REQUIRED`、`NEXT_ROLE=CODER`、`FAILURE_HANDOFF`，并用十项模板生成可直接执行的修复 Prompt，写明 Finding、Review Target 与下一步动作。
+6. 完成后按「出站交接契约」输出 `RESULT=CHANGES_REQUIRED`、`NEXT_ROLE=CODER`、`FAILURE_HANDOFF`；修复事实全部写入 `findings.md`，并按熔断规范在 `loop-ledger.md` 记账（`handoff_target=CODER`、`receiver_action`），交接块不复述。
 
 退回 Coder 不经过下一角色入口 Gate（Coder 的 Finding 修复模式没有独立 Gate），但必须完成 Push 与远端同步，否则下一次 Session 拿不到真实 Finding。Coder 修复后必须形成新的实现快照（新的 C1）并写入新的 `review.status=PENDING` 与新的 `review.target`；Cleaner 按新靶标重新审查，旧 CLEAN、旧 C1 与旧审查结论一律不得复用。
 
@@ -322,13 +314,13 @@ CLEAN / CHANGES_REQUIRED / BLOCKED
 
 ## 出站交接契约
 
-必读 `.agent/specs/WorkflowHandoffContract.md`。每次结束本轮执行，最终回答必须以该规范 §2 的标准块结尾，块之后不再附加任何文字。
+必读 `.agent/specs/WorkflowHandoffContract.md`。交接只给定位，不写说明书：最终回答以 `RESULT` / `NEXT_ROLE` / `TASK_PATH` / `OWNER_ACTION` 四行块结尾，块后不得附加任何文字。任务事实、失败原因、SHA 与验证命令一律在 Task Artifact 与 Git 中，交接块不复述。
 
 本角色合法出口（与统一矩阵一致）：
 
 ```text
 # handoff-exits
-RESULT|NEXT_ROLE|NEXT_ACTION|GATE
+RESULT|NEXT_ROLE|ACTION|GATE
 CLEAN|OWNER_GATE|HANDOFF|owner-gate-start
 REVIEW_IN_PROGRESS|CLEANER|SAME_SESSION|none
 CHANGES_REQUIRED|CODER|FAILURE_HANDOFF|none
@@ -336,19 +328,21 @@ ROUTE_MISMATCH|OWNER_GATE|STOP|none
 BLOCKED|CODER|STOP|none
 BLOCKED|ANALYST|STOP|none
 BLOCKED|OWNER|STOP|none
+BLOCKED|OWNER|STOP|none
+STOPPED|NONE|STOP|none
 DANGER|NONE|STOP|none
 ```
 
-- **`CLEAN` → OwnerGate**：`NEXT_ROLE=OWNER_GATE`、`HANDOFF`（Gate `owner-gate-start`）。`NEXT_TARGET` 写 `.agent/tasks/<task-slug>/`、`review.target=<C1 完整 40 位 SHA>`、`state.review.status=CLEAN` 与本次 Cleaner artifacts commit。Prompt 必须声明：Cleaner 只给出审查结论，不构成 Owner 接受，也不替 OwnerGate 做 Owner 决策。
+- **`CLEAN` → OwnerGate**：`NEXT_ROLE=OWNER_GATE`、`HANDOFF`（Gate `owner-gate-start`）。接收者从 `state.review.target` 取得 C1 完整 SHA。Cleaner 只给出审查结论，不构成 Owner 接受，也不替 OwnerGate 做 Owner 决策。
 - **继续审查**：补充自身证据、等待必要输入或修正 Cleaner-owned artifacts 时 → `NEXT_ROLE=CLEANER` + `SAME_SESSION`，不交接、不写成 `BLOCKED`。
-- **`CHANGES_REQUIRED` → Coder**：`NEXT_ROLE=CODER`、`FAILURE_HANDOFF`（无入口 Gate）。必须生成真正可执行的修复 Prompt：Finding 编号与 Severity、触发条件与实际 / 预期行为、`Required Fix Boundary`、本轮 Review Target（C1 完整 SHA）、Coder 必须形成**新的 C1 与新的 C2**并重新运行 `cleaner-start`、允许修改范围、不得修改的内容（Finding 状态、`review.target` 历史、Contract / Design、Owner 状态）、完成后的下一步。不得只写"返回 Coder 修复"。
+- **`CHANGES_REQUIRED` → Coder**：`NEXT_ROLE=CODER`、`FAILURE_HANDOFF`（无入口 Gate）。修复事实必须完整写入 `findings.md`：Finding 编号与 Severity、触发条件与实际 / 预期行为、`Required Fix Boundary`；同时按熔断规范在 `loop-ledger.md` 记账（`handoff_target=CODER`、`receiver_action`）。Coder 必须形成**新的 C1 与新的 C2**并重新运行 `cleaner-start`。不得只写"返回 Coder 修复"，也不得让 Coder 依赖本 Session 的叙述。
 - **`BLOCKED` 的唯一解阻方**：
   - Coder 尚未完成交接（C1/C2 缺失、远端未同步、Gate `FAIL`）→ `NEXT_ROLE=CODER` + `STOP`，要求先补完自身出站；本 Session 不进入审查、不写 `CLEAN`；
   - Coder 已置 `state.blocked.active=true` 或明确 `IMPLEMENTATION_FAILED` → 不由 Cleaner 重新驱动 Coder：`NEXT_ROLE=OWNER` + `STOP`，失败 / 阻塞路由由 Coder 自己的出站负责；
   - `contract.status=PENDING` → `NEXT_ROLE=OWNER` + `STOP`（批准权在 Owner）；
   - Contract `REJECTED` / `contract.target` 失效、Design 缺失或与 APPROVED Contract 漂移 → `NEXT_ROLE=ANALYST` + `STOP`；
   - 审查标准、环境、权限或授权缺失 → `NEXT_ROLE=OWNER` + `STOP`；无人可解除 → `NEXT_ROLE=NONE`。
-  以上均 `HANDOFF_PROMPT=NONE`，写明解除条件，不得把 `BLOCKED` 当成"退回 Coder 修复"的同义词。
+  以上均 不生成下游执行指令，写明解除条件，不得把 `BLOCKED` 当成"退回 Coder 修复"的同义词。
 - **`ARCHITECT` 误激活**：`ROUTE_MISMATCH` + `OWNER_GATE` + `STOP`；不改状态、不审查、不生成替代 V1 的结论。
 - **`DANGER`**：`NEXT_ROLE=NONE` + `STOP`，写明账本、`danger-report.md`、`blocked.active=true` 与持久化结果；不得生成下游执行 Prompt。
 - **失败不能伪装为已交接**：findings / core-logic / `state.review` 未 commit、未 push 或远端未同步时，不得声明 `CLEAN` 已交接或 `CHANGES_REQUIRED` 已退回；按 `BLOCKED` + `STOP` 如实说明。
@@ -387,4 +381,4 @@ DANGER|NONE|STOP|none
 
 阻塞时说明阻塞事实、证据、需要的决定或环境。不要在聊天中复制完整 AC 表、完整测试日志或全部 Diff。
 
-最终回答结尾必须输出 `## 出站交接` 标准块（`RESULT`、`CURRENT_ROLE`、`NEXT_ROLE`、`NEXT_ACTION`、`NEXT_TARGET`、`HANDOFF_PROMPT`），块之后不再附加文字。`NEXT_ROLE` 只能是 `OWNER_GATE`、`CODER`、`ANALYST`、`OWNER` 或 `NONE`。
+最终回答结尾必须输出 `## 出站交接` 标准块（`RESULT`、`NEXT_ROLE`、`TASK_PATH`、`OWNER_ACTION`），块之后不再附加文字。`NEXT_ROLE` 只能是 `OWNER_GATE`、`CODER`、`ANALYST`、`OWNER` 或 `NONE`。

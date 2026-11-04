@@ -67,6 +67,10 @@ NEVER_PACKAGE_PREFIXES = (
     ".git/",
 )
 
+# 框架仓库可以在自己的历史里保存开发期 Task（Owner 决策 B：self-hosting）。
+# 这些文件仍不得进入分发包，但不构成 SOURCE_INVALID；其他宿主数据保持 fail-closed。
+EXCLUDABLE_TASK_PREFIX = ".agent/tasks/"
+
 # Files that are part of the distribution for reading/diffing/release
 # provenance but are never copied over a host file.
 PACKAGE_ONLY_FILES = {
@@ -593,6 +597,9 @@ def create_source_distribution(
             continue
         kind = classify_path(path)
         if kind == "never_package":
+            if path.startswith(EXCLUDABLE_TASK_PREFIX):
+                # 框架仓库自托管：Task 数据可被跟踪，但绝不进入分发包。
+                continue
             violations.append(f"{path} (host/protected data)")
             continue
         if kind == "unclassified":
@@ -939,6 +946,9 @@ def _load_source_tree(
             continue
         kind = classify_path(path)
         if kind == "never_package":
+            if path.startswith(EXCLUDABLE_TASK_PREFIX):
+                # 与 dist 一致：框架仓库自托管的 Task 数据不安装、也不使来源无效。
+                continue
             violations.append(f"{path} (host/protected data)")
             continue
         if kind == "unclassified":

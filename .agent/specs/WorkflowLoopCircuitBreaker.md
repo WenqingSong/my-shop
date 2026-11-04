@@ -175,6 +175,8 @@ loop_key = <CATEGORY>:<root-cause-slug>
 - anchor: AC-003 / contract.md#failure-semantics
 - root_cause: <≤200 字稳定根因摘要>
 - request_summary: <向谁请求 / 退回了什么>
+- handoff_target: <接收角色，例如 CODER / ANALYST / OWNER>
+- receiver_action: <接收者最小必要动作，≤200 字>
 - premise_change: NONE
 - owner_decision: NONE
 - outcome: OPEN
@@ -200,6 +202,8 @@ loop_key = <CATEGORY>:<root-cause-slug>
 | `anchor` | 是 | 阻塞锚点（§2.4 要素 1） |
 | `root_cause` | 是 | 稳定根因摘要，不含措辞性描述 |
 | `request_summary` | 是 | 请求或退回的内容；`CLOSE` / `RESET` 记录解决或授权摘要 |
+| `handoff_target` | 是（`REQUEST` / `DANGER`） | 接收角色；必须与出站 `NEXT_ROLE` 一致 |
+| `receiver_action` | 是（`REQUEST` / `DANGER`） | 接收者的最小必要动作，≤200 字；不得复述 AC / 实现步骤 |
 | `premise_change` | 是 | `NONE` 或具体前提变化 |
 | `owner_decision` | 是 | `NONE` 或 Owner 明确决定的引用（决定原文要点 + 时间） |
 | `outcome` | 是 | `OPEN` / `CLOSED` / `TERMINATED` / `DANGER` / `RESET` |

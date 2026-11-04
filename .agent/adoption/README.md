@@ -104,7 +104,7 @@
 - `package_only`（根 README、CI、Design）不落宿主；
 - 根 `AGENTS.md` 不创建、不覆盖、不删除；
 - `.agent/workflow.yaml` 在升级中只读；
-- `.agent/tasks/**`、`.agent/registry/**`、业务文件与证据只读；
+- `.agent/tasks/**`、`.agent/registry/**`、业务文件与证据只读；框架仓库自身的 tracked `.agent/tasks/**` 在 V3.4.0 起被排除出分发包而不是使构建失败；
 - 升级冲突、B 快照缺失、删除未授权时整次 fail closed，不做部分写入；
 - 写入前备份到 `.git/workflow-adoption/backups/<txn>/`；
 - 报告写入 `.git/workflow-adoption/reports/<txn>.json`；
@@ -167,6 +167,6 @@ python3 .agent/adoption/tests/test_workflow_adoption.py -v
 
 ## Version Boundary
 
-当前 `.agent/VERSION` 是 `3.2.0`（Source Version）。`v3.2.0` Tag、Release、四平台
-binary 资产、`SHA256SUMS` 与 `version.json` 由发布流水线产生，当前 Published Status
-为 `NOT_RELEASED`；本目录不创建 Tag / Release，也不伪造正式发布地址。
+当前 `.agent/VERSION` 是 `3.4.0`（Source Version）。`v3.4.0` Tag、Release、四平台
+binary 资产、`SHA256SUMS` 与 `version.json` 由发布流水线产生；本目录不创建 Tag / Release，
+也不伪造正式发布地址。发布是否完成以 CNB Release 与附件核验结果为准。

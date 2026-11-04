@@ -28,6 +28,105 @@
 
 `ARCHITECT` 路线有一个直接后果：该路线的结构验证由被明确指定为 ARCHITECT OwnerGate 的**新 Session** 执行，Engine 只校验 `review.status` / `review.target` / Tail / `handoffReady` 等 Git 与 State 事实，**不能**证明验证者不是 Architect 本人，也不能证明验证真的发生。独立性由 Role Prompt、Session 隔离与 `findings.md` 中的真实证据执行，不得宣称 Engine 已具备身份认证能力。
 
+### 2.1 Session Bootstrap Protocol（独立 Session 启动）
+
+Owner 启动一个角色只需要两行：
+
+```text
+以 <ROLE> 角色执行任务：
+.agent/tasks/<task-slug>/
+```
+
+可选第三行 `NOTE: <≤2 行>`，只能写无法持久化的启动前提（例如外部环境变量位置）。**开发者不需要复制上一角色的交接说明、源码位置、执行步骤或验证命令**；这些事实必须在 Task 或 Git 中。
+
+被启动的角色按固定五步执行：
+
+1. 按 §4 读取规范链（Directive、自身 Role Prompt、协作规范、路线、熔断、交接契约、Git Lifecycle）；
+2. 读取 Task 目录内**全部现存 Artifact**：`task.md`、`state.yaml`、`contract.md`、`findings.md`、`core-logic.md`、`owner-decision.md`、`delivery.md`、`architecture.md`、`loop-ledger.md`、`danger-report.md`；除 `task.md` / `state.yaml` 缺失为 `BLOCKED` 外，其余缺失不阻断；
+3. 按 §2.2 与 §2.3 推导当前 stage、`mode` 与入口 Gate；
+4. 输出**开工声明**（见下），作为本次独立理解的证据；
+5. 运行入口 Gate；`PASS` 后进入职责；`FAIL` 时不得进入职责，按实际原因输出 `BLOCKED` 或 `STOP`。
+
+开工声明固定五行，位于进入职责前的第一个章节：
+
+```text
+## 开工声明
+ROLE: <CLEANER>
+TASK: <task-slug>
+STAGE: <REVIEW_PENDING>
+TARGET: <review.target 完整 SHA，或 NONE>
+ENTRY_GATE: <cleaner-start = PASS | none>
+```
+
+规则：
+
+- 开工声明是**理解证据**，不是 Gate 结论，不得替代真实 Gate 运行；
+- 不得要求 Owner 提供 Task / Git 已经存在的信息；不得假设本 Session 能访问上一 Session 的聊天记录；
+- 历史交接块中的 `HANDOFF_PROMPT` 一律**不得**作为事实来源；
+- 推导结果与 Owner 指定的角色冲突、`route` 缺失、Artifact 自相矛盾时：输出 `BLOCKED`，不猜测、不擅自改角色、不降级为普通 Session。
+
+### 2.2 Stage Derivation Table（唯一权威）
+
+下表由五个 Gate 的入口条件反推，是本框架「当前该谁做」的唯一权威推导；其他文件只引用，不复制。
+
+| route | contract | review | owner | delivery | stage | actor | 入口 Gate |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| NORMAL | NOT_REQUIRED | NOT_REQUESTED | PENDING | NOT_RUN | IMPLEMENTATION_PENDING | CODER | coder-start |
+| COMPLEX / ARCHITECT | PENDING / REJECTED | NOT_REQUESTED | PENDING | NOT_RUN | CONTRACT_PENDING | ANALYST | none |
+| COMPLEX | APPROVED | NOT_REQUESTED | PENDING | NOT_RUN | IMPLEMENTATION_PENDING | CODER | coder-start |
+| ARCHITECT | APPROVED | NOT_REQUESTED | PENDING | NOT_RUN | STRUCTURE_PENDING | ARCHITECT | coder-start |
+| 任意 | 任意 | PENDING | PENDING | NOT_RUN | REVIEW_PENDING | CLEANER（ARCHITECT → OWNER_GATE V1） | cleaner-start |
+| 任意 | 任意 | CHANGES_REQUIRED | 任意 | NOT_RUN | REPAIR_PENDING | CODER（ARCHITECT → ARCHITECT） | none |
+| 任意 | 任意 | CLEAN | PENDING | NOT_RUN | DECISION_PENDING | OWNER_GATE | owner-gate-start |
+| 任意 | 任意 | CLEAN | ACCEPTED | NOT_RUN | DELIVERY_PENDING | DELIVERER | delivery-start |
+| 任意 | 任意 | CLEAN | ACCEPTED | PASS | INTEGRATION_PENDING | OWNER | merge-ready |
+| 任意 | 任意 | CLEAN | REJECTED | NOT_RUN | RETURN_PENDING | **不可机器推导**：读 `owner-decision.md` 的 `Return To`；缺失 → BLOCKED | none |
+| 任意 | 任意 | 任意 | 任意 | 任意 | BLOCKED（`blocked.active=true`） | NONE | 任意 Gate 均 FAIL |
+
+推导所需的六类事实必须从下列位置取得，不得向 Owner 索取，也不得从聊天记录推断：
+
+| 事实 | 唯一来源 |
+| --- | --- |
+| 任务定义与验收标准 | `task.md` 的 Goal / Scope / Out of Scope / Acceptance Criteria |
+| 审查基线（已有修改的区分） | `task.md` 的 `## Review Baseline` |
+| 审查对象 / Review Target | `state.review.target`（并以 `cleaner-start` / `owner-gate-start` 输出复核） |
+| 路线 | `state.route`（Engine 强制与 `task.md` 的 `## Complexity` 一致） |
+| 复审对象 | `findings.md` 中 `Status: OPEN` 的编号 |
+| 失败原因与退回对象 | `findings.md`、`owner-decision.md`、`delivery.md`、`loop-ledger.md` |
+| 当前 Commit 与远端事实 | `git rev-parse HEAD`、`git ls-remote`、`state.yaml` 的引用字段 |
+
+使用规则：
+
+- 先判 `blocked.active`，为真时任何角色都只能 `STOP`；
+- `route` 缺失（历史任务）时**不做推断**：要求 Owner 显式指定角色；角色只在 state 与自身职责不矛盾时继续；
+- `RETURN_PENDING` 是唯一不可机器推导的行；`owner-decision.md` 的 `Return To` 缺失时 `BLOCKED`；
+- 表中没有的组合视为不可推导 → `BLOCKED`，不得套用最近似的一行。
+
+### 2.3 `mode` 与 Finding 推导
+
+角色 Prompt 不再要求 `mode` 或 `finding_ids` 作为必填输入；按下表从 Task 推导：
+
+| Role | `mode` 推导 | 推导依据 |
+| --- | --- | --- |
+| Analyst | `contract.status=PENDING` 且有 Owner 已确认文本 → `record_owner_decision`；`APPROVED` 且 Owner 要求重审 → `reconsideration`；否则 `analysis` | `state.contract` + `owner-decision.md` |
+| Architect | `review.status=CHANGES_REQUIRED` → `structural_repair`；否则 `architecture_delivery` | `state.review` |
+| Coder | `review.status=CHANGES_REQUIRED` 或 `owner.status=REJECTED` 或 `delivery.status=FAIL` → `finding_fix`；否则 `implementation` | `state.review` / `state.owner` / `state.delivery`；复审对象见 `findings.md` 的 `OPEN` 项 |
+| Cleaner | `review.status=PENDING` → `initial_review`；`CHANGES_REQUIRED` → `re_review` | `state.review`；复审对象见 `findings.md` 的 `OPEN` 项 |
+| Deliverer | `delivery.status=NOT_RUN` → `milestone_verification`；`FAIL` → `re_verification` | `state.delivery` |
+| OwnerGate | `review.status=PENDING` 且 `route=ARCHITECT` → V1；`review.status=CLEAN` → V2 | `state.review` + `state.route` |
+| TaskBuilder | 输入含 `task_path` → `owner_update`；否则 `create` | Owner 输入 |
+
+`finding_ids` 不作为输入：`finding_fix` / `re_review` 模式下，复审对象 = `findings.md` 中 `Status: OPEN` 的全部编号。`findings.md` 缺失或全部 `CLOSED` 时 `BLOCKED`（`INPUT_INCOMPLETE`），不得自行提出新 Finding。
+
+### 2.4 旧式输入兼容
+
+| 旧式输入 | V3.4 处理 |
+| --- | --- |
+| `mode: ...` | 作为**覆盖提示**；与推导结果一致时采用，冲突时 `BLOCKED`，不得静默忽略 |
+| `task_path: .agent/tasks/<slug>/task.md` | 接受；规范统一写目录，Engine 两者都接受 |
+| `finding_ids: ...` | 忽略；以 `findings.md` 的 `OPEN` 项为准；显式指定与 OPEN 集不一致时 `BLOCKED` |
+| 交接块含 `HANDOFF_PROMPT` | 只取 `NEXT_ROLE` / `TASK_PATH` / `OWNER_ACTION`；`HANDOFF_PROMPT` 不得作为事实来源 |
+
 ## 3. 普通 Agent Session 的范围
 
 普通 Agent Session：
@@ -48,9 +147,9 @@ Role 开始工作前，必须按顺序**显式读取**：
 3. `.agent/specs/AgentCollaborationSpecification.md`（协作规范）与 `.agent/specs/Five-AgentResponsibilityBoundary.md`（职责边界）；
 4. `.agent/specs/WorkflowRouteSelection.md`（路线事实：`NORMAL` / `COMPLEX` / `ARCHITECT` 的判定权、`state.yaml.route` 与 Engine 校验）；
 5. `.agent/specs/WorkflowLoopCircuitBreaker.md`（循环熔断：两轮预算、账本、DANGER 停机与 Owner 恢复）；
-6. `.agent/specs/WorkflowHandoffContract.md`（跨 Session HANDOFF 的最小字段与格式契约；见 §5 的缺失处理）；
+6. `.agent/specs/WorkflowHandoffContract.md`（四字段交接、失败落盘与反模式；见 §5 的缺失处理）；
 7. `.agent/specs/WorkflowGitLifecycle.md`（Stage / Commit / Push / Gate / HANDOFF 的时机与完成条件，以及只读自检工具）；
-8. 当前 Task 事实：`.agent/tasks/<task-slug>/` 下的 `task.md`、`state.yaml`、`contract.md`、`loop-ledger.md`、`danger-report.md` 等；
+8. 当前 Task 事实：`.agent/tasks/<task-slug>/` 下**全部现存** Artifact —— `task.md`、`state.yaml`、`contract.md`、`findings.md`、`core-logic.md`、`owner-decision.md`、`delivery.md`、`architecture.md`、`loop-ledger.md`、`danger-report.md`；`task.md` / `state.yaml` 缺失为 `BLOCKED`；
 9. 宿主根 `AGENTS.md`：**存在时读取并遵守**其中的宿主业务规范；**不存在时继续**，不创建、不阻断。
 
 **本节是唯一权威必读清单。** 角色 Prompt 中的清单只是摘要；任何未列出的项目仍以本节为准，不得解释为可以跳过本节第 4～7 项。
@@ -108,9 +207,10 @@ Role 认为继续执行会违反自身职责或安全约束时，输出 `BLOCKED
 | 职责边界 | `.agent/specs/Five-AgentResponsibilityBoundary.md` |
 | 路线事实（`NORMAL` / `COMPLEX` / `ARCHITECT` 判定与 `route` 校验） | `.agent/specs/WorkflowRouteSelection.md` |
 | 循环熔断（两轮预算 / 账本 / DANGER / Owner 恢复） | `.agent/specs/WorkflowLoopCircuitBreaker.md` |
-| 跨 Session HANDOFF 字段与格式（Agent B 提供） | `.agent/specs/WorkflowHandoffContract.md` |
+| 跨 Session 交接四字段与失败落盘规则 | `.agent/specs/WorkflowHandoffContract.md` |
+| 独立 Session 启动串与开工五步 | 本文件 §2.1 |
 | Git Lifecycle（Stage / Commit / Push / Gate / HANDOFF 时机） | `.agent/specs/WorkflowGitLifecycle.md` |
-| Git 只读前置自检（SPEC_ONLY） | `.agent/specs/tools/git-lifecycle-check` |
+| Git 只读前置自检（SPEC_ONLY；含 `baseline` 基线事实发现） | `.agent/specs/tools/git-lifecycle-check` |
 | 首次跨项目 Adoption | `.agent/specs/WorkflowAdoption.md` + `.agent/templates/PROJECT_ADAPTATION.template.md` |
 | 角色 Prompt | `.agent/roles/*.md` |
 | 机器配置 | `.agent/workflow.yaml` |
