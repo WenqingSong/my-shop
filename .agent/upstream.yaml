@@ -1,67 +1,35 @@
+# Workflow upstream provenance. Machine-written by workflow-adoption.
+# Do not edit by hand; it is only updated by a successful install/upgrade transaction.
 schema_version: 1
-repository: https://cnb.cool/framework-station/agent-workflow
-commit: ccd95f8c6e2191b4f4a13019ce15bd7dfa251e01
-version: "3.2.0"
-subdirectory: .agent
 
-# 本次采用的远端引用：refs/tags/v3.2.0（附注 tag）peel 后指向 ccd95f8c，
-# 与 refs/heads/main、远端 HEAD 为同一提交。
-# 核验方式：git ls-remote --tags / git merge-base，2026-10-29。
-ref: refs/tags/v3.2.0
-tag: v3.2.0
-tag_object: 2ef026da5a22f1955ecc732af53e569bcb3a86d6
+source:
+  repository: "https://cnb.cool/framework-station/agent-workflow"
+  kind: "source-distribution"
+  name: "agent-workflow-src-ccd95f8c6e21.tar.gz"
+  sha256: "00a0578749525d142688f762903009124c7808e226d13280d772541ae3d9dffc"
+  framework_version: "3.2.0"
+  commit: "ccd95f8c6e2191b4f4a13019ce15bd7dfa251e01"
+  release: "v3.2.0"
 
-# 上一版本地基线：上游 4.x 线提交 229edfd（"release: finalize Agent Workflow v4.3.0"）。
-# 重要事实：该提交在上游没有 tag，也不被任何远端分支包含；上游发布线（main / 全部 tag）
-# 停在 v3.2.0。3.2.0 与 4.3.0 互不为祖先，共同祖先为 7727e0a（= v3.0.0）。
-# 因此本次不是版本回退，而是切换世代：3.x 发布线 ↔ 4.x 未发布线。
-previous:
-  commit: 229edfd18e3b6e770f803db01e5010b215ba623f
-  version: "4.3.0-unreleased"
-  verified_by: git merge-base ccd95f8c 229edfd = 7727e0a；is-ancestor 双向均为 false
+installed:
+  action: "reconstructed"
+  at: "2026-11-04"
+  owner: "owner"
+  branch: "develop"
+  integration_branch: "develop"
+  previous_commit: ""
 
-history:
-  - commit: 229edfd18e3b6e770f803db01e5010b215ba623f
-    version: "4.3.0-unreleased"
-  - commit: 0c62d1c07bc9a98120c7a11b9cd3bbeae104a2f0
-    version: "4.3.0-dev"
-  - commit: 1fc5c6dc88fc7f417374e37e7354a3a6c4e07a65
-    version: "4.2.1"
-  - commit: 7727e0a64f47bc33b6f042f27421e1889224e7f3
-    version: "3.0.0"
+snapshot:
+  store: "git-dir:workflow-adoption"
+  ref: "snapshots/ccd95f8c6e2191b4f4a13019ce15bd7dfa251e01"
+  manifest_sha256: "3f797edb82d76f855279b3556b1ef3ef5951e2015e368ce676118337ebc5ab02"
+  file_count: 53
 
-# 本次迁移范围：框架资产整体替换为 v3.2.0，宿主运行数据迁移。
-migration:
-  framework_replace:
-    - 删除 4.x 框架资产：engine/（六 CLI）、roles/{complex,design,legacy}、mastery/、index/、
-      specs/TaskLayoutExtension.md、AGENTS.md、assistant-context.md、LICENSE
-    - 写入 v3.2.0 全量资产：engine/（workflow-check 单 CLI）、roles/（七角色平铺）、
-      specs/、templates/、adoption/、bin/.gitignore、README.md、VERSION
-  task_migration:
-    - Task 目录由 <category>/<id>/ 拍平为 .agent/tasks/<id>/（v3.2.0 路径约定）
-    - 51 个 Task → 29 个可被 v3.2.0 引擎解析并保留；22 个移入 .agent/tasks/_archive/
-      其中 19 个无 state.yaml（仅文档证据），3 个 state schema_version=0（不可解析）
-    - 分类索引 layout.yaml / layout-journal.yaml 移入 .agent/tasks/_archive/_layout/ 作为历史记录
-  preserved_host_assets:
-    - .agent/workflow.yaml（schema 1，integration_branch=develop，两个 Registry kind）
-    - .agent/registry/migrations.md、.agent/registry/error-codes.md
-    - .agent/tasks/（运行数据与证据，逐字节保留）
+runtime:
+  workflow_check: ".agent/bin/workflow-check"
+  workflow_check_sha256: ""
+  provenance: "unknown"
 
-# 保留的项目本地定制与项目拥有资产（不随框架更新覆盖）：
-local_changes: |-
-  workflow.yaml：项目机器配置（integration_branch=develop、migration_version 与 error_code_domain 两个 Registry）。
-  registry/、tasks/：项目运行数据与共享资源事实源。
-  根 AGENTS.md 已于 2026-10-18 按 Owner 指令删除，业务工程规范位于 docs/design/engineering-guidelines.md。
-
-# 与上游 3.2.0 的差异（不得伪称为上游功能）：
-divergence:
-  - 上游 3.2.0 无 Task 分类目录机制；本项目的分类信息仅保留在 _archive/_layout 历史记录中，不再参与任何校验。
-  - 22 个归档 Task 不具备 v3.2.0 可校验的 state.yaml，不得对其调用 workflow-check gate。
-
-# 未解决的兼容限制：
-compat:
-  - 29 个保留 Task 均无 state.route 事实（4.x 迁移前未记录），Engine 按 Legacy 处理：
-    workflow-check route <task> 需显式 --allow-legacy；不补造 route，避免 R-3 与 task.md 不一致。
-  - 3.2.0 缺少 workflow-deliver / workflow-event / workflow-git / workflow-program / workflow-status，
-    任务查询与交付由文档与人工流程承担。
-  - 3.2.0 上游自述 NOT_RELEASED，且 Cross-project Adoption 为 NOT PERFORMED。
+compatibility:
+  config_schema: 1
+  state_schema: "2,3"
