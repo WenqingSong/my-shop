@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "framework_version": "4.0.0",
+  "source_commit": "<40-hex>",
+  "source_repository": "<repository-url>",
+  "distribution_sha256": "<sha256 of source archive>",
+  "package": "<archive file name>",
+  "integration_branch": "<owner-confirmed-branch>",
+  "owner": "<owner>",
+  "installed_at": "<ISO-8601 UTC>",
+  "files": {
+    ".agent/VERSION": "<sha256>"
+  }
+}

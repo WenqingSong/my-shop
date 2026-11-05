@@ -4,10 +4,10 @@
 >
 > 本文件在项目曾升级到 4.x 期间归档保留，只用于回溯 V3 的设计决策与演进原因。正文为 V3 原文，未改写，也不得作为当前实现的权威依据。
 >
-> - 当前框架版本：`.agent/VERSION` = `3.4.0`（上游发布线 `refs/tags/v3.4.0`；`https://cnb.cool/framework-station/agent-workflow`，Commit `263194ba83e72c1fc67f177fb22e9bffeff0780e`；2026-11-04 经 adoption 事务由 `3.2.0` 升级，见 `docs/reports/2026-11-04-agent-workflow-upgrade-v3.4.0.md`）。
-> - 当前权威入口：`.agent/README.md`（运行资产索引）；Workflow 专用指令 `.agent/specs/WorkflowAgentDirective.md`；协作规范 `.agent/specs/AgentCollaborationSpecification.md`；职责边界 `.agent/specs/Five-AgentResponsibilityBoundary.md`；路线选择 `.agent/specs/WorkflowRouteSelection.md`；角色 Prompt `.agent/roles/`（七个平铺文件）。
-> - 迁移与历史 Task 兼容规则：`.agent/specs/WorkflowAdoption.md`（安装 / 升级 / 恢复；引擎支持 state schema 2/3）。
-> - 世代说明：项目在 2026-10-29 由 4.x 未发布线（`229edfd`，上游无 tag）切回发布线 `3.2.0`。两者在 `v3.0.0`（`7727e0a`）分叉，互不为祖先；4.x 的 DESIGN / Program / 六 CLI / Task schema 4 机制在本项目已不存在。
+> - 当前框架版本：`.agent/VERSION` = `4.0.0`（上游发布线 `refs/tags/v4.0.0`；`https://cnb.cool/framework-station/agent-workflow`，Commit `304bdb26b4c46f428e14e6067159f33505e14f7d`；2026-11-05 经 adoption 事务由 `3.4.0` 升级，见 `docs/reports/2026-11-05-agent-workflow-upgrade-v4.0.0.md`）。
+> - 当前权威入口：`.agent/README.md`（运行资产索引）；唯一入口 `.agent/specs/WorkflowAgentDirective.md`；协作原则 `.agent/specs/AgentCollaborationSpecification.md`；权责边界 `.agent/specs/Five-AgentResponsibilityBoundary.md`；角色 Prompt `.agent/roles/`（七个）。V4 已删除 Engine 与 Route 选择，本文正文中所有 Gate / `state.yaml` / `workflow-check` 描述都是 V3 历史。
+> - 迁移与历史 Task 兼容规则：`.agent/specs/WorkflowAdoption.md`（分发 / 安装 / 升级 / 回滚 / 校验；V4 不解析 state schema）。
+> - 世代说明：项目在 2026-10-29 由 4.x 未发布线（`229edfd`，上游无 tag）切回发布线 `3.2.0`；2026-11-05 上游发布 `v4.0.0`（结构性重写，删除 Engine / Gate / Route / Registry 机器机制）后，项目由 `3.4.0` 升级到该发布线。V3 与 V4 在 `v3.0.0`（`7727e0a`）之后连续演进，不再存在无 tag 的分支世代。
 >
 > **Workflow V3 Baseline**（`.agent/VERSION` = `3.0.0`，归档时快照）
 >

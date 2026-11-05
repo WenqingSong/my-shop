@@ -205,21 +205,20 @@ make test-race  # 竞态检测
 
 ## Task 管理（Agent Workflow）
 
-当前框架为 Agent Workflow `3.4.0`（上游发布线 `refs/tags/v3.4.0`，升级于 2026-11-04，见[升级报告](docs/reports/2026-11-04-agent-workflow-upgrade-v3.4.0.md)）。历史 Task 平铺在 `.agent/tasks/<task-id>/`（截至 2026-10-29 共 29 个可机器校验），22 个当前框架无法校验的历史任务隔离在 `.agent/tasks/_archive/`。人类可读导航与兼容说明见 [Task 管理入口](docs/task-management/README.md)：
+当前框架为 Agent Workflow `4.0.0`（上游发布线 `refs/tags/v4.0.0`，升级于 2026-11-05，见[升级报告](docs/reports/2026-11-05-agent-workflow-upgrade-v4.0.0.md)）。V4 删除了 Workflow Engine、`state.yaml`、五个 Gate 与 Stage 推导：工作流由 Lead Agent 组织，事实写在 Markdown 与 Git 里，机器只做静态校验。历史 Task 平铺在 `.agent/tasks/<task-id>/`（29 个 V3 记录作为冻结证据保留），22 个更早的历史任务隔离在 `.agent/tasks/_archive/`。人类可读导航与兼容说明见 [Task 管理入口](docs/task-management/README.md)：
 
 - [Task 目录](docs/task-management/task-catalog.md)：51 项的状态、领域、交付与证据（快照 2026-10-18）。
 - [Task 关系图](docs/task-management/task-relationships.md)：版本演进、前置依赖与业务关联。
 - [Owner 决策清单](docs/task-management/owner-decisions.md)：仍需人类决定的事项。
 
 ```bash
-GOWORK=off go -C .agent/engine build -o ../bin/workflow-check ./cmd/workflow-check
-.agent/bin/workflow-check route .agent/tasks/<task-id> --allow-legacy   # 路线事实自检
-.agent/bin/workflow-check gate <gate> .agent/tasks/<task-id>            # 五个 Gate
+.agent/adoption/workflow-adoption verify --target .   # 框架文件与哈希校验（V4 唯一的机器校验）
+.agent/tools/git-facts --json                         # 只读 Git 事实：分支 / HEAD / 上游 / 领先落后
 ```
 
-新任务由 [TaskBuilderPrompt](.agent/roles/TaskBuilderPrompt.md) 以 `mode: create` 初始化到 `.agent/tasks/<task-slug>/task.md`；路线 `NORMAL` / `COMPLEX` / `ARCHITECT` 的判定见 [WorkflowRouteSelection](.agent/specs/WorkflowRouteSelection.md)。
+新任务由 [TaskBuilderPrompt](.agent/roles/TaskBuilderPrompt.md) 建档到 `.agent/tasks/<task-slug>/`，使用六份 Markdown 记录（`task.md`、`plan.md`、`handoff.md`、`findings.md`、`delivery.md`、`decisions.md`）；角色是能力边界、由 Lead 按需调用，入口见 [`.agent/README.md`](.agent/README.md) 与 [WorkflowAgentDirective](.agent/specs/WorkflowAgentDirective.md)。
 
-29 个在用历史任务均为 schema 2/3 且未记录 `route` 事实（Engine 按 Legacy 处理）。框架替换改动了 `.agent/README.md` 等文件，落在历史任务的 `review.target` 之后，按 INV-4（Review Tail）判定为实质变化，因此这些任务的 `owner-gate-start` / `delivery-start` / `merge-ready` 复核已失效，只作为冻结事实保留；`_archive/` 下的任务不得调用 Gate。
+29 个在用历史任务是 V3 证据：其 `state.yaml`、`route` 与 Gate 结论均为冻结事实，V4 不解析、不续用，也不得为通过旧校验补写字段。`.agent/engine/`、`.agent/bin/workflow-check`、`.agent/workflow.yaml` 已随 V4 删除；`.agent/registry/*.md` 保留为普通 Markdown 文档，不再有机器 schema。
 
 ## 部署
 

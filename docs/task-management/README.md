@@ -2,43 +2,36 @@
 
 本目录是项目历史 Task 的**人类可读导航**，用于回答“有哪些任务、哪些还在处理、哪些已完成、版本如何演进、如何安全继续”。
 
-**当前框架：Agent Workflow `3.4.0`（上游发布线 `v3.4.0`，2026-11-04 由 `3.2.0` 升级）。** Task 物理位置已回归上游约定：`.agent/tasks/<task-id>/` 平铺，**不再有分类目录**；v4 分类机制移除时无法被 3.2.0 引擎校验的 22 个历史 Task 已隔离到 `.agent/tasks/_archive/<task-id>/`。
+**当前框架：Agent Workflow `4.0.0`（上游发布线 `v4.0.0`，2026-11-05 由 `3.4.0` 升级）。** V4 删除了 Workflow Engine、`state.yaml` 权威、五个 Gate 与 Route 选择，任务记录是普通 Markdown，由 Lead Agent 组织、由 Git 事实佐证。Task 物理位置为 `.agent/tasks/<task-id>/` 平铺，**没有分类目录**；无法被 V3 引擎校验的 22 个历史 Task 已隔离到 `.agent/tasks/_archive/<task-id>/`。
 
 ## 1. 权威边界（先读）
 
 | 信息 | 权威来源 | 说明 |
 |---|---|---|
-| Task 当前状态与决策 | `.agent/tasks/<task-id>/state.yaml` + Git Evidence | 唯一机器权威；本目录不复制、不覆盖 |
-| 归档任务 | `.agent/tasks/_archive/<task-id>/` | 无 state.yaml 或 schema 不可解析，**不得**调用 Gate |
+| Task 当前事实 | `.agent/tasks/<task-id>/` 下的 Markdown 记录（`task.md` / `plan.md` / `handoff.md` / `findings.md` / `delivery.md` / `decisions.md`）+ Git | V4 没有 State 文件；本目录不复制、不覆盖 |
+| V3 历史任务的 `state.yaml` | `.agent/tasks/<task-id>/state.yaml` | 冻结证据，V4 不解析、不续用、不得补写 |
+| 归档任务 | `.agent/tasks/_archive/<task-id>/` | 无 state.yaml 或 schema 不可解析，仅作文档证据 |
 | 人类可读分类与关系 | 本目录 | 人工维护的导航层，明确标注 `UNKNOWN`，不推断状态 |
-| 审计事实与逐项证据 | [2026-10-18 治理报告](../reports/2026-10-18-agent-task-governance.md) | 只读盘点结果（快照于 4.3.0）；与 State 冲突时以 State + Git 为准 |
+| 审计事实与逐项证据 | [2026-10-18 治理报告](../reports/2026-10-18-agent-task-governance.md) | 只读盘点结果（快照于 4.3.0）；与记录冲突时以任务目录 + Git 为准 |
 
-`3.2.0` 不提供分类清单、派生索引、单任务诊断等 CLI（`workflow-status` 已随 v4 移除），查询以文件系统 + `workflow-check` 为准。本目录不写 State、不产生批准、不替代 Gate，也不自动修改历史 Task。
+V4 不提供分类清单、派生索引、单任务诊断等 CLI，也没有 Gate 命令；查询以文件系统 + `.agent/tools/git-facts` 为准。本目录不写任务记录、不产生批准，也不自动修改历史 Task。
 
 ## 2. 快速查询
 
-构建校验器（产物被 Git 忽略）：
-
 ```bash
-GOWORK=off go -C .agent/engine build -o ../bin/workflow-check ./cmd/workflow-check
-```
+# 框架自身校验（V4 唯一的机器校验：受管文件与哈希）
+.agent/adoption/workflow-adoption verify --target .
 
-```bash
-# 路线事实自检（历史任务缺 route，需显式 --allow-legacy）
-.agent/bin/workflow-check route .agent/tasks/<task-id> --allow-legacy
-
-# 五个 Gate：coder-start / cleaner-start / owner-gate-start / delivery-start / merge-ready
-.agent/bin/workflow-check gate merge-ready .agent/tasks/<task-id>
+# 只读 Git 事实：分支 / HEAD / 上游 / 领先落后 / 工作区是否干净
+.agent/tools/git-facts --json
 
 # 列出在用任务 / 归档任务
 ls .agent/tasks | grep -v _archive
 ls .agent/tasks/_archive
 
-# 直接读 State 的机器事实
+# 读 V3 历史任务的冻结事实（只读，不参与任何校验）
 grep -E '^(schema_version|task_id|route):' .agent/tasks/<task-id>/state.yaml
 ```
-
-退出码：`0` PASS、`1` 不变量不满足、`2` 输入/State/Git 运行级错误。
 
 ## 3. 状态词汇（本目录专用）
 
@@ -66,10 +59,10 @@ grep -E '^(schema_version|task_id|route):' .agent/tasks/<task-id>/state.yaml
 
 细节：
 
-- 29 个在用 Task 全部有 `task.md`，`workflow-check route --allow-legacy` 结果为 PASS=29 FAIL=0 ERROR=0。
-- 22 个归档 Task 的 `workflow-check` 调用会返回 ERROR（exit 2），这是预期行为，不代表任务失败。
+- 29 个在用 Task 全部有 `task.md`；V3 时代（3.4.0 引擎）`workflow-check route --allow-legacy` 曾为 PASS=29 FAIL=0 ERROR=0，该工具已随 V4 删除，此结论降级为历史事实。
+- 22 个归档 Task 在 V3 时代 `workflow-check` 返回 ERROR（exit 2），属预期行为，不代表任务失败；V4 已无此命令。
 - 分类迁移历史（原 `active/completed/blocked/archive` 归属）保留在 `.agent/tasks/_archive/_layout/layout.yaml` 与 `layout-journal.yaml`，仅供参考，不参与任何校验。
-- 仓库没有 `.agent/programs`、`.agent/intake`，3.2.0 也不提供 Program/Intake/Event Log 机制。
+- 仓库没有 `.agent/programs`、`.agent/intake`；V4 也不提供 Program / Intake / Event Log 机制。
 
 完整 51 项见 [task-catalog.md](task-catalog.md)（快照于 2026-10-18，分类列已失效）。
 
@@ -84,42 +77,34 @@ grep -E '^(schema_version|task_id|route):' .agent/tasks/<task-id>/state.yaml
 
 ## 6. 历史兼容与安全恢复
 
-当前项目为 Agent Workflow `3.2.0`，state schema 支持范围由引擎决定：
+当前项目为 Agent Workflow `4.0.0`，V4 **没有引擎**，不解析 `state.yaml`、不跑 Gate、不做 Stage 推导：
 
-| State 形态 | 3.2.0 行为 | 允许的操作 |
+| State 形态 | V4 行为 | 允许的操作 |
 |---|---|---|
-| `schema_version: 2` / `3` | 严格解析，可跑 Gate 与 `route` | 只读复核；不写回、不改 schema |
-| `schema_version: 0` 或缺失 | 拒绝解析（exit 2） | 只读阅读 `task.md` / `delivery.md` / Git；不得调用 Gate |
-| 无 `state.yaml` | 视为不存在该 Task | 仅作文档证据；不得补造 State |
+| `schema_version: 2` / `3` | 不解析；仅作为 V3 冻结证据 | 只读阅读 `task.md` / `delivery.md` / Git |
+| `schema_version: 0` 或缺失 | 同上 | 只读阅读；不得补造字段 |
+| 无 `state.yaml` | 与本目录记录一致（归档证据） | 仅作文档证据；不得补造 State |
 
-重要事实：框架替换提交改动 `.agent/README.md` 等文件，落在所有历史任务的 `review.target` 之后，按 INV-4（Review Tail）判定为实质变化。因此 **29 个历史 Task 的 `owner-gate-start` / `delivery-start` / `merge-ready` 复核已全部失效**（实测 merge-ready：PASS=0，Review Tail FAIL=28，Contract FAIL=1）。这不是可修复的配置问题，而是“CLEAN 快照绑定具体 SHA”的机制结果；历史任务只作为冻结事实保留。
+重要事实：V3 时代框架替换提交改动 `.agent/README.md` 等文件，落在所有历史任务的 `review.target` 之后，按 INV-4（Review Tail）判定为实质变化，**29 个历史 Task 的 `owner-gate-start` / `delivery-start` / `merge-ready` 复核已全部失效**（实测 merge-ready：PASS=0，Review Tail FAIL=28，Contract FAIL=1）。V4 里这套机制整体不存在，历史任务只作为冻结事实保留。
 
 安全继续步骤：
 
 1. 确认 Task 在 `.agent/tasks/`（在用）还是 `.agent/tasks/_archive/`（归档）。
-2. 在用任务：`route --allow-legacy` 可自查；不要为通过校验补写 `route` 或 `## Complexity`。
-3. 归档任务：**停止**，向 Owner 提出新 Task 申请（新范围、路线、父分支、Base），不继承旧 Evidence。
-4. 任何情况下都不通过清字段、补批准或降低 Gate 来“恢复”。
+2. 在用任务：直接读六份记录（V3 任务只有 `task.md` / `delivery.md` 等旧记录）与 Git；不要为通过已不存在的校验补写 `route` / `state.yaml` 字段。
+3. 归档任务：**停止**，向 Owner 提出新 Task 申请（新范围、分支、Base），不继承旧 Evidence。
+4. 任何情况下都不通过清字段、补批准来“恢复”。
 
 ## 7. 新建 Task（正式流程）
 
-1. Owner 明确需求、Task slug、Feature Branch（名称 + base 分支 + base SHA）与授权原话。
-2. 由 [TaskBuilderPrompt](../../.agent/roles/TaskBuilderPrompt.md) 以 `mode: create` 初始化 `.agent/tasks/<task-slug>/task.md`，并记录路线决策。
-3. 路线 `NORMAL` / `COMPLEX` / `ARCHITECT` 的判定规则见 [WorkflowRouteSelection.md](../../.agent/specs/WorkflowRouteSelection.md)；`state.yaml.route` 是唯一机器权威，`task.md` 的 `## Complexity` 供人阅读且必须一致。
-4. 按角色 Prompt 逐步执行，每个交接点跑对应 Gate：
-
-```bash
-.agent/bin/workflow-check gate coder-start .agent/tasks/<task-slug>
-.agent/bin/workflow-check gate cleaner-start .agent/tasks/<task-slug>
-.agent/bin/workflow-check gate owner-gate-start .agent/tasks/<task-slug>
-.agent/bin/workflow-check gate delivery-start .agent/tasks/<task-slug>
-.agent/bin/workflow-check gate merge-ready .agent/tasks/<task-slug>
-```
+1. Owner 明确需求、Task slug、分支与授权原话。
+2. 由 [TaskBuilderPrompt](../../.agent/roles/TaskBuilderPrompt.md) 建档到 `.agent/tasks/<task-slug>/`，按 [templates/task/](../../.agent/templates/task/) 生成六份记录：`task.md`、`plan.md`、`handoff.md`、`findings.md`、`delivery.md`、`decisions.md`。
+3. Lead 按任务需要调用角色（Analyst / Architect / Coder / Cleaner / OwnerGate / Deliverer，可跳过、可并行、可多轮）；角色是能力边界，不是固定流水线。
+4. 每次交接落盘并以四字段交接块收尾（`RESULT` / `NEXT` / `TASK` / `ACTION`，可选 `EVIDENCE`），规则见 [WorkflowHandoffContract.md](../../.agent/specs/WorkflowHandoffContract.md)。
 
 ## 8. 文档维护
 
 - 本目录为**人工维护**：业务领域、版本关系、是否需要处理需要判断，不能从机器事实自动推导。
-- 新增/关闭 Task 后手工更新 [task-catalog.md](task-catalog.md)；3.2.0 没有导航一致性校验脚本，`make check-task-docs` 已随 v4 机制移除。
+- 新增/关闭 Task 后手工更新 [task-catalog.md](task-catalog.md)；V4 没有导航一致性校验脚本（原 `make check-task-docs` 已随 V3 机制移除）。
 - 本目录只描述**已发生的事实**与**待决策事项**；不预写“计划完成”的状态，不复制 `.agent/tasks/` 内容。
 
 ## 9. 目录
