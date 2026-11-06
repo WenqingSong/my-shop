@@ -12,7 +12,7 @@
 | 审计时分支 | `task/surgecart-baseline-audit` | `git branch --show-current` |
 | 审计时 HEAD | `95c13910c7226b4e32487ed046702caf75d74fc6` | `git rev-parse HEAD` |
 | 工作区 | clean（`git status --short` 为空） | `git status --short` |
-| 代码基线等价性 | `git diff --stat 473d6f5253e3abcb98ece9d79a5a8059563a3e8d..HEAD` 仅 6 个 `.agent/tasks/surgecart-baseline-audit/*.md`（+266 行），`internal/`、`api/`、`test/`、`go.mod`、`go.sum`、`Dockerfile`、`.cnb.yml`、`prometheus/` 均无差异 | 同左命令输出 |
+| 代码基线等价性 | 审计开始时（HEAD=`95c1391`）`git diff --stat 473d6f5..HEAD` 仅 6 个 `.agent/tasks/surgecart-baseline-audit/*.md`（+266 行）；交付后同一区间新增本任务 6 个报告文件，业务目录仍无差异 | 同左命令输出；交付后区间 = 12 个文件（6 记录 + 6 报告） |
 | 因此 | 本报告关于源码的结论对 `95c1391` 与 `473d6f5` 同时成立（源码逐字节相同） | 同上 |
 
 审计执行环境：`go1.24.1 linux/amd64`、Docker `29.9.2`、Docker Compose `v5.6.1`、MySQL 容器 `8.0.46`（由 `make deps-start` 在本机新建）、Redis `7-alpine`（同）。实际执行命令与结果见 D3。

@@ -9,7 +9,7 @@
 
 - 仓库 `/root/projects/my-shop`，远端 `origin` = `https://cnb.cool/framework-station/my-shop`。
 - 审计时分支 `task/surgecart-baseline-audit`，HEAD `95c13910c7226b4e32487ed046702caf75d74fc6`，`git status --short` 为空。
-- `git diff --stat 473d6f5253e3abcb98ece9d79a5a8059563a3e8d..HEAD` 只有 6 个任务记录文件（+266 行），业务源码零差异。
+- 审计开始时（HEAD=`95c1391`）`git diff --stat 473d6f5..HEAD` 只有 6 个任务记录文件（+266 行），业务源码零差异；交付后该区间新增 6 个报告文件，业务目录仍零差异。
 - 证据：`git rev-parse HEAD`、`git status --short`、`git diff --stat 473d6f5..HEAD`（命令与输出见 `delivery.md` §3.1）。
 
 ### A2 秒杀 HTTP 入口与身份校验
