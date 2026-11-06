@@ -86,6 +86,7 @@
 - Remote: `origin` = `https://cnb.cool/framework-station/my-shop`
 - Base branch: `develop`（本地与 `origin/develop` 同为 `473d6f5253e3abcb98ece9d79a5a8059563a3e8d`）
 - Base Commit: `473d6f5253e3abcb98ece9d79a5a8059563a3e8d`
+- Audit HEAD（结论锚点）: `95c13910c7226b4e32487ed046702caf75d74fc6`（2026-11-06，`task/surgecart-baseline-audit`；`git diff --stat 473d6f5..95c1391` 仅本任务 6 个记录文件，业务源码逐字节等价）
 - 工作区: clean（`git status --short` 输出为空，无暂存、未暂存、未跟踪文件）
 - Task branch: `task/surgecart-baseline-audit`（从 Base Commit 创建，未使用任何远端分支作为起点）
 - 基线选择依据（Git 事实）：

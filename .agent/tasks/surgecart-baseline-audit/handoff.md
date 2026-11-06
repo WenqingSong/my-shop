@@ -17,3 +17,19 @@
 - Files: `.agent/tasks/surgecart-baseline-audit/{plan.md,handoff.md}`
 - Next action: 同上一条；LEAD 从步骤 2 开始，不改写已完成的步骤 1。
 - Open findings: NONE
+
+## 2026-11-06T02:33:05Z LEAD → LEAD（接管）
+
+- Commit: `95c13910c7226b4e32487ed046702caf75d74fc6`
+- Result: LEAD 接管本任务。已读 V4 规范链（`WorkflowAgentDirective.md`、`AgentCollaborationSpecification.md`、`Five-AgentResponsibilityBoundary.md`、`WorkflowHandoffContract.md`、`WorkflowGitLifecycle.md`、`WorkflowLoopCircuitBreaker.md`）、7 个角色定义与 6 个任务模板；已读本任务全部现存记录。Git 事实：分支 `task/surgecart-baseline-audit`，HEAD `95c1391`，工作区 clean，本地与 `origin/task/surgecart-baseline-audit` 同为 `95c1391`；`git diff --stat 473d6f5..HEAD` 只有本任务 6 个记录文件，业务源码零差异。裁决：继续使用既有分支与任务目录，不按 Owner 本次指令中的 `-v1` 后缀新建（理由见 `decisions.md` D4：`-v1` 目录与报告属既有历史交付，不得覆盖；既有已推送分支即本任务分支）。
+- Files: `.agent/tasks/surgecart-baseline-audit/{plan.md,decisions.md,handoff.md}`
+- Next action: LEAD 执行 `task.md` 的 D1~D5：从 HTTP 入口测绘链路、审查数据层与一致性、盘点工程配套、实跑测试、整理事实/推断/未知/风险并落盘至 `docs/reports/surgecart-baseline-audit/`。
+- Open findings: NONE
+
+## 2026-11-06T02:33:05Z LEAD → OWNER
+
+- Commit: `95c13910c7226b4e32487ed046702caf75d74fc6`
+- Result: T01 审计执行完毕并落盘。已从 `POST /flash-sales/:id/orders` 追到订单结果，覆盖路由、认证、限流、熔断、Lua 预扣、MySQL 请求入队、消费者 `FOR UPDATE SKIP LOCKED` 领取、订单/库存/请求状态同事务、失败重试/死信、结果查询、仅收敛 Redis 的对账。数据层核实 5 张表、3 个 Migration、唯一键/索引/事务边界/状态迁移。工程盘点覆盖 61 个测试文件、11 项质量门禁、Docker/Compose、CNB、Prometheus。实跑：`go build`、`go vet`、`gofmt`、`test-unit`、`test-race`、`test-integration`、`test-container`、`test-prometheus`、`test-lib`、`check-registry`、`test-nginx` 全部退出码 0；秒杀逻辑层 22 个用例、E2E 20 个用例全部 PASS。登记 12 条 OPEN 风险（F1~F12），未修改任何业务代码/Schema/测试。
+- Files: `docs/reports/surgecart-baseline-audit/{call-chain-map,data-layer-map,test-baseline,facts-and-risks,review-input-t02-t03,engineering-inventory}.md`；`.agent/tasks/surgecart-baseline-audit/{task,plan,findings,handoff,delivery,decisions}.md`
+- Next action: OWNER 验收；如需独立审查，指派与本报告无作者关系的审查者按交付 commit 复核。T02/T03 可直接从 `review-input-t02-t03.md` 接手。
+- Open findings: F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12
