@@ -34,6 +34,57 @@ services:
       timeout: 3s
       retries: 5
 
+  # Kafka 本地开发环境（B1 仅基础设施，秒杀链路尚未接入 Kafka）。
+  #
+  # 使用官方 Apache Kafka 镜像 + KRaft 单节点（Broker 与 Controller 合一），不依赖 ZooKeeper。
+  # 单节点开发配置：Replication Factor=1、min.insync.replicas=1，仅用于本地联调，
+  # 不具备 Broker 故障容忍能力；生产需 3 Broker、RF=3、min.insync.replicas=2。
+  #
+  # 通过 profiles 隔离：默认 `docker compose up -d` 不启动 Kafka，不改变现有服务默认启动行为；
+  # 需要时显式启动：`docker compose --profile kafka up -d kafka`。
+  # app 服务未配置 FLASH_SALE_KAFKA_*，默认 kafka.enabled=false，业务行为保持不变。
+  kafka:
+    image: apache/kafka:3.9.1
+    container_name: my-shop-kafka
+    restart: unless-stopped
+    profiles: ["kafka"]
+    environment:
+      # 固定 CLUSTER_ID：数据卷已格式化后容器重建仍能复用同一 KRaft 集群元数据。
+      CLUSTER_ID: "a6SsLG7YBxBAeqa-3gKwgg"
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      # 三个监听器：容器内 PLAINTEXT（kafka:9092）、KRaft 控制器、宿主机 PLAINTEXT_HOST。
+      KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,PLAINTEXT_HOST://0.0.0.0:29092"
+      # 对外广播地址必须与客户端实际访问地址一致：
+      # 容器内客户端用 kafka:9092，宿主机客户端用 127.0.0.1:29092。
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,PLAINTEXT_HOST://127.0.0.1:${KAFKA_PORT:-29092}"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      # 本地单节点：内部 Topic 与业务 Topic 均为 RF=1 / min.insync.replicas=1。
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_MIN_INSYNC_REPLICAS: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Topic 必须显式创建，不依赖 Broker 自动建 Topic（避免分区/副本数不可控）。
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    ports:
+      # 回环绑定：仅宿主机本机可连（与 MySQL/Redis 一致），不对外暴露。
+      - "127.0.0.1:${KAFKA_PORT:-29092}:29092"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      # 用 Kafka 自带 CLI 校验 Broker API 可用，而不是只探测端口：
+      # 端口可连但 KRaft 尚未完成选举时，生产/消费仍会失败。
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server 127.0.0.1:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+
   app:
     build:
       context: .
@@ -140,3 +191,5 @@ volumes:
   mysql_data:
   redis_data:
   app_storage:
+  # Kafka KRaft 数据（Topic 元数据、消息日志），容器重建不丢失。
+  kafka_data:

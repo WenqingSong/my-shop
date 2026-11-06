@@ -91,8 +91,28 @@ order:
   cancel_scan_interval: 60
 
 # 秒杀配置（以下均为开发默认值，可通过环境变量覆盖）
-# 对应环境变量：FLASH_SALE_RECONCILE_SCAN_INTERVAL / FLASH_SALE_CONSUME_SCAN_INTERVAL
+# 对应环境变量：FLASH_SALE_RECONCILE_SCAN_INTERVAL / FLASH_SALE_CONSUME_SCAN_INTERVAL /
+#              FLASH_SALE_KAFKA_*
 flash_sale:
+  # 秒杀请求分发模式（占位配置）：db_scanner 为当前唯一生效路径，保持既有 MySQL 出队表扫描器行为。
+  # B1 只建立配置与校验，不实现模式切换；kafka 模式由后续 B2/B3 落地，切勿提前改成 kafka。
+  dispatch_mode: "db_scanner"
+
+  # Kafka 基础设施配置（B1 只建设 Producer/Consumer 基础能力，尚未接入秒杀业务链路）。
+  # 默认关闭：关闭时允许 Broker/Topic/消费组留空，业务行为与既有 db_scanner 路径完全一致。
+  kafka:
+    # 是否启用 Kafka。默认 false，不改变现有秒杀异步下单链路。
+    enabled: false
+    # Broker 地址列表，逗号分隔、自动去空格；启用时必须至少配置一个合法 host:port。
+    # 本地开发：宿主机进程连 127.0.0.1:29092；容器内进程连 kafka:9092。
+    brokers: "127.0.0.1:29092"
+    # 秒杀请求事件主题（分区数、副本数需显式创建，不依赖 Broker 自动建 Topic）。
+    topic: "surgecart.flashsale.order.requested.v1"
+    # 死信主题：必须与 topic 不同，避免失败消息回灌正常链路。
+    dlq_topic: "surgecart.flashsale.order.requested.v1.dlq"
+    # 消费组名：同组实例分摊分区；更换组名会导致从新组的起始位移重新消费。
+    consumer_group: "surgecart-flashsale-order-worker-v1"
+
   # 秒杀缓存对账/回补的后台扫描周期（秒）。
   reconcile_scan_interval: 60
   # 秒杀异步下单的消费扫描周期（秒），保证排队请求低延迟落单。
