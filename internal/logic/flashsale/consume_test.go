@@ -38,9 +38,12 @@ func setupConsumeTest(t *testing.T) {
 	if err := boot.Bootstrap(ctx); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
+	// 清理顺序必须满足外键：inventories / inventory_logs → skus → products → categories
+	// （ON DELETE RESTRICT）。跨包共用同一个测试库时，其它包的测试可能已留下库存记录，
+	// 直接 DELETE skus 会触发 1451 外键错误，属于测试隔离问题而不是业务问题。
 	for _, table := range []string{
 		"flash_sale_request_audits", "flash_sale_order_requests", "flash_sale_orders", "flash_sale_activity_skus", "flash_sale_activities",
-		"skus", "product_images", "products", "categories",
+		"inventory_logs", "inventories", "skus", "product_images", "products", "categories",
 	} {
 		if _, err := g.DB().Exec(ctx, "DELETE FROM "+table); err != nil {
 			t.Fatalf("clean %s: %v", table, err)

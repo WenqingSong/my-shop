@@ -18,6 +18,8 @@ package flashsale
 //	DATABASE_DEFAULT_PASS=root go test -run TestConsumerRealKafka -v ./internal/logic/flashsale/
 //
 // 需要 MySQL/Redis 就绪（复用 setupConsumeTest 环境）与 Kafka Broker 可连。
+// 用例会清理 flashsale 与商品/SKU 域的表，务必指向一次性测试库（DATABASE_DEFAULT_NAME），
+// 不要对保存真实数据的实例执行。
 
 import (
 	"context"

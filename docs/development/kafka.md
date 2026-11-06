@@ -510,6 +510,29 @@ Lag 指标，列为后续监控集成事项（可用 `kafka-consumer-groups.sh -
 - **无 Lag / 无消费堆积告警**：见 9.8。
 - **未装配**：`serve` 不启动本 Consumer，`dispatch_mode` 仍为 `db_scanner`（B4）。
 
+### 9.10 测试与门禁
+
+```bash
+# 纯内存用例（无需 MySQL/Redis），已登记到 scripts/test-unit.sh
+make test-unit
+
+# 真实 MySQL/Redis 集成用例（含消费事务、终态幂等、并发、重试预算、DLQ）
+DATABASE_DEFAULT_PASS=root go test -p 1 -count=1 -run 'TestConsumeRequest|TestConsumer' ./internal/logic/flashsale/
+
+# 真实 Kafka 集成用例（需 Broker），建议指向一次性隔离库
+docker exec -e MYSQL_PWD=root my-shop-mysql mysql -uroot \
+  -e "CREATE DATABASE IF NOT EXISTS \`my_shop_b3_kafka\` CHARACTER SET utf8mb4"
+FLASH_SALE_KAFKA_TEST_BROKER=127.0.0.1:29092 DATABASE_DEFAULT_PASS=root \
+  DATABASE_DEFAULT_NAME=my_shop_b3_kafka \
+  go test -p 1 -count=1 -run TestConsumerRealKafka -v ./internal/logic/flashsale/
+
+# 并发/超卖/双入口竞态（-race，隔离库，已纳入 scripts/test-race.sh）
+make test-race
+```
+
+集成测试会清理 flashsale 与商品/SKU 域的表，**必须指向测试库**（`DATABASE_DEFAULT_NAME`），
+不要对保存真实数据的实例执行；Race 门禁由脚本自建自删 `my_shop_outbox_race`。
+
 ## 10. 如何检查 Kafka 是否正常运行
 
 ```bash
