@@ -21,6 +21,8 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	v1 "cnb.cool/go-cloud-devops/my-shop/api/flashsale/v1"
+	"cnb.cool/go-cloud-devops/my-shop/internal/boot"
+	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
 	"cnb.cool/go-cloud-devops/my-shop/internal/mq"
 )
 
@@ -140,10 +142,28 @@ func outboxTestOptions() OutboxOptions {
 	}
 }
 
-// setupOutboxTest 复用消费测试的隔离环境（migration + Bootstrap + 清空秒杀域表 + 清 Redis）。
+// setupOutboxTest 建立 Outbox 测试的隔离环境：migration + Bootstrap（DB/Redis 配置）+ 清空请求域表。
+//
+// 只清理本批次真正使用的表（请求与审计），不删除 skus/inventories 等其它域的数据：
+// 那些表存在跨包共享的外键关系（inventories → skus ON DELETE RESTRICT），
+// 在其它包的测试留下数据后清理会失败，属于与 Outbox 无关的噪声。
 func setupOutboxTest(t *testing.T) {
 	t.Helper()
-	setupConsumeTest(t)
+	t.Setenv("AUTH_JWT_SECRET", "test-secret-0123456789-0123456789-0123456789")
+	t.Setenv("ADMIN_SUPER_PASSWORD", "test-admin-password-123")
+
+	ctx := context.Background()
+	if err := migrations.Up(ctx); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
+	if err := boot.Bootstrap(ctx); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	for _, table := range []string{"flash_sale_request_audits", "flash_sale_order_requests"} {
+		if _, err := g.DB().Exec(ctx, "DELETE FROM "+table); err != nil {
+			t.Fatalf("clean %s: %v", table, err)
+		}
+	}
 }
 
 // outboxInsertRequest 插入一条秒杀请求，返回 id。
