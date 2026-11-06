@@ -106,11 +106,19 @@ func (c *Consumer) Poll(ctx context.Context, maxMessages int) ([]mq.Message, err
 
 	fetches := c.cl.PollRecords(ctx, maxMessages)
 
-	// context 先于关闭判断：两者同时发生时，调用方更关心自己的取消原因。
+	// 关键：BlockRebalanceOnPoll 在 PollRecords 返回「非空 Fetches」时保留 poller 计数，
+	// 即使这里只有分区错误、没有任何记录。调用方拿不到消息，就不会调用 AllowRebalance；
+	// 计数泄漏后，下一次群体再平衡会永久等待（Broker 重启/分区迁移后的典型死锁）。
+	// 因此所有不向调用方交付消息的返回路径都必须在这里解除阻塞。
+	//
+	// 记录本身在错误路径上会被丢弃（位移未提交，Broker 会重投），换取错误语义简单：
+	// 调用方要么拿到可处理的批次，要么拿到错误，不会出现「半批消息 + 错误」的歧义。
 	if err := ctx.Err(); err != nil {
+		c.cl.AllowRebalance()
 		return nil, fmt.Errorf("拉取 Kafka 消息: %w", err)
 	}
 	if err := fetches.Err(); err != nil {
+		c.cl.AllowRebalance()
 		if errors.Is(err, kgo.ErrClientClosed) {
 			return nil, fmt.Errorf("拉取 Kafka 消息: %w", mq.ErrClosed)
 		}
@@ -126,6 +134,7 @@ func (c *Consumer) Poll(ctx context.Context, maxMessages int) ([]mq.Message, err
 		return nil, fmt.Errorf("拉取 Kafka 消息: %w", errors.Join(detailed...))
 	}
 	if c.closed.Load() {
+		c.cl.AllowRebalance()
 		return nil, fmt.Errorf("拉取 Kafka 消息: %w", mq.ErrClosed)
 	}
 
@@ -133,6 +142,10 @@ func (c *Consumer) Poll(ctx context.Context, maxMessages int) ([]mq.Message, err
 	fetches.EachRecord(func(record *kgo.Record) {
 		messages = append(messages, recordToMessage(record))
 	})
+	if len(messages) == 0 {
+		// 空批次也可能持有 poller 计数（驱动实现差异），统一解除阻塞。
+		c.cl.AllowRebalance()
+	}
 	return messages, nil
 }
 

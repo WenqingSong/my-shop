@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kgo"
@@ -125,12 +126,13 @@ func producerRetryBackoff(attempt int) time.Duration {
 
 // Publish 同步发布一批消息，等待每条消息的 Broker 确认后返回。
 //
-// 返回语义：
-//   - results 与 messages 等长且顺序一致；results[i].Err 非 nil 表示第 i 条失败；
-//   - error 非 nil 且 results 为 nil 表示批次未完整投递（context 取消/超时、客户端已关闭），
-//     此时整批结果未知，调用方不得把任何一条视为已发布；
-//   - error 非 nil 且 results 非 nil 表示部分（或全部）消息失败，逐条错误仍可用；
-//   - 单条失败不会中断其他消息，只有 context 结束才会提前返回。
+// 返回语义（F-03）：
+//   - 批次一旦进入投递流程，results 与 messages 等长且顺序一致；
+//   - 已获得 Broker ACK 的条目 Err 为 nil，已明确失败的条目保留具体错误；
+//   - context 在批次中间结束时立即返回，不丢弃已得到的逐条结果；尚未收到回调的条目
+//     Err 包装 mq.ErrPublishUnknown，调用方只能按「可能已发送」重试；
+//   - error 非 nil 且 results 为 nil 仅发生在批次未进入投递流程时（客户端已关闭、
+//     调用前 context 已取消），此时整批结果未知。
 //
 // context 控制调用方愿意等待的时长：到期后立即返回，尚未确认的消息由驱动在后台
 // 按投递超时收敛，绝不能在到期后断言「消息未发送」——这正是下游必须幂等的原因。
@@ -170,39 +172,107 @@ func (p *Producer) Publish(ctx context.Context, messages ...mq.Message) ([]mq.Pu
 		messages[i].Topic = topic
 	}
 
-	// 逐条回调、按下标写结果：ProduceSync 的结果顺序取决于回调完成顺序，不能直接使用。
+	return collectPublishResults(ctx, messages, records, p.cl.Produce)
+}
+
+// produceAsync 发起一次异步投递。生产环境是 (*kgo.Client).Produce；
+// 抽成函数类型是为了在单元测试中可控地制造「部分 ACK 后 context 超时」与
+// 「回调晚于返回值」的时序，而不需要真实 Broker。
+type produceAsync func(ctx context.Context, record *kgo.Record, promise func(*kgo.Record, error))
+
+// collectPublishResults 等待一批异步投递的逐条结果，并在 context 结束前做一次安全快照。
+//
+// 并发边界：
+//   - 驱动回调可能在任意协程、且在 Publish 返回之后才触发；results/settled 只允许在
+//     mu 保护下读写，返回给调用方的切片是快照，晚到的回调不可能再改写它；
+//   - 用原子计数代替「额外等待协程 + WaitGroup」：即使某个回调永远不触发（故障注入或
+//     驱动异常），也不会遗留一个永久阻塞在 wg.Wait 上的 goroutine。
+//
+// 结果语义见 mq.Publisher 的注释：已 ACK 保留成功、已失败保留失败、未回调标记未知。
+func collectPublishResults(
+	ctx context.Context, messages []mq.Message, records []*kgo.Record, produce produceAsync,
+) ([]mq.PublishResult, error) {
 	results := make([]mq.PublishResult, len(messages))
-	var wg sync.WaitGroup
-	wg.Add(len(records))
+	settled := make([]bool, len(messages))
+
+	var (
+		mu        sync.Mutex
+		remaining atomic.Int32
+	)
+	remaining.Store(int32(len(records)))
+	// done 由最后一个完成的回调关闭：没有等待协程，因此不会产生 goroutine 泄漏。
+	done := make(chan struct{})
 	for i, record := range records {
 		idx := i
-		p.cl.Produce(ctx, record, func(r *kgo.Record, err error) {
+		produce(ctx, record, func(r *kgo.Record, err error) {
 			result := mq.PublishResult{Message: messages[idx], Err: err}
 			if r != nil {
 				result.Partition = r.Partition
 				result.Offset = r.Offset
 			}
+			mu.Lock()
 			results[idx] = result
-			wg.Done()
+			settled[idx] = true
+			mu.Unlock()
+			if remaining.Add(-1) == 0 {
+				close(done)
+			}
 		})
 	}
 
-	// 用一个有界的等待协程把 context 取消转换为及时返回。
-	// 该协程在驱动的回调全部触发后自然退出（最迟受投递超时约束），不会永久泄漏。
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
+	// 先非阻塞检查完成：context 与最后一条回调同时就绪时，优先采用完整结果，
+	// 避免把已经全部确认的批次误报为「存在未知项」。
 	select {
 	case <-done:
-	case <-ctx.Done():
-		return nil, fmt.Errorf("发布 %d 条消息: %w", len(messages), ctx.Err())
+	default:
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return snapshotUnknownResults(ctx, messages, results, settled, &mu)
+		}
 	}
+	return summarizePublishResults(messages, results, &mu)
+}
+
+// snapshotUnknownResults 在 context 结束后复制当前结果，并把尚未回调的条目标记为未知。
+// 快照必须在 mu 内完成；返回后驱动的晚到回调只会写入内部切片，不再影响调用方。
+func snapshotUnknownResults(
+	ctx context.Context, messages []mq.Message, results []mq.PublishResult, settled []bool, mu *sync.Mutex,
+) ([]mq.PublishResult, error) {
+	mu.Lock()
+	snapshot := make([]mq.PublishResult, len(messages))
+	copy(snapshot, results)
+	unknown := 0
+	// 错误文本只保留一次 context 原因，避免逐条拼接造成日志膨胀。
+	cause := ctx.Err()
+	for i := range snapshot {
+		if settled[i] {
+			continue
+		}
+		unknown++
+		snapshot[i] = mq.PublishResult{
+			Message: messages[i],
+			Err:     fmt.Errorf("%w: %v", mq.ErrPublishUnknown, cause),
+		}
+	}
+	mu.Unlock()
+	// 批次错误保留 context 原因（便于调用方 errors.Is 判断超时/取消），
+	// 逐条结果再区分已确认/未知（详见 snapshot 中包装的 mq.ErrPublishUnknown）。
+	return snapshot, fmt.Errorf("发布 %d 条消息: 上下文结束，其中 %d 条结果未知: %w", len(messages), unknown, cause)
+}
+
+// summarizePublishResults 复制逐条结果并汇总批次级错误。
+func summarizePublishResults(
+	messages []mq.Message, results []mq.PublishResult, mu *sync.Mutex,
+) ([]mq.PublishResult, error) {
+	mu.Lock()
+	snapshot := make([]mq.PublishResult, len(messages))
+	copy(snapshot, results)
+	mu.Unlock()
 
 	failed := 0
 	var firstErr error
-	for _, result := range results {
+	for _, result := range snapshot {
 		if result.Err != nil {
 			failed++
 			if firstErr == nil {
@@ -211,9 +281,9 @@ func (p *Producer) Publish(ctx context.Context, messages ...mq.Message) ([]mq.Pu
 		}
 	}
 	if failed > 0 {
-		return results, fmt.Errorf("发布 %d 条消息: %d 条未获 Broker 确认，首个错误: %w", len(messages), failed, firstErr)
+		return snapshot, fmt.Errorf("发布 %d 条消息: %d 条未获 Broker 确认，首个错误: %w", len(messages), failed, firstErr)
 	}
-	return results, nil
+	return snapshot, nil
 }
 
 // Close 优雅关闭 Producer：先刷新本地缓冲的消息，再释放连接与后台协程。

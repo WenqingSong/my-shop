@@ -225,6 +225,7 @@ make test-race  # 竞态检测
 - **本地/单机**：Docker Compose 编排 nginx/app/MySQL/Redis/Prometheus 五个服务，Nginx 为对外唯一入口，app 仅暴露 Compose 内网端口；`make init` + `make up` 两阶段拉起。
 - **镜像发布**：`make docker-build` / `make docker-push` 构建并推送短 SHA + `latest` 双标签镜像（同源同 digest）。
 - **CI/CD**：CNB 流水线（`.cnb.yml`）按「测试 → 竞态检测 → 构建 → 镜像发布」顺序执行，任一阶段失败即中断；`latest` 仅指向测试全绿的构建。
+- **秒杀消费模式**：`flash_sale.dispatch_mode` 二选一——`db_scanner`（默认，仅 MySQL 扫描器）或 `kafka`（Redis 准入 + MySQL Outbox + Kafka Publisher/Consumer，需同时设置 `kafka.enabled=true`）。两种模式严格互斥，切换需重启进程；默认模式不需要安装 Kafka。详见 [Kafka 开发说明](docs/development/kafka.md#10-b4serve-集成与运行闭环)。
 
 详细部署模型、启动生命周期、持久化与健康检查语义见 [部署设计](docs/design/deployment.md)。
 
@@ -234,7 +235,7 @@ make test-race  # 竞态检测
 - [系统架构](docs/design/architecture.md)：分层结构、模块边界、核心业务流程与基础设施。
 - 核心设计：[订单](docs/design/order.md)、[秒杀](docs/design/flash-sale.md)、[商品](docs/design/product.md)、[分类](docs/design/category.md)、[SKU](docs/design/sku.md)、[库存](docs/design/inventory.md)、[购物车](docs/design/cart.md)、[IAM](docs/design/iam.md)、[RBAC](docs/design/rbac.md)、[优惠券](docs/design/coupon.md)、[退款](docs/design/refund.md)。
 - 部署与运维：[容器化部署](docs/design/deployment.md)、[数据库迁移](docs/design/migration.md)、[错误码](docs/design/error-codes.md)、[对象存储](docs/design/storage.md)。
-- 开发环境：[Kafka 开发说明](docs/development/kafka.md)（B1 基础设施 + B2/B2.1 Outbox 发布 + B3 业务消费核心；`serve` 装配与 dispatch 切换尚未接入，留给 B4）。
+- 开发环境：[Kafka 开发说明](docs/development/kafka.md)（B4 已完成：两种运行模式、serve 装配、Publisher/Consumer 生命周期、F-03/F-04 修复、优雅关闭与真实端到端门禁）。
 - Task 管理：[Task 管理入口](docs/task-management/README.md)、[Task 目录](docs/task-management/task-catalog.md)、[Task 关系图](docs/task-management/task-relationships.md)、[Owner 决策清单](docs/task-management/owner-decisions.md)。
 - 运营与内容：[轮播图](docs/design/banner.md)、[文章](docs/design/article.md)、[推荐位](docs/design/recommendation.md)、[评价](docs/design/review.md)、[数据大屏](docs/design/dashboard.md)、[收藏](docs/design/favorite.md)、[点赞](docs/design/like.md)。
 

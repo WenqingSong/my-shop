@@ -90,6 +90,17 @@ const (
 	ConsumeReasonRetryExhausted = "retry_exhausted"
 )
 
+// KafkaDelivery 是 Kafka 消息的传输元数据。
+//
+// 它不参与业务判断（价格/库存仍从 MySQL 读取），只用于在消费事务内补写 Outbox 投递凭证：
+// 消费方能收到这条消息，本身就证明 Broker 已接收该事件。当 Publisher 在 ACK 后写
+// published_at 失败、而 Consumer 又先把请求推进到终态时，这次补写可以避免记录永久停留在
+// 「已投递但未标记」的状态（见 B4 F-04）。
+type KafkaDelivery struct {
+	Partition int32
+	Offset    int64
+}
+
 // ConsumeRequest 是 Kafka Consumer 交给业务核心的单条请求。
 //
 // 所有字段都只用于「定位 + 一致性校验」，不是落单依据：订单价格、库存、已售数量
@@ -101,6 +112,9 @@ type ConsumeRequest struct {
 	SkuID          int64
 	IdempotencyKey string
 	RequestHash    string
+	// Delivery 非 nil 表示本次调用来自 Kafka 消息消费，可用于补写投递凭证；
+	// nil 表示非 Kafka 入口（例如测试直接调用），不得改写发布列。
+	Delivery *KafkaDelivery
 }
 
 // ConsumeRequestResult 是 ConsumeRequest 的处置结论（error 为 nil 时有效）。
@@ -262,6 +276,12 @@ func (s *sFlashSale) ConsumeRequest(ctx context.Context, in ConsumeRequest) (Con
 			result.Reason = ConsumeReasonIdentity
 			return nil
 		}
+		// 消息身份校验通过后，先用「已从 Kafka 消费」这一事实补写投递凭证：
+		// 即使请求已是终态（Publisher 标记失败 + Consumer 先落终态的窗口），
+		// 也能在本次事务提交时修复 published_at，避免永久未标记。
+		if e := markKafkaDeliveryInTx(ctx, tx, r.Id, in.Delivery); e != nil {
+			return e
+		}
 		return s.consumeLockedRequestInTx(ctx, tx, r, &outcome)
 	})
 	if err != nil {
@@ -417,6 +437,43 @@ func (s *sFlashSale) applyConsumeOutcome(ctx context.Context, out *consumeOutcom
 		})
 	}
 	metrics.ObserveConsume(ctx, out.result, time.Since(started))
+}
+
+// markKafkaDeliveryInTx 用「消息已从 Kafka 消费」这一事实补写 Outbox 投递凭证。
+//
+// 为什么放在消费事务里：
+//   - 消费方能收到消息，证明 Broker 已 ACK；这是不依赖 Publisher 本地结果的第二份证据；
+//   - F-04 的窗口是「Broker 已 ACK → Publisher 写 published_at 失败 → Consumer 先落终态」。
+//     若不在消费侧补写，请求已不在 queued，Publisher 的 claim 永远不会再次选中它，
+//     published_at 将永久为空（消息没有丢，但 Outbox 记账永久缺失）。
+//
+// 并发边界：
+//   - 调用方已用 FOR UPDATE 锁定请求行，本更新在同一事务内不会与 Consumer 竞争；
+//   - 条件 published_at IS NULL 保证不覆盖 Publisher 已写入的发布事实；
+//   - 只写发布列，绝不修改 status/retry_count/flash_order_id；
+//   - 身份不匹配（不可信消息）不会走到这里，避免用错误消息改写权威发布列。
+func markKafkaDeliveryInTx(ctx context.Context, tx gdb.TX, requestID int64, delivery *KafkaDelivery) error {
+	if delivery == nil || requestID <= 0 {
+		return nil
+	}
+	if delivery.Partition < 0 || delivery.Offset < 0 {
+		return nil
+	}
+	if _, err := tx.Model(requestTable).Ctx(ctx).
+		Where("id", requestID).
+		Where("published_at IS NULL").
+		Data(g.Map{
+			"published_at":        gdb.Raw("NOW(6)"),
+			"publish_claim_token": nil,
+			"publish_lease_until": nil,
+			"next_publish_at":     nil,
+			"last_publish_error":  nil,
+			"published_partition": delivery.Partition,
+			"published_offset":    delivery.Offset,
+		}).Update(); err != nil {
+		return codes.Wrap(codes.CodeInternalError, fmt.Errorf("补写秒杀请求 %d 的发布凭证: %w", requestID, err))
+	}
+	return nil
 }
 
 // successRequestInTx 将请求标记为 success 并关联成功订单 id（与成功订单创建同一事务）。

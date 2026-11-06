@@ -1400,3 +1400,39 @@ func TestConsumerRaceKafkaAndScannerSameRequest(t *testing.T) {
 		t.Fatalf("sold=%d want 1", sold)
 	}
 }
+
+// TestConsumerPollErrorReleasesRebalance 覆盖 BlockRebalanceOnPoll 的计数泄漏：
+// Poll 返回错误时业务层拿不到消息，若不同步 AllowRebalance，消费组会在 Broker 恢复后
+// 永久卡在再平衡等待（真实 Broker 停机/恢复场景已复现，见 B4 e2e）。
+func TestConsumerPollErrorReleasesRebalance(t *testing.T) {
+	client := &fakeConsumer{pollErr: errors.New("broker 暂时不可用")}
+	c := newTestConsumer(t, client, &fakePublisher{}, &scriptedConsumerService{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- c.Run(ctx) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if client.allowRebalanceCount() > 0 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+
+	select {
+	case <-done:
+		// fake 在脚本批次耗尽时返回包装 ErrClosed 的错误，Run 据此退出属预期；
+		// 本用例关心的是错误路径上的 AllowRebalance 与位移提交。
+	case <-time.After(3 * time.Second):
+		t.Fatal("消费循环未在 ctx 取消后退出")
+	}
+
+	if got := client.allowRebalanceCount(); got == 0 {
+		t.Fatal("Poll 错误路径必须 AllowRebalance，否则再平衡会永久阻塞")
+	}
+	if client.committedCount() != 0 {
+		t.Fatal("拉取失败不得提交任何位移")
+	}
+}

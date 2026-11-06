@@ -63,6 +63,7 @@ const (
 const (
 	OutboxMarkLeaseLost        = "lease_lost"        // 租约令牌已被他人接管或人工修复重置
 	OutboxMarkAlreadyPublished = "already_published" // 记录已由其他 Publisher 标记发布
+	OutboxMarkLockBusy         = "lock_busy"         // 业务行锁被占用（NOWAIT 立即返回，租约到期后恢复）
 )
 
 // histogramBuckets 是秒杀请求耗时的直方图桶（秒），覆盖微秒~10 秒量级，保证 p95/p99 分辨率。
@@ -151,6 +152,12 @@ var (
 		Name:      "consumer_commit_failures_total",
 		Help:      "Kafka 业务 Consumer 位移提交失败次数（失败即不推进，消息会被重投）。",
 	})
+	// consumerRestarts 只统计「意外退出后的重建」，正常 SIGTERM 关闭不计数。
+	consumerRestarts = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "flashsale",
+		Name:      "consumer_restarts_total",
+		Help:      "Kafka 业务 Consumer 意外退出后的重建次数（有界指数退避恢复）。",
+	})
 	consumerProcessingDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: "flashsale",
 		Name:      "consumer_processing_seconds",
@@ -165,7 +172,7 @@ func init() {
 		outboxClaimed, outboxLeaseReclaimed, outboxPublished, outboxPublishFailed,
 		outboxRetried, outboxMarkSkipped, outboxPublishDuration,
 		consumerRecords, consumerProcessed, consumerRetries, consumerDLQ,
-		consumerCommitFailures, consumerProcessingDuration,
+		consumerCommitFailures, consumerRestarts, consumerProcessingDuration,
 	)
 }
 
@@ -288,6 +295,14 @@ func ObserveConsumerCommitFailure(ctx context.Context) {
 		return
 	}
 	consumerCommitFailures.Inc()
+}
+
+// ObserveConsumerRestart 记录一次 Consumer 意外退出后的重建（正常关闭不计数）。
+func ObserveConsumerRestart(ctx context.Context) {
+	if !Enabled(ctx) {
+		return
+	}
+	consumerRestarts.Inc()
 }
 
 // Handler 返回 Prometheus 指标采集 handler（默认 registry 的文本格式）。

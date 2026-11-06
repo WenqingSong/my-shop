@@ -193,6 +193,10 @@ func (c *RequestedEventConsumer) Run(ctx context.Context) error {
 			if errors.Is(err, mq.ErrClosed) {
 				return err
 			}
+			// 拉取失败时本批次没有交给业务处理：必须解除 BlockRebalanceOnPoll 的阻塞。
+			// 低层 Poll 已在错误路径调用一次；这里再防御性调用，保证即使未来适配器
+			// 忘记释放，也不会把消费组卡在永久再平衡等待上（AllowRebalance 幂等）。
+			c.client.AllowRebalance()
 			// 拉取失败不推进任何位移：退避后继续拉取，避免紧密循环打爆 Broker。
 			logx.Warning(ctx, "flashsale_consumer_poll_failed", "秒杀 Kafka Consumer 拉取失败", logx.Fields{
 				"error": err.Error(),
@@ -300,6 +304,8 @@ func (c *RequestedEventConsumer) handleMessage(parent context.Context, msg mq.Me
 		SkuID:          event.SkuID,
 		IdempotencyKey: event.IdempotencyKey,
 		RequestHash:    event.RequestHash,
+		// 传递传输元数据，供消费事务补写 Outbox 投递凭证（F-04 的终态窗口）。
+		Delivery: &KafkaDelivery{Partition: msg.Partition, Offset: msg.Offset},
 	}
 
 	for attempt := 1; ; attempt++ {

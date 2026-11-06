@@ -425,3 +425,108 @@ func TestConsumeCrashBeforeCommitRedeliversOnce(t *testing.T) {
 		t.Fatalf("redelivered sold=%d want 1", sold)
 	}
 }
+
+// TestConsumeRequestBackfillsDeliveryProof 覆盖 F-04 的终态窗口：
+// Broker 已 ACK、Publisher 写 published_at 失败、Consumer 先把请求推进到终态时，
+// 消费事务内的「投递凭证补写」必须修复 published_at/partition/offset，
+// 否则 Outbox 的 claim 永远不会再选中这条已终态记录。
+func TestConsumeRequestBackfillsDeliveryProof(t *testing.T) {
+	setupConsumeTest(t)
+	ctx := context.Background()
+	s := New()
+	skuID := consumeTestSku(t, "backfill-sku")
+	activityID := consumeTestActivity(t, skuID)
+	userID := int64(882001)
+	key := "k-backfill"
+	hash := requestHash(activityID, skuID)
+
+	// 模拟窗口：status 已是 success，published_at 缺失，旧租约 token 残留。
+	id, err := g.DB().Model("flash_sale_order_requests").Ctx(ctx).Data(g.Map{
+		"user_id":             userID,
+		"activity_id":         activityID,
+		"sku_id":              skuID,
+		"idempotency_key":     key,
+		"request_hash":        hash,
+		"status":              requestStatusSuccess,
+		"publish_claim_token": "stale-token",
+	}).InsertAndGetId()
+	if err != nil {
+		t.Fatalf("insert terminal request: %v", err)
+	}
+
+	res, err := s.ConsumeRequest(ctx, ConsumeRequest{
+		RequestID:      id,
+		UserID:         userID,
+		ActivityID:     activityID,
+		SkuID:          skuID,
+		IdempotencyKey: key,
+		RequestHash:    hash,
+		Delivery:       &KafkaDelivery{Partition: 5, Offset: 77},
+	})
+	if err != nil {
+		t.Fatalf("consume terminal request: %v", err)
+	}
+	if res.Outcome != ConsumeOutcomeDuplicate {
+		t.Fatalf("终态请求应按 duplicate 处理，实际 %s", res.Outcome)
+	}
+
+	rec, err := g.DB().Model("flash_sale_order_requests").Ctx(ctx).
+		Fields("status,published_at,publish_claim_token,published_partition,published_offset").
+		Where("id", id).One()
+	if err != nil || rec == nil {
+		t.Fatalf("query request: %v", err)
+	}
+	if rec["published_at"].IsNil() {
+		t.Fatal("消费事务必须补写 published_at")
+	}
+	if rec["publish_claim_token"].String() != "" {
+		t.Fatal("补写发布凭证后应清除过期租约 token")
+	}
+	if rec["published_partition"].Int() != 5 || rec["published_offset"].Int64() != 77 {
+		t.Fatalf("投递凭证的 partition/offset 应来自消息: %+v", rec)
+	}
+	if rec["status"].Int() != requestStatusSuccess {
+		t.Fatalf("补写发布凭证不得修改业务状态: %d", rec["status"].Int())
+	}
+}
+
+// TestConsumeRequestWithoutDeliveryDoesNotTouchOutbox 覆盖非 Kafka 入口：
+// 没有 Delivery 元数据时不得改写发布列，避免测试/内部调用伪造投递凭证。
+func TestConsumeRequestWithoutDeliveryDoesNotTouchOutbox(t *testing.T) {
+	setupConsumeTest(t)
+	ctx := context.Background()
+	s := New()
+	skuID := consumeTestSku(t, "no-delivery-sku")
+	activityID := consumeTestActivity(t, skuID)
+	userID := int64(882002)
+	key := "k-no-delivery"
+	hash := requestHash(activityID, skuID)
+
+	id, err := g.DB().Model("flash_sale_order_requests").Ctx(ctx).Data(g.Map{
+		"user_id":         userID,
+		"activity_id":     activityID,
+		"sku_id":          skuID,
+		"idempotency_key": key,
+		"request_hash":    hash,
+		"status":          requestStatusSuccess,
+	}).InsertAndGetId()
+	if err != nil {
+		t.Fatalf("insert terminal request: %v", err)
+	}
+
+	if _, err := s.ConsumeRequest(ctx, ConsumeRequest{
+		RequestID: id, UserID: userID, ActivityID: activityID, SkuID: skuID,
+		IdempotencyKey: key, RequestHash: hash,
+	}); err != nil {
+		t.Fatalf("consume terminal request: %v", err)
+	}
+
+	rec, err := g.DB().Model("flash_sale_order_requests").Ctx(ctx).
+		Fields("published_at").Where("id", id).One()
+	if err != nil || rec == nil {
+		t.Fatalf("query request: %v", err)
+	}
+	if !rec["published_at"].IsNil() {
+		t.Fatal("没有 KafkaDelivery 时不得写入 published_at")
+	}
+}

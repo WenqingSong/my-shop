@@ -171,11 +171,13 @@ func fakeFailureResults(msgs []mq.Message, failIdx map[int]bool, err error) []mq
 const outboxTestTopic = "surgecart.test.flashsale.requested.v1"
 
 // outboxTestOptions 返回测试用发布参数：批量小、租约短（但仍满足安全余量），便于构造过期场景。
+// 租约需要覆盖 PublishTimeout + MarkTimeout + 安全余量（3s + 2s + 10s = 15s）。
 func outboxTestOptions() OutboxOptions {
 	return OutboxOptions{
 		BatchSize:      10,
-		Lease:          15 * time.Second,
+		Lease:          30 * time.Second,
 		PublishTimeout: 3 * time.Second,
+		MarkTimeout:    2 * time.Second,
 		BackoffBase:    time.Second,
 		BackoffMax:     8 * time.Second,
 	}
@@ -1115,8 +1117,9 @@ func TestOutboxConcurrentRoundsNoDeadlock(t *testing.T) {
 	fake := &fakePublisher{}
 	pub := newTestOutboxPublisher(t, fake, OutboxOptions{
 		BatchSize:      3,
-		Lease:          15 * time.Second,
+		Lease:          30 * time.Second,
 		PublishTimeout: 3 * time.Second,
+		MarkTimeout:    2 * time.Second,
 		BackoffBase:    time.Second,
 		BackoffMax:     4 * time.Second,
 	})
@@ -1253,5 +1256,248 @@ func TestOutboxRepairDeadToQueuedRepublishes(t *testing.T) {
 	}
 	if staleEvent.EventID != RequestedEventID(id) {
 		t.Fatalf("event_id=%q want %q", staleEvent.EventID, RequestedEventID(id))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// B4：F-03 / F-04 回归用例
+// ---------------------------------------------------------------------------
+
+// holdRequestRowLockDuringPublish 返回一个 fake publish 行为：在 Kafka 发布期间
+// 由独立事务锁定同一条请求行，模拟 Consumer 恰好开始处理该 Request。
+// Publisher 领取阶段已提交（不持锁），因此该锁正好落在「发布完成 → 写标记」的窗口内。
+func holdRequestRowLockDuringPublish(t *testing.T, id int64, release *func()) func(context.Context, []mq.Message) ([]mq.PublishResult, error) {
+	t.Helper()
+	return func(_ context.Context, msgs []mq.Message) ([]mq.PublishResult, error) {
+		// 使用独立的后台 ctx：Outbox 在 Publish 返回后会立即 cancel(publishCtx)，
+		// 绑定该 ctx 的事务会被连带回滚，锁也随之释放，无法模拟「标记阶段行锁被占用」。
+		lockCtx := context.Background()
+		tx, err := g.DB().Begin(lockCtx)
+		if err != nil {
+			t.Errorf("begin row-lock tx: %v", err)
+			return nil, err
+		}
+		var rows []*orderRequestRow
+		if err := tx.Model("flash_sale_order_requests").Ctx(lockCtx).
+			Where("id", id).LockUpdate().Scan(&rows); err != nil {
+			_ = tx.Rollback()
+			t.Errorf("lock request %d: %v", id, err)
+			return nil, err
+		}
+		if len(rows) == 0 {
+			_ = tx.Rollback()
+			t.Errorf("request %d not found for lock", id)
+			return nil, errors.New("request not found")
+		}
+		var once sync.Once
+		*release = func() {
+			once.Do(func() {
+				if err := tx.Rollback(); err != nil {
+					t.Logf("release row lock: %v", err)
+				}
+			})
+		}
+		return fakeSuccessResults(msgs, 1, 1), nil
+	}
+}
+
+// TestOutboxPartialAckTimeoutDoesNotAmplifyDuplicates 是 F-03 的 Outbox 侧验收：
+// 批次 3 条中 2 条已 ACK、1 条结果未知时，只重发未知的那一条，
+// 已 ACK 的记录必须立即写入 published_at，不能被整批重发放大。
+func TestOutboxPartialAckTimeoutDoesNotAmplifyDuplicates(t *testing.T) {
+	setupOutboxTest(t)
+	ctx := context.Background()
+	ids := []int64{
+		outboxInsertRequest(t, "f03-1", g.Map{"user_id": 812101}),
+		outboxInsertRequest(t, "f03-2", g.Map{"user_id": 812102}),
+		outboxInsertRequest(t, "f03-3", g.Map{"user_id": 812103}),
+	}
+
+	fake := &fakePublisher{publish: func(_ context.Context, msgs []mq.Message) ([]mq.PublishResult, error) {
+		results := make([]mq.PublishResult, len(msgs))
+		for i := range msgs {
+			if i == len(msgs)-1 {
+				// 最后一条：context 到期前未收到 Broker 确认。
+				results[i] = mq.PublishResult{
+					Message: msgs[i],
+					Err:     fmt.Errorf("%w: %v", mq.ErrPublishUnknown, context.DeadlineExceeded),
+				}
+				continue
+			}
+			results[i] = mq.PublishResult{Message: msgs[i], Partition: 1, Offset: int64(100 + i)}
+		}
+		return results, context.DeadlineExceeded
+	}}
+	pub := newTestOutboxPublisher(t, fake, outboxTestOptions())
+
+	stats, err := pub.PublishBatch(ctx, 10)
+	if err == nil {
+		t.Fatal("存在未知结果时必须返回本轮错误")
+	}
+	if stats.Claimed != 3 || stats.Published != 2 || stats.Failed != 1 || stats.Retried != 1 {
+		t.Fatalf("逐条结果统计不符: %+v", stats)
+	}
+	if stats.MarkFailed != 0 || stats.MarkSkipped != 0 {
+		t.Fatalf("已 ACK 的记录必须成功标记: %+v", stats)
+	}
+	for _, i := range []int{0, 1} {
+		row := outboxLoad(t, ids[i])
+		if row.PublishedAt == nil {
+			t.Fatalf("已 ACK 的请求 %d 必须写入 published_at（不得整批重发）", ids[i])
+		}
+		if row.PublishedOffset == nil || *row.PublishedOffset != int64(100+i) {
+			t.Fatalf("请求 %d 的 offset 证据丢失: %+v", ids[i], row)
+		}
+	}
+	unknown := outboxLoad(t, ids[2])
+	if unknown.PublishedAt != nil {
+		t.Fatalf("结果未知的请求不得标记为已发布: %+v", unknown)
+	}
+	if unknown.NextPublishAt == nil || unknown.PublishClaimToken != nil {
+		t.Fatalf("未知结果应安全退避并释放租约: %+v", unknown)
+	}
+
+	// 第二轮只能重发未知的那一条：已 ACK 的两条不得再次进入 Kafka。
+	if _, err := g.DB().Exec(ctx,
+		"UPDATE flash_sale_order_requests SET next_publish_at = NULL WHERE id = ?", ids[2]); err != nil {
+		t.Fatalf("clear backoff: %v", err)
+	}
+	fake.publish = func(_ context.Context, msgs []mq.Message) ([]mq.PublishResult, error) {
+		return fakeSuccessResults(msgs, 1, 900), nil
+	}
+	if _, err := pub.PublishBatch(ctx, 10); err != nil {
+		t.Fatalf("第二轮发布失败: %v", err)
+	}
+	if fake.batchCount() != 2 {
+		t.Fatalf("期望两轮发布，实际 %d", fake.batchCount())
+	}
+	second := fake.lastBatch()
+	if len(second) != 1 {
+		t.Fatalf("第二轮只应重发 1 条未知消息，实际 %d 条（重复放大）", len(second))
+	}
+	if outboxLoad(t, ids[2]).PublishedAt == nil {
+		t.Fatal("未知消息重发成功后应写入 published_at")
+	}
+}
+
+// TestOutboxMarkDoesNotWaitBusinessRowLock 是 F-04 的验收：
+// 另一个事务持有业务行锁时，标记必须在预算内返回、不得写入 published_at、
+// 不得覆盖新租约，并且记录在租约到期后可以恢复。
+func TestOutboxMarkDoesNotWaitBusinessRowLock(t *testing.T) {
+	setupOutboxTest(t)
+	ctx := context.Background()
+	id := outboxInsertRequest(t, "f04-1", g.Map{"user_id": 812201})
+
+	var release func()
+	fake := &fakePublisher{publish: holdRequestRowLockDuringPublish(t, id, &release)}
+	defer func() {
+		if release != nil {
+			release()
+		}
+	}()
+
+	opts := outboxTestOptions()
+	opts.MarkTimeout = 2 * time.Second
+	pub := newTestOutboxPublisher(t, fake, opts)
+
+	started := time.Now()
+	stats, err := pub.PublishBatch(ctx, 10)
+	elapsed := time.Since(started)
+	if err != nil {
+		t.Fatalf("行锁占用不应被视为本轮故障（记录可由租约恢复）: %v", err)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("标记等待业务行锁耗时 %v，NOWAIT 未生效", elapsed)
+	}
+	if stats.Published != 1 {
+		t.Fatalf("消息已 ACK，stats.Published 应为 1: %+v", stats)
+	}
+	if stats.MarkSkipped != 1 || stats.MarkFailed != 0 {
+		t.Fatalf("锁占用应计入 MarkSkipped: %+v", stats)
+	}
+
+	row := outboxLoad(t, id)
+	if row.PublishedAt != nil {
+		t.Fatal("未取得锁时绝不能写 published_at")
+	}
+	if row.PublishClaimToken == nil {
+		t.Fatal("锁占用时应保留租约，交由到期恢复路径处理")
+	}
+	oldToken := *row.PublishClaimToken
+
+	release()
+	// 模拟租约被另一个 Publisher 接管：旧 token 的迟到标记不得覆盖任何状态。
+	if _, err := g.DB().Exec(ctx,
+		"UPDATE flash_sale_order_requests SET publish_claim_token = ?, publish_lease_until = DATE_ADD(NOW(6), INTERVAL 60 SECOND) WHERE id = ?",
+		"takeover-token", id); err != nil {
+		t.Fatalf("simulate lease takeover: %v", err)
+	}
+	outcome, markErr := pub.markPublished(ctx, &outboxClaim{Id: id}, oldToken,
+		mq.PublishResult{Partition: 9, Offset: 999})
+	if markErr != nil {
+		t.Fatalf("旧 token 标记不应返回技术错误: %v", markErr)
+	}
+	if outcome != markSkippedLeaseLost {
+		t.Fatalf("旧 token 标记应判定 lease_lost，实际 %v", outcome)
+	}
+	row = outboxLoad(t, id)
+	if row.PublishedAt != nil || row.PublishedPartition != nil || row.PublishedOffset != nil {
+		t.Fatalf("旧 token 不得写入任何发布事实: %+v", row)
+	}
+
+	// 租约到期后恢复：下一轮重新领取并发布（允许重复，绝不丢事件）。
+	if _, err := g.DB().Exec(ctx,
+		"UPDATE flash_sale_order_requests SET publish_claim_token = NULL, publish_lease_until = DATE_SUB(NOW(6), INTERVAL 1 SECOND) WHERE id = ?", id); err != nil {
+		t.Fatalf("expire lease: %v", err)
+	}
+	recoveryPub := newTestOutboxPublisher(t, &fakePublisher{}, opts)
+	if _, err := recoveryPub.PublishBatch(ctx, 10); err != nil {
+		t.Fatalf("租约到期后的恢复发布失败: %v", err)
+	}
+	if outboxLoad(t, id).PublishedAt == nil {
+		t.Fatal("租约到期后记录应被重新发布并标记")
+	}
+}
+
+// TestOutboxMarkTimeoutDoesNotWritePublishedAt 覆盖 F-04 的总预算：
+// 标记阶段预算耗尽时，条件更新必须随事务回滚，绝不能留下「published_at 已写」的半成品；
+// 记录保持未发布 + 原租约，租约到期后可重新发布。
+func TestOutboxMarkTimeoutDoesNotWritePublishedAt(t *testing.T) {
+	setupOutboxTest(t)
+	ctx := context.Background()
+	id := outboxInsertRequest(t, "f04-mark-timeout", g.Map{"user_id": 812301})
+
+	opts := outboxTestOptions()
+	// 1ns 预算必然在进入标记事务前耗尽：验证「预算约束」而不是「锁等待」。
+	opts.MarkTimeout = time.Nanosecond
+	pub := newTestOutboxPublisher(t, &fakePublisher{}, opts)
+
+	stats, err := pub.PublishBatch(ctx, 10)
+	if err == nil {
+		t.Fatal("标记预算耗尽必须返回本轮错误")
+	}
+	if stats.Published != 1 || stats.MarkFailed != 1 {
+		t.Fatalf("消息已 ACK 但标记应失败: %+v", stats)
+	}
+
+	row := outboxLoad(t, id)
+	if row.PublishedAt != nil || row.PublishedPartition != nil || row.PublishedOffset != nil {
+		t.Fatalf("标记超时不得写入任何发布事实: %+v", row)
+	}
+	if row.PublishClaimToken == nil {
+		t.Fatal("标记失败应保留租约，交由到期恢复路径处理")
+	}
+
+	// 租约到期后恢复：清理租约与退避，使用正常预算重新发布。
+	if _, err := g.DB().Exec(ctx,
+		"UPDATE flash_sale_order_requests SET publish_claim_token = NULL, publish_lease_until = DATE_SUB(NOW(6), INTERVAL 1 SECOND), next_publish_at = NULL WHERE id = ?", id); err != nil {
+		t.Fatalf("expire lease: %v", err)
+	}
+	recovery := newTestOutboxPublisher(t, &fakePublisher{}, outboxTestOptions())
+	if _, err := recovery.PublishBatch(ctx, 10); err != nil {
+		t.Fatalf("恢复发布失败: %v", err)
+	}
+	if outboxLoad(t, id).PublishedAt == nil {
+		t.Fatal("租约到期后应重新发布并写入 published_at")
 	}
 }

@@ -34,15 +34,17 @@ services:
       timeout: 3s
       retries: 5
 
-  # Kafka 本地开发环境（B1 仅基础设施，秒杀链路尚未接入 Kafka）。
+  # Kafka 本地开发环境（B4 起可接入秒杀链路）。
   #
   # 使用官方 Apache Kafka 镜像 + KRaft 单节点（Broker 与 Controller 合一），不依赖 ZooKeeper。
   # 单节点开发配置：Replication Factor=1、min.insync.replicas=1，仅用于本地联调，
   # 不具备 Broker 故障容忍能力；生产需 3 Broker、RF=3、min.insync.replicas=2。
   #
   # 通过 profiles 隔离：默认 `docker compose up -d` 不启动 Kafka，不改变现有服务默认启动行为；
-  # 需要时显式启动：`docker compose --profile kafka up -d kafka`。
-  # app 服务未配置 FLASH_SALE_KAFKA_*，默认 kafka.enabled=false，业务行为保持不变。
+  # 需要时显式启动：`docker compose --profile kafka up -d kafka`，并按 docs/development/kafka.md
+  # 显式创建业务 Topic 与死信 Topic。
+  # app 默认 FLASH_SALE_DISPATCH_MODE=db_scanner、FLASH_SALE_KAFKA_ENABLED=false，
+  # 不会创建任何 Kafka 客户端；启用 Kafka 模式时需同时打开两个开关并重启 app。
   kafka:
     image: apache/kafka:3.9.1
     container_name: my-shop-kafka
@@ -130,6 +132,15 @@ services:
       QINIU_MAX_FILE_SIZE: "${QINIU_MAX_FILE_SIZE:-10485760}"
       # 秒杀指标开关（Prometheus /metrics 暴露开关，默认关闭）。
       FLASH_SALE_METRICS_ENABLED: "${FLASH_SALE_METRICS_ENABLED:-false}"
+      # 秒杀消费模式：db_scanner（默认，不依赖 Kafka）或 kafka（需同时启用 Kafka 开关）。
+      FLASH_SALE_DISPATCH_MODE: "${FLASH_SALE_DISPATCH_MODE:-db_scanner}"
+      FLASH_SALE_KAFKA_ENABLED: "${FLASH_SALE_KAFKA_ENABLED:-false}"
+      # 容器内使用 Compose DNS 名；未启用 Kafka 时这些值不会建立连接。
+      FLASH_SALE_KAFKA_BROKERS: "${FLASH_SALE_KAFKA_BROKERS:-kafka:9092}"
+      FLASH_SALE_KAFKA_TOPIC: "${FLASH_SALE_KAFKA_TOPIC:-surgecart.flashsale.order.requested.v1}"
+      FLASH_SALE_KAFKA_DLQ_TOPIC: "${FLASH_SALE_KAFKA_DLQ_TOPIC:-surgecart.flashsale.order.requested.v1.dlq}"
+      FLASH_SALE_KAFKA_CONSUMER_GROUP: "${FLASH_SALE_KAFKA_CONSUMER_GROUP:-surgecart-flashsale-order-worker-v1}"
+      FLASH_SALE_SHUTDOWN_TIMEOUT: "${FLASH_SALE_SHUTDOWN_TIMEOUT:-30s}"
     # 不映射宿主机端口：app 仅 Compose 网络内 app:8000 可达（Nginx 唯一对外入口的信任边界前提）。
     volumes:
       - app_storage:/app/storage

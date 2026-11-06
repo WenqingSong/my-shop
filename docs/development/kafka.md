@@ -3,11 +3,11 @@
 本文面向本地开发与后续批次实现者，说明 SurgeCart 引入 Kafka 的职责边界、配置方式、
 本地 KRaft 环境、Producer/Consumer 使用方式，以及各批次的功能边界。
 
-> **当前状态（B3）**：Kafka 基础设施与消息契约（B1）、Request Outbox 发布器（B2/B2.1）、
-> **业务 Consumer 核心（B3，见第 9 节）** 均已完成并有测试覆盖。
-> 但**秒杀业务链路默认仍走 MySQL 出队表 + 后台扫描器（`dispatch_mode=db_scanner`）**：
-> Kafka 默认关闭，Consumer 与 Outbox Publisher 都还没有接入 `serve` 启动装配，
-> dispatch_mode 切换留给 B4。不要把本文描述的目标能力误读为已上线能力。
+> **当前状态（B4）**：Kafka 基础设施与消息契约（B1）、Request Outbox 发布器（B2/B2.1）、
+> 业务 Consumer 核心（B3）与 **serve 集成/生命周期闭环（B4，见第 10 节）** 均已完成并有测试覆盖。
+> **默认仍是 `dispatch_mode=db_scanner`**（只运行 MySQL 扫描器，不需要 Kafka）。
+> 启用 Kafka 需要同时设置 `dispatch_mode=kafka` 与 `kafka.enabled=true`，并按第 5 节显式创建 Topic；
+> 两种模式严格互斥，切换需重启进程。单节点 KRaft 只用于本地联调，不代表生产高可用。
 
 ## 1. Kafka 在 SurgeCart 中承担什么职责
 
@@ -138,28 +138,41 @@ docker run --rm --network host --entrypoint /opt/kafka/bin/kafka-topics.sh \
 
 ```yaml
 flash_sale:
-  dispatch_mode: "db_scanner"   # 占位：B1 不实现切换，当前唯一生效路径
+  dispatch_mode: "db_scanner"   # db_scanner | kafka（互斥，切换需重启）
+  shutdown_timeout: "30s"       # 秒杀后台组件统一关闭预算
   kafka:
     enabled: false
     brokers: "127.0.0.1:29092"
     topic: "surgecart.flashsale.order.requested.v1"
     dlq_topic: "surgecart.flashsale.order.requested.v1.dlq"
     consumer_group: "surgecart-flashsale-order-worker-v1"
+    publisher:
+      batch_size: 100
+      poll_interval: "200ms"
+      error_backoff: "2s"
 ```
 
 | 配置项 | 环境变量 | 说明 |
 | --- | --- | --- |
-| `flash_sale.kafka.enabled` | `FLASH_SALE_KAFKA_ENABLED` | 总开关，默认 `false`；关闭时允许 Broker/Topic 留空 |
+| `flash_sale.dispatch_mode` | `FLASH_SALE_DISPATCH_MODE` | `db_scanner`（默认）或 `kafka`；其他值启动失败 |
+| `flash_sale.shutdown_timeout` | `FLASH_SALE_SHUTDOWN_TIMEOUT` | 停止 Publisher/Consumer/Scanner 的总预算；超时记录明确日志 |
+| `flash_sale.kafka.enabled` | `FLASH_SALE_KAFKA_ENABLED` | Kafka 总开关，默认 `false`；必须与 `dispatch_mode` 一致 |
 | `flash_sale.kafka.brokers` | `FLASH_SALE_KAFKA_BROKERS` | 逗号分隔的 `host:port`，自动去空格；拒绝空项、重复项、非法端口 |
 | `flash_sale.kafka.topic` | `FLASH_SALE_KAFKA_TOPIC` | 正常事件 Topic，启用时必填 |
 | `flash_sale.kafka.dlq_topic` | `FLASH_SALE_KAFKA_DLQ_TOPIC` | 死信 Topic，启用时必填且不得与 `topic` 相同 |
 | `flash_sale.kafka.consumer_group` | `FLASH_SALE_KAFKA_CONSUMER_GROUP` | 消费组名，启用时必填 |
+| `flash_sale.kafka.publisher.batch_size` | `FLASH_SALE_KAFKA_PUBLISHER_BATCH_SIZE` | Outbox 单轮领取上限，默认 100，硬上限 1000 |
+| `flash_sale.kafka.publisher.poll_interval` | `FLASH_SALE_KAFKA_PUBLISHER_POLL_INTERVAL` | 发布轮次最小间隔（Go duration），默认 `200ms` |
+| `flash_sale.kafka.publisher.error_backoff` | `FLASH_SALE_KAFKA_PUBLISHER_ERROR_BACKOFF` | 无进展时的退避起点（Go duration），默认 `2s`，指数增长、30s 封顶 |
 
 校验规则要点：
 
 - `enabled=false` 时不要求 Kafka 配置齐全，但**已填写的值仍会校验**，避免配置错误被开关掩盖；
 - `enabled=true` 时 Broker 至少一个，Topic/DLQ/消费组必填，错误信息会指出具体配置项；
-- `enabled` 必须是合法布尔值；`"ture"` 这类拼写错误会直接报错，而不是被静默当成 `false`。
+- `enabled` 必须是合法布尔值；`"ture"` 这类拼写错误会直接报错，而不是被静默当成 `false`；
+- **模式互斥**：`dispatch_mode=kafka` 必须 `enabled=true`；`dispatch_mode=db_scanner` 必须
+  `enabled=false`。任一矛盾都在启动期 fail-fast，不允许静默退回另一种模式；
+- 默认 `db_scanner + enabled=false` 不创建任何 Kafka 客户端/后台循环，本地开发无需安装 Kafka。
 
 **配置读取注意**：GoFrame 的 `GetEffective` 会把配置键中的 `_` 归一化为 `.`
 （`flash_sale.kafka.enabled` 变成 `flash.sale.kafka.enabled`），无法命中本项目的 `flash_sale` 命名空间。
@@ -206,8 +219,16 @@ for _, r := range results {
 
 可靠性参数：`acks=all`、幂等写入、重试 5 次 + 100ms~2s 有界指数退避、投递超时 30s、
 单次 Produce 请求超时 10s、linger 5ms、批次 64KB、zstd 压缩、本地缓冲上限 1 万条 / 64MB。
-`Publish` 同步等待逐条确认，返回结果与入参顺序一致，部分失败不会被伪装成整批成功；
-`ctx` 到期会立即返回，但已入队的消息可能仍在后台投递——下游必须幂等。
+`Publish` 同步等待逐条确认，返回结果与入参顺序一致，部分失败不会被伪装成整批成功。
+
+**F-03（B4）后的超时语义**：`ctx` 到期时不再丢弃整批结果，而是返回等长的逐条结果：
+
+- 已获得 ACK 的条目 `Err == nil`，保留 partition/offset 证据；
+- 明确失败的条目保留具体错误；
+- 尚未收到回调的条目包装 `mq.ErrPublishUnknown`（只能按「可能已发送」重试）。
+
+返回后已入队的消息仍可能由驱动在后台投递（最迟受 30s 投递超时约束），因此下游仍必须幂等；
+但调用方不能再把「超时」当成「整批未知」而重发全部消息。
 
 ### 8.2 Consumer
 
@@ -310,7 +331,8 @@ consumer.AllowRebalance()
 
 ## 9. B3 业务 Consumer 实现
 
-> B3 只交付「业务消费核心」，**不包含服务启动装配与 dispatch_mode 切换**（B4）。
+> B3 只交付「业务消费核心」，不包含服务启动装配与 dispatch_mode 切换；
+> 这两项已由 B4 补齐（见第 10 节）。本节保留 B3 的组件语义与事务边界说明。
 > 因此本节的组件在当前代码里存在并有测试覆盖，但 `serve` 默认仍然只启动 MySQL Scanner。
 
 ### 9.1 组件与调用链
@@ -490,7 +512,9 @@ Kafka 消费不新建第二套 Redis 库存体系，完全复用既有机制：
 | `flashsale_consumer_retries_total` | 已持久化重试预算的技术失败次数 |
 | `flashsale_consumer_dlq_total{reason}` | 死信投递成功数（按原因） |
 | `flashsale_consumer_commit_failures_total` | 位移提交失败次数 |
+| `flashsale_consumer_restarts_total` | 意外退出后的重建次数（正常 SIGTERM 不计数） |
 | `flashsale_consumer_processing_seconds{result}` | 单条消息处理耗时 |
+| `flashsale_outbox_mark_skipped_total{reason="lock_busy"}` | 标记遇到业务行锁（NOWAIT），等待租约恢复 |
 
 业务侧仍复用既有的 `flashsale_requests_total{interface="consume", result=...}` 与耗时直方图。
 不包含 `request_id` / `user_id` / `activity_id` 等高基数标签。
@@ -502,13 +526,14 @@ Lag 指标，列为后续监控集成事项（可用 `kafka-consumer-groups.sh -
 ### 9.9 已知限制
 
 - **技术错误无法 seek 重试**：B1 客户端没有暴露 `SeekPartitions`，同一进程内无法把位移
-  拨回失败消息。当前策略是「持久化预算 + 停止消费循环」，由上层（B4）决定重启节奏；
-  重启后从已提交位移重投，不会丢消息，但会带来额外的组再平衡开销。
-- **默认单条批量**：牺牲吞吐换位移连续性，B4 需要基于真实压测决定是否提高批量。
+  拨回失败消息。当前策略是「持久化预算 + 停止消费循环」，由 B4 的 Consumer 监督循环
+  按有界指数退避重建客户端；重启后从已提交位移重投，不会丢消息，但会带来额外的组再平衡开销。
+- **默认单条批量**：牺牲吞吐换位移连续性，后续需基于真实压测决定是否提高批量。
 - **单 SKU 单分区**：分区键 `<activity_id>:<sku_id>` 决定热点 SKU 的消费并行度上限为 1，
   这是 B2.1 已接受的架构取舍。
 - **无 Lag / 无消费堆积告警**：见 9.8。
-- **未装配**：`serve` 不启动本 Consumer，`dispatch_mode` 仍为 `db_scanner`（B4）。
+- **模式切换需重启**：B4 不实现运行中热切换，只能通过重启进程在 `db_scanner` / `kafka`
+  之间切换（见第 10 节）。
 
 ### 9.10 测试与门禁
 
@@ -526,14 +551,186 @@ FLASH_SALE_KAFKA_TEST_BROKER=127.0.0.1:29092 DATABASE_DEFAULT_PASS=root \
   DATABASE_DEFAULT_NAME=my_shop_b3_kafka \
   go test -p 1 -count=1 -run TestConsumerRealKafka -v ./internal/logic/flashsale/
 
-# 并发/超卖/双入口竞态（-race，隔离库，已纳入 scripts/test-race.sh）
+# 并发/超卖/双入口竞态 + F-03/F-04（-race，隔离库，已纳入 scripts/test-race.sh）
 make test-race
+
+# B4 真实端到端（专用库/Redis DB/唯一 Topic；含 Kafka/MySQL 停机恢复）
+make test-kafka-e2e
+```
+
+F-03/F-04 专项用例：
+
+```bash
+DATABASE_DEFAULT_PASS=root DATABASE_DEFAULT_NAME=my_shop_b4_test \
+  go test -count=1 -v -run 'TestOutboxPartialAckTimeoutDoesNotAmplifyDuplicates|TestOutboxMarkDoesNotWaitBusinessRowLock' \
+  ./internal/logic/flashsale/
+
+go test -count=1 -v -run 'TestProducerPublishResults' ./internal/mq/kafka/
 ```
 
 集成测试会清理 flashsale 与商品/SKU 域的表，**必须指向测试库**（`DATABASE_DEFAULT_NAME`），
-不要对保存真实数据的实例执行；Race 门禁由脚本自建自删 `my_shop_outbox_race`。
+不要对保存真实数据的实例执行；Race 门禁由脚本自建自删 `my_shop_outbox_race`；
+端到端脚本拒绝 `my_shop` / `my_shop_staging` 等库名并自建自删专用库。
 
-## 10. 如何检查 Kafka 是否正常运行
+## 10. B4：serve 集成与运行闭环
+
+### 10.1 两种模式
+
+`serve` 在 `boot.Bootstrap` 之后、HTTP 监听之前调用
+`worker.StartFlashSaleRuntime`，按 `flash_sale.dispatch_mode` 只装配一套消费入口：
+
+| 模式 | MySQL Scanner | Outbox Publisher | Kafka Consumer | 订单取消 / 缓存对账扫描器 |
+| --- | --- | --- | --- | --- |
+| `db_scanner`（默认） | 启动 | 不启动 | 不启动 | 启动 |
+| `kafka` | **不启动** | 启动 | 启动 | 启动 |
+
+互斥由启动层代码保证（不是配置注释）：两种模式共用同一批 `status=queued` 请求行，
+同时运行会争抢行锁并重复消耗 `retry_count` 预算。启动层测试直接断言实际创建/运行的组件集合
+（`internal/worker/flashsale_runtime_test.go`）。
+
+### 10.2 启动顺序
+
+```text
+serve
+  └─ boot.Bootstrap（MySQL/Redis/schema/seed）
+       └─ service.Upload().ValidateConfig
+            └─ worker.StartFlashSaleRuntime
+                 ├─ db_scanner: StartOrderCancelScanner + Reconcile + ConsumeScanner
+                 └─ kafka:      Producer → OutboxPublisher → Consumer 客户端
+                                → Publisher 发布循环 + Consumer 监督循环
+                                + OrderCancelScanner + Reconcile
+                     └─ g.Server().Run()（HTTP 入口）
+```
+
+Kafka 模式下，配置矛盾、Kafka 配置非法、客户端构造失败都会在监听端口之前 fail-fast。
+客户端构造是惰性的：Broker 暂时不可用不会阻塞启动，故障会在发布/拉取结果中暴露并退避重试。
+
+### 10.3 Outbox 后台发布循环
+
+- 复用 B2 的 `OutboxPublisher.PublishBatch`，不重新实现领取/发布/标记逻辑；
+- 每轮使用有界批次（`publisher.batch_size`，硬上限 1000）；
+- 轮与轮之间至少等待 `poll_interval`，有数据时也不会无间隔空转；
+- 本轮有进展（Published/Retried > 0）时保持正常节奏；本轮完全无进展才使用
+  `error_backoff` 起步的有界指数退避（30s 封顶），避免一条坏记录拖慢整个积压；
+- ctx 取消后当前轮次返回即退出；`Shutdown` 会等待该 goroutine 结束；
+- Publisher 不负责业务状态迁移：它只写发布相关列，`status/retry_count/flash_order_id` 由 Consumer 维护。
+
+### 10.4 Consumer 监督与异常恢复
+
+Consumer 在独立 goroutine 中运行 `RequestedEventConsumer.Run`：
+
+1. `Run` 返回后先判断 `ctx.Err()`：主动关闭直接退出，不重建；
+2. 意外退出时先关闭旧客户端（`Close` 有界），**确认旧实例已停止后才创建新客户端**，
+   保证同一时刻最多一个 Consumer 实例；
+3. 重建使用同一 ConsumerGroup，从已提交位移继续；未提交位移的消息由 Kafka 重投，
+   `retry_count/next_attempt_at` 从 MySQL 恢复，不依赖进程内状态；
+4. 退避 1s 起步、30s 封顶，可被 ctx 取消；一次运行超过 1 分钟视为稳定并重置退避；
+5. 重建次数记录 `flashsale_consumer_restarts_total`，正常 SIGTERM 不计数。
+
+### 10.5 优雅关闭
+
+`FlashSaleRuntime.Shutdown` 使用统一预算 `flash_sale.shutdown_timeout`（默认 30s）：
+
+1. 取消 Publisher ctx，等待当前 `PublishBatch` 结束（不再领取新记录）；
+2. 取消 Consumer ctx，等待 `Run` 返回；监督循环退出前关闭 Consumer 客户端；
+3. 关闭 Producer（有界 Flush）；此后不会再有 Publish；
+4. 取消根 ctx，等待订单取消/缓存对账扫描器退出。
+
+任何一步超时都会记录 `flashsale_runtime_shutdown_timeout` 并继续执行后续步骤，
+不会因单个组件挂起而永久阻塞其他资源释放。未提交的 MySQL 事务由数据库回滚；
+未提交的 Kafka Offset 会在重启后重投。
+
+**BlockRebalanceOnPoll 的关闭语义**：Consumer 客户端 `Close` 先 `AllowRebalance` 再离组，
+避免未处理完的 Poll 批次阻塞分区回收；`Run` 在批次处理完（含异常路径）通过 `defer AllowRebalance`
+释放阻塞。B4 还修复了一个关键泄漏：`Poll` 返回错误/空批次时低层适配器必须自行
+`AllowRebalance`，否则 Broker 恢复后的再平衡会永久等待（真实停机测试复现并回归）。
+
+### 10.6 F-03：Producer 超时不再丢弃逐条结果
+
+**原问题**：B1 `Producer.Publish` 在 context 超时时返回 `nil, error`，B2 只能把整批视为未知；
+100 条中 99 条已 ACK 时，整批重试会把 99 条再次放大。
+
+**修复**：`Publish` 改为按下标收集回调结果，超时返回等长快照：
+
+- 已 ACK 保留成功与 partition/offset；
+- 明确失败保留原错误；
+- 未回调标记 `mq.ErrPublishUnknown`；
+- 快照在互斥锁内复制，晚到回调只写内部状态，不能改写已返回结果；
+- 用原子计数代替等待协程，回调永不触发时也不会遗留阻塞 goroutine。
+
+Outbox 对这些结果逐条处理：ACK 的立即 `markPublished`，未知/失败的写入退避，
+下一轮只重发未确认项。
+
+### 10.7 F-04：发布标记不再等待业务行锁
+
+**原问题**：`markPublished/markPublishFailure` 直接 UPDATE；Consumer 持有同一 Request 行锁时，
+Publisher 可能等待 MySQL 默认锁等待（最长 50s），而租约只有 60s，导致租约过期后重复发布。
+
+**修复**：
+
+- 标记事务先执行 `SELECT ... FOR UPDATE NOWAIT`；取不到锁立即返回 `lock_busy`，
+  不写任何列（尤其不写 `published_at`），记录保留未发布 + 原租约；
+  该语法要求 MySQL 8.0+（本项目 Compose 与 CI 均为 mysql:8.0）；
+- NOWAIT 的瞬时索引锁冲突在**整轮标记预算内**做至多 3 次、每次 20ms 的有界重试，
+  不会退化为等待业务行锁；持续占用时仍走租约恢复路径；
+- 取到锁后在同一事务内做条件 UPDATE，token 条件保证旧 Publisher 不能覆盖新租约；
+- 领取阶段有 `ClaimTimeout`、标记阶段有整轮 `MarkTimeout` 总预算（默认 10s，不是单条预算）；
+- 租约约束改为 `Lease > PublishTimeout + MarkTimeout + 10s 安全余量`，
+  默认 60s > 20s + 10s + 10s；不靠调大租约掩盖锁等待；
+- 锁被占用计入 `flashsale_outbox_mark_skipped_total{reason="lock_busy"}` 并输出
+  `flashsale_outbox_mark_lock_busy` 日志；租约到期后恢复路径会重新发布（允许重复，绝不丢事件）。
+- **终态窗口的投递凭证补写**：如果 Publisher 在 ACK 后写标记失败，而 Consumer 又先把请求
+  推进到 success/failed，Outbox 的 claim 不会再选中该记录。Consumer 在消费事务内
+  （身份校验通过、`published_at IS NULL`）用消息的 partition/offset 补写发布凭证，
+  使「已消费」这一事实成为第二份 ACK 证据，避免记录永久停留在「已投递但未标记」。
+  该补写只改发布列，不改 status/retry_count/flash_order_id。
+
+### 10.8 模式切换
+
+运行中不做热切换。切换步骤：
+
+```bash
+# 1) 停旧进程（SIGTERM，等待 shutdown_timeout 内的优雅关闭）
+# 2) 修改配置（两个值必须同时改，否则启动 fail-fast）
+FLASH_SALE_DISPATCH_MODE=kafka
+FLASH_SALE_KAFKA_ENABLED=true
+# 3) 启动新进程
+```
+
+反向切回时把两个值同时改回 `db_scanner` / `false`。先停旧、再启新，
+不允许两套消费入口同时工作。
+
+### 10.9 本地完整环境与端到端验证
+
+```bash
+# 1) 启动 MySQL/Redis（默认不启动 Kafka）
+make deps-start
+
+# 2) 启动 Kafka（profile 隔离）并创建 Topic
+docker compose --profile kafka up -d kafka
+docker exec my-shop-kafka /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server kafka:9092 --create --if-not-exists \
+  --topic surgecart.flashsale.order.requested.v1 --partitions 12 --replication-factor 1
+docker exec my-shop-kafka /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server kafka:9092 --create --if-not-exists \
+  --topic surgecart.flashsale.order.requested.v1.dlq --partitions 12 --replication-factor 1
+
+# 3) 一条命令跑真实 Kafka 秒杀端到端（专用库/Redis DB/唯一 Topic，含故障注入）
+make test-kafka-e2e
+```
+
+`make test-kafka-e2e` 覆盖：db_scanner 模式（无需 Kafka）、Kafka 完整链路（HTTP → Redis →
+MySQL Outbox → Kafka → Consumer → 订单 → Offset）、模式切换、Publisher/Consumer 重启恢复、
+Kafka/MySQL 停机恢复、Publisher 与 Consumer 同时运行时的关闭。
+设置 `B4_E2E_FAULTS=0` 可跳过 stop/start 容器的故障注入；`B4_E2E_RUN='^TestName$'` 可单用例调试。
+
+### 10.10 单节点局限
+
+Compose 中的 Kafka 是单节点 KRaft（RF=1）。它只能验证「Broker 短时不可用后恢复」，
+**不能**证明 Broker 永久故障下的数据不丢失、副本切换或高可用；这些需要 3 Broker / RF=3 /
+`min.insync.replicas=2` 的集群环境，属于后续部署阶段。
+
+## 11. 如何检查 Kafka 是否正常运行
 
 ```bash
 # 1) 容器健康（healthy 才代表 Broker API 可用）
@@ -555,7 +752,7 @@ docker exec my-shop-kafka /opt/kafka/bin/kafka-console-consumer.sh \
   --topic surgecart.flashsale.order.requested.v1 \
   --from-beginning --max-messages 1 --timeout-ms 20000
 
-# 5) 查看消费组 Lag（消费接入后使用）
+# 5) 查看消费组 Lag
 docker exec my-shop-kafka /opt/kafka/bin/kafka-consumer-groups.sh \
   --bootstrap-server kafka:9092 \
   --describe --group surgecart-flashsale-order-worker-v1
@@ -567,7 +764,7 @@ docker exec my-shop-kafka /opt/kafka/bin/kafka-consumer-groups.sh \
 docker compose --profile kafka logs -f kafka
 ```
 
-## 11. 单节点开发环境与生产环境的区别
+## 12. 单节点开发环境与生产环境的区别
 
 | 维度 | 本地开发（本项目 Compose） | 生产建议 |
 | --- | --- | --- |
@@ -580,9 +777,9 @@ docker compose --profile kafka logs -f kafka
 | Topic 分区 | 12 | 按吞吐评估，创建后只能增不能减 |
 
 本地 KRaft 单节点只用于开发联调，**不得据此声明生产级 Broker 故障容忍能力**。
-生产集群的部署、监控、容量评估不在 B1 范围，也未在本仓库完成。
+生产集群的部署、监控、容量评估不在 B1–B4 范围，也未在本仓库完成；Kubernetes 适配属于后续阶段。
 
-## 12. 已实现 / 未实现的功能边界（B3）
+## 13. 已实现 / 未实现的功能边界（B4）
 
 已实现：
 
@@ -596,21 +793,24 @@ docker compose --profile kafka logs -f kafka
 - B3：Kafka 业务 Consumer 核心（`RequestedEventConsumer`）、与 Scanner 共享的订单事务核心、
   消息校验与身份比对、MySQL 先于 Offset 的提交顺序、持久化重试预算 + 退避 + 死信、
   Redis 补偿复用、Rebalance 生命周期、Consumer 指标；真实 MySQL/Kafka 集成测试与
-  Consumer 并发 Race 门禁。
+  Consumer 并发 Race 门禁；
+- B4：`serve` 启动装配与 `dispatch_mode` 二选一、Publisher 后台发布循环、Consumer 监督与
+  有界重启、统一优雅关闭预算、Scanner 与 Kafka 严格互斥（启动层测试）、F-03 逐条结果语义、
+  F-04 NOWAIT 标记 + 预算、真实 MySQL/Redis/Kafka/HTTP 端到端门禁与故障注入。
 
-未实现（后续批次）：
+未实现（后续阶段）：
 
-- `serve` 启动装配（Producer / Outbox Publisher / Consumer 的创建与优雅关闭）、
-  `dispatch_mode=kafka` 切换与旧 Scanner 退役协调（B4）；
-- F-03（批次超时导致重复放大）与 F-04（发布标记锁等待突破租约）的修复，
-  必须在 B4 完整启用 Kafka 链路前处理；
+- Kubernetes/Helm 部署、多 Broker 生产集群、Kafka 多实例容量验证；
 - Consumer Lag 指标与消费堆积告警（需要消费组元数据 API，见 9.8）；
-- 分区暂停/恢复、消费端 seek 重试、生产集群部署与容量验证。
+- 分区暂停/恢复、消费端 seek 重试；
+- 运行中热切换模式（B4 明确要求通过重启生效）；
+- Schema Registry、Kafka 分区键重新设计。
 
-**B3 仍未完成秒杀 Kafka 化**：Kafka 默认关闭，业务链路仍然走 `db_scanner`，
-Consumer 与 Outbox Publisher 都未在生产装配。
+**B4 后秒杀 Kafka 链路可运行但不是生产高可用**：默认仍是 `db_scanner`；
+启用 Kafka 需同时设置 `dispatch_mode=kafka` 与 `enabled=true`，并使用显式创建的 Topic。
+单节点 KRaft 只用于本地联调，生产部署与容量评估属于后续阶段。
 
-## 13. franz-go 版本与选型说明
+## 14. franz-go 版本与选型说明
 
 采用 `github.com/twmb/franz-go v1.18.1`（`pkg/kgo`），理由：
 

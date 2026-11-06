@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os/signal"
 	"strconv"
-	"sync"
 	"syscall"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -15,6 +14,7 @@ import (
 
 	"cnb.cool/go-cloud-devops/my-shop/internal/boot"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/health"
+	"cnb.cool/go-cloud-devops/my-shop/internal/logx"
 	"cnb.cool/go-cloud-devops/my-shop/internal/metrics"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
@@ -125,18 +125,28 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 		return err
 	}
 
-	// 优雅关闭根 ctx：SIGINT/SIGTERM 触发取消，驱动三个后台扫描器停止领取新任务、在途单事务回滚或完成。
-	// HTTP 侧优雅 drain 仍由 GoFrame s.Run() 负责（其处理同一批信号），两者并存由 Go 标准库多 channel 接收保证。
+	// 优雅关闭根 ctx：SIGINT/SIGTERM 触发取消，驱动秒杀后台组件停止领取新任务、
+	// 在途单事务回滚或完成。HTTP 侧优雅 drain 仍由 GoFrame s.Run() 负责
+	// （其处理同一批信号），两者并存由 Go 标准库多 channel 接收保证。
 	signalCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	var wg sync.WaitGroup
-	// 启动后台超时取消扫描器：扫描 status=待支付 且 expire_at 已过的订单，逐单原子取消并恢复库存。
-	worker.StartOrderCancelScanner(signalCtx, &wg)
-	// 启动秒杀缓存对账扫描器：按「活动 × SKU」粒度将 Redis remaining 刷成 total_stock - sold - inflight_queued，并回补缺失预热。
-	worker.StartFlashSaleReconcileScanner(signalCtx, &wg)
-	// 启动秒杀异步消费扫描器：出队 queued 请求并事务落单/失败/重试/死信。
-	worker.StartFlashSaleConsumeScanner(signalCtx, &wg)
+	// 秒杀链路装配：dispatch_mode 决定唯一消费入口（db_scanner 或 kafka），
+	// 两者严格互斥。Kafka 模式下 Producer / Outbox Publisher / Consumer 在此真正启动；
+	// 配置矛盾或 Kafka 配置非法会 fail-fast，不带着「无消费者」状态对外提供服务。
+	runtime, err := worker.StartFlashSaleRuntime(signalCtx)
+	if err != nil {
+		return err
+	}
+	// 关闭顺序由 runtime 统一编排（Publisher → Consumer → Producer → Scanner），
+	// 所有等待受 flash_sale.shutdown_timeout 约束；超时记录明确日志但不改变进程退出语义。
+	defer func() {
+		if err := runtime.Shutdown(); err != nil {
+			logx.Warning(context.Background(), "flashsale_runtime_shutdown_failed", "秒杀后台组件关闭未完全成功", logx.Fields{
+				"error": err.Error(),
+			})
+		}
+	}()
 
 	s := g.Server()
 	// 初始化本地图片存储：seed 轮播图占位图，并将 banner 目录映射为静态路由 /storage/banners。
@@ -159,8 +169,7 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 		RegisterAdminRoutes(root)
 	})
 	s.Run()
-	// s.Run() 返回后（HTTP 已完成优雅 drain），等待后台扫描器停止领取新任务并收尾后进程退出。
-	wg.Wait()
+	// s.Run() 返回后（HTTP 已完成优雅 drain），由 defer 中的 runtime.Shutdown 停止后台组件并收尾。
 	return nil
 }
 

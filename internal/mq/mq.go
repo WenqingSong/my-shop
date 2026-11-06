@@ -24,6 +24,18 @@ import (
 // 使调用方可用 errors.Is 区分「客户端生命周期结束」与「单次 I/O 失败」。
 var ErrClosed = errors.New("mq: 客户端已关闭")
 
+// ErrPublishUnknown 表示单条消息的投递结果未知：调用方等待期间 context 结束，
+// 适配器在返回前仍未收到该条的 Broker 确认（既不能断言成功，也不能断言未送达）。
+//
+// 为什么需要独立的错误值：
+//   - context 超时发生在批次中间时，先前的消息可能已获得 ACK，后续消息尚未确认；
+//     如果整批返回「全部未知」，已 ACK 的消息会被重复发布（F-03 的重复放大）；
+//   - 如果整批返回「全部成功」，未确认的消息会被错误标记为已发布，造成永久丢事件。
+//
+// 携带本错误的结果只能按「可能已发送」处理：不得写 published_at，必须保留重试路径。
+// 调用方用 errors.Is(err, mq.ErrPublishUnknown) 区分它与 Broker 明确返回的失败。
+var ErrPublishUnknown = errors.New("mq: 消息投递结果未知")
+
 // Header 是消息头键值对。Kafka 等实现原样透传，不解释 Value 的编码；
 // 约定同一个消息内的 Header Key 唯一（由发布方保证），消费方按 Key 查找。
 type Header struct {
@@ -83,20 +95,27 @@ type PublishResult struct {
 
 // Publisher 是消息发布端契约。
 //
-// Publish 是同步确认语义：返回时本批次每条消息都已有结果（确认或失败），
-// 调用方无需再等待回调。适配器应保证 results 长度与入参一致（除非返回批次级错误）。
+// Publish 是同步确认语义：返回时本批次每条消息都已有结果（确认、明确失败或未知），
+// 调用方无需再等待回调。批次一旦进入投递流程，results 长度必须与入参一致且顺序一致。
 //
 // 发布失败语义：
 //   - 返回 error 且 results 为 nil：批次未进入投递流程（客户端已关闭、context 已取消等），
 //     整批结果未知，调用方不得把任何一条消息标记为已发布；
-//   - 返回 error 且 results 非 nil：至少一条消息失败，results 中保留逐条错误；
+//   - 返回 error 且 results 非 nil：至少一条消息未获确认，results 中保留逐条结果：
+//     已 ACK 的条目 Err 为 nil，明确失败的条目 Err 为具体错误，
+//     未得到明确结论的条目 Err 必须包装 ErrPublishUnknown；
 //   - 返回 nil：全部消息均已获得 Broker 确认。
+//
+// 最后一条语义是 F-03 的修复重点：context 在批次中途结束时，适配器必须保留已经获得的
+// ACK/失败证据，并把剩余条目标记为未知，而不是丢弃整批结果。调用方据此只重发未知/失败项，
+// 不会把已确认的消息再次放大。
 //
 // at-least-once 的业务语义（例如 Outbox 标记已发布）不在此接口内实现，
 // 由调用方结合自身持久化事实决定重发策略。
 type Publisher interface {
 	// Publish 同步发布一批消息，按入参顺序返回逐条结果。
-	// 单条消息失败不应中断同批次其他消息的投递（除非 context 结束）。
+	// 单条消息失败不应中断同批次其他消息的投递（除非 context 结束）；
+	// context 结束时仍需返回已确定的逐条结果，未确定项包装 ErrPublishUnknown。
 	Publish(ctx context.Context, messages ...Message) ([]PublishResult, error)
 	// Close 停止接收新消息、尽力刷新在途消息并释放资源；可重复调用。
 	Close(ctx context.Context) error

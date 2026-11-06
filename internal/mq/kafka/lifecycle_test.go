@@ -83,8 +83,13 @@ func TestProducerPublishStopsOnContextDeadline(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("错误应可追溯为 context 超时，实际: %v", err)
 	}
-	if results != nil {
-		t.Fatalf("批次未确认时不得返回逐条成功结果: %#v", results)
+	// F-03：批次已进入投递流程，到期后必须返回等长的逐条结果（成功的保留成功、
+	// 未确认的包装 ErrPublishUnknown），而不是丢弃整批结果导致下游重复放大。
+	if len(results) != 1 {
+		t.Fatalf("超时后仍必须返回等长结果，实际: %#v", results)
+	}
+	if results[0].Err == nil {
+		t.Fatalf("未获 Broker 确认的消息不得标记为成功: %#v", results[0])
 	}
 	if elapsed > 5*time.Second {
 		t.Fatalf("Publish 耗时 %v，context 超时未生效", elapsed)

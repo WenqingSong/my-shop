@@ -23,6 +23,12 @@ cd "${ROOT_DIR}"
 log_info "go test -race（进程内共享内存并发逻辑：flashsale 熔断器状态机）"
 go test -race -count=1 -run 'TestCircuitBreakerStateMachine' ./internal/logic/flashsale/...
 
+# F-03：Producer 等待 context 结束时复制逐条结果，晚到回调不得改写已返回快照。
+# B4：模式装配、Consumer 监督循环、关闭预算与 goroutine 回收。
+log_info "go test -race（F-03 逐条结果快照 + B4 秒杀装配/生命周期）"
+go test -race -count=1 -run 'TestProducerPublishResults' ./internal/mq/kafka/...
+go test -race -count=1 -run 'TestResolveFlashSaleRuntimeConfig|TestFlashSaleRuntime|TestScannersStopOnContextCancel' ./internal/worker/...
+
 # ---------------------------------------------------------------------------
 # Outbox 并发可靠性 Race 门禁（F-14）
 # ---------------------------------------------------------------------------
@@ -39,6 +45,9 @@ OUTBOX_RACE_TESTS=(
   "TestOutboxSuccessThenMarkFailureRecoverable" # ACK 成功但标记失败的窗口可恢复
   "TestOutboxTerminalStatusNotReverted"         # 发布标记不回写业务终态
   "TestOutboxPublishUnknownResult"              # 发布结果未知后的重发
+  "TestOutboxPartialAckTimeoutDoesNotAmplifyDuplicates" # F-03：部分 ACK + 超时不得整批重发
+  "TestOutboxMarkDoesNotWaitBusinessRowLock"    # F-04：业务行锁不得突破标记预算/租约
+  "TestOutboxMarkTimeoutDoesNotWritePublishedAt" # F-04：标记总预算耗尽不得写 published_at
 )
 
 RACE_DB_NAME="${OUTBOX_RACE_DB_NAME:-my_shop_outbox_race}"
