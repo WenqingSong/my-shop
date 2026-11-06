@@ -12,6 +12,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	"cnb.cool/go-cloud-devops/my-shop/internal/codes"
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 )
 
 // 限流 Redis key 前缀（B 类 namespace，复用 flashsale: 前缀）。
@@ -40,29 +41,17 @@ func flashSaleRLActivityKey(activityID int64) string {
 
 // rateLimitEnabled 读取限流开关（flash_sale.rate_limit.enabled，默认关闭）。
 func rateLimitEnabled(ctx context.Context) bool {
-	v, err := g.Cfg().GetEffective(ctx, "flash_sale.rate_limit.enabled", false)
-	if err != nil || v == nil {
-		return false
-	}
-	return v.Bool()
+	return flashSaleBool(ctx, config.KeyFlashSaleRateLimitEnabled, false)
 }
 
 // userRateLimitMax 读取用户级限流阈值（单位窗口内最大请求数，<=0 表示不限）。
 func userRateLimitMax(ctx context.Context) int64 {
-	v, err := g.Cfg().GetEffective(ctx, "flash_sale.rate_limit.user.max_requests", int64(0))
-	if err != nil || v == nil {
-		return 0
-	}
-	return v.Int64()
+	return flashSaleInt64(ctx, config.KeyFlashSaleRateLimitUserMaxRequests, 0)
 }
 
 // userRateLimitWindow 读取用户级限流窗口秒数（<=0 回退默认 1 秒）。
 func userRateLimitWindow(ctx context.Context) int64 {
-	v, err := g.Cfg().GetEffective(ctx, "flash_sale.rate_limit.user.window_seconds", int64(1))
-	if err != nil || v == nil {
-		return 1
-	}
-	if n := v.Int64(); n > 0 {
+	if n := flashSaleInt64(ctx, config.KeyFlashSaleRateLimitUserWindowSeconds, 1); n > 0 {
 		return n
 	}
 	return 1
@@ -70,20 +59,12 @@ func userRateLimitWindow(ctx context.Context) int64 {
 
 // activityRateLimitMax 读取活动级限流阈值（单位窗口内最大请求数，<=0 表示不限）。
 func activityRateLimitMax(ctx context.Context) int64 {
-	v, err := g.Cfg().GetEffective(ctx, "flash_sale.rate_limit.activity.max_requests", int64(0))
-	if err != nil || v == nil {
-		return 0
-	}
-	return v.Int64()
+	return flashSaleInt64(ctx, config.KeyFlashSaleRateLimitActivityMaxRequests, 0)
 }
 
 // activityRateLimitWindow 读取活动级限流窗口秒数（<=0 回退默认 1 秒）。
 func activityRateLimitWindow(ctx context.Context) int64 {
-	v, err := g.Cfg().GetEffective(ctx, "flash_sale.rate_limit.activity.window_seconds", int64(1))
-	if err != nil || v == nil {
-		return 1
-	}
-	if n := v.Int64(); n > 0 {
+	if n := flashSaleInt64(ctx, config.KeyFlashSaleRateLimitActivityWindowSeconds, 1); n > 0 {
 		return n
 	}
 	return 1

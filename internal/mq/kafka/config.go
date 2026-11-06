@@ -13,18 +13,19 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 
-	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gcfg"
-	"github.com/gogf/gf/v2/os/genv"
+
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 )
 
-// GoFrame 配置项路径。环境变量按 GoFrame 规则由「大写 + 点替换为下划线」映射，
-// 例如 flash_sale.kafka.brokers 对应 FLASH_SALE_KAFKA_BROKERS。
-// 覆盖行为见 lookup：环境变量优先于配置文件，并由 config_test.go 用真实配置对象验证。
+// GoFrame 配置项路径。环境变量名显式登记在 internal/config 契约注册表中
+// （全大写蛇形：flash_sale.kafka.brokers → FLASH_SALE_KAFKA_BROKERS），
+// 优先级为「环境变量 > config.yaml > 代码默认值」，并由 config 包测试用真实配置对象验证。
 const (
 	configKeyEnabled       = "flash_sale.kafka.enabled"
 	configKeyBrokers       = "flash_sale.kafka.brokers"
@@ -102,27 +103,34 @@ func Load(ctx context.Context) (Config, error) {
 
 // LoadFrom 从指定 GoFrame 配置对象读取 flash_sale.kafka 节点并解析。
 // 抽成显式入参是为了在测试中注入隔离的配置对象，避免修改进程级全局配置。
+//
+// 读取统一走 internal/config：环境变量（FLASH_SALE_KAFKA_*）> config.yaml > 代码默认值，
+// 文件读取不做键归一化（GetEffective 会把 flash_sale 变成 flash.sale）。
 func LoadFrom(ctx context.Context, cfg *gcfg.Config) (Config, error) {
 	if cfg == nil {
 		return Config{}, fmt.Errorf("读取 Kafka 配置: 配置中心未初始化")
 	}
-	enabled, err := readBool(ctx, cfg, configKeyEnabled)
+	loader, err := config.NewLoader(cfg, os.LookupEnv)
+	if err != nil {
+		return Config{}, fmt.Errorf("读取 Kafka 配置: %w", err)
+	}
+	enabled, err := loader.Bool(ctx, config.KeyFlashSaleKafkaEnabled)
 	if err != nil {
 		return Config{}, err
 	}
-	brokers, err := readString(ctx, cfg, configKeyBrokers)
+	brokers, err := loader.String(ctx, config.KeyFlashSaleKafkaBrokers)
 	if err != nil {
 		return Config{}, err
 	}
-	topic, err := readString(ctx, cfg, configKeyTopic)
+	topic, err := loader.String(ctx, config.KeyFlashSaleKafkaTopic)
 	if err != nil {
 		return Config{}, err
 	}
-	dlqTopic, err := readString(ctx, cfg, configKeyDLQTopic)
+	dlqTopic, err := loader.String(ctx, config.KeyFlashSaleKafkaDLQTopic)
 	if err != nil {
 		return Config{}, err
 	}
-	group, err := readString(ctx, cfg, configKeyConsumerGroup)
+	group, err := loader.String(ctx, config.KeyFlashSaleKafkaConsumerGroup)
 	if err != nil {
 		return Config{}, err
 	}
@@ -286,63 +294,6 @@ func validateConsumerGroup(group string) error {
 		}
 	}
 	return nil
-}
-
-// lookup 读取单个配置项，优先级：环境变量 > 配置文件（缺失时返回 nil，由调用方使用默认值）。
-//
-// 为什么不能直接用 g.Cfg().GetEffective：
-// GetEffective 在查询配置文件前会做键归一化，把 "_" 替换为 "."（GoFrame internal/utils.FormatCmdKey），
-// 于是 "flash_sale.kafka.enabled" 会被读成 "flash.sale.kafka.enabled"，永远命中不了
-// 本项目既有的 flash_sale 命名空间——表现为“环境变量和代码默认值都生效，唯独配置文件不生效”。
-// 这里保留 GetEffective 的环境变量优先级（FLASH_SALE_KAFKA_*），文件读取改用不做键归一化的
-// cfg.Get，从而让 YAML 与 env 两条路径都能真正生效。项目未使用 gf 命令行参数覆盖配置，故不额外处理。
-func lookup(ctx context.Context, cfg *gcfg.Config, key string) (*gvar.Var, error) {
-	if v := genv.Get(envKey(key)); v != nil {
-		return v, nil
-	}
-	return cfg.Get(ctx, key)
-}
-
-// envKey 把配置键映射为环境变量名（与 GoFrame FormatEnvKey 规则一致）：
-// 大写 + "." 替换为 "_"，例如 flash_sale.kafka.brokers -> FLASH_SALE_KAFKA_BROKERS。
-func envKey(key string) string {
-	return strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
-}
-
-// readString 读取字符串配置，缺失时返回空串。
-func readString(ctx context.Context, cfg *gcfg.Config, key string) (string, error) {
-	v, err := lookup(ctx, cfg, key)
-	if err != nil {
-		return "", fmt.Errorf("读取配置项 %s: %w", key, err)
-	}
-	if v == nil {
-		return "", nil
-	}
-	return v.String(), nil
-}
-
-// readBool 严格读取布尔配置。
-//
-// GoFrame 的 gvar.Bool() 会把无法识别的字符串静默转换为 false，
-// 这会让 enabled: "ture" 之类的拼写错误表现为「Kafka 永久关闭」而无人察觉。
-// 因此这里先取字符串再用 strconv.ParseBool 严格解析，非法值直接报错并指出配置项。
-func readBool(ctx context.Context, cfg *gcfg.Config, key string) (bool, error) {
-	v, err := lookup(ctx, cfg, key)
-	if err != nil {
-		return false, fmt.Errorf("读取配置项 %s: %w", key, err)
-	}
-	if v == nil {
-		return false, nil
-	}
-	text := strings.TrimSpace(v.String())
-	if text == "" {
-		return false, nil
-	}
-	enabled, err := strconv.ParseBool(text)
-	if err != nil {
-		return false, fmt.Errorf("配置项 %s 需要布尔值（true/false），实际为 %q", key, text)
-	}
-	return enabled, nil
 }
 
 // disabledError 返回「Kafka 未启用却尝试创建客户端」的统一错误。

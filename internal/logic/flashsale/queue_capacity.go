@@ -14,6 +14,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	"cnb.cool/go-cloud-devops/my-shop/internal/codes"
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 )
 
 // 排队计数 Redis key 前缀（B 类 namespace，复用 flashsale: 前缀）。
@@ -25,29 +26,17 @@ func flashSaleQueuedKey(activityID, skuID int64) string {
 
 // queueCapacityEnabled 读取排队软上限开关（flash_sale.queue_capacity.enabled，默认关闭）。
 func queueCapacityEnabled(ctx context.Context) bool {
-	v, err := g.Cfg().GetEffective(ctx, "flash_sale.queue_capacity.enabled", false)
-	if err != nil || v == nil {
-		return false
-	}
-	return v.Bool()
+	return flashSaleBool(ctx, config.KeyFlashSaleQueueCapacityEnabled, false)
 }
 
 // queueCapacityMax 读取排队软上限（单 activity×SKU 最大 queued 数，<=0 表示不限）。
 func queueCapacityMax(ctx context.Context) int64 {
-	v, err := g.Cfg().GetEffective(ctx, "flash_sale.queue_capacity.max_queued_per_sku", int64(0))
-	if err != nil || v == nil {
-		return 0
-	}
-	return v.Int64()
+	return flashSaleInt64(ctx, config.KeyFlashSaleQueueCapacityMaxQueuedPerSKU, 0)
 }
 
 // queueCounterTTL 读取排队计数 key 的兜底 TTL（秒，<=0 回退默认 86400；对账扫描器会按活动 TTL 刷新）。
 func queueCounterTTL(ctx context.Context) int64 {
-	v, err := g.Cfg().GetEffective(ctx, "flash_sale.queue_capacity.counter_ttl_seconds", int64(86400))
-	if err != nil || v == nil {
-		return 86400
-	}
-	if n := v.Int64(); n > 0 {
+	if n := flashSaleInt64(ctx, config.KeyFlashSaleQueueCapacityCounterTTL, 86400); n > 0 {
 		return n
 	}
 	return 86400

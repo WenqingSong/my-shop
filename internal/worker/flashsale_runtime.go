@@ -14,15 +14,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/gogf/gf/v2/container/gvar"
-	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/os/genv"
-
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 	"cnb.cool/go-cloud-devops/my-shop/internal/logic/flashsale"
 	"cnb.cool/go-cloud-devops/my-shop/internal/logx"
 	"cnb.cool/go-cloud-devops/my-shop/internal/metrics"
@@ -645,10 +641,10 @@ func closeConsumerClientBounded(client flashsale.RebalanceConsumer, timeout time
 
 // loadFlashSaleRuntimeConfig 读取 mode / kafka / publisher / shutdown 配置。
 //
-// 读取方式与其他 flash_sale 配置一致：环境变量优先，配置文件用不做键归一化的 cfg.Get
-// （GoFrame 的 GetEffective 会把 flash_sale 归一化成 flash.sale，见 mq/kafka/config.go）。
+// 读取方式统一走 internal/config：环境变量 > config.yaml > 代码默认值，
+// 文件读取不做键归一化（GoFrame 的 GetEffective 会把 flash_sale 归一化成 flash.sale）。
 func loadFlashSaleRuntimeConfig(ctx context.Context) (flashSaleRuntimeConfig, error) {
-	mode, err := readFlashSaleString(ctx, "flash_sale.dispatch_mode", flashSaleModeDBScanner)
+	mode, err := config.String(ctx, config.KeyFlashSaleDispatchMode)
 	if err != nil {
 		return flashSaleRuntimeConfig{}, err
 	}
@@ -656,19 +652,19 @@ func loadFlashSaleRuntimeConfig(ctx context.Context) (flashSaleRuntimeConfig, er
 	if err != nil {
 		return flashSaleRuntimeConfig{}, fmt.Errorf("读取 flash_sale.kafka 配置: %w", err)
 	}
-	batch, err := readFlashSaleInt(ctx, "flash_sale.kafka.publisher.batch_size", defaultFlashSalePublisherBatchSize)
+	batch, err := config.Int(ctx, config.KeyFlashSaleKafkaPublisherBatchSize)
 	if err != nil {
 		return flashSaleRuntimeConfig{}, err
 	}
-	poll, err := readFlashSaleDuration(ctx, "flash_sale.kafka.publisher.poll_interval", defaultFlashSalePublisherPollInterval)
+	poll, err := config.Duration(ctx, config.KeyFlashSaleKafkaPublisherPollInterval)
 	if err != nil {
 		return flashSaleRuntimeConfig{}, err
 	}
-	backoff, err := readFlashSaleDuration(ctx, "flash_sale.kafka.publisher.error_backoff", defaultFlashSalePublisherErrorBackoff)
+	backoff, err := config.Duration(ctx, config.KeyFlashSaleKafkaPublisherErrorBackoff)
 	if err != nil {
 		return flashSaleRuntimeConfig{}, err
 	}
-	shutdown, err := readFlashSaleDuration(ctx, "flash_sale.shutdown_timeout", defaultFlashSaleShutdownTimeout)
+	shutdown, err := config.Duration(ctx, config.KeyFlashSaleShutdownTimeout)
 	if err != nil {
 		return flashSaleRuntimeConfig{}, err
 	}
@@ -732,61 +728,4 @@ func resolveFlashSaleRuntimeConfig(cfg flashSaleRuntimeConfig) (flashSaleRuntime
 		cfg.ShutdownTimeout = defaultFlashSaleShutdownTimeout
 	}
 	return cfg, nil
-}
-
-// lookupFlashSaleConfig 读取单个配置项：环境变量优先，其次配置文件。
-func lookupFlashSaleConfig(ctx context.Context, key string) (*gvar.Var, error) {
-	envKey := strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
-	if v := genv.Get(envKey); v != nil {
-		return v, nil
-	}
-	return g.Cfg().Get(ctx, key)
-}
-
-func readFlashSaleString(ctx context.Context, key, def string) (string, error) {
-	v, err := lookupFlashSaleConfig(ctx, key)
-	if err != nil {
-		return "", fmt.Errorf("读取配置项 %s: %w", key, err)
-	}
-	if v == nil {
-		return def, nil
-	}
-	text := strings.TrimSpace(v.String())
-	if text == "" {
-		return def, nil
-	}
-	return text, nil
-}
-
-func readFlashSaleInt(ctx context.Context, key string, def int) (int, error) {
-	text, err := readFlashSaleString(ctx, key, "")
-	if err != nil {
-		return 0, err
-	}
-	if text == "" {
-		return def, nil
-	}
-	n, err := strconv.Atoi(text)
-	if err != nil {
-		return 0, fmt.Errorf("配置项 %s 需要整数，实际为 %q", key, text)
-	}
-	return n, nil
-}
-
-func readFlashSaleDuration(ctx context.Context, key string, def time.Duration) (time.Duration, error) {
-	text, err := readFlashSaleString(ctx, key, "")
-	if err != nil {
-		return 0, err
-	}
-	if text == "" {
-		return def, nil
-	}
-	d, err := time.ParseDuration(text)
-	if err != nil {
-		return 0, fmt.Errorf("配置项 %s 需要 Go duration（如 200ms/2s），实际为 %q", key, text)
-	}
-	if d <= 0 {
-		return 0, fmt.Errorf("配置项 %s 必须大于 0，实际为 %s", key, d)
-	}
-	return d, nil
 }

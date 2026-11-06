@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/glog"
 
 	qauth "github.com/qiniu/go-sdk/v7/auth"
 	qclient "github.com/qiniu/go-sdk/v7/client"
@@ -21,15 +21,13 @@ import (
 
 	v1 "cnb.cool/go-cloud-devops/my-shop/api/upload/v1"
 	"cnb.cool/go-cloud-devops/my-shop/internal/codes"
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 	"cnb.cool/go-cloud-devops/my-shop/internal/service"
 )
 
+// 说明：qiniu 配置的默认值统一由 internal/config 契约注册表持有（含区域/凭证 TTL/
+// 文件大小上限/扩展名与 MIME 白名单），本包不再维护第二份默认值。
 const (
-	// 结构配置默认值（与 manifest/config/config.yaml 保持一致）。
-	defaultRegion      = "z2"
-	defaultTokenTTL    = 3600
-	defaultMaxFileSize = 10 * 1024 * 1024 // 10MB
-
 	// keyRandomBytes 是存储 key 随机段的字节数（hex 编码后长度翻倍）。
 	keyRandomBytes = 16
 
@@ -37,12 +35,6 @@ const (
 	// SDK 的 GetBucketInfo 内部使用 context.Background()、不接受外部 ctx，
 	// 因此通过注入带 Timeout 的 http.Client 约束超时。
 	bucketCheckTimeout = 10 * time.Second
-)
-
-// 白名单默认值（与 config.yaml 一致）。测试环境不加载 config.yaml，靠代码默认值兜底。
-var (
-	defaultAllowedExtensions = []string{"jpg", "jpeg", "png", "gif", "webp"}
-	defaultAllowedMimeTypes  = []string{"image/jpeg", "image/png", "image/gif", "image/webp"}
 )
 
 type sUpload struct {
@@ -81,7 +73,10 @@ type qiniuConfig struct {
 // 对指定 bucket 的真实只读可用性检查（GetBucketInfo）。任一失败返回错误，进程非零退出。
 // 错误信息只指认字段名/失败原因，不泄漏凭据值、内部路径或堆栈。
 func (s *sUpload) ValidateConfig(ctx context.Context) error {
-	cfg := loadConfig(ctx)
+	cfg, err := loadConfig(ctx)
+	if err != nil {
+		return err
+	}
 	if err := cfg.validateStructural(); err != nil {
 		return err
 	}
@@ -94,7 +89,12 @@ func (s *sUpload) ValidateConfig(ctx context.Context) error {
 // IssueToken 校验请求声明（扩展名/MIME）并签发七牛云直传凭证。
 // 凭据或 bucket/domain 缺失/非法时返回稳定错误码 17002，不泄漏任何凭据细节。
 func (s *sUpload) IssueToken(ctx context.Context, filename, contentType string) (*v1.TokenRes, error) {
-	cfg := loadConfig(ctx)
+	cfg, err := loadConfig(ctx)
+	if err != nil {
+		// 配置读取失败按「配置不可用」拒绝签发（17002），不把内部路径/格式细节回给调用方。
+		glog.Errorf(ctx, "读取七牛配置失败: %v", err)
+		return nil, codes.New(codes.CodeUploadConfigInvalid)
+	}
 	if err := cfg.validateCredentials(); err != nil {
 		return nil, err
 	}
@@ -138,19 +138,67 @@ func (s *sUpload) IssueToken(ctx context.Context, filename, contentType string) 
 	}, nil
 }
 
-// loadConfig 读取 qiniu 段配置。配置读取失败时按安全默认值/空值处理，后续校验负责拒绝。
-func loadConfig(ctx context.Context) qiniuConfig {
-	return qiniuConfig{
-		accessKey:         cfgString(ctx, "qiniu.access_key", ""),
-		secretKey:         cfgString(ctx, "qiniu.secret_key", ""),
-		bucket:            cfgString(ctx, "qiniu.bucket", ""),
-		domain:            cfgString(ctx, "qiniu.domain", ""),
-		region:            cfgString(ctx, "qiniu.region", defaultRegion),
-		tokenTTL:          cfgInt64(ctx, "qiniu.token_ttl", defaultTokenTTL),
-		maxFileSize:       cfgInt64(ctx, "qiniu.max_file_size", defaultMaxFileSize),
-		allowedExtensions: cfgStrings(ctx, "qiniu.allowed_extensions", defaultAllowedExtensions),
-		allowedMimeTypes:  cfgStrings(ctx, "qiniu.allowed_mime_types", defaultAllowedMimeTypes),
+// loadConfig 读取 qiniu 段配置（环境变量 > config.yaml > 代码默认值）。
+// 配置读取失败（非法类型）返回错误，由调用方决定 fail-fast 或 17002，不静默使用空值。
+func loadConfig(ctx context.Context) (qiniuConfig, error) {
+	read := &qiniuConfigReader{ctx: ctx}
+	cfg := qiniuConfig{
+		accessKey:         read.str(config.KeyQiniuAccessKey),
+		secretKey:         read.str(config.KeyQiniuSecretKey),
+		bucket:            read.str(config.KeyQiniuBucket),
+		domain:            read.str(config.KeyQiniuDomain),
+		region:            read.str(config.KeyQiniuRegion),
+		tokenTTL:          read.int64Value(config.KeyQiniuTokenTTL),
+		maxFileSize:       read.int64Value(config.KeyQiniuMaxFileSize),
+		allowedExtensions: read.list(config.KeyQiniuAllowedExtensions),
+		allowedMimeTypes:  read.list(config.KeyQiniuAllowedMimeTypes),
 	}
+	if err := read.err; err != nil {
+		return qiniuConfig{}, err
+	}
+	return cfg, nil
+}
+
+// qiniuConfigReader 顺序读取 qiniu 段配置并保留首个错误。
+type qiniuConfigReader struct {
+	ctx context.Context
+	err error
+}
+
+// str 读取字符串配置项。
+func (r *qiniuConfigReader) str(key config.Key) string {
+	if r.err != nil {
+		return ""
+	}
+	value, err := config.String(r.ctx, key)
+	if err != nil {
+		r.err = err
+	}
+	return value
+}
+
+// int64Value 读取 int64 配置项。
+func (r *qiniuConfigReader) int64Value(key config.Key) int64 {
+	if r.err != nil {
+		return 0
+	}
+	value, err := config.Int64(r.ctx, key)
+	if err != nil {
+		r.err = err
+	}
+	return value
+}
+
+// list 读取字符串列表配置项。
+func (r *qiniuConfigReader) list(key config.Key) []string {
+	if r.err != nil {
+		return nil
+	}
+	value, err := config.Strings(r.ctx, key)
+	if err != nil {
+		r.err = err
+	}
+	return value
 }
 
 // validateStructural 校验非机密结构配置（region/ttl/大小/白名单）的格式，供启动 fail-fast。
@@ -288,32 +336,4 @@ func contains(list []string, target string) bool {
 		}
 	}
 	return false
-}
-
-func cfgString(ctx context.Context, key, def string) string {
-	v, err := g.Cfg().GetEffective(ctx, key, def)
-	if err != nil || v == nil {
-		return def
-	}
-	return v.String()
-}
-
-func cfgInt64(ctx context.Context, key string, def int64) int64 {
-	v, err := g.Cfg().GetEffective(ctx, key, def)
-	if err != nil || v == nil {
-		return def
-	}
-	return v.Int64()
-}
-
-func cfgStrings(ctx context.Context, key string, def []string) []string {
-	v, err := g.Cfg().GetEffective(ctx, key)
-	if err != nil || v == nil || v.IsEmpty() {
-		return def
-	}
-	s := v.Strings()
-	if len(s) == 0 {
-		return def
-	}
-	return s
 }

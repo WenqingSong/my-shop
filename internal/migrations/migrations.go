@@ -18,22 +18,13 @@ import (
 
 	go_mysql "github.com/go-sql-driver/mysql"
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/glog"
 
 	migrate "github.com/golang-migrate/migrate/v4"
 	migrate_mysql "github.com/golang-migrate/migrate/v4/database/mysql"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
-)
 
-// 数据库配置默认值，与 internal/boot/boot.go 保持一致（开发环境默认值）。
-// 真实值由 manifest/config/config.yaml 或环境变量覆盖。
-const (
-	defaultDBHost    = "127.0.0.1"
-	defaultDBPort    = "3306"
-	defaultDBUser    = "root"
-	defaultDBName    = "my_shop"
-	defaultDBCharset = "utf8mb4"
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 )
 
 // migrationDir 是内嵌文件系统中存放迁移文件的子目录。
@@ -156,24 +147,47 @@ func closeMigrate(m *migrate.Migrate) {
 // 密码无内置默认回退：缺失（config 空且无 DATABASE_DEFAULT_PASS）时 fail-fast，
 // 不回退 "root" 等默认密码（docs/design/migration.md §5）。
 func buildDSN(ctx context.Context) (string, error) {
-	pass := cfgString(ctx, "database.default.pass", "")
+	read := &dbConfigReader{ctx: ctx}
+	pass := read.value(config.KeyDatabaseDefaultPass)
+	user := read.value(config.KeyDatabaseDefaultUser)
+	host := read.value(config.KeyDatabaseDefaultHost)
+	port := read.value(config.KeyDatabaseDefaultPort)
+	name := read.value(config.KeyDatabaseDefaultName)
+	charset := read.value(config.KeyDatabaseDefaultCharset)
+	if err := read.err; err != nil {
+		return "", err
+	}
 	if pass == "" {
 		return "", gerror.New("未配置 database.default.pass（DATABASE_DEFAULT_PASS）：数据库密码无内置默认值，必须显式注入")
 	}
 	cfg := go_mysql.NewConfig()
-	cfg.User = cfgString(ctx, "database.default.user", defaultDBUser)
+	cfg.User = user
 	cfg.Passwd = pass
 	cfg.Net = "tcp"
-	cfg.Addr = net.JoinHostPort(
-		cfgString(ctx, "database.default.host", defaultDBHost),
-		cfgString(ctx, "database.default.port", defaultDBPort),
-	)
-	cfg.DBName = cfgString(ctx, "database.default.name", defaultDBName)
-	cfg.Params = map[string]string{
-		"charset": cfgString(ctx, "database.default.charset", defaultDBCharset),
-	}
+	cfg.Addr = net.JoinHostPort(host, port)
+	cfg.DBName = name
+	cfg.Params = map[string]string{"charset": charset}
 	cfg.MultiStatements = true
 	return cfg.FormatDSN(), nil
+}
+
+// dbConfigReader 顺序读取 database.default.* 并保留首个错误，
+// 避免在同一段 DSN 构造里重复写 if err != nil。
+type dbConfigReader struct {
+	ctx context.Context
+	err error
+}
+
+// value 读取字符串配置项，失败时记录首个错误。
+func (r *dbConfigReader) value(key config.Key) string {
+	if r.err != nil {
+		return ""
+	}
+	value, err := config.String(r.ctx, key)
+	if err != nil {
+		r.err = err
+	}
+	return value
 }
 
 // latestVersion 返回内嵌迁移文件的最高版本号（按数字升序取最大值）。
@@ -211,17 +225,4 @@ func parseVersion(name string) (uint, error) {
 func isTableNotExist(err error) bool {
 	var mysqlErr *go_mysql.MySQLError
 	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1146
-}
-
-// cfgString 从 GoFrame 配置读取字符串，支持环境变量覆盖，读取失败时回退默认值。
-func cfgString(ctx context.Context, key, def string) string {
-	v, err := g.Cfg().GetEffective(ctx, key, def)
-	if err != nil {
-		glog.Warningf(ctx, "读取配置 %q 失败: %v", key, err)
-		return def
-	}
-	if v == nil {
-		return def
-	}
-	return v.String()
 }

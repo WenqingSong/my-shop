@@ -7,16 +7,8 @@ import (
 	"net"
 
 	go_mysql "github.com/go-sql-driver/mysql"
-	"github.com/gogf/gf/v2/frame/g"
-)
 
-// 数据库连接默认值，与 internal/migrations 及 internal/boot 保持一致（开发环境默认）。
-const (
-	defaultDBHost        = "127.0.0.1"
-	defaultDBPort        = "3306"
-	defaultDBUser        = "root"
-	defaultDBName        = "my_shop"
-	defaultStagingDBName = "my_shop_staging"
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 )
 
 // OpenConnections 依据配置打开 staging 源库与目标库连接。
@@ -25,12 +17,30 @@ const (
 // host/port/user/pass 复用 database.default（同一 MySQL 实例），仅 schema 名不同，
 // 保证原始 SQL 只进入 staging、目标库连接绝不执行 SET FOREIGN_KEY_CHECKS=0（AC-002）。
 func OpenConnections(ctx context.Context) (source, target *sql.DB, err error) {
-	host := cfgString(ctx, "database.default.host", defaultDBHost)
-	port := cfgString(ctx, "database.default.port", defaultDBPort)
-	user := cfgString(ctx, "database.default.user", defaultDBUser)
-	pass := cfgString(ctx, "database.default.pass", "")
-	targetName := cfgString(ctx, "database.default.name", defaultDBName)
-	stagingName := cfgString(ctx, "legacy.staging.name", defaultStagingDBName)
+	host, err := config.String(ctx, config.KeyDatabaseDefaultHost)
+	if err != nil {
+		return nil, nil, err
+	}
+	port, err := config.String(ctx, config.KeyDatabaseDefaultPort)
+	if err != nil {
+		return nil, nil, err
+	}
+	user, err := config.String(ctx, config.KeyDatabaseDefaultUser)
+	if err != nil {
+		return nil, nil, err
+	}
+	pass, err := config.String(ctx, config.KeyDatabaseDefaultPass)
+	if err != nil {
+		return nil, nil, err
+	}
+	targetName, err := config.String(ctx, config.KeyDatabaseDefaultName)
+	if err != nil {
+		return nil, nil, err
+	}
+	stagingName, err := config.String(ctx, config.KeyLegacyStagingName)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	// 数据库密码无内置默认回退：缺失（config 空且无 DATABASE_DEFAULT_PASS）时 fail-fast，
 	// 不回退 "root" 等默认密码（docs/design/deployment.md §3 无内置默认回退）。
@@ -77,13 +87,4 @@ func buildDSN(host, port, user, pass, name string) string {
 	cfg.Params = map[string]string{"charset": "utf8mb4"}
 	cfg.MultiStatements = false
 	return cfg.FormatDSN()
-}
-
-// cfgString 从 GoFrame 配置读取字符串，读取失败回退默认值。
-func cfgString(ctx context.Context, key, def string) string {
-	v, err := g.Cfg().GetEffective(ctx, key, def)
-	if err != nil || v == nil {
-		return def
-	}
-	return v.String()
 }

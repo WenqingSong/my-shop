@@ -7,6 +7,17 @@ server:
   # 对应环境变量 SERVER_GRACEFUL_TIMEOUT，属于 T2-03 冻结终止预算的 http_drain_timeout 段。
   graceful_timeout: 10
 
+# 部署期配置（T2-01 统一配置契约）。
+# 对应环境变量：DEPLOYMENT_REQUIRE_EXTERNAL_ENDPOINTS。
+deployment:
+  # Kubernetes 严格配置模式开关，默认 false（保持本地开发兼容）。
+  # 为 true 时，启动会在建立任何数据库/Redis 连接之前校验：DATABASE_DEFAULT_HOST、
+  # DATABASE_DEFAULT_NAME、REDIS_DEFAULT_ADDRESS 必须由环境变量显式提供（不能只靠本文件
+  # 或代码默认值），且不得指向 localhost / 127.0.0.1 / ::1 等回环地址；
+  # 任一不满足即启动失败并指出缺失的环境变量名。
+  # 后续 T2-06 的 Kubernetes ConfigMap 必须设置 DEPLOYMENT_REQUIRE_EXTERNAL_ENDPOINTS=true。
+  require_external_endpoints: false
+
 # 容器终止预算（T2-03 冻结契约）。
 # 预算关系：termination_grace_period >= pre_stop_delay + http_drain_timeout
 #           + runtime_shutdown_timeout + safety_margin

@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"testing"
 
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
 )
 
@@ -25,11 +26,19 @@ func setupEngineTest(t *testing.T) (*sql.DB, *sql.DB) {
 	t.Helper()
 	ctx := context.Background()
 
-	host := cfgString(ctx, "database.default.host", defaultDBHost)
-	port := cfgString(ctx, "database.default.port", defaultDBPort)
-	user := cfgString(ctx, "database.default.user", defaultDBUser)
-	pass := cfgString(ctx, "database.default.pass", "")
-	targetName := cfgString(ctx, "database.default.name", defaultDBName)
+	mustConfig := func(key config.Key) string {
+		t.Helper()
+		value, err := config.String(ctx, key)
+		if err != nil {
+			t.Fatalf("读取配置 %s: %v", key, err)
+		}
+		return value
+	}
+	host := mustConfig(config.KeyDatabaseDefaultHost)
+	port := mustConfig(config.KeyDatabaseDefaultPort)
+	user := mustConfig(config.KeyDatabaseDefaultUser)
+	pass := mustConfig(config.KeyDatabaseDefaultPass)
+	targetName := mustConfig(config.KeyDatabaseDefaultName)
 
 	// root 连接（无库名）用于创建/清理 staging 测试库。
 	root, err := sql.Open("mysql", buildDSN(host, port, user, pass, ""))

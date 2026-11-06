@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/os/gcmd"
 
 	"cnb.cool/go-cloud-devops/my-shop/internal/boot"
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/health"
 	"cnb.cool/go-cloud-devops/my-shop/internal/logx"
 	"cnb.cool/go-cloud-devops/my-shop/internal/metrics"
@@ -148,7 +149,11 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 	// preStop + HTTP drain + Runtime 关闭 + 安全余量。
 	// 预算不足即启动失败：否则进程会在终止宽限期结束时被 SIGKILL，关闭顺序随之失效。
 	// HTTP drain 与 Runtime 关闭预算都取自实际生效配置（而非默认常量），避免日志与行为漂移。
-	budget, err := termination.Load(ctx, boot.ServerGracefulTimeout(ctx), runtime.ShutdownTimeout())
+	drainTimeout, err := boot.ServerGracefulTimeout(ctx)
+	if err != nil {
+		return err
+	}
+	budget, err := termination.Load(ctx, drainTimeout, runtime.ShutdownTimeout())
 	if err != nil {
 		return err
 	}
@@ -179,7 +184,11 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 
 	// serveHTTP 返回后（HTTP 已完成有界 drain、或在预算内强制关闭并确认停止），
 	// 由 defer 中的 runtime.Shutdown 停止后台组件并收尾。
-	return serveHTTP(ctx, s, boot.ServerAddress(ctx), budget.HTTPDrainTimeout)
+	addr, err := boot.ServerAddress(ctx)
+	if err != nil {
+		return err
+	}
+	return serveHTTP(ctx, s, addr, budget.HTTPDrainTimeout)
 }
 
 // runtimeContext 返回脱离信号取消的后台运行期 ctx（B4.1 语义）。
@@ -198,7 +207,11 @@ func runtimeContext(ctx context.Context) context.Context {
 // configureBannerStorage 初始化轮播图图片的本地存储：seed 3 张占位图，并将 banner 目录
 // 映射为 /storage/banners 静态路由（LocalStorage 为 V1 唯一实现，后续可替换 MinIO/OSS/S3）。
 func configureBannerStorage(ctx context.Context, s *ghttp.Server) error {
-	local := storage.NewLocal(storageRoot(ctx))
+	root, err := config.String(ctx, config.KeyStorageLocalRoot)
+	if err != nil {
+		return err
+	}
+	local := storage.NewLocal(root)
 	if _, err := local.PrepareBannerPlaceholders(ctx); err != nil {
 		return err
 	}
@@ -215,15 +228,6 @@ func registerMetricsRoute(ctx context.Context, s *ghttp.Server) {
 	s.BindHandler("GET:/metrics", func(r *ghttp.Request) {
 		metrics.Handler().ServeHTTP(r.Response.Writer, r.Request)
 	})
-}
-
-// storageRoot 读取本地存储根目录（环境变量 STORAGE_LOCAL_ROOT 可覆盖），默认 ./storage。
-func storageRoot(ctx context.Context) string {
-	v, err := g.Cfg().GetEffective(ctx, "storage.local.root", "./storage")
-	if err != nil || v == nil {
-		return "./storage"
-	}
-	return v.String()
 }
 
 // migrateUp 执行所有未应用 migration。

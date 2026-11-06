@@ -19,6 +19,7 @@ import (
 
 	v1 "cnb.cool/go-cloud-devops/my-shop/api/dashboard/v1"
 	"cnb.cool/go-cloud-devops/my-shop/internal/codes"
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 	"cnb.cool/go-cloud-devops/my-shop/internal/service"
 )
 
@@ -219,7 +220,10 @@ func (s *sDashboard) FlashSales(ctx context.Context) (*v1.FlashSalesRes, error) 
 
 // businessLocation 加载 Dashboard 日期切分时区；配置非法或含 DST 时 fail-closed 返回 500，不静默回退。
 func businessLocation(ctx context.Context) (*time.Location, error) {
-	name := g.Cfg().MustGet(ctx, "dashboard.timezone", defaultTimezone).String()
+	name, err := config.String(ctx, config.KeyDashboardTimezone)
+	if err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, err)
+	}
 	loc, err := time.LoadLocation(name)
 	if err != nil {
 		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("dashboard.timezone 配置非法: %w", err))

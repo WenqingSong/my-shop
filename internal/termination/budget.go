@@ -19,13 +19,9 @@ package termination
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
-	"github.com/gogf/gf/v2/container/gvar"
-	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/os/genv"
-
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 	"cnb.cool/go-cloud-devops/my-shop/internal/logx"
 )
 
@@ -117,11 +113,11 @@ func (b Budget) LogStartup(ctx context.Context) {
 //
 // 任一值非法或宽限期不足都会返回错误，由调用方 fail-fast。
 func Load(ctx context.Context, httpDrainTimeout, runtimeShutdownTimeout time.Duration) (Budget, error) {
-	preStop, err := loadDuration(ctx, "lifecycle.pre_stop_delay", DefaultPreStopDelay)
+	preStop, err := config.Duration(ctx, config.KeyLifecyclePreStopDelay)
 	if err != nil {
 		return Budget{}, err
 	}
-	grace, err := loadDuration(ctx, "lifecycle.termination_grace_period", DefaultTerminationGracePeriod)
+	grace, err := config.Duration(ctx, config.KeyLifecycleTerminationGracePeriod)
 	if err != nil {
 		return Budget{}, err
 	}
@@ -135,40 +131,6 @@ func Load(ctx context.Context, httpDrainTimeout, runtimeShutdownTimeout time.Dur
 		return budget, err
 	}
 	return budget, nil
-}
-
-// loadDuration 读取 Go duration 配置：环境变量优先，其次配置文件；空值回落默认值。
-// 非法写法的 duration 必须启动失败，不能静默回落默认值（否则运维误以为配置已生效）。
-func loadDuration(ctx context.Context, key string, def time.Duration) (time.Duration, error) {
-	v, err := lookupConfig(ctx, key)
-	if err != nil {
-		return 0, fmt.Errorf("读取配置项 %s: %w", key, err)
-	}
-	if v == nil {
-		return def, nil
-	}
-	text := strings.TrimSpace(v.String())
-	if text == "" {
-		return def, nil
-	}
-	d, err := time.ParseDuration(text)
-	if err != nil {
-		return 0, fmt.Errorf("配置项 %s 需要 Go duration（如 5s/60s），实际为 %q", key, text)
-	}
-	if d <= 0 {
-		return 0, fmt.Errorf("配置项 %s 必须大于 0，实际为 %s", key, d)
-	}
-	return d, nil
-}
-
-// lookupConfig 读取单个配置项：环境变量优先（点分键转大写蛇形），其次配置文件。
-// 与 flash_sale 配置保持一致，使用不做键归一化的 g.Cfg().Get，避免 lifecycle 被改写。
-func lookupConfig(ctx context.Context, key string) (*gvar.Var, error) {
-	envKey := strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
-	if v := genv.Get(envKey); v != nil {
-		return v, nil
-	}
-	return g.Cfg().Get(ctx, key)
 }
 
 // durationText 以秒为单位输出整秒预算（如 60s），非整秒保留原始写法（如 1500ms）。

@@ -8,24 +8,23 @@ import (
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/database/gredis"
 	"github.com/gogf/gf/v2/frame/g"
+
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 )
 
-func TestCfgStringEnvOverride(t *testing.T) {
+func TestConfigStringEnvOverride(t *testing.T) {
 	ctx := context.Background()
 	// 使用 t.Setenv 而非 genv.Set/os.Setenv：t.Setenv 在测试结束后自动恢复原值，
 	// 避免把 DATABASE_DEFAULT_HOST 等进程级环境变量永久覆盖/清除，污染后续测试
 	// （尤其 test.sh 注入的 DATABASE_DEFAULT_PASS 不能被 boot 包内其它测试清除）。
 	t.Setenv("DATABASE_DEFAULT_HOST", "env-host")
 
-	if got := cfgString(ctx, "database.default.host", "default-host"); got != "env-host" {
-		t.Fatalf("expected env override %q, got %q", "env-host", got)
+	got, err := config.String(ctx, config.KeyDatabaseDefaultHost)
+	if err != nil {
+		t.Fatalf("读取 database.default.host 失败: %v", err)
 	}
-}
-
-func TestCfgStringDefaultFallback(t *testing.T) {
-	ctx := context.Background()
-	if got := cfgString(ctx, "nonexistent.config.key", "fallback"); got != "fallback" {
-		t.Fatalf("expected default %q, got %q", "fallback", got)
+	if got != "env-host" {
+		t.Fatalf("expected env override %q, got %q", "env-host", got)
 	}
 }
 
@@ -77,7 +76,11 @@ func TestDependencyTimeoutEnvOverride(t *testing.T) {
 	ctx := context.Background()
 	t.Setenv("STARTUP_DEPENDENCY_TIMEOUT", "5")
 
-	if got := dependencyTimeout(ctx); got != 5*time.Second {
+	got, err := dependencyTimeout(ctx)
+	if err != nil {
+		t.Fatalf("读取 startup.dependency.timeout 失败: %v", err)
+	}
+	if got != 5*time.Second {
 		t.Fatalf("expected %v, got %v", 5*time.Second, got)
 	}
 }
@@ -133,7 +136,9 @@ func TestApplyServerConfigGracefulTimeoutEnvOverride(t *testing.T) {
 	ctx := context.Background()
 	t.Setenv("SERVER_GRACEFUL_TIMEOUT", "42")
 
-	applyServerConfig(ctx)
+	if err := applyServerConfig(ctx); err != nil {
+		t.Fatalf("applyServerConfig 返回错误: %v", err)
+	}
 
 	if got := g.Server().GetGracefulTimeout(); got != 42 {
 		t.Fatalf("expected graceful timeout 42 from SERVER_GRACEFUL_TIMEOUT, got %d", got)
@@ -151,7 +156,9 @@ func TestApplyRedisConfigEnvOverride(t *testing.T) {
 		t.Setenv(k, v)
 	}
 
-	applyRedisConfig(ctx)
+	if err := applyRedisConfig(ctx); err != nil {
+		t.Fatalf("applyRedisConfig 返回错误: %v", err)
+	}
 
 	cfg, ok := gredis.GetConfig(gredis.DefaultGroupName)
 	if !ok {

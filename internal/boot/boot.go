@@ -13,20 +13,13 @@ import (
 	"github.com/gogf/gf/v2/os/glog"
 
 	"cnb.cool/go-cloud-devops/my-shop/internal/auth"
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
 )
 
+// 说明：配置默认值统一由 internal/config 契约注册表持有，本包不再保留第二份默认值，
+// 以免「代码默认值」与契约文档/注册表漂移。此处仅保留非配置类常量。
 const (
-	defaultServerAddress     = ":8000"
-	defaultDBType            = "mysql"
-	defaultDBHost            = "127.0.0.1"
-	defaultDBPort            = "3306"
-	defaultDBUser            = "root"
-	defaultDBName            = "my_shop"
-	defaultDBCharset         = "utf8mb4"
-	defaultRedisAddress      = "127.0.0.1:6379"
-	defaultRedisDB           = 0
-	defaultRedisPass         = ""
 	defaultDependencyTimeout = 30 * time.Second
 	defaultGracefulTimeout   = 10
 	checkRetryInterval       = time.Second
@@ -36,15 +29,29 @@ const (
 // 只读校验 schema 就绪（不建表、不执行 DDL），随后执行超级管理员与权限 seed，
 // 最后交由 serve 启动 HTTP。数据库表结构由 `my-shop migrate up` 负责建立。
 func Bootstrap(ctx context.Context) error {
-	applyServerConfig(ctx)
+	// T2-01：配置校验必须是启动的第一步，且早于任何数据库/Redis 连接装配：
+	//   - Validate 逐项解析全部已登记配置，非法 bool/int/duration 立即失败（不静默回退）；
+	//   - ValidateExternalEndpoints 在 Kubernetes 严格模式下要求关键连接参数由环境变量显式注入。
+	if err := ValidateConfig(ctx); err != nil {
+		return err
+	}
+	if err := applyServerConfig(ctx); err != nil {
+		return err
+	}
 	if err := applyDatabaseConfig(ctx); err != nil {
 		return err
 	}
-	applyRedisConfig(ctx)
+	if err := applyRedisConfig(ctx); err != nil {
+		return err
+	}
 	if _, err := auth.Secret(ctx); err != nil {
 		return err
 	}
-	if err := waitForDependencies(ctx, dependencyTimeout(ctx)); err != nil {
+	timeout, err := dependencyTimeout(ctx)
+	if err != nil {
+		return err
+	}
+	if err := waitForDependencies(ctx, timeout); err != nil {
 		return err
 	}
 	if err := checkSchemaReady(ctx); err != nil {
@@ -54,6 +61,20 @@ func Bootstrap(ctx context.Context) error {
 		return err
 	}
 	return seedPermissions(ctx)
+}
+
+// ValidateConfig 校验统一配置契约：先逐项解析全部登记配置，再按部署模式做严格连接校验。
+//
+// 该方法不建立任何连接，可被 serve 与该任务之外的运维命令复用；必须在实际连接数据库与
+// Redis 之前调用（Bootstrap 已保证顺序）。
+func ValidateConfig(ctx context.Context) error {
+	if err := config.Validate(ctx); err != nil {
+		return gerror.Wrap(err, "配置校验失败")
+	}
+	if err := config.ValidateExternalEndpoints(ctx); err != nil {
+		return gerror.Wrap(err, "部署严格配置校验失败")
+	}
+	return nil
 }
 
 // checkSchemaReady 只读校验 schema 就绪：schema_migrations 已初始化、非 dirty、
@@ -73,39 +94,54 @@ func checkSchemaReady(ctx context.Context) error {
 	return nil
 }
 
-// dependencyTimeout returns the maximum time the startup dependency check may
-// keep retrying. It can be overridden via the STARTUP_DEPENDENCY_TIMEOUT
-// environment variable (in seconds).
-func dependencyTimeout(ctx context.Context) time.Duration {
-	secs := cfgInt(ctx, "startup.dependency.timeout", int(defaultDependencyTimeout/time.Second))
+// dependencyTimeout 返回启动依赖检查允许重试的最长时间
+// （startup.dependency.timeout，环境变量 STARTUP_DEPENDENCY_TIMEOUT，单位秒）。
+// 配置非正值时保持既有语义：回退默认 30s。
+func dependencyTimeout(ctx context.Context) (time.Duration, error) {
+	secs, err := config.Int(ctx, config.KeyStartupDependencyTimeout)
+	if err != nil {
+		return 0, err
+	}
 	if secs <= 0 {
 		secs = int(defaultDependencyTimeout / time.Second)
 	}
-	return time.Duration(secs) * time.Second
+	return time.Duration(secs) * time.Second, nil
 }
 
-func applyServerConfig(ctx context.Context) {
-	g.Server().SetAddr(ServerAddress(ctx))
+func applyServerConfig(ctx context.Context) error {
+	addr, err := ServerAddress(ctx)
+	if err != nil {
+		return err
+	}
+	drain, err := ServerGracefulTimeout(ctx)
+	if err != nil {
+		return err
+	}
+	g.Server().SetAddr(addr)
 	// 优雅关闭 HTTP drain 超时（秒）：SIGINT/SIGTERM 后停收新连接、等待在途请求完成的最长时间。
 	// 对应环境变量 SERVER_GRACEFUL_TIMEOUT；默认 10s。
 	// 该值同时是 T2-03 终止预算的 http_drain_timeout 段（见 ServerGracefulTimeout）。
-	g.Server().SetGracefulTimeout(int(ServerGracefulTimeout(ctx) / time.Second))
+	g.Server().SetGracefulTimeout(int(drain / time.Second))
+	return nil
 }
 
 // ServerAddress 返回 HTTP 监听地址（server.address，环境变量 SERVER_ADDRESS）。
 // serve 需要先自行监听（受控 listener）再交给 GoFrame，因此与 applyServerConfig 共用同一来源。
-func ServerAddress(ctx context.Context) string {
-	return cfgString(ctx, "server.address", defaultServerAddress)
+func ServerAddress(ctx context.Context) (string, error) {
+	return config.String(ctx, config.KeyServerAddress)
 }
 
 // ServerGracefulTimeout 返回 HTTP drain 预算，供 serve 的终止流程与终止预算计算共用同一配置来源
 // （server.graceful_timeout，环境变量 SERVER_GRACEFUL_TIMEOUT）。配置值为秒，非正值回退默认 10s。
-func ServerGracefulTimeout(ctx context.Context) time.Duration {
-	seconds := cfgInt(ctx, "server.graceful_timeout", defaultGracefulTimeout)
+func ServerGracefulTimeout(ctx context.Context) (time.Duration, error) {
+	seconds, err := config.Int(ctx, config.KeyServerGracefulTimeout)
+	if err != nil {
+		return 0, err
+	}
 	if seconds <= 0 {
 		seconds = defaultGracefulTimeout
 	}
-	return time.Duration(seconds) * time.Second
+	return time.Duration(seconds) * time.Second, nil
 }
 
 func applyDatabaseConfig(ctx context.Context) error {
@@ -113,23 +149,26 @@ func applyDatabaseConfig(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	read := &configReader{ctx: ctx}
+	node := gdb.ConfigNode{
+		Type:     read.string(config.KeyDatabaseDefaultType),
+		Host:     read.string(config.KeyDatabaseDefaultHost),
+		Port:     read.string(config.KeyDatabaseDefaultPort),
+		User:     read.string(config.KeyDatabaseDefaultUser),
+		Pass:     read.string(config.KeyDatabaseDefaultPass),
+		Name:     read.string(config.KeyDatabaseDefaultName),
+		Charset:  read.string(config.KeyDatabaseDefaultCharset),
+		Protocol: "tcp",
+		Debug:    read.boolean(config.KeyDatabaseDefaultDebug),
+		Extra:    timeZoneExtra,
+	}
+	if err := read.err; err != nil {
+		return err
+	}
 	// 数据库密码无内置默认回退：缺失（config 空且无 DATABASE_DEFAULT_PASS）时 fail-fast，
 	// 不回退 "root" 等默认密码（对齐 auth.Secret() 的 fail-fast 语义，见 docs/design/deployment.md §3）。
-	pass := cfgString(ctx, "database.default.pass", "")
-	if pass == "" {
+	if node.Pass == "" {
 		return gerror.New("未配置 database.default.pass（DATABASE_DEFAULT_PASS）：数据库密码无内置默认值，必须显式注入")
-	}
-	node := gdb.ConfigNode{
-		Type:     cfgString(ctx, "database.default.type", defaultDBType),
-		Host:     cfgString(ctx, "database.default.host", defaultDBHost),
-		Port:     cfgString(ctx, "database.default.port", defaultDBPort),
-		User:     cfgString(ctx, "database.default.user", defaultDBUser),
-		Pass:     pass,
-		Name:     cfgString(ctx, "database.default.name", defaultDBName),
-		Charset:  cfgString(ctx, "database.default.charset", defaultDBCharset),
-		Protocol: "tcp",
-		Debug:    cfgBool(ctx, "database.default.debug", false),
-		Extra:    timeZoneExtra,
 	}
 	return gdb.SetConfigGroup(gdb.DefaultGroupName, gdb.ConfigGroup{node})
 }
@@ -140,7 +179,10 @@ func applyDatabaseConfig(ctx context.Context) error {
 // 配置非法或含夏令时（DST）时 fail-fast 返回错误，不静默回退：DST 时区无法用固定偏移表达，
 // 跨切换会与 Go 端 DST 感知的边界计算漂移（CLEAN-002）。
 func databaseTimeZoneExtra(ctx context.Context) (string, error) {
-	name := cfgString(ctx, "dashboard.timezone", "Asia/Shanghai")
+	name, err := config.String(ctx, config.KeyDashboardTimezone)
+	if err != nil {
+		return "", err
+	}
 	loc, err := time.LoadLocation(name)
 	if err != nil {
 		return "", gerror.Wrapf(err, "dashboard.timezone 配置非法 %q", name)
@@ -175,13 +217,18 @@ func hasDST(loc *time.Location) bool {
 	return false
 }
 
-func applyRedisConfig(ctx context.Context) {
+func applyRedisConfig(ctx context.Context) error {
+	read := &configReader{ctx: ctx}
 	cfg := &gredis.Config{
-		Address: cfgString(ctx, "redis.default.address", defaultRedisAddress),
-		Db:      cfgInt(ctx, "redis.default.db", defaultRedisDB),
-		Pass:    cfgString(ctx, "redis.default.pass", defaultRedisPass),
+		Address: read.string(config.KeyRedisDefaultAddress),
+		Db:      read.integer(config.KeyRedisDefaultDB),
+		Pass:    read.string(config.KeyRedisDefaultPass),
+	}
+	if err := read.err; err != nil {
+		return err
 	}
 	gredis.SetConfig(cfg)
+	return nil
 }
 
 // waitForDependencies retries the dependency connectivity check until it
@@ -219,38 +266,48 @@ func checkDependencies(ctx context.Context) error {
 	return nil
 }
 
-func cfgString(ctx context.Context, key, def string) string {
-	v, err := g.Cfg().GetEffective(ctx, key, def)
-	if err != nil {
-		glog.Warningf(ctx, "read config %q failed: %v", key, err)
-		return def
-	}
-	if v == nil {
-		return def
-	}
-	return v.String()
+// configReader 顺序读取一组配置项并保留首个错误。
+//
+// 用于「一次性装配一个配置节点」的场景（DB/Redis），避免为每个字段重复写
+// if err != nil；首个错误被保留后短路后续读取，最终由调用方统一返回，
+// 不会因为后续字段成功而覆盖前面的配置错误。
+type configReader struct {
+	ctx context.Context
+	err error
 }
 
-func cfgBool(ctx context.Context, key string, def bool) bool {
-	v, err := g.Cfg().GetEffective(ctx, key, def)
+// string 读取字符串配置项。
+func (r *configReader) string(key config.Key) string {
+	if r.err != nil {
+		return ""
+	}
+	value, err := config.String(r.ctx, key)
 	if err != nil {
-		glog.Warningf(ctx, "read config %q failed: %v", key, err)
-		return def
+		r.err = err
 	}
-	if v == nil {
-		return def
-	}
-	return v.Bool()
+	return value
 }
 
-func cfgInt(ctx context.Context, key string, def int) int {
-	v, err := g.Cfg().GetEffective(ctx, key, def)
+// boolean 读取布尔配置项。
+func (r *configReader) boolean(key config.Key) bool {
+	if r.err != nil {
+		return false
+	}
+	value, err := config.Bool(r.ctx, key)
 	if err != nil {
-		glog.Warningf(ctx, "read config %q failed: %v", key, err)
-		return def
+		r.err = err
 	}
-	if v == nil {
-		return def
+	return value
+}
+
+// integer 读取 int 配置项。
+func (r *configReader) integer(key config.Key) int {
+	if r.err != nil {
+		return 0
 	}
-	return v.Int()
+	value, err := config.Int(r.ctx, key)
+	if err != nil {
+		r.err = err
+	}
+	return value
 }

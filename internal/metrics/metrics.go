@@ -13,9 +13,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/glog"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 )
 
 // 结果标签取值（与 Contract 的 success/queued/gate_rejected/rate_limited/queue_full/error 枚举一致，
@@ -176,13 +178,17 @@ func init() {
 	)
 }
 
-// Enabled 读取指标开关（flash_sale.metrics.enabled，默认关闭）。
+// Enabled 读取指标开关（flash_sale.metrics.enabled / FLASH_SALE_METRICS_ENABLED，默认关闭）。
+//
+// 配置非法时返回 false 并显式记录错误（不静默）：启动期的 config.Validate 已把非法值
+// 拦成启动失败，此处只是运行期兜底，避免把指标采集故障扩散为业务请求失败。
 func Enabled(ctx context.Context) bool {
-	v, err := g.Cfg().GetEffective(ctx, "flash_sale.metrics.enabled", false)
-	if err != nil || v == nil {
+	enabled, err := config.Bool(ctx, config.KeyFlashSaleMetricsEnabled)
+	if err != nil {
+		glog.Errorf(ctx, "读取 %s 失败，按关闭处理: %v", config.KeyFlashSaleMetricsEnabled, err)
 		return false
 	}
-	return v.Bool()
+	return enabled
 }
 
 // ObserveOrder 记录一次秒杀下单请求（接口=order）。

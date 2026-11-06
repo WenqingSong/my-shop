@@ -6,7 +6,9 @@
 #
 # 拆分依据：仓库大部分测试为集成测试（启动完整 app + 真实 MySQL/Redis），仅有少数纯内存测试，
 # 且部分包同时包含纯内存与集成测试。本脚本用「整包 go test + -run 精确匹配」枚举纯内存测试：
-#   - 整包纯内存：auth / metrics / logic/health / logic/dashboard / controller/health / mq / termination / worker；
+#   - 整包纯内存：auth / config / metrics / logic/health / logic/dashboard / controller/health / mq / termination / worker；
+#     config 包（T2-01 统一配置层）用临时 YAML + 独立 gcfg 实例 + t.Setenv 验证优先级、
+#     类型解析与严格模式，不依赖任何外部服务。
 #   - 混合包纯内存：iam（用户名/密码校验）、flashsale（熔断器状态机 / 结果映射 / Kafka 消息契约）、
 #     legacymigrate（金额/状态映射 / DSN 构建拒绝）、migrations（DSN 构建 / charset）、
 #     middleware（RequestID 中间件）。
@@ -21,6 +23,7 @@ cd "${ROOT_DIR}"
 log_info "go test：整包纯内存测试（无 MySQL/Redis）..."
 go test \
   ./internal/auth/... \
+  ./internal/config/... \
   ./internal/metrics/... \
   ./internal/logic/health/... \
   ./internal/logic/dashboard/... \
