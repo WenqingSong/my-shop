@@ -82,4 +82,28 @@ for name in "${OUTBOX_RACE_TESTS[@]}"; do
   grep -qE "^--- PASS: ${name} " "${race_log}" || fail "Outbox Race 门禁未实际执行或未通过：${name}"
 done
 
-log_info "race 门禁通过（含 Outbox 并发可靠性用例 ${#OUTBOX_RACE_TESTS[@]} 项）"
+# ---------------------------------------------------------------------------
+# B3 Kafka Consumer 并发可靠性 Race 门禁
+# ---------------------------------------------------------------------------
+# 覆盖两类并发风险（同样复用上面的隔离库，测试内部自行清表，不触碰开发库）：
+#   - 同一活动×SKU 的并发消费：条件扣减 + 行锁保证不超卖；
+#   - Kafka 重复投递与 MySQL Scanner 同时接管同一 Request（B4 切换期风险）：
+#     只允许一次业务效果。用例内部用 -race 覆盖业务事务与状态迁移的共享内存访问。
+CONSUMER_RACE_TESTS=(
+  "TestConsumerRaceOversellGuard"              # 并发消费者竞争同一 SKU：成功订单数恰好等于库存
+  "TestConsumerRaceKafkaAndScannerSameRequest" # Kafka 重复投递 + Scanner 并发接管：只落一单
+)
+
+consumer_log="$(mktemp)"
+trap 'rm -f "${race_log}" "${consumer_log}"; cleanup_race_db' EXIT
+
+consumer_pattern="^($(IFS='|'; printf '%s' "${CONSUMER_RACE_TESTS[*]}"))$"
+log_info "go test -race（B3 Consumer 并发落单/超卖/双入口竞态，隔离库 ${RACE_DB_NAME}）"
+go test -race -p 1 -count=1 -v -timeout 15m -run "${consumer_pattern}" ./internal/logic/flashsale/ |
+  tee "${consumer_log}"
+
+for name in "${CONSUMER_RACE_TESTS[@]}"; do
+  grep -qE "^--- PASS: ${name} " "${consumer_log}" || fail "Consumer Race 门禁未实际执行或未通过：${name}"
+done
+
+log_info "race 门禁通过（含 Outbox 并发可靠性用例 ${#OUTBOX_RACE_TESTS[@]} 项、B3 Consumer 并发用例 ${#CONSUMER_RACE_TESTS[@]} 项）"

@@ -363,9 +363,23 @@ func (s *sFlashSale) clearBoughtMarker(ctx context.Context, activityID, skuID, u
 	}
 }
 
+// convergeRedisFailureHook 是「MySQL 终态已提交、Redis 补偿之前」注入失败的测试钩子（生产恒为 nil）。
+// 返回非 nil 表示本次补偿期间 Redis 不可用，用于验证「补偿失败可恢复」：
+// 库存由对账扫描器按权威值收敛，标记靠 TTL 自愈，且补偿本身幂等、不会重复回补。
+var convergeRedisFailureHook func(ctx context.Context, activityID, skuID int64) error
+
 // convergeStockAndMarkers 在「入队失败」或「消费终态失败」时补偿 Redis：
 // 权威值收敛 remaining（幂等 SET）+ 清除一人一单/幂等标记（幂等 DEL）。Redis 失败仅记录日志。
+//
+// 这里刻意不使用 INCR 回补：重复消费、Kafka 重投、崩溃重放都会再次进入本函数，
+// 只有「按 MySQL 权威值 SET」才能保证补偿不重不漏；失败时由对账扫描器兜底收敛。
 func (s *sFlashSale) convergeStockAndMarkers(ctx context.Context, activityID, skuID, userID int64, idempotencyKey string) {
+	if convergeRedisFailureHook != nil {
+		if err := convergeRedisFailureHook(ctx, activityID, skuID); err != nil {
+			glog.Warningf(ctx, "秒杀 Redis 补偿暂不可用(activity=%d sku=%d): %v", activityID, skuID, err)
+			return
+		}
+	}
 	s.convergeStock(ctx, activityID, skuID)
 	s.clearMarkers(ctx, activityID, skuID, userID, idempotencyKey)
 }

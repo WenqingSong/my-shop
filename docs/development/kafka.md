@@ -1,12 +1,13 @@
 # Kafka 开发说明
 
 本文面向本地开发与后续批次实现者，说明 SurgeCart 引入 Kafka 的职责边界、配置方式、
-本地 KRaft 环境、Producer/Consumer 使用方式与 B1 的功能边界。
+本地 KRaft 环境、Producer/Consumer 使用方式，以及各批次的功能边界。
 
-> **当前状态（B2.1）**：Kafka 基础设施与消息契约（B1）、Request Outbox 发布器（B2/B2.1）
-> 已完成，但**秒杀业务链路仍走 MySQL 出队表 + 后台扫描器（`dispatch_mode=db_scanner`）**：
-> Kafka 默认关闭，没有业务消费 Handler、没有消费组装配，也没有切换 dispatch_mode，
-> Outbox Publisher 同样未在生产装配。不要把本文描述的目标能力误读为已上线能力。
+> **当前状态（B3）**：Kafka 基础设施与消息契约（B1）、Request Outbox 发布器（B2/B2.1）、
+> **业务 Consumer 核心（B3，见第 9 节）** 均已完成并有测试覆盖。
+> 但**秒杀业务链路默认仍走 MySQL 出队表 + 后台扫描器（`dispatch_mode=db_scanner`）**：
+> Kafka 默认关闭，Consumer 与 Outbox Publisher 都还没有接入 `serve` 启动装配，
+> dispatch_mode 切换留给 B4。不要把本文描述的目标能力误读为已上线能力。
 
 ## 1. Kafka 在 SurgeCart 中承担什么职责
 
@@ -236,8 +237,8 @@ consumer.AllowRebalance()
 - 允许重复投递（位移提交前崩溃、rebalance 都会重投），消费逻辑必须幂等；
 - franz-go 没有 `max.poll.interval.ms` 客户端参数（心跳由后台协程维持），
   等价约束必须由消费循环保证：单批处理时间有界，处理完尽快 `AllowRebalance`；
-- 上例只演示接口用法，**不是完整的业务消费循环**：重试预算、死信写入、数据库事务与位移提交顺序
-  由 B3 设计实现。
+- 上例只演示接口用法。**完整的业务消费循环**（解析校验、重试预算、死信、数据库事务与位移提交
+  顺序、Rebalance 生命周期）见第 9 节与 `internal/logic/flashsale/kafka_consumer.go`。
 
 ### 8.3 处置语义（B1 只冻结接口）
 
@@ -307,7 +308,209 @@ consumer.AllowRebalance()
 禁止「事务外普通 SELECT 判断状态，再执行订单创建」：两次读取之间状态可能被其他
 消费者或人工修复改变，event_id 去重台账无法弥补这个竞态。
 
-## 9. 如何检查 Kafka 是否正常运行
+## 9. B3 业务 Consumer 实现
+
+> B3 只交付「业务消费核心」，**不包含服务启动装配与 dispatch_mode 切换**（B4）。
+> 因此本节的组件在当前代码里存在并有测试覆盖，但 `serve` 默认仍然只启动 MySQL Scanner。
+
+### 9.1 组件与调用链
+
+| 组件 | 位置 | 职责 |
+| --- | --- | --- |
+| `RequestedEventConsumer` | `internal/logic/flashsale/kafka_consumer.go` | 拉取、解析校验、重试/DLQ、位移提交、再平衡生命周期 |
+| `sFlashSale.ConsumeRequest` | `internal/logic/flashsale/consume.go` | 按 `request_id` 执行订单事务（Kafka 入口） |
+| `sFlashSale.ConsumeQueued` | `internal/logic/flashsale/consume.go` | 原 MySQL Scanner 入口（出队） |
+| `consumeLockedRequestInTx` | `internal/logic/flashsale/consume.go` | 两条入口共享的订单事务核心 |
+| `RebalanceConsumer` | `internal/logic/flashsale/kafka_consumer.go` | `mq.Consumer` + `AllowRebalance` 的组合约束 |
+
+调用链（顺序消费，默认 `BatchSize=1`）：
+
+```text
+Poll（BlockRebalanceOnPoll）
+  → parseRequestedEvent（JSON / schema_version / event_type / 字段 / 消息头）
+  → ConsumeRequest
+       BEGIN
+         SELECT request FOR UPDATE
+         身份比对（消息字段 vs MySQL）
+         status != queued  → duplicate（安全跳过）
+         retry_count > 预算 → dead（不再执行业务）
+         resolveSku → SAVEPOINT → 建单 → 条件扣库存 → 状态更新
+       COMMIT
+  → 终态失败 → Redis 补偿（提交后执行）
+  → Kafka Commit
+  → AllowRebalance
+```
+
+为什么 Kafka 用 `FOR UPDATE` 而不是 Scanner 的 `FOR UPDATE SKIP LOCKED`：
+Scanner 是「抢一条没人处理的行」，跳过被锁行是正确行为；Kafka 是「必须处理这一条」，
+跳过锁行等于把处理结论建立在旧快照上。等待锁之后读到的是最新已提交状态，
+并发的第二个消费者因此会看到终态并安全跳过。两条路径最终进入同一个事务核心，
+库存扣减与建单逻辑只有一份。
+
+### 9.2 消息校验与权威数据
+
+校验顺序固定为：JSON → `schema_version` → `event_type` → 必填字段/身份推导 → 消息头一致性。
+任何一项失败都是**永久错误**：进入死信、提交位移，不调用业务、不改数据库。
+永久错误的原因被细分为低基数枚举（`parse_error` / `schema_version` / `event_type` /
+`invalid_field` / `identity_mismatch` / `request_missing`），既用于指标标签，也写入死信头。
+
+`user_id` / `activity_id` / `sku_id` / `idempotency_key` / `request_hash` 只用于与 MySQL
+请求行比对；订单价格、库存、已售数量一律在事务内重新读取。身份不一致时**不改数据库**：
+消息不可信，不能据此改写权威请求行。
+
+### 9.3 事务边界
+
+订单事务只在两种情况下写业务终态：
+
+```text
+BEGIN
+  SELECT Request FOR UPDATE                          -- 行锁：并发消费者串行化
+  status != queued            → 不改任何行，返回 duplicate
+  retry_count > 3             → 不改任何行，返回 dead（等调用方先死信）
+  resolveSku 失败（业务）      → status = failed, last_error_code
+  SAVEPOINT flashsale_consume_order
+  建单 + 条件扣减 sold
+  任一失败                    → ROLLBACK TO SAVEPOINT → status = failed
+  成功                        → status = success, flash_order_id
+COMMIT
+```
+
+三个关键点：
+
+1. **保存点**：建单与扣库存必须同生共死。历史实现把「建单失败」的 error 转成状态更新后
+   继续提交同一事务，一旦扣减分支失败就会残留「有订单但没扣库存」。B3 用保存点把这对
+   写操作回滚干净，再写终态。
+2. **技术失败不写终态**：连接中断、死锁、事务提交失败、Redis 不可用都不属于业务结论。
+   业务事务整体回滚（不写 `failed`、不写 `retry_count`），重试预算由**独立短事务**推进
+   （`persistConsumeFailure`）。这样既不会把基础设施故障固化成业务失败，也不会让半成品
+   随状态更新一起提交。
+3. **重试预算与终态分离**：预算耗尽时业务事务不改行，只由调用方在死信 ACK 之后落 `dead`
+   （见 9.5 的顺序约束）。
+
+`retry_count` / `next_attempt_at` 的真实语义是「该请求已消耗的技术重试次数」与
+「下一次允许尝试的时间」，由 Scanner 与 Kafka Consumer 共同使用；`publish_attempts` /
+`next_publish_at` 属于 Outbox 发布重试，与消费无关，B3 **不复用**。因此本批次不需要新增
+migration。
+
+### 9.4 Offset 提交语义
+
+严格顺序：**MySQL COMMIT 先于 Kafka Offset COMMIT**。
+
+```text
+Poll → 业务事务 → MySQL COMMIT → Kafka Commit → AllowRebalance
+```
+
+批次内顺序处理，成功一条进入待提交集合；一旦某条消息需要「停止本轮」（技术错误未收敛、
+死信未 ACK、无法持久化重试预算、位移提交失败），立即停止本批：
+
+- 只提交**该消息之前**已确认的消息（同分区只提交最大 offset+1）；
+- 绝不提交失败消息及其后同分区消息的位移；
+- 位移提交失败时不吞错误：`Run` 返回错误并停止拉取，未提交的消息在重启后重投。
+
+故障窗口与预期结果：
+
+| 故障场景 | 实现行为 | 结果 |
+| --- | --- | --- |
+| MySQL 事务失败 | 不提交位移 | 消息重投，请求仍 queued，可重试 |
+| MySQL COMMIT 成功、Offset 提交失败 | `Run` 报错退出，位移未推进 | 消息重投 → 请求已 success → duplicate → ACK，不重复落单 |
+| 消费过程中进程崩溃 | 未提交位移 | 重启后重投，状态闸门保证只落一单 |
+| 相同消息重复投递 | 行锁 + status 闸门 | duplicate，安全 ACK |
+| 请求已终态 | status 闸门 | duplicate，安全 ACK |
+
+### 9.5 Retry、退避与 DLQ
+
+错误分类：
+
+| 类别 | 例子 | 处置 |
+| --- | --- | --- |
+| 永久错误 | 非法 JSON、未知版本/类型、字段非法、身份不一致、请求不存在 | 死信 + 提交位移 |
+| 业务失败 | 库存不足、时间窗结束、已购、幂等冲突 | 写 `failed` + 提交位移 |
+| 技术错误 | MySQL 短暂不可用、死锁、提交失败、Redis 不可用 | 持久化重试预算 → 退避重试；预算耗尽 → 死信 + `dead` |
+
+技术错误的重试预算持久化在 `retry_count` 上，预算是 3 次：
+
+- Kafka 路径退避：1s → 2s → 4s（封顶 5s），累计不超过 7s，远低于 30s 会话超时，
+  因此不会长时间阻塞分区再平衡；
+- Scanner 路径保持原有 5s → 10s → 20s（封顶 60s）；
+- 每次失败都写 `retry_count+1` 与 `next_attempt_at`，进程重启后继续累加，不会归零；
+- 本地还保留一份 `MaxDeliveryAttempts`（默认 4）兜底：连重试次数都写不进去时
+  （典型是 MySQL 不可用），只做有界本地退避后停止，**绝不因为本地计数达到阈值就丢弃消息**，
+  位移保持未提交，由重启后的重投继续尝试。
+
+预算耗尽后的顺序不可交换：
+
+```text
+1. 发布原始消息到 DLQ（同步等待 Broker ACK）
+2. MySQL: status = dead（条件更新 WHERE status=queued）
+3. Redis 补偿（convergeStockAndMarkers）
+4. Kafka Commit 原始位移
+```
+
+- DLQ 未 ACK → 不提交位移，消息会重投；
+- DLQ 已 ACK 但 `dead` 写入失败 → 不提交位移，消息重投（死信可能重复，允许），
+  原始业务请求不会丢。
+
+死信消息头（低基数诊断信息，Value 原样搬运以便重放）：
+`dlq_reason`、`dlq_error`、`dlq_source_topic`、`dlq_source_partition`、
+`dlq_source_offset`、`dlq_retry_count`；Key 仍为 `<activity_id>:<sku_id>`。
+
+### 9.6 Redis 一致性
+
+Kafka 消费不新建第二套 Redis 库存体系，完全复用既有机制：
+
+- 终态失败（`failed`/`dead`）在 MySQL 提交后调用 `convergeStockAndMarkers`：
+  `remaining` 用**权威值 SET**（`total_stock - sold - inflight_queued`）、
+  一人一单/幂等标记用幂等 `DEL` 清除；
+- 不使用 `INCR` 回补：重复消费、Kafka 重投、崩溃重放都会再次进入补偿，只有按权威值
+  `SET` 才能保证「不重不漏」；
+- 补偿失败只记录日志，不阻塞消费（MySQL 终态已经正确）：库存由对账扫描器
+  （`ReconcileCache`）按权威值收敛，标记由 TTL 自愈；
+- 已 success 的请求再次投递时走 duplicate 分支，**不执行任何 Redis 副作用**。
+
+### 9.7 Rebalance 与位移安全
+
+- B1 客户端固定 `BlockRebalanceOnPoll`：Poll 返回批次后到 `AllowRebalance` 之前，
+  分区不会被再平衡抢走；
+- 消费循环用 `defer c.client.AllowRebalance()` 包住「处理 + 提交」，
+  **包括错误路径与 context 取消**，避免组内永久阻塞；
+- `Run` 在 `Poll` 返回空批次时也调用一次 `AllowRebalance`（不同驱动实现的批次计数不同，
+  统一释放更安全）；
+- 首版顺序消费、默认单条批量：把阻塞窗口压到「单条消息处理时间」，
+  并保证同分区位移连续提交；
+- 无界并发消费被明确禁止：并发会打破位移连续性，且无法保证失败消息之后的位移不提交。
+
+### 9.8 指标
+
+`internal/metrics` 新增（全部为进程内观测，非业务事实，标签均为固定枚举）：
+
+| 指标 | 说明 |
+| --- | --- |
+| `flashsale_consumer_records_total` | 消费消息总数（含重复投递） |
+| `flashsale_consumer_processed_total{result}` | 处置结果（success/failed/dead/duplicate/invalid/error） |
+| `flashsale_consumer_retries_total` | 已持久化重试预算的技术失败次数 |
+| `flashsale_consumer_dlq_total{reason}` | 死信投递成功数（按原因） |
+| `flashsale_consumer_commit_failures_total` | 位移提交失败次数 |
+| `flashsale_consumer_processing_seconds{result}` | 单条消息处理耗时 |
+
+业务侧仍复用既有的 `flashsale_requests_total{interface="consume", result=...}` 与耗时直方图。
+不包含 `request_id` / `user_id` / `activity_id` 等高基数标签。
+
+**Consumer Lag 未实现**：当前只依赖 `franz-go/pkg/kgo`（v1.18.1），
+Lag 需要消费组元数据 API（`kadm`），为避免在 B3 引入新依赖并伪造数据，本批次不提供
+Lag 指标，列为后续监控集成事项（可用 `kafka-consumer-groups.sh --describe` 人工核查）。
+
+### 9.9 已知限制
+
+- **技术错误无法 seek 重试**：B1 客户端没有暴露 `SeekPartitions`，同一进程内无法把位移
+  拨回失败消息。当前策略是「持久化预算 + 停止消费循环」，由上层（B4）决定重启节奏；
+  重启后从已提交位移重投，不会丢消息，但会带来额外的组再平衡开销。
+- **默认单条批量**：牺牲吞吐换位移连续性，B4 需要基于真实压测决定是否提高批量。
+- **单 SKU 单分区**：分区键 `<activity_id>:<sku_id>` 决定热点 SKU 的消费并行度上限为 1，
+  这是 B2.1 已接受的架构取舍。
+- **无 Lag / 无消费堆积告警**：见 9.8。
+- **未装配**：`serve` 不启动本 Consumer，`dispatch_mode` 仍为 `db_scanner`（B4）。
+
+## 10. 如何检查 Kafka 是否正常运行
 
 ```bash
 # 1) 容器健康（healthy 才代表 Broker API 可用）
@@ -341,7 +544,7 @@ docker exec my-shop-kafka /opt/kafka/bin/kafka-consumer-groups.sh \
 docker compose --profile kafka logs -f kafka
 ```
 
-## 10. 单节点开发环境与生产环境的区别
+## 11. 单节点开发环境与生产环境的区别
 
 | 维度 | 本地开发（本项目 Compose） | 生产建议 |
 | --- | --- | --- |
@@ -356,7 +559,7 @@ docker compose --profile kafka logs -f kafka
 本地 KRaft 单节点只用于开发联调，**不得据此声明生产级 Broker 故障容忍能力**。
 生产集群的部署、监控、容量评估不在 B1 范围，也未在本仓库完成。
 
-## 11. 已实现 / 未实现的功能边界（B2.1）
+## 12. 已实现 / 未实现的功能边界（B3）
 
 已实现：
 
@@ -366,21 +569,25 @@ docker compose --profile kafka logs -f kafka
 - B2：Request Outbox Publisher（短事务领取 + `FOR UPDATE SKIP LOCKED`、租约与 claim token、
   多实例并发发布、失败指数退避、逐条 ACK 后标记、人工修复重发、Prometheus 指标）；
 - B2.1：event_id / 业务幂等语义冻结、Outbox Topic 显式路由、Message Key 策略冻结、
-  Outbox 并发 Race 测试进入 CI 门禁。
+  Outbox 并发 Race 测试进入 CI 门禁；
+- B3：Kafka 业务 Consumer 核心（`RequestedEventConsumer`）、与 Scanner 共享的订单事务核心、
+  消息校验与身份比对、MySQL 先于 Offset 的提交顺序、持久化重试预算 + 退避 + 死信、
+  Redis 补偿复用、Rebalance 生命周期、Consumer 指标；真实 MySQL/Kafka 集成测试与
+  Consumer 并发 Race 门禁。
 
 未实现（后续批次）：
 
-- 业务消费 Handler、消费组装配、重试/死信处置、数据库事务与位移提交顺序（B3）；
-- `dispatch_mode=kafka` 切换与旧 Scanner 退役协调（B4）；
+- `serve` 启动装配（Producer / Outbox Publisher / Consumer 的创建与优雅关闭）、
+  `dispatch_mode=kafka` 切换与旧 Scanner 退役协调（B4）；
 - F-03（批次超时导致重复放大）与 F-04（发布标记锁等待突破租约）的修复，
   必须在 B4 完整启用 Kafka 链路前处理；
-- 分区暂停/恢复、rebalance 时在途事务处理、数据库不可用时消费策略；
-- Kafka 业务指标、Consumer Lag 告警、生产集群部署与容量验证。
+- Consumer Lag 指标与消费堆积告警（需要消费组元数据 API，见 9.8）；
+- 分区暂停/恢复、消费端 seek 重试、生产集群部署与容量验证。
 
-**B2.1 没有完成秒杀 Kafka 化**：Kafka 默认关闭，业务链路仍然走 `db_scanner`，
-Outbox Publisher 未在生产装配，也没有业务消费。
+**B3 仍未完成秒杀 Kafka 化**：Kafka 默认关闭，业务链路仍然走 `db_scanner`，
+Consumer 与 Outbox Publisher 都未在生产装配。
 
-## 12. franz-go 版本与选型说明
+## 13. franz-go 版本与选型说明
 
 采用 `github.com/twmb/franz-go v1.18.1`（`pkg/kgo`），理由：
 

@@ -19,7 +19,8 @@ import (
 )
 
 // 结果标签取值（与 Contract 的 success/queued/gate_rejected/rate_limited/queue_full/error 枚举一致，
-// consume 链路扩展 failed/dead 表示业务失败终态与死信）。
+// consume 链路扩展 failed/dead 表示业务失败终态与死信，B3 再扩展 duplicate/invalid 表示重复投递
+// 与不可处理消息）。所有标签都是固定枚举，禁止把 request_id/user_id 等高基数值放进标签。
 const (
 	ResultQueued       = "queued"        // 下单接口：受理入队成功
 	ResultSuccess      = "success"       // 消费链路：落单成功
@@ -28,7 +29,20 @@ const (
 	ResultQueueFull    = "queue_full"    // 下单接口：排队满拒绝 12010
 	ResultFailed       = "failed"        // 消费链路：业务失败终态
 	ResultDead         = "dead"          // 消费链路：技术失败重试超限（死信）
+	ResultDuplicate    = "duplicate"     // 消费链路：请求已终态，重复投递被安全跳过
+	ResultInvalid      = "invalid"       // 消费链路：消息不可处理（永久错误，进入死信）
 	ResultError        = "error"         // 技术错误（503/500/参数错误）
+)
+
+// Kafka Consumer 死信原因标签取值（低基数：只区分失败类别，不含任何业务 id）。
+const (
+	ConsumerDLQParse          = "parse_error"       // 消息体不是合法 JSON
+	ConsumerDLQSchemaVersion  = "schema_version"    // 不支持的 schema_version
+	ConsumerDLQEventType      = "event_type"        // 不支持的 event_type
+	ConsumerDLQInvalidField   = "invalid_field"     // 必填字段非法（含 event_id 与 request_id 不一致）
+	ConsumerDLQIdentity       = "identity_mismatch" // 消息身份字段与 MySQL 请求行不一致
+	ConsumerDLQRequestMissing = "request_missing"   // 消息指向的请求在 MySQL 中不存在
+	ConsumerDLQRetryExhausted = "retry_exhausted"   // 技术失败重试预算耗尽
 )
 
 // 接口标签取值。
@@ -107,6 +121,42 @@ var (
 		Help:      "Outbox 单轮领取+发布+标记耗时。",
 		Buckets:   histogramBuckets,
 	})
+
+	// B3 Kafka 业务 Consumer 指标：只做进程内观测计数，不是业务事实。
+	// 全部标签都是固定枚举（result / reason），不含 request_id/user_id/activity_id 等高基数值。
+	// Consumer Lag 需要查询消费组元数据，现有 franz-go 客户端（v1.18.1 仅 kgo）不提供安全 API，
+	// 本批次不伪造该指标，作为后续监控集成事项（见 docs/development/kafka.md）。
+	consumerRecords = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "flashsale",
+		Name:      "consumer_records_total",
+		Help:      "Kafka 业务 Consumer 拉取到的消息总数（含重复投递）。",
+	})
+	consumerProcessed = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "flashsale",
+		Name:      "consumer_processed_total",
+		Help:      "Kafka 业务 Consumer 的消息处置结果总数（success/failed/dead/duplicate/invalid/error）。",
+	}, []string{"result"})
+	consumerRetries = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "flashsale",
+		Name:      "consumer_retries_total",
+		Help:      "Kafka 业务 Consumer 已持久化重试预算的技术失败次数。",
+	})
+	consumerDLQ = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "flashsale",
+		Name:      "consumer_dlq_total",
+		Help:      "Kafka 业务 Consumer 投递到死信主题并获得 Broker 确认的消息数（按原因）。",
+	}, []string{"reason"})
+	consumerCommitFailures = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "flashsale",
+		Name:      "consumer_commit_failures_total",
+		Help:      "Kafka 业务 Consumer 位移提交失败次数（失败即不推进，消息会被重投）。",
+	})
+	consumerProcessingDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: "flashsale",
+		Name:      "consumer_processing_seconds",
+		Help:      "Kafka 业务 Consumer 单条消息处理耗时（按处置结果）。",
+		Buckets:   histogramBuckets,
+	}, []string{"result"})
 )
 
 func init() {
@@ -114,6 +164,8 @@ func init() {
 		requestsTotal, requestDuration,
 		outboxClaimed, outboxLeaseReclaimed, outboxPublished, outboxPublishFailed,
 		outboxRetried, outboxMarkSkipped, outboxPublishDuration,
+		consumerRecords, consumerProcessed, consumerRetries, consumerDLQ,
+		consumerCommitFailures, consumerProcessingDuration,
 	)
 }
 
@@ -193,6 +245,49 @@ func ObserveOutboxPublishDuration(ctx context.Context, d time.Duration) {
 		return
 	}
 	outboxPublishDuration.Observe(d.Seconds())
+}
+
+// ObserveConsumerRecord 记录 Consumer 拉取到的一条消息（不论最终处置结果）。
+func ObserveConsumerRecord(ctx context.Context) {
+	if !Enabled(ctx) {
+		return
+	}
+	consumerRecords.Inc()
+}
+
+// ObserveConsumerResult 记录一条消息的处置结果与处理耗时；result 必须是固定枚举。
+func ObserveConsumerResult(ctx context.Context, result string, d time.Duration) {
+	if !Enabled(ctx) {
+		return
+	}
+	consumerProcessed.WithLabelValues(result).Inc()
+	if d > 0 {
+		consumerProcessingDuration.WithLabelValues(result).Observe(d.Seconds())
+	}
+}
+
+// ObserveConsumerRetry 记录一次「技术失败并已持久化重试预算」。
+func ObserveConsumerRetry(ctx context.Context) {
+	if !Enabled(ctx) {
+		return
+	}
+	consumerRetries.Inc()
+}
+
+// ObserveConsumerDLQ 记录一条成功获得 Broker 确认的死信消息；reason 为低基数类别。
+func ObserveConsumerDLQ(ctx context.Context, reason string) {
+	if !Enabled(ctx) {
+		return
+	}
+	consumerDLQ.WithLabelValues(reason).Inc()
+}
+
+// ObserveConsumerCommitFailure 记录一次位移提交失败（消息会因未提交而被重投）。
+func ObserveConsumerCommitFailure(ctx context.Context) {
+	if !Enabled(ctx) {
+		return
+	}
+	consumerCommitFailures.Inc()
 }
 
 // Handler 返回 Prometheus 指标采集 handler（默认 registry 的文本格式）。
