@@ -54,5 +54,8 @@ USER 10001:10001
 
 EXPOSE 8000
 
-# entrypoint：migrate up（幂等 + GET_LOCK 串行）→ exec serve（复用 serve 自身 fail-fast）。
-ENTRYPOINT ["/app/docker-entrypoint.sh"]
+# 生产镜像默认只启动服务。Kubernetes 中 migration 由单独的发布步骤执行，
+# 避免每个副本启动时都执行 DDL；serve 会只读校验 schema 版本并 fail-fast。
+# 使用 exec 形式让应用作为 PID 1 直接接收 SIGTERM。
+ENTRYPOINT ["/app/my-shop"]
+CMD ["serve"]

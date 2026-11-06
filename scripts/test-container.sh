@@ -80,7 +80,10 @@ grep -q 'COPY --from=builder /out/my-shop /app/my-shop' "${DOCKERFILE}" || fail 
 # ---------------------------------------------------------------------------
 [[ -f "${ENTRYPOINT}" ]] || fail "缺少 ${ENTRYPOINT}"
 grep -q 'migrate up' "${ENTRYPOINT}" || fail "entrypoint 未执行 migrate up"
-grep -q 'exec /app/my-shop serve' "${ENTRYPOINT}" || fail "entrypoint 未以 exec serve 启动服务"
+grep -q 'exec /app/my-shop serve' "${ENTRYPOINT}" || fail "Compose entrypoint 未以 exec serve 启动服务"
+grep -qF 'ENTRYPOINT ["/app/my-shop"]' "${DOCKERFILE}" || fail "生产镜像必须以二进制作为 PID 1 接收信号"
+grep -qF 'CMD ["serve"]' "${DOCKERFILE}" || fail "生产镜像默认必须直接启动 serve"
+grep -qF 'entrypoint: ["/app/docker-entrypoint.sh"]' "${COMPOSE_CFG}" || fail "Compose 必须显式保留本地迁移入口"
 migrate_line="$(grep -n 'migrate up' "${ENTRYPOINT}" | head -n 1 | cut -d: -f1)"
 serve_line="$(grep -n 'exec /app/my-shop serve' "${ENTRYPOINT}" | head -n 1 | cut -d: -f1)"
 if [[ -z "${migrate_line}" || -z "${serve_line}" || "${migrate_line}" -ge "${serve_line}" ]]; then

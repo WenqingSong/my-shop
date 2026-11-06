@@ -40,15 +40,15 @@ Compose 服务（`docker-compose.yml`）：
 
 ## 4. 启动生命周期
 
-容器 entrypoint（镜像内 shell 脚本，不改 Go 代码）：
+生产镜像默认直接以 `my-shop serve` 作为 PID 1；发布前须独立完成 `my-shop migrate up`。本地 Compose 显式覆盖为镜像内 shell 脚本，保留原有自动迁移流程：
 
 1. `my-shop migrate up`（幂等：已全部应用则成功返回；golang-migrate MySQL driver `GET_LOCK` 串行化并发迁移）。
-2. `exec my-shop serve`：`boot.Bootstrap`（依赖连通重试 → schema 就绪只读校验 → 超管/权限 seed）→ 七牛 `ValidateConfig` → 后台扫描器 → 轮播图占位图 seed → 路由 → `s.Run()`。
+2. `exec my-shop serve`：`boot.Bootstrap`（依赖连通重试 → schema 就绪只读校验 → 超管/权限 seed）→ 七牛 `ValidateConfig` → 按 `flash_sale.dispatch_mode` 启动 DB Scanner 或 Kafka Runtime → 轮播图占位图 seed → 路由 → `s.Run()`。
 
 - 依赖未就绪：Compose `depends_on: condition: service_healthy` 先行等待，app 内 `waitForDependencies`（`STARTUP_DEPENDENCY_TIMEOUT`，默认 30s）再重试兜底。
 - 启动幂等不并发：重复 `up`、容器重启、并发启动，migration 不重复、超管/权限不重复（`schema_migrations` 追踪 + `GET_LOCK` + 唯一约束 1062 兜底）。
 
-停止生命周期（优雅关闭）：`serve` 以 `signal.NotifyContext(SIGINT, SIGTERM)` 为根 ctx 驱动三个后台扫描器（订单超时取消、秒杀对账、秒杀消费）。停机时序：SIGTERM/SIGINT → 取消根 ctx → 扫描器停止领取新任务、在途单事务回滚或完成 → HTTP 停收新连接并 drain 在途请求（`server.graceful_timeout`，默认 10s）→ `sync.WaitGroup` 收尾后进程退出。消费事务被打断时整体回滚、请求保持 `queued`，重启后由重试/对账恢复，不产生半成品或重复下单。
+停止生命周期（优雅关闭）：SIGTERM/SIGINT 后 GoFrame HTTP Server 先停收并 drain 在途请求（`server.graceful_timeout`，默认 10s），`s.Run()` 返回后 `FlashSaleRuntime.Shutdown` 按 Publisher → Consumer → Producer → Scanner 顺序关闭（默认统一预算 30s）。后台组件使用不继承信号取消的运行期 Context，避免信号到达时同时中断在途发布。B4.1 的真实进程测试已验证该顺序；Kubernetes Pod 滚动更新时序仍待验证。
 
 ## 5. 持久化
 
