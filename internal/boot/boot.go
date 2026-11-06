@@ -85,11 +85,17 @@ func dependencyTimeout(ctx context.Context) time.Duration {
 }
 
 func applyServerConfig(ctx context.Context) {
-	g.Server().SetAddr(cfgString(ctx, "server.address", defaultServerAddress))
+	g.Server().SetAddr(ServerAddress(ctx))
 	// 优雅关闭 HTTP drain 超时（秒）：SIGINT/SIGTERM 后停收新连接、等待在途请求完成的最长时间。
 	// 对应环境变量 SERVER_GRACEFUL_TIMEOUT；默认 10s。
 	// 该值同时是 T2-03 终止预算的 http_drain_timeout 段（见 ServerGracefulTimeout）。
 	g.Server().SetGracefulTimeout(int(ServerGracefulTimeout(ctx) / time.Second))
+}
+
+// ServerAddress 返回 HTTP 监听地址（server.address，环境变量 SERVER_ADDRESS）。
+// serve 需要先自行监听（受控 listener）再交给 GoFrame，因此与 applyServerConfig 共用同一来源。
+func ServerAddress(ctx context.Context) string {
+	return cfgString(ctx, "server.address", defaultServerAddress)
 }
 
 // ServerGracefulTimeout 返回 HTTP drain 预算，供 serve 的终止流程与终止预算计算共用同一配置来源

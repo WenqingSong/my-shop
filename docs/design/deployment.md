@@ -48,11 +48,16 @@ Compose 服务（`docker-compose.yml`）：
 - 依赖未就绪：Compose `depends_on: condition: service_healthy` 先行等待，app 内 `waitForDependencies`（`STARTUP_DEPENDENCY_TIMEOUT`，默认 30s）再重试兜底。
 - 启动幂等不并发：重复 `up`、容器重启、并发启动，migration 不重复、超管/权限不重复（`schema_migrations` 追踪 + `GET_LOCK` + 唯一约束 1062 兜底）。
 
-停止生命周期（优雅关闭，T2-03 冻结契约）：`serve` 自行接管 `SIGINT/SIGTERM/SIGQUIT`，停机时序为：
+停止生命周期（优雅关闭，T2-03 / T2-03.1 冻结契约）：`serve` 自行接管 `SIGINT/SIGTERM/SIGQUIT`，停机时序为：
 
-1. 收到信号后先停收新连接（`net/http` Shutdown 立即关闭 listener），在 `server.graceful_timeout`（默认 10s）内等待在途请求完成；超时记录 `http_server_stopped` 的 `timed_out=true` 后继续，**不无限等待**；
-2. 输出 `http_server_stopped` 之后才调用 `FlashSaleRuntime.Shutdown`，按 Publisher → Consumer → Producer → Scanner 顺序停止，整体受 `flash_sale.shutdown_timeout`（默认 30s）约束；
-3. 关闭流程结束、`serve` 返回，进程以退出码 0 结束。
+1. 收到信号后先停收新连接（`net/http` Shutdown 立即关闭 listener），在 `server.graceful_timeout`（默认 10s，划分见 §4.1）内等待在途请求完成；
+2. 若优雅 drain 未完成：输出 `http_server_drain_timeout` → 强制关闭 listener 与全部连接（等价 `http.Server.Close`，`http_server_force_closed`）→ 确认 Shutdown 返回且连接清零后输出 `http_server_stopped`（`timed_out=true`）。**总耗时不超过 10s，不会因为等待 Shutdown 而突破预算**；
+3. 输出 `http_server_stopped` 之后才调用 `FlashSaleRuntime.Shutdown`，按 Publisher → Consumer → Producer → Scanner 顺序停止，整体受 `flash_sale.shutdown_timeout`（默认 30s）约束；
+4. 关闭流程结束、`serve` 返回，进程以退出码 0 结束。
+
+正常路径事件为 `http_server_drain_begin → http_server_stopped → flashsale_runtime_shutdown_begin`；超时路径为
+`http_server_drain_begin → http_server_drain_timeout → http_server_force_closed → http_server_stopped → flashsale_runtime_shutdown_begin`。
+强制关闭只保证 listener 与连接关闭、Server 停止；Go 无法终止忽略取消的 handler goroutine，这类 goroutine 随进程退出终止（不会阻塞关闭预算）。
 
 后台组件不继承信号 ctx（B4.1：`context.WithoutCancel`），SIGTERM 不会绕过上述顺序并发取消 Publisher/Consumer/Scanner。消费事务被打断时整体回滚、请求保持 `queued`，重启后由重试/对账恢复，不产生半成品或重复下单。
 
@@ -67,6 +72,8 @@ Compose 服务（`docker-compose.yml`）：
 | terminationGracePeriodSeconds / Compose `stop_grace_period` | 60s | `lifecycle.termination_grace_period` / `docker-compose.yml` 的 app 服务 |
 
 预算关系：`60s >= 5s + 10s + 30s + 15s`。**preStop 的耗时计入 60s 宽限期，不是额外的 5 秒。**
+
+HTTP drain 的 10s 划分：前 9s 用于优雅 drain（同时作为 GoFrame 内部 graceful 关闭超时，保证 `Shutdown` 调用一定在预算内返回），最后 1s 用于强制关闭 listener/连接并确认真实停止。预算不足 2s 时按一半划分。
 
 - 应用启动时校验该关系（不足即 fail-fast）并输出 `termination_budget` 结构化日志，字段为 `pre_stop_delay` / `http_drain_timeout` / `runtime_shutdown_timeout` / `required_termination_budget` / `termination_grace_period` / `safety_margin`。
 - `docker compose stop/down` 使用 `stop_grace_period: 60s`，避免 Compose 默认 10s 提前 SIGKILL；其他容器不声明该字段。
@@ -122,7 +129,7 @@ Nginx 是面向外部的唯一 HTTP 入口，职责为纯反向代理（无 Lua/
 - **七牛凭据缺失 / 首次建号缺 `ADMIN_SUPER_PASSWORD`**：`serve` fail-fast 非零退出，日志指认字段名、不泄漏凭据值。
 - 部分完成：migration dirty 需人工 `force` 恢复。
 - **运行时依赖失效**：DB/Redis 不可达时 `/ready` 返回 503（fail-closed，不泄漏敏感信息），结果缓存 TTL 内不重复打库/打缓存，恢复后下一 TTL 窗口返回 200；`/health` 仍 200（liveness 不依赖依赖）。
-- **优雅停机**：SIGTERM/SIGINT 触发后 HTTP 停收新连接并在 `server.graceful_timeout`（默认 10s）内 drain 在途请求；drain 结束（或超时）后才按 Publisher → Consumer → Producer → Scanner 顺序关闭后台组件（`flash_sale.shutdown_timeout`，默认 30s），扫描器停止领取新任务、在途单事务回滚或完成；预算不足时 serve 启动 fail-fast，实际终止宽限期与预算见 §4.1。消费被打断 → 事务回滚 + 请求保持 `queued`，重启后重试/对账恢复，不产生半成品或重复下单。事实来源不变：MySQL 为业务权威、Redis 为派生缓存，无 MQ。
+- **优雅停机**：SIGTERM/SIGINT 触发后 HTTP 停收新连接并在 `server.graceful_timeout`（默认 10s）内 drain 在途请求；超时则在预算内强制关闭 listener 与全部连接，确认 `http_server_stopped` 后才按 Publisher → Consumer → Producer → Scanner 顺序关闭后台组件（`flash_sale.shutdown_timeout`，默认 30s），扫描器停止领取新任务、在途单事务回滚或完成；预算不足时 serve 启动 fail-fast，实际终止宽限期与预算见 §4.1。消费被打断 → 事务回滚 + 请求保持 `queued`，重启后重试/对账恢复，不产生半成品或重复下单。事实来源不变：MySQL 为业务权威、Redis 为派生缓存，无 MQ。
 
 ## 10. 安全与凭据边界
 

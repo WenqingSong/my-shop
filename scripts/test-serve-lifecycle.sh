@@ -6,7 +6,9 @@
 #   - 七牛启动校验：把 SDK 的 UC endpoint 指向本地 Mock（真实签名/请求/解析代码不变，
 #     生产二进制不含该能力，也没有任何 skip 校验开关）；
 #   - 在途秒杀流量下向应用 PID 发送 SIGTERM，验证关闭顺序、退出码与关闭预算；
-#   - 同配置重启后请求收敛，MySQL 订单/库存/请求状态与 Kafka 消息一致性核对。
+#   - 同配置重启后请求收敛，MySQL 订单/库存/请求状态与 Kafka 消息一致性核对；
+#   - T2-03.1：阻塞 handler 超过 HTTP drain 预算，验证 10s 预算内的强制关闭、
+#     事件顺序（drain_timeout → force_closed → stopped）与进程退出。
 #
 # 隔离保证：
 #   - 专用 MySQL 库（默认 my_shop_serve_lifecycle）与专用 Redis DB（默认 7），测试前重建、测试后删除；
@@ -141,20 +143,24 @@ export FLASH_SALE_KAFKA_TEST_TOPIC="${TOPIC}"
 export FLASH_SALE_KAFKA_TEST_GROUP="${GROUP}"
 export SERVE_LIFECYCLE_BIN="${SERVE_BIN}"
 
-log_info "go test -tags serve_lifecycle（真实进程/HTTP/Kafka/SIGTERM）..."
+log_info "go test -tags serve_lifecycle（真实进程/HTTP/Kafka/SIGTERM + HTTP drain 超时强制关闭）..."
+LIFECYCLE_TESTS='^(TestServeProcessLifecycle|TestServeHTTPDrainTimeoutForceClose)$'
 set +e
-go test -tags serve_lifecycle -p 1 -count=1 -v -timeout 20m \
-  -run '^TestServeProcessLifecycle$' ./test/e2e/ 2>&1 | tee "${TEST_LOG}"
+go test -tags serve_lifecycle -p 1 -count=1 -v -timeout 25m \
+  -run "${LIFECYCLE_TESTS}" ./test/e2e/ 2>&1 | tee "${TEST_LOG}"
 go_test_code=${PIPESTATUS[0]}
 set -e
 if [[ ${go_test_code} -ne 0 ]]; then
   log_error "go test 退出码 ${go_test_code}；日志见 ${ARTIFACT_DIR}"
   exit ${go_test_code}
 fi
-if ! grep -qE '^--- PASS: TestServeProcessLifecycle ' "${TEST_LOG}"; then
-  log_error "进程级用例未实际执行或未通过（可能存在 t.Skip / 用例改名）"
-  exit 1
-fi
+# 两个用例都必须实际执行并通过（不接受 t.Skip / 改名静默匹配）。
+for test_name in TestServeProcessLifecycle TestServeHTTPDrainTimeoutForceClose; do
+  if ! grep -qE "^--- PASS: ${test_name} " "${TEST_LOG}"; then
+    log_error "进程级用例 ${test_name} 未实际执行或未通过（可能存在 t.Skip / 用例改名）"
+    exit 1
+  fi
+done
 
 # 5) 子进程必须真正退出：残留进程视为失败（不允许依赖 kill -9 收尾）。
 if pgrep -f "${SERVE_BIN} serve" >/dev/null 2>&1; then

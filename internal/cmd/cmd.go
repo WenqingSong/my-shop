@@ -3,11 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/signal"
 	"strconv"
-	"syscall"
-	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -178,9 +174,12 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 		RegisterFrontendRoutes(root)
 		RegisterAdminRoutes(root)
 	})
-	// serveHTTP 返回后（HTTP 已完成有界 drain 或 drain 超时），
+	// 测试构建可注入额外路由（生产构建为空实现，不包含任何测试入口）。
+	applyServeLifecycleHook(s)
+
+	// serveHTTP 返回后（HTTP 已完成有界 drain、或在预算内强制关闭并确认停止），
 	// 由 defer 中的 runtime.Shutdown 停止后台组件并收尾。
-	return serveHTTP(ctx, s, budget.HTTPDrainTimeout)
+	return serveHTTP(ctx, s, boot.ServerAddress(ctx), budget.HTTPDrainTimeout)
 }
 
 // runtimeContext 返回脱离信号取消的后台运行期 ctx（B4.1 语义）。
@@ -194,74 +193,6 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 // 运行期统一由 HTTP drain 结束后调用的 runtime.Shutdown 控制关闭顺序。
 func runtimeContext(ctx context.Context) context.Context {
 	return context.WithoutCancel(ctx)
-}
-
-// serveHTTP 启动 HTTP 服务并在预算内完成摘流与 drain。
-//
-// 时序：SIGTERM/SIGINT/SIGQUIT → 停止接收新连接（net/http Shutdown 立即关闭 listener）
-// → 等待在途请求完成，最多 drainTimeout → 返回。返回后由 serve 的 defer 按
-// Publisher → Consumer → Producer → Scanner 顺序关闭后台组件。
-//
-// 为什么不用 s.Run()：GoFrame v2.10.3 的信号处理调用 http.Server.Shutdown(context.TODO())，
-// 没有 deadline，server.graceful_timeout 不参与该路径。若在途请求不结束，进程会无限等待，
-// 最终在 Kubernetes terminationGracePeriodSeconds 到期时被 SIGKILL，关闭顺序完全失效。
-func serveHTTP(ctx context.Context, s *ghttp.Server, drainTimeout time.Duration) error {
-	// 先注册信号再启动监听，缩小「已监听但信号无人处理」的窗口。
-	// 与 GoFrame 一致覆盖 SIGINT/SIGQUIT/SIGTERM（SIGKILL 不可捕获）。
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGTERM)
-	defer signal.Stop(sigCh)
-
-	if err := s.Start(); err != nil {
-		return err
-	}
-	logx.Info(ctx, "http_server_started", "HTTP Server 已启动，等待终止信号", logx.Fields{
-		"address":       s.GetListenedAddress(),
-		"drain_timeout": drainTimeout.String(),
-	})
-
-	sig := <-sigCh
-	logx.Info(ctx, "http_server_drain_begin", "收到终止信号，停止接收新连接并开始 drain 在途请求", logx.Fields{
-		"signal":        sig.String(),
-		"drain_timeout": drainTimeout.String(),
-	})
-
-	elapsed, timedOut, shutdownErr := drainHTTP(s.Shutdown, drainTimeout)
-	if shutdownErr != nil {
-		// 关闭错误不改变退出语义：后台组件仍需按顺序关闭。
-		logx.Warning(ctx, "http_server_shutdown_failed", "HTTP Server 关闭返回错误（继续关闭秒杀后台组件）", logx.Fields{
-			"error": shutdownErr.Error(),
-		})
-	}
-	// 该日志是进程级关闭时序的显式证据：它必须早于 runtime 的关闭步骤日志。
-	logx.Info(ctx, "http_server_stopped", "HTTP Server 已退出（优雅 drain 结束），开始关闭秒杀后台组件", logx.Fields{
-		"signal":       sig.String(),
-		"elapsed_ms":   elapsed.Milliseconds(),
-		"timed_out":    timedOut,
-		"drain_budget": drainTimeout.String(),
-	})
-	return nil
-}
-
-// drainHTTP 在预算内等待 HTTP Server 完成优雅 drain，
-// 返回 (耗时, 是否超时, 关闭错误)。
-//
-// 超时后调用方必须继续执行后续关闭步骤：进程最终会退出，不能无限阻塞在 drain 上。
-func drainHTTP(shutdown func() error, timeout time.Duration) (time.Duration, bool, error) {
-	started := time.Now()
-	done := make(chan error, 1)
-	go func() {
-		done <- shutdown()
-	}()
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-
-	select {
-	case err := <-done:
-		return time.Since(started), false, err
-	case <-timer.C:
-		return time.Since(started), true, nil
-	}
 }
 
 // configureBannerStorage 初始化轮播图图片的本地存储：seed 3 张占位图，并将 banner 目录

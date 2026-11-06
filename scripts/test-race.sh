@@ -29,6 +29,13 @@ log_info "go test -race（F-03 逐条结果快照 + B4 秒杀装配/生命周期
 go test -race -count=1 -run 'TestProducerPublishResults' ./internal/mq/kafka/...
 go test -race -count=1 -run 'TestResolveFlashSaleRuntimeConfig|TestFlashSaleRuntime|TestScannersStopOnContextCancel' ./internal/worker/...
 
+# T2-03.1：HTTP drain 预算、强制关闭连接跟踪与关闭控制器（纯内存，不连接 DB/Redis）。
+# 覆盖 trackedListener 的 Accept/ForceClose 并发路径：强制关闭后不得再放行新连接。
+log_info "go test -race（HTTP drain 预算与强制关闭路径）"
+go test -race -count=1 \
+  -run 'TestRuntimeContextDetachesSignalCancellation|TestForceCloseWindow|TestTrackedListener|TestStopHTTPServer' \
+  ./internal/cmd/...
+
 # ---------------------------------------------------------------------------
 # Outbox 并发可靠性 Race 门禁（F-14）
 # ---------------------------------------------------------------------------
