@@ -42,8 +42,10 @@ type requestAuditRow struct {
 // B2 适配：同一次条件更新内同步重置发布状态（published_at / claim token / 租约 / next_publish_at /
 // 发布尝试次数），使修复后的请求立即重新符合 Outbox 的领取条件（status=queued、未发布、无租约、无退避）。
 // 重置 token 是关键：旧 Publisher 若持有修复前的租约，其迟到标记会因 token 不匹配而落空，
-// 不会污染修复后这一代租约；旧消息与修复后重新发布的新消息可能同时存在，
-// 消费方必须按 event_id（由 request_id 稳定推导）做业务幂等，而不是假设同一 request_id 只出现一次。
+// 不会污染修复后这一代租约。但旧消息与修复后重新发布的新消息可能同时存在，且 event_id
+// 完全相同（由 request_id 稳定推导，B2.1 不引入 repair_generation）。
+// 因此消费方不得用永久 event_id 去重台账充当业务幂等闸门，必须以 MySQL 请求行状态为准：
+// 在订单事务内锁行读取 status，仅 queued 才执行业务，终态一律跳过（详见 message.go）。
 func (s *sFlashSale) RepairRequest(ctx context.Context, adminID int64, req *v1.RepairRequestReq) (*v1.RepairRequestRes, error) {
 	if req.Id <= 0 {
 		return nil, codes.New(codes.CodeInvalidArgument)

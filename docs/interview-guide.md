@@ -120,7 +120,7 @@ CNB 流水线（`.cnb.yml`）分两条：
 2. **单元测试**（`test-unit`）：纯内存、无 MySQL/Redis，覆盖 auth/metrics/health/dashboard 及部分混合包中可抽离的纯函数逻辑。
 3. **集成测试**（`test-integration`）：依赖真实 MySQL/Redis，`go test -p 1 ./...` 串行执行（各包共享同一批表，避免跨包并行数据竞争）。
 4. **静态断言**：Registry 一致性校验（migration version / 错误码域）、容器化配置（凭据分离/构建上下文）、Nginx 反向代理配置、Prometheus 抓取配置。
-5. **竞态检测**：`test-race`（`go test -race`，进程内共享内存并发逻辑）。
+5. **竞态检测**：`test-race` 分两段——进程内共享内存并发逻辑（熔断器状态机），以及 Outbox 并发领取 / 多 Worker 发布 / 租约恢复 / 旧 Token 失效 / 人工修复竞态（`go test -race -p 1`，跑在一次性隔离库 `my_shop_outbox_race` 上，结束后删除）。
 6. **独立 E2E**：`test-storage` 需要真实七牛凭据，签发→直传→校验→删除。
 
 ## 面试阅读路径

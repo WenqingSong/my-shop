@@ -51,7 +51,7 @@ test-unit: ## 仅运行不依赖 MySQL/Redis 的纯内存单元测试
 test-integration: ## 仅运行依赖 MySQL/Redis 的真实集成测试（需先 make deps-start 或 make init/up）
 	@bash $(SCRIPTS)/test-integration.sh
 
-test-race: ## 执行 go test -race（进程内共享内存并发逻辑，与 DB 集成测试隔离）
+test-race: ## 执行 go test -race（熔断器状态机 + Outbox 并发/租约/修复竞态；后者需 MySQL/Redis）
 	@bash $(SCRIPTS)/test-race.sh
 
 test-prometheus: ## 校验 Prometheus 抓取配置与 compose 服务定义

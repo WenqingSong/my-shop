@@ -11,9 +11,27 @@
 //   - Redis remaining。
 // 这些值在消息投递期间可能已经变化，只能由消费者从 MySQL 重新读取。
 //
-// 事件标识的稳定性：event_id 由 request_id 确定性推导（flashsale.requested:<request_id>），
-// 因此同一请求无论重发多少次、由哪条 Outbox 记录发布，event_id 都保持不变，
-// 消费方可据此做幂等去重，而不会因为重发产生「新事件」。
+// event_id 的职责（B2.1 冻结，不得扩展为业务完成凭证）：
+//   - 标识逻辑事件，让日志、追踪、对账能把同一请求的多次投递关联起来；
+//   - 识别 Kafka 重复投递（at-least-once、Outbox 重发、租约过期回收都会重投）；
+//   - 不作为「该请求已经处理完成」的永久凭证，也不作为消费去重台账的主键。
+//
+// event_id 由 request_id 确定性推导（flashsale.requested:<request_id>），
+// 因此同一请求无论重发多少次、由哪条 Outbox 记录发布，event_id 都保持不变。
+// 这同时意味着：人工修复（dead→queued）后合法重新发布的事件，与修复前那条
+// 旧事件拥有完全相同的 event_id。若消费方建立永久性的 event_id 消费台账，
+// 修复后的合法请求会被当作重复消息直接丢弃。
+//
+// 真正的业务幂等边界是 MySQL 的 flash_sale_order_requests 行（B3 消费方实现）：
+//  1. 在开启订单事务之后重新读取请求记录；
+//  2. 对该行加锁（SELECT ... FOR UPDATE，或出队场景的 FOR UPDATE SKIP LOCKED）；
+//  3. 检查当前 status；
+//  4. 只有 queued 的请求才执行订单业务；
+//  5. 已处于 success、failed、dead 等终态的请求不得重复执行业务副作用；
+//  6. 订单唯一约束与库存条件更新继续作为数据库层面的最后保护。
+//
+// 绝不允许「事务外普通 SELECT 判断状态，再执行订单创建」：两次读取之间状态可能
+// 被其他消费者或人工修复改变，event_id 去重台账无法弥补这个竞态。
 
 package flashsale
 
@@ -50,6 +68,7 @@ const (
 // JSON 键名是跨服务契约的一部分，重命名等同于破坏性变更。
 type RequestedEvent struct {
 	// EventID 是稳定事件标识：flashsale.requested:<request_id>，重发不变。
+	// 它只用于关联日志与识别重复投递，不得当作业务幂等闸门或永久去重台账的键。
 	EventID string `json:"event_id"`
 	// EventType 固定为 flashsale.order.requested。
 	EventType string `json:"event_type"`
@@ -84,7 +103,9 @@ type RequestedEventInput struct {
 }
 
 // RequestedEventID 返回 request_id 对应的稳定事件标识。
-// 使用确定性推导而非随机 UUID，保证「同一请求重新发布 event_id 不变」。
+// 使用确定性推导而非随机 UUID，保证「同一请求重新发布 event_id 不变」——
+// 这既让 Kafka 重复投递可被识别，也让人工修复后的重新发布复用同一 event_id。
+// 因此调用方不得把 event_id 当作业务终态凭证：业务幂等必须回到 MySQL 请求行状态。
 func RequestedEventID(requestID int64) string {
 	return fmt.Sprintf("%s%d", requestedEventIDPrefix, requestID)
 }

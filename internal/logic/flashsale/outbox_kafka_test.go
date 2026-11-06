@@ -97,6 +97,110 @@ func kafkaFetchUntil(t *testing.T, broker, topic string, want int) []*kgo.Record
 	return out
 }
 
+// kafkaFetchNone 断言在给定窗口内从 Topic 起始位置读不到任何消息。
+// 用于「显式 Topic 路由」：若消息被投递到 Producer 默认主题，这里会读到记录并失败。
+func kafkaFetchNone(t *testing.T, broker, topic string, wait time.Duration) {
+	t.Helper()
+	client, err := kgo.NewClient(
+		kgo.SeedBrokers(broker),
+		kgo.ConsumeTopics(topic),
+		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
+		kgo.ClientID("outbox-test-consumer-none"),
+	)
+	if err != nil {
+		t.Fatalf("create consumer: %v", err)
+	}
+	defer client.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), wait)
+	defer cancel()
+	for ctx.Err() == nil {
+		fetches := client.PollFetches(ctx)
+		for _, fe := range fetches.Errors() {
+			// 上下文到期是预期的「没有消息」结束条件，其余错误如实报出。
+			if ctx.Err() == nil && !errors.Is(fe.Err, context.DeadlineExceeded) {
+				t.Fatalf("poll %s: %v", topic, fe.Err)
+			}
+		}
+		var got int
+		fetches.EachRecord(func(r *kgo.Record) {
+			got++
+			t.Errorf("unexpected record on topic %s (key=%q offset=%d)", topic, r.Key, r.Offset)
+		})
+		if got > 0 {
+			t.FailNow()
+		}
+	}
+}
+
+// TestOutboxRealKafkaExplicitTopicRouting 覆盖 F-02 的真实路由：
+// Producer 默认 Topic 与 OutboxPublisher 构造 Topic 不同，消息必须只出现在后者。
+func TestOutboxRealKafkaExplicitTopicRouting(t *testing.T) {
+	broker := kafkaTestBroker(t)
+	setupOutboxTest(t)
+	ctx := context.Background()
+
+	suffix := time.Now().UnixNano()
+	outboxTopic := fmt.Sprintf("surgecart.test.flashsale.explicit.v1.%d", suffix)
+	producerDefault := fmt.Sprintf("surgecart.test.flashsale.default.v1.%d", suffix)
+	kafkaCreateTopic(t, broker, outboxTopic, 2)
+	kafkaCreateTopic(t, broker, producerDefault, 2)
+
+	// 关键点：Producer 的默认 Topic 故意配成另一个主题。
+	producer, err := kafkamq.NewProducer(kafkamq.Config{
+		Enabled:       true,
+		Brokers:       []string{broker},
+		Topic:         producerDefault,
+		DLQTopic:      producerDefault + ".dlq",
+		ConsumerGroup: "surgecart-test-topic-routing",
+	})
+	if err != nil {
+		t.Fatalf("new producer: %v", err)
+	}
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := producer.Close(closeCtx); err != nil {
+			t.Logf("close producer: %v", err)
+		}
+	}()
+
+	pub, err := NewOutboxPublisher(producer, outboxTopic, outboxTestOptions())
+	if err != nil {
+		t.Fatalf("new outbox publisher: %v", err)
+	}
+	id := outboxInsertRequest(t, "real-kafka-topic", g.Map{
+		"user_id": 814001, "activity_id": 824001, "sku_id": 834001,
+	})
+
+	stats, err := pub.PublishBatch(ctx, 10)
+	if err != nil {
+		t.Fatalf("publish batch: %v", err)
+	}
+	if stats.Published != 1 {
+		t.Fatalf("stats=%+v want 1 published", stats)
+	}
+
+	records := kafkaFetchUntil(t, broker, outboxTopic, 1)
+	rec := records[0]
+	if got, want := string(rec.Key), requestedMessageKey(824001, 834001); got != want {
+		t.Fatalf("kafka key=%q want %q", got, want)
+	}
+	event, err := DecodeRequestedEvent(rec.Value)
+	if err != nil {
+		t.Fatalf("decode kafka value: %v", err)
+	}
+	if event.EventID != RequestedEventID(id) {
+		t.Fatalf("event_id=%q want %q", event.EventID, RequestedEventID(id))
+	}
+	if row := outboxLoad(t, id); row.PublishedPartition != nil && int(*row.PublishedPartition) != int(rec.Partition) {
+		t.Fatalf("recorded partition=%d want %d", *row.PublishedPartition, rec.Partition)
+	}
+
+	// 默认主题必须保持为空：Topic 参数一旦失效，消息会落在这里。
+	kafkaFetchNone(t, broker, producerDefault, 3*time.Second)
+}
+
 // TestOutboxRealKafkaPublishAndRecovery 覆盖 B2-4 的真实 Broker 链路：
 // 发布 → Broker 确认 → 标记 published_at → 消费侧校验 Key/Header/Value/Partition；
 // 再模拟「结果未知/标记丢失」后重投，验证 event_id 稳定（at-least-once 允许重复）。
@@ -127,7 +231,9 @@ func TestOutboxRealKafkaPublishAndRecovery(t *testing.T) {
 	}()
 
 	opts := outboxTestOptions()
-	pub := newTestOutboxPublisher(t, producer, opts)
+	// 必须把 Publisher 的 Topic 配成刚创建的唯一主题：F-02 之后 Message.Topic 由 Publisher
+	// 显式决定，不再回退到 Producer 的默认 Topic（旧写法会因固定 Topic 不存在而失败）。
+	pub := newTestOutboxPublisherWithTopic(t, producer, topic, opts)
 	id := outboxInsertRequest(t, "real-kafka-1", g.Map{"user_id": 812001, "activity_id": 820001, "sku_id": 830001})
 
 	stats, err := pub.PublishBatch(ctx, 10)

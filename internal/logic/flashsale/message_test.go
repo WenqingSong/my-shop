@@ -2,6 +2,9 @@ package flashsale
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -92,9 +95,11 @@ func TestRequestedEventJSONFieldsAreFrozen(t *testing.T) {
 			t.Fatalf("缺少契约字段 %q: %s", key, data)
 		}
 	}
-	for _, forbidden := range []string{"flash_price", "total_stock", "remaining", "sold"} {
+	// repair_generation 是 B2.1 明确拒绝的字段：event_id 不区分「修复代次」，
+	// 用 generations 规避人工修复后的重复 event_id 会破坏 v1 契约与既有消费方。
+	for _, forbidden := range []string{"flash_price", "total_stock", "remaining", "sold", "repair_generation"} {
 		if _, ok := raw[forbidden]; ok {
-			t.Fatalf("消息中不得出现权威数据字段 %q: %s", forbidden, data)
+			t.Fatalf("消息中不得出现禁止字段 %q: %s", forbidden, data)
 		}
 	}
 }
@@ -187,6 +192,48 @@ func TestRequestedEventValidateRejects(t *testing.T) {
 				t.Fatal("非法事件不应被 Encode 输出")
 			}
 		})
+	}
+}
+
+// TestKafkaDocFreezesIdempotencyAndPartitionContract 是文档契约断言（F-01 / F-08）：
+// docs/development/kafka.md 必须明确「event_id 不是业务幂等闸门」「业务幂等以 MySQL
+// 请求行状态为准（事务内锁读）」，并且不得再建议按 request_id 做幂等闸门或把
+// request_id 当作 Kafka 分区键。文档漂移会直接让后续 B3 消费实现走错方向。
+func TestKafkaDocFreezesIdempotencyAndPartitionContract(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("无法定位当前测试文件路径")
+	}
+	docPath := filepath.Join(filepath.Dir(file), "..", "..", "..", "docs", "development", "kafka.md")
+	data, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatalf("读取 Kafka 开发文档 %s: %v", docPath, err)
+	}
+	text := string(data)
+
+	required := []string{
+		"event_id 只标识逻辑事件",
+		"不能作为永久去重台账",
+		"真正的业务幂等边界是 MySQL 请求行状态",
+		"SELECT ... FOR UPDATE",
+		"<activity_id>:<sku_id>",
+		"热门 SKU",
+	}
+	for _, phrase := range required {
+		if !strings.Contains(text, phrase) {
+			t.Fatalf("kafka.md 缺少必需的契约表述 %q", phrase)
+		}
+	}
+
+	forbidden := []string{
+		"消费方以 `request_id` 做幂等闸门即可收敛重复投递",
+		"消费方必须按 event_id",
+		"strconv.FormatInt(event.RequestID, 10)",
+	}
+	for _, phrase := range forbidden {
+		if strings.Contains(text, phrase) {
+			t.Fatalf("kafka.md 不得再出现旧表述 %q", phrase)
+		}
 	}
 }
 

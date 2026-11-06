@@ -9,6 +9,7 @@
 //     任何「先标记后发布」的写法都会在 Broker 故障时永久丢事件。
 //   - INV-3：发布失败、进程崩溃、租约过期都不会让请求永久丢失——租约到期后重新可领取。
 //   - INV-4：event_id 由 request_id 稳定推导，重发不变（见 message.go）。
+//     它只标识逻辑事件，不是业务完成凭证：人工修复（dead→queued）后会再次发布同一 event_id。
 //   - INV-5：多实例互斥依赖数据库行锁 + 租约，而不是进程内 mutex；
 //     租约过期后的重复发布属于允许的 at-least-once 语义。
 //   - INV-6：Publisher 只读写发布相关列，不改 status/retry_count/flash_order_id，
@@ -20,8 +21,16 @@
 //  3. 标记：逐条以 request_id + claim token 为条件更新（逐条结果，绝不整批成功化）；
 //  4. 失败退避：写 next_publish_at 并释放租约，下一轮再试。
 //
-// 特别注意：同一 SKU 固定分区只保证「同 key 消息在分区内有序」，
-// 多 Publisher 并发下 Kafka 中的消息顺序不等价于 MySQL id 顺序。业务正确性不得依赖该顺序。
+// 消息路由与分区键（B2.1 冻结）：
+//   - 主题由 OutboxPublisher 构造参数显式写入 Message.Topic，不依赖 Producer 默认值；
+//   - Kafka Key 固定为 <activity_id>:<sku_id>，同一活动 SKU 的消息进入同一分区，
+//     以保持该 SKU 的分区内处理顺序，并避免多个 Consumer 争抢同一 SKU 的库存行。
+//     代价是热点 SKU 只能利用单个分区：即使 Topic 有 12 个分区，单 SKU 的消费
+//     并行度仍然是 1。这是当前接受的架构取舍，后续以真实压测评估，不在 B2.1 修改。
+//
+// 特别注意：同一 SKU 固定分区只保证「同 key 消息在分区内追加有序」，
+// 多 Publisher 并发下 Kafka 中的消息顺序不等价于 MySQL id/request_id 顺序，
+// 也不能把分区顺序当作数据库事务正确性的保证。业务正确性不得依赖该顺序。
 package flashsale
 
 import (
@@ -247,7 +256,7 @@ func (p *OutboxPublisher) PublishBatch(ctx context.Context, limit int) (stats Ou
 		roundError error
 	)
 	for _, c := range claims {
-		msg, buildErr := buildRequestedMessage(c)
+		msg, buildErr := buildRequestedMessage(p.topic, c)
 		if buildErr != nil {
 			errs = append(errs, buildErr)
 			stats.Failed++
@@ -281,7 +290,8 @@ func (p *OutboxPublisher) PublishBatch(ctx context.Context, limit int) (stats Ou
 
 		if publishErr != nil && results == nil {
 			// 整批结果未知（context 到期/取消、客户端已关闭）：按「可能已发送」处理，
-			// 不写 published_at，只安排退避重发。消费者按 event_id 去重承担最终业务幂等。
+			// 不写 published_at，只安排退避重发。业务幂等由消费方以 MySQL 请求行状态保证
+			// （事务内锁行读取 status）；event_id 只用于识别这次重复投递。
 			errs = append(errs, fmt.Errorf("秒杀 Outbox 发布 %d 条消息结果未知: %w", len(pendings), publishErr))
 			for _, item := range pendings {
 				stats.Failed++
@@ -564,9 +574,21 @@ func pickPublishResult(results []mq.PublishResult, i int) (mq.PublishResult, boo
 //
 // 字段全部来自 MySQL 权威行：occurred_at 使用请求实际创建时间（重发不变），
 // 不掺入价格/库存/sold，也不在每次重发时生成新时间。
-// Kafka Key 固定为 <activity_id>:<sku_id>，使同一 SKU 的消息进入同一分区；
-// 但这只保证分区内有序，不保证与会话/MySQL id 的全局顺序一致。
-func buildRequestedMessage(c *outboxClaim) (mq.Message, error) {
+//
+// topic 是 OutboxPublisher 构造时指定的目标主题，必须显式写入 Message.Topic。
+// 若留空，实际主题会退化为底层 Producer 的默认 Topic：一旦装配期两者不一致，
+// 消息可能被投递到错误主题，而 MySQL 仍按「Broker 已确认」写入 published_at，
+// 形成「标记成功但事件在错误主题」的静默错投。
+//
+// Kafka Key 固定为 <activity_id>:<sku_id>（B2.1 冻结）：同一活动 SKU 的消息进入
+// 同一分区，保持该 SKU 的分区内处理顺序；代价是热点 SKU 只能利用单个分区的消费并行度。
+// 该 Key 不是 request_id：Kafka 只保证分区内追加有序，不保证多 Publisher 下的消息
+// 顺序与 MySQL request_id 顺序一致，也不能把分区顺序当作事务正确性的保证。
+func buildRequestedMessage(topic string, c *outboxClaim) (mq.Message, error) {
+	if topic == "" {
+		// 构造期已拒绝空 Topic；此处防御任何绕过构造函数的调用路径，避免静默回退到默认主题。
+		return mq.Message{}, fmt.Errorf("秒杀请求 %d 缺少目标 Topic，无法构造事件", c.Id)
+	}
 	if c.CreatedAt == nil {
 		return mq.Message{}, fmt.Errorf("秒杀请求 %d 缺少 created_at，无法构造事件", c.Id)
 	}
@@ -584,7 +606,8 @@ func buildRequestedMessage(c *outboxClaim) (mq.Message, error) {
 		return mq.Message{}, fmt.Errorf("构造秒杀请求 %d 的事件消息: %w", c.Id, err)
 	}
 	return mq.Message{
-		Topic: "",
+		// 显式指定目标主题：这是 Topic 参数唯一真正生效的位置。
+		Topic: topic,
 		Key:   []byte(requestedMessageKey(c.ActivityId, c.SkuId)),
 		Value: value,
 		Headers: []mq.Header{
@@ -599,8 +622,15 @@ func buildRequestedMessage(c *outboxClaim) (mq.Message, error) {
 	}, nil
 }
 
-// requestedMessageKey 返回 Kafka 分区键 <activity_id>:<sku_id>。
-// 同 SKU 固定分区只用于聚合与顺序性便利，业务正确性不依赖跨请求顺序。
+// requestedMessageKey 返回 Kafka 分区键 <activity_id>:<sku_id>（B2.1 架构决策，不再改回 request_id）。
+//
+// 选择该 Key 的理由：
+//   - 同一活动 SKU 的消息进入同一分区，保持该 SKU 的分区内处理顺序；
+//   - 避免多个 Consumer 同时争抢同一个 SKU 的库存记录。
+//
+// 必须承认的代价：若活动只有一个热门 SKU，该 SKU 的消息会集中到单个分区，
+// 即使 Topic 配置 12 个分区也无法自动获得 12 路消费并行度。
+// 同 key 固定分区只提供聚合与顺序性便利，业务正确性不依赖跨请求顺序。
 func requestedMessageKey(activityID, skuID int64) string {
 	return strconv.FormatInt(activityID, 10) + ":" + strconv.FormatInt(skuID, 10)
 }

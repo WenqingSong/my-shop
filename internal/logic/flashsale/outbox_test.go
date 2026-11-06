@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -114,6 +115,40 @@ func fakeSuccessResults(msgs []mq.Message, partition int32, offsetBase int64) []
 	return results
 }
 
+// defaultTopicPublisher 模拟「底层 Producer 自带默认 Topic」的发布器：
+// Message.Topic 为空时回退到 defaultTopic，与 internal/mq/kafka.Producer 的行为一致。
+// 用于验证 OutboxPublisher 构造参数与底层默认主题不一致时，实际路由仍由 Outbox 决定。
+type defaultTopicPublisher struct {
+	mu           sync.Mutex
+	defaultTopic string
+	effective    []string
+}
+
+func (d *defaultTopicPublisher) Publish(_ context.Context, msgs ...mq.Message) ([]mq.PublishResult, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for i := range msgs {
+		topic := msgs[i].Topic
+		if topic == "" {
+			topic = d.defaultTopic
+		}
+		msgs[i].Topic = topic
+		d.effective = append(d.effective, topic)
+	}
+	return fakeSuccessResults(msgs, 1, 1), nil
+}
+
+func (d *defaultTopicPublisher) Close(context.Context) error { return nil }
+
+// effectiveTopics 返回每次实际投递使用的主题（已按默认值回落后的结果）。
+func (d *defaultTopicPublisher) effectiveTopics() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make([]string, len(d.effective))
+	copy(out, d.effective)
+	return out
+}
+
 // fakeFailureResults 构造逐条失败（或指定下标失败）的发布结果。
 func fakeFailureResults(msgs []mq.Message, failIdx map[int]bool, err error) []mq.PublishResult {
 	results := make([]mq.PublishResult, len(msgs))
@@ -130,6 +165,10 @@ func fakeFailureResults(msgs []mq.Message, failIdx map[int]bool, err error) []mq
 // ---------------------------------------------------------------------------
 // 测试辅助
 // ---------------------------------------------------------------------------
+
+// outboxTestTopic 是测试中构造 OutboxPublisher 时显式指定的目标主题。
+// 断言消息 Topic 时必须引用它，而不是底层 Publisher 的默认主题。
+const outboxTestTopic = "surgecart.test.flashsale.requested.v1"
 
 // outboxTestOptions 返回测试用发布参数：批量小、租约短（但仍满足安全余量），便于构造过期场景。
 func outboxTestOptions() OutboxOptions {
@@ -241,10 +280,18 @@ func outboxDBNow(t *testing.T) time.Time {
 	return parsed.Time
 }
 
-// newTestOutboxPublisher 构造被测 Publisher。
+// newTestOutboxPublisher 构造被测 Publisher（Topic 固定为 outboxTestTopic）。
 func newTestOutboxPublisher(t *testing.T, pub mq.Publisher, opts OutboxOptions) *OutboxPublisher {
 	t.Helper()
-	p, err := NewOutboxPublisher(pub, "surgecart.test.flashsale.requested.v1", opts)
+	return newTestOutboxPublisherWithTopic(t, pub, outboxTestTopic, opts)
+}
+
+// newTestOutboxPublisherWithTopic 构造指定 Topic 的被测 Publisher。
+// 真实 Kafka 用例必须显式传入唯一主题：Topic 参数已生效（F-02），
+// 不能再依赖 Producer 的默认 Topic 兜底。
+func newTestOutboxPublisherWithTopic(t *testing.T, pub mq.Publisher, topic string, opts OutboxOptions) *OutboxPublisher {
+	t.Helper()
+	p, err := NewOutboxPublisher(pub, topic, opts)
 	if err != nil {
 		t.Fatalf("new outbox publisher: %v", err)
 	}
@@ -339,7 +386,7 @@ func TestOutboxOptionsValidation(t *testing.T) {
 	}
 }
 
-// TestOutboxMessageContract 校验消息字段全部来自持久化事实，且 key/header 稳定。
+// TestOutboxMessageContract 校验消息字段全部来自持久化事实，且 topic/key/header 稳定。
 func TestOutboxMessageContract(t *testing.T) {
 	created := time.Date(2026, 11, 6, 10, 0, 0, 0, time.Local)
 	claim := &outboxClaim{
@@ -348,12 +395,20 @@ func TestOutboxMessageContract(t *testing.T) {
 		RequestHash:    requestHash(9, 11),
 		CreatedAt:      gtime.NewFromTime(created),
 	}
-	msg, err := buildRequestedMessage(claim)
+	msg, err := buildRequestedMessage(outboxTestTopic, claim)
 	if err != nil {
 		t.Fatalf("build message: %v", err)
 	}
+	// F-02：目标主题必须由 Outbox 构造参数显式写入，不能留空交给 Producer 默认值。
+	if msg.Topic != outboxTestTopic {
+		t.Fatalf("message topic=%q want %q", msg.Topic, outboxTestTopic)
+	}
 	if got, want := string(msg.Key), "9:11"; got != want {
 		t.Fatalf("key=%q want %q", got, want)
+	}
+	// F-08：分区键是 <activity_id>:<sku_id>，绝不是 request_id。
+	if string(msg.Key) == strconv.FormatInt(claim.Id, 10) {
+		t.Fatalf("message key must be <activity_id>:<sku_id>, not request_id: %q", msg.Key)
 	}
 	// 传输层时间戳必须留空（由驱动填充发送时间），事件时间只在消息体内表达。
 	if !msg.Timestamp.IsZero() {
@@ -387,8 +442,63 @@ func TestOutboxMessageContract(t *testing.T) {
 
 	// 缺少 created_at 时必须失败，而不是编造时间。
 	claim.CreatedAt = nil
-	if _, err := buildRequestedMessage(claim); err == nil {
+	if _, err := buildRequestedMessage(outboxTestTopic, claim); err == nil {
 		t.Fatalf("missing created_at should fail")
+	}
+	// 缺少目标 Topic 时必须失败：绝不能静默回退到底层 Producer 的默认主题。
+	claim.CreatedAt = gtime.NewFromTime(created)
+	if _, err := buildRequestedMessage("", claim); err == nil {
+		t.Fatalf("empty topic should fail")
+	}
+}
+
+// TestOutboxMessageKeyStrategy 冻结 Kafka 分区键策略（F-08）：
+// 同一 activity+sku 的请求共享同一 Key，不同 SKU 不共享；Key 与 request_id 无关。
+// 这保证同一活动 SKU 的消息进入同一分区（分区内有序、不争抢同一 SKU 库存行），
+// 同时明确 Key 不是 request_id，不能据此推断 MySQL id 顺序。
+func TestOutboxMessageKeyStrategy(t *testing.T) {
+	created := gtime.NewFromTime(time.Date(2026, 11, 6, 10, 0, 0, 0, time.Local))
+	newClaim := func(id, activityID, skuID int64) *outboxClaim {
+		return &outboxClaim{
+			Id: id, UserId: 1, ActivityId: activityID, SkuId: skuID,
+			IdempotencyKey: fmt.Sprintf("idem-%d", id),
+			RequestHash:    requestHash(activityID, skuID),
+			CreatedAt:      created,
+		}
+	}
+
+	first, err := buildRequestedMessage(outboxTestTopic, newClaim(101, 9, 11))
+	if err != nil {
+		t.Fatalf("build first message: %v", err)
+	}
+	second, err := buildRequestedMessage(outboxTestTopic, newClaim(102, 9, 11))
+	if err != nil {
+		t.Fatalf("build second message: %v", err)
+	}
+	otherSku, err := buildRequestedMessage(outboxTestTopic, newClaim(103, 9, 12))
+	if err != nil {
+		t.Fatalf("build other-sku message: %v", err)
+	}
+
+	if got, want := string(first.Key), "9:11"; got != want {
+		t.Fatalf("key=%q want %q", got, want)
+	}
+	if string(second.Key) != string(first.Key) {
+		t.Fatalf("same activity/sku must share partition key: %q vs %q", first.Key, second.Key)
+	}
+	if string(otherSku.Key) == string(first.Key) {
+		t.Fatalf("different sku must not share partition key: %q", otherSku.Key)
+	}
+	if string(first.Key) == strconv.FormatInt(101, 10) || string(second.Key) == strconv.FormatInt(102, 10) {
+		t.Fatalf("partition key must not be request_id: %q / %q", first.Key, second.Key)
+	}
+	// Key 与 event_id 属于不同维度：前者聚合活动 SKU，后者标识单条逻辑事件。
+	event, err := DecodeRequestedEvent(first.Value)
+	if err != nil {
+		t.Fatalf("decode event: %v", err)
+	}
+	if string(first.Key) == event.EventID {
+		t.Fatalf("partition key must not reuse event_id: %q", first.Key)
 	}
 }
 
@@ -432,8 +542,48 @@ func TestOutboxPublishSuccess(t *testing.T) {
 	if row.Status != requestStatusQueued || row.RetryCount != 0 {
 		t.Fatalf("publisher must not touch business status: status=%d retry=%d", row.Status, row.RetryCount)
 	}
-	if len(fake.lastBatch()) != 1 {
-		t.Fatalf("expected exactly one published message, got %d", len(fake.lastBatch()))
+	batch := fake.lastBatch()
+	if len(batch) != 1 {
+		t.Fatalf("expected exactly one published message, got %d", len(batch))
+	}
+	// F-02：Fake Publisher 捕获到的消息必须携带 Outbox 构造时指定的 Topic。
+	if batch[0].Topic != outboxTestTopic {
+		t.Fatalf("captured message topic=%q want %q", batch[0].Topic, outboxTestTopic)
+	}
+}
+
+// TestOutboxExplicitTopicOverridesProducerDefault 覆盖 F-02 的核心场景：
+// Outbox 构造参数与底层 Producer 默认 Topic 不一致时，消息仍必须投递到 Outbox 指定的 Topic。
+// 若构造参数失效，Message.Topic 会留空并回退到 Producer 默认值——本用例会直接失败。
+func TestOutboxExplicitTopicOverridesProducerDefault(t *testing.T) {
+	setupOutboxTest(t)
+	ctx := context.Background()
+
+	const producerDefaultTopic = "surgecart.test.flashsale.producer-default.v1"
+	routing := &defaultTopicPublisher{defaultTopic: producerDefaultTopic}
+	pub, err := NewOutboxPublisher(routing, outboxTestTopic, outboxTestOptions())
+	if err != nil {
+		t.Fatalf("new outbox publisher: %v", err)
+	}
+	id := outboxInsertRequest(t, "explicit-topic", g.Map{"user_id": 811002})
+
+	stats, err := pub.PublishBatch(ctx, 10)
+	if err != nil {
+		t.Fatalf("publish batch: %v", err)
+	}
+	if stats.Published != 1 {
+		t.Fatalf("expected one published message, got %+v", stats)
+	}
+	topics := routing.effectiveTopics()
+	if len(topics) != 1 {
+		t.Fatalf("expected one effective topic, got %v", topics)
+	}
+	if topics[0] != outboxTestTopic {
+		t.Fatalf("effective topic=%q want outbox topic %q (producer default %q must not win)",
+			topics[0], outboxTestTopic, producerDefaultTopic)
+	}
+	if outboxLoad(t, id).PublishedAt == nil {
+		t.Fatalf("record should be marked published after broker ack")
 	}
 }
 
@@ -1079,5 +1229,29 @@ func TestOutboxRepairDeadToQueuedRepublishes(t *testing.T) {
 	}
 	if row.Status != requestStatusQueued {
 		t.Fatalf("late mark must not change status: %d", row.Status)
+	}
+
+	// F-01 契约证据：修复前（旧租约）与修复后（新租约）两代消息的 event_id 完全相同，
+	// 因为 event_id 只由 request_id 推导，B2.1 不引入 repair_generation。
+	// 因此消费者若以永久 event_id 台账去重，修复后的合法请求会被直接丢弃；
+	// 唯一正确的幂等边界是 MySQL 请求行状态（事务内锁读，见 message.go）。
+	staleBatch, freshBatch := stale.lastBatch(), fresh.lastBatch()
+	if len(staleBatch) != 1 || len(freshBatch) != 1 {
+		t.Fatalf("expected one message per generation, got %d and %d", len(staleBatch), len(freshBatch))
+	}
+	staleEvent, err := DecodeRequestedEvent(staleBatch[0].Value)
+	if err != nil {
+		t.Fatalf("decode stale event: %v", err)
+	}
+	freshEvent, err := DecodeRequestedEvent(freshBatch[0].Value)
+	if err != nil {
+		t.Fatalf("decode fresh event: %v", err)
+	}
+	if staleEvent.EventID != freshEvent.EventID {
+		t.Fatalf("event_id must stay identical across repair generations: %q vs %q",
+			staleEvent.EventID, freshEvent.EventID)
+	}
+	if staleEvent.EventID != RequestedEventID(id) {
+		t.Fatalf("event_id=%q want %q", staleEvent.EventID, RequestedEventID(id))
 	}
 }

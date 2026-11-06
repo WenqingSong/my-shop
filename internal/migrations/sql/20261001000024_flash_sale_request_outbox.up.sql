@@ -12,8 +12,9 @@
 -- 发布不变量：
 --   - published_at 只能由「Broker 已确认」的发布结果写入（禁止先标记后发布）；
 --   - publish_lease_until 是数据库级领取租约，多实例互斥依赖它而不是进程内 mutex；
---   - 租约过期后允许被其他 Publisher 重新领取，因此发布语义是 at-least-once，
---     消费方必须按 event_id（由 request_id 稳定推导）去重。
+--   - 租约过期后允许被其他 Publisher 重新领取，因此发布语义是 at-least-once；
+--     消费方必须以 MySQL 请求行状态（订单事务内锁行读取）作为业务幂等边界，
+--     event_id 只用于识别重复投递与排查，不能当永久去重台账（人工修复后会再次发布同一 event_id）。
 --
 -- 旧数据兼容：既有行（无论 queued/success/failed/dead）在迁移后一律为
 -- published_at=NULL / publish_attempts=0 / 租约为空，即「未发布」。

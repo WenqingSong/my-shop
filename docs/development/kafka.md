@@ -3,9 +3,10 @@
 本文面向本地开发与后续批次实现者，说明 SurgeCart 引入 Kafka 的职责边界、配置方式、
 本地 KRaft 环境、Producer/Consumer 使用方式与 B1 的功能边界。
 
-> **当前状态（B1）**：只完成 Kafka 基础设施与消息契约，**秒杀业务链路仍走 MySQL 出队表
-> + 后台扫描器（`dispatch_mode=db_scanner`）**。Kafka 默认关闭，没有接入真实消费，
-> 也没有实现 Outbox 发布。不要把本文描述的目标能力误读为已上线能力。
+> **当前状态（B2.1）**：Kafka 基础设施与消息契约（B1）、Request Outbox 发布器（B2/B2.1）
+> 已完成，但**秒杀业务链路仍走 MySQL 出队表 + 后台扫描器（`dispatch_mode=db_scanner`）**：
+> Kafka 默认关闭，没有业务消费 Handler、没有消费组装配，也没有切换 dispatch_mode，
+> Outbox Publisher 同样未在生产装配。不要把本文描述的目标能力误读为已上线能力。
 
 ## 1. Kafka 在 SurgeCart 中承担什么职责
 
@@ -13,7 +14,8 @@ Kafka 只承担「已受理的秒杀请求需要异步落单」这一事件的**
 
 - 不承载订单、库存、请求生命周期等业务状态；
 - 不替代 MySQL 的权威地位，也不改变 Redis 闸门的准入语义；
-- 消费方收到事件后必须按 `request_id` 回到 MySQL 读取权威数据再决定是否落单。
+- 消费方收到事件后必须按 `request_id` 回到 MySQL 读取权威数据再决定是否落单；
+  读取必须发生在订单事务内并对请求行加锁（见 8.5），不能先做事务外普通 `SELECT` 判断状态。
 
 它要解决的问题是现有 MySQL 出队表的吞吐与解耦上限：当前消费由单实例
 `goroutine + ticker` 轮询（默认 1s 周期、每轮限量）驱动，消费能力受轮询周期与行锁竞争约束。
@@ -31,8 +33,9 @@ Kafka 只承担「已受理的秒杀请求需要异步落单」这一事件的**
    再写一张 Outbox 表意味着同事务双写两行，增加写放大与维护成本，却没有增加业务事实。
 2. **载荷可确定性重建**：`RequestedEvent` 的所有字段都能从 request 行（及活动/SKU 绑定）推导，
    `event_id` 由 `request_id` 确定性生成，不需要在发送时临时拼装随机标识。
-3. **发布幂等天然成立**：同一 `request_id` 重复发布得到相同 `event_id`，
-   消费方以 `request_id` 做幂等闸门即可收敛重复投递。
+3. **重复投递可被识别**：同一 `request_id` 重复发布得到相同 `event_id`，
+   消费方可用它关联日志、追踪与识别 Kafka 重复投递；但业务幂等必须回到
+   MySQL 请求行状态，不能把 `event_id` 当永久去重台账（原因见 8.5）。
 4. **避免双写不一致**：独立 Outbox 表需要额外的清理、归档与「已发布」状态维护；
    request 行本来就有 `status` 生命周期，增加发布标记的复杂度更低。
 
@@ -187,7 +190,10 @@ if err != nil {
     return err
 }
 results, err := producer.Publish(ctx, mq.Message{
-    Key:   []byte(strconv.FormatInt(event.RequestID, 10)), // 同一请求固定分区
+    // 显式主题：调用方必须自己指定，不要依赖 Producer 的默认 Topic（见 8.4 / F-02）。
+    Topic: "surgecart.flashsale.order.requested.v1",
+    // 分区键固定为 <activity_id>:<sku_id>，同一活动 SKU 进入同一分区（见 8.4）。
+    Key:   []byte(strconv.FormatInt(event.ActivityID, 10) + ":" + strconv.FormatInt(event.SkuID, 10)),
     Value: payload,
 })
 for _, r := range results {
@@ -243,7 +249,63 @@ consumer.AllowRebalance()
 | `DispositionRetry` | 可重试失败（如 DB 暂时不可用） | 不提交，有限次数/有界退避后重试，超预算升级为死信 |
 | `DispositionDeadLetter` | 不可重试或重试耗尽 | 先写死信主题，成功后再提交原位移 |
 
-消费循环本身不在 B1 范围内。
+消费循环本身不在 B1 范围内（B3 实现）。
+
+### 8.4 Kafka Message Key 策略（B2.1 冻结）
+
+`RequestedEvent` 的 Kafka Message Key 固定为 `<activity_id>:<sku_id>`，**不改用 `request_id`**。
+
+理由：
+
+1. 同一活动 SKU 的消息进入同一 Partition；
+2. 保持同一活动 SKU 的分区内处理顺序；
+3. 避免多个 Consumer 同时争抢同一个 SKU 的库存记录；
+4. 让 Kafka 分区策略与秒杀库存资源的组织方式保持一致（库存行与 Redis 计数都按 activity+sku 组织）。
+
+必须明确这一策略的代价：
+
+- 若某个秒杀活动只有一个热门 SKU，该 SKU 的消息会集中到一个 Partition；
+- 即使 Topic 配置了 12 个 Partition，热门 SKU 也不能自动利用全部 12 个 Partition 的消费并行度；
+- 单 SKU 的消费并行度上限就是 1，这是当前明确接受的架构取舍，不在文档中隐瞒。
+
+顺序边界同样必须说清：
+
+- Kafka 只保证**同一 Partition 内的追加顺序**；
+- 多 Publisher 并发发布时，Kafka 消息顺序与 MySQL `request_id` 顺序**不一致**；
+- 不能把 Kafka 分区顺序当作数据库事务正确性的保证——正确性仍由 MySQL 行锁、
+  条件更新与唯一约束保证。
+
+后续通过真实压测比较不同分区策略（按 activity、按 request_id 等），不在 B2.1 擅自修改。
+
+### 8.5 event_id 与业务幂等契约（B2.1 冻结）
+
+`event_id` 形如 `flashsale.requested:<request_id>`，由 `request_id` 确定性推导。
+
+它承担三件事：
+
+1. 标识逻辑事件；
+2. 关联日志、追踪与消息排查；
+3. 识别 Kafka 重复投递（at-least-once、Outbox 重发、租约过期回收）。
+
+它**不承担**的事：event_id 只标识逻辑事件，不是业务处理完成的凭证，
+不能作为永久去重台账的键。
+
+原因是人工修复语义：`dead → queued` 会重置发布状态并重新投递同一条请求，
+重新发布的事件与修复前那条旧事件 event_id 完全相同（B2.1 不引入 repair_generation，
+也不修改 event_id 生成算法）。若消费方维护永久 event_id 消费台账，
+修复后的合法请求会被当成重复消息直接丢弃。
+
+真正的业务幂等边界是 MySQL 请求行状态。消费方（B3）必须：
+
+1. 在开启订单事务之后重新读取 `flash_sale_order_requests` 记录；
+2. 锁定请求行（`SELECT ... FOR UPDATE`，或出队场景的 `FOR UPDATE SKIP LOCKED`）；
+3. 检查当前 `status`；
+4. 仅 `queued` 的请求才执行订单业务；
+5. `success` / `failed` / `dead` 等终态请求一律跳过，不得重复执行业务副作用；
+6. 订单唯一约束与库存条件更新继续作为数据库层面的最后保护。
+
+禁止「事务外普通 SELECT 判断状态，再执行订单创建」：两次读取之间状态可能被其他
+消费者或人工修复改变，event_id 去重台账无法弥补这个竞态。
 
 ## 9. 如何检查 Kafka 是否正常运行
 
@@ -294,28 +356,29 @@ docker compose --profile kafka logs -f kafka
 本地 KRaft 单节点只用于开发联调，**不得据此声明生产级 Broker 故障容忍能力**。
 生产集群的部署、监控、容量评估不在 B1 范围，也未在本仓库完成。
 
-## 11. B1 已实现 / 未实现的功能边界
+## 11. 已实现 / 未实现的功能边界（B2.1）
 
 已实现：
 
-- `github.com/twmb/franz-go/pkg/kgo` 接入（v1.18.1，见下节选型说明）；
-- 通用消息契约 `internal/mq/mq.go`；
-- Kafka 配置读取、规范化与校验（`internal/mq/kafka/config.go`）；
-- 同步确认 Producer（acks=all、幂等、有界重试、zstd、批量、优雅关闭）；
-- Consumer Group 基础客户端（手动提交、禁止自动提交、`BlockRebalanceOnPoll` 生命周期约束）；
-- RequestedEvent v1 编解码、字段/版本/类型校验（`internal/logic/flashsale/message.go`）；
-- 本地 KRaft 单节点 Compose 服务、健康检查、显式 Topic 创建命令；
-- 配置、消息契约与生命周期单元测试。
+- B1：`github.com/twmb/franz-go/pkg/kgo` 接入（v1.18.1，见下节选型说明）、通用消息契约
+  `internal/mq/mq.go`、配置读取/校验、同步确认 Producer、Consumer Group 基础客户端、
+  RequestedEvent v1 编解码与校验、本地 KRaft Compose 服务与显式 Topic 创建；
+- B2：Request Outbox Publisher（短事务领取 + `FOR UPDATE SKIP LOCKED`、租约与 claim token、
+  多实例并发发布、失败指数退避、逐条 ACK 后标记、人工修复重发、Prometheus 指标）；
+- B2.1：event_id / 业务幂等语义冻结、Outbox Topic 显式路由、Message Key 策略冻结、
+  Outbox 并发 Race 测试进入 CI 门禁。
 
 未实现（后续批次）：
 
-- Outbox 发布器、发布标记、历史请求回填（B2）；
-- `dispatch_mode=kafka` 切换与旧 Scanner 退役协调（B2/B3）；
-- 业务消费 Handler、重试/死信处置、数据库事务与位移提交顺序（B3）；
-- 分区暂停/恢复、rebalance 时在途事务处理、数据库不可用时消费策略（B3）；
+- 业务消费 Handler、消费组装配、重试/死信处置、数据库事务与位移提交顺序（B3）；
+- `dispatch_mode=kafka` 切换与旧 Scanner 退役协调（B4）；
+- F-03（批次超时导致重复放大）与 F-04（发布标记锁等待突破租约）的修复，
+  必须在 B4 完整启用 Kafka 链路前处理；
+- 分区暂停/恢复、rebalance 时在途事务处理、数据库不可用时消费策略；
 - Kafka 业务指标、Consumer Lag 告警、生产集群部署与容量验证。
 
-**B1 没有完成秒杀 Kafka 化**：Kafka 默认关闭，业务链路仍然完全走 `db_scanner`。
+**B2.1 没有完成秒杀 Kafka 化**：Kafka 默认关闭，业务链路仍然走 `db_scanner`，
+Outbox Publisher 未在生产装配，也没有业务消费。
 
 ## 12. franz-go 版本与选型说明
 
