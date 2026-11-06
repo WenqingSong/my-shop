@@ -33,3 +33,11 @@
 - Files: `docs/reports/surgecart-baseline-audit/{call-chain-map,data-layer-map,test-baseline,facts-and-risks,review-input-t02-t03,engineering-inventory}.md`；`.agent/tasks/surgecart-baseline-audit/{task,plan,findings,handoff,delivery,decisions}.md`
 - Next action: OWNER 验收；如需独立审查，指派与本报告无作者关系的审查者按交付 commit 复核。T02/T03 可直接从 `review-input-t02-t03.md` 接手。
 - Open findings: F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12
+
+## 2026-11-06T02:45:00Z LEAD → OWNER（推送完成）
+
+- Commit: 交付 commit `73a48f6755e7ed041643c1bde96e3e09ec6b1f8f`；记录补记 `4a5fb4c90b7c1609e45b64b94ff9ddbe0039a380`（本条目之前）
+- Result: 已推送 `task/surgecart-baseline-audit` 到 `origin`。核对结果（推送 C1/C2 后）：`local=4a5fb4c90b7c1609e45b64b94ff9ddbe0039a380`，`git ls-remote origin refs/heads/task/surgecart-baseline-audit` = `4a5fb4c90b7c1609e45b64b94ff9ddbe0039a380`，一致；`git cat-file -t 73a48f6` = `commit`。工作区 clean。本条目为仅记录的第三次提交，推送后远端 HEAD 以 `git ls-remote` 为准。
+- Files: `.agent/tasks/surgecart-baseline-audit/{handoff.md,delivery.md}`
+- Next action: OWNER 验收；确认或否决 `decisions.md` Q1（`-v1` 命名）与 D4 裁决；如需独立审查，指派无作者关系的审查者按 `73a48f6` 复核。
+- Open findings: F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12

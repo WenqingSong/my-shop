@@ -4,7 +4,8 @@
 
 - 分支: `task/surgecart-baseline-audit`
 - 审计产物提交（交付 commit）: `73a48f6755e7ed041643c1bde96e3e09ec6b1f8f`
-- 记录补记提交: 见 `git log -2 --format=%H`（本节所在提交；交付 commit 已包含全部审计产物）
+- 记录补记提交: `4a5fb4c90b7c1609e45b64b94ff9ddbe0039a380`
+- 推送状态记录提交: 见 `git log -1 --format=%H`（仅记录远端核对结果，不改审计内容）
 - 审查对象: `95c13910c7226b4e32487ed046702caf75d74fc6`（审计基线；源码与 `473d6f5253e3abcb98ece9d79a5a8059563a3e8d` 等价）
 - 审查结论: **NOT_REVIEWED**
 - 独立性披露: 本任务由单个 Agent Session 完成，报告作者即 LEAD；**审查为作者自审，独立性未满足**。按 `AgentCollaborationSpecification.md` §4.3 如实标注，不声称已通过独立审查。Owner 可指派新 Session 或外部审查者按上述 SHA 复核。
@@ -139,7 +140,7 @@ docker compose down -v
 | 交付 commit（审计产物） | `73a48f6755e7ed041643c1bde96e3e09ec6b1f8f` |
 | 记录提交 | 本文件所在提交（`git log -2 --format=%H`） |
 | 基线 | `95c13910c7226b4e32487ed046702caf75d74fc6`（`473d6f5253e3abcb98ece9d79a5a8059563a3e8d` 源码等价） |
-| 远程分支 | `origin/task/surgecart-baseline-audit`，推送后用 `git ls-remote` 与本地比对（结果见 `handoff.md` 最后一条） |
+| 远程分支 | 已推送。核对（推送 C1/C2 后）：`git ls-remote origin refs/heads/task/surgecart-baseline-audit` = `4a5fb4c90b7c1609e45b64b94ff9ddbe0039a380`，与本地一致；本文件所在记录提交推送后，远端 HEAD 以 `git ls-remote` 为准 |
 | 工作区 | 交付时 clean |
 | Tag | 未创建（本任务不发布版本） |
 | 合并 | 未合并到 `main`/`develop`（无授权） |
