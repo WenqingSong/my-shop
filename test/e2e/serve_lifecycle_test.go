@@ -12,6 +12,8 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -409,4 +411,169 @@ func TestServeProcessLifecycle(t *testing.T) {
 
 	t.Logf("B4.1 进程级验收通过：serve 启动=%s，SIGTERM 退出耗时=%s，重启收敛完成",
 		started.At.Format(time.RFC3339Nano), elapsed.Round(time.Millisecond))
+}
+
+// TestServeKafkaOutageKeepsHTTPAvailable 是 T2-02-D 的进程级验收：
+//
+//	真实 serve 子进程（Kafka 模式）→ 停止真实 Kafka Broker
+//	→ 子进程不退出、/health 与 /ready 仍为 200、consumer_joined 归 0
+//	→ HTTP 仍受理请求并写入 MySQL Outbox（积压指标反映真实数量）
+//	→ 恢复 Kafka → Consumer 重新加入、积压收敛、请求进入正确终态且不重复。
+//
+// 为什么必须用真实子进程而不是进程内测试：本用例要证明的是「Kafka 故障不会让进程退出」，
+// 以及健康检查/指标在真实 serve 装配下（含 Qiniu 启动校验、终止预算、Runtime 装配）成立。
+//
+// 该用例放在文件末尾：它会在运行期 stop/start Kafka 容器，必须在其他进程级用例之后执行。
+func TestServeKafkaOutageKeepsHTTPAvailable(t *testing.T) {
+	env := lifecycleRequireEnv(t)
+	repoRoot := lifecycleRepoRoot(t)
+	bin := buildLifecycleServeBinary(t, repoRoot)
+	mock := newLifecycleQiniuMock(t)
+	runID := fmt.Sprintf("%d", time.Now().UnixNano())
+	kafkaContainer := strings.TrimSpace(os.Getenv("B4_E2E_KAFKA_CONTAINER"))
+	if kafkaContainer == "" {
+		kafkaContainer = "my-shop-kafka"
+	}
+
+	// 父进程只用于准备数据与断言；必须与子进程指向同一隔离库/Redis DB。
+	t.Setenv("DATABASE_DEFAULT_NAME", env.DBName)
+	t.Setenv("DATABASE_DEFAULT_PASS", env.DBPass)
+	t.Setenv("REDIS_DEFAULT_DB", env.RedisDB)
+	t.Setenv("AUTH_JWT_SECRET", env.JWTSecret)
+	t.Setenv("ADMIN_SUPER_PASSWORD", env.AdminPass)
+	t.Setenv("STORAGE_LOCAL_ROOT", env.StorageDir)
+
+	t.Logf("隔离资源: MySQL=%s RedisDB=%s broker=%s topic=%s group=%s kafka_container=%s",
+		env.DBName, env.RedisDB, env.Broker, env.Topic, env.Group, kafkaContainer)
+
+	lifecycleSetupIsolatedDB(t)
+
+	// 库存 5：只提交 1 条请求，避免库存因素干扰「故障期间受理」的判定。
+	skuID := flashSetupSku(t, "t202-broker-outage", 5000, 1)
+	now := flashMySQLNow(t)
+	activityID := flashInsertActivity(t, "t202-broker-outage", 1, now.Add(-time.Hour), now.Add(time.Hour))
+	flashInsertBinding(t, activityID, skuID, 1000, 5)
+	flashSyncCache(t, activityID)
+
+	base := fmt.Sprintf("http://127.0.0.1:%d", env.ServerPort)
+	p := startLifecycleServeProcess(t, bin, repoRoot, env.childEnv(mock, runID))
+
+	// 若断言失败，尽最大努力把 Kafka 拉回来，避免后续用例受污染。
+	restoreKafka := func() { _ = exec.Command("docker", "start", kafkaContainer).Run() }
+	t.Cleanup(restoreKafka)
+
+	// ---------- 阶段 1：正常运行 ----------
+	p.waitHealth(base, 90*time.Second)
+	started := p.waitLogEvent("flashsale_runtime_started", 30*time.Second)
+	if !strings.Contains(started.Line, `"mode":"kafka"`) {
+		t.Fatalf("Runtime 未按 kafka 模式装配: %s", started.Line)
+	}
+	assertHealthAndReady(t, base, 200, 200)
+	waitMetricValue(t, base, metricConsumerJoined, 1, 120*time.Second)
+	waitMetricValue(t, base, metricOutboxBacklogPending, 0, 60*time.Second)
+	joinedEvent := p.waitLogEvent("flashsale_consumer_joined", 30*time.Second)
+	if joinedEvent.Name != "flashsale_consumer_joined" {
+		t.Fatalf("首次加入消费组必须输出 flashsale_consumer_joined 日志，实际 %q", joinedEvent.Name)
+	}
+	if fields := lifecycleEventFields(t, joinedEvent.Line); fmt.Sprint(fields["consumer_group"]) != env.Group {
+		t.Fatalf("加入日志的 consumer_group=%v，期望 %q", fields["consumer_group"], env.Group)
+	}
+	t.Logf("PASS 正常状态：/health 200、/ready 200、consumer_joined=1、outbox_backlog_pending=0")
+
+	// ---------- 阶段 2：真实 Kafka 停机 ----------
+	lifecycleDockerMust(t, "stop", kafkaContainer)
+	waitMetricValue(t, base, metricConsumerJoined, 0, 150*time.Second)
+	t.Logf("PASS Kafka 停机：consumer_joined 归 0（进程 pid=%d 仍存活）", p.cmd.Process.Pid)
+
+	// 跨多个 readiness 缓存窗口（默认 3s）重复验证：Kafka 故障绝不能摘流 HTTP。
+	for i := 0; i < 3; i++ {
+		if !p.Alive() {
+			t.Fatalf("Kafka 故障期间 serve 子进程退出；日志尾部:\n%s", lifecycleTail(p.Logs(), 60))
+		}
+		assertHealthAndReady(t, base, 200, 200)
+		time.Sleep(2 * time.Second)
+	}
+	if v, ok := metricValue(scrapeMetrics(t, base), metricConsumerJoined); !ok || v != 0 {
+		t.Fatalf("Kafka 停机期间 consumer_joined=(%v,%v) want (true,0)", v, ok)
+	}
+	t.Logf("PASS Kafka 故障期间 HTTP 可用：连续 3 个 readiness 窗口 /health=200 /ready=200")
+
+	// ---------- 阶段 3：故障期间受理请求 ----------
+	userID := int64(971500) // 位于 lifecycleSetupIsolatedDB 清理区间内，可重复运行
+	token := flashMintUserToken(t, userID)
+	key := "t202-outage-1"
+	res, err := isoRequest(base, "POST", fmt.Sprintf("/flash-sales/%d/orders", activityID), map[string]any{
+		"sku_id": skuID, "idempotency_key": key,
+	}, isoAuthHeader(token))
+	if err != nil {
+		t.Fatalf("Kafka 故障期间下单请求失败: %v", err)
+	}
+	if res.Status != 200 || res.Code != 0 {
+		t.Fatalf("Kafka 故障期间下单被拒（HTTP 不应依赖 Kafka）: status=%d code=%d msg=%q", res.Status, res.Code, res.Message)
+	}
+
+	// Outbox 待发布数量必须反映真实积压（这是「请求已可靠落库」的可观测证据）。
+	waitMetricValue(t, base, metricOutboxBacklogPending, 1, 90*time.Second)
+	row := lifecycleLoadRequests(t, activityID)[key]
+	if row.Status != 0 || row.Published {
+		t.Fatalf("Kafka 故障期间请求状态异常（应 queued 且未发布）: %+v", row)
+	}
+	t.Logf("PASS Kafka 故障期间受理：request_id=%d status=queued published=false backlog=1", row.Id)
+
+	// ---------- 阶段 4：恢复 Kafka ----------
+	lifecycleDockerMust(t, "start", kafkaContainer)
+	lifecycleWaitKafkaHealthy(t, kafkaContainer, 150*time.Second)
+
+	waitMetricValue(t, base, metricConsumerJoined, 1, 180*time.Second)
+	lifecycleWaitRequestTerminal(t, activityID, key, 180*time.Second)
+	waitMetricValue(t, base, metricOutboxBacklogPending, 0, 150*time.Second)
+	t.Logf("PASS Kafka 恢复：consumer_joined=1、请求已发布并落单、backlog 收敛为 0")
+
+	// ---------- 阶段 5：数据一致性 ----------
+	orders := lifecycleCountOrders(t, activityID)
+	success := lifecycleCountSuccess(t, activityID)
+	sold := lifecycleSold(t, activityID, skuID)
+	if duplicates := lifecycleDuplicateOrderKeys(t, activityID); len(duplicates) > 0 {
+		t.Fatalf("存在重复订单: %v", duplicates)
+	}
+	if orders != 1 || success != 1 || sold != 1 {
+		t.Fatalf("一致性核对失败：orders=%d success=%d sold=%d（期望均为 1）", orders, success, sold)
+	}
+	if !p.Alive() {
+		t.Fatalf("恢复阶段 serve 子进程已退出；日志尾部:\n%s", lifecycleTail(p.Logs(), 60))
+	}
+	t.Logf("PASS 数据一致性：orders=%d success=%d sold=%d duplicate_orders=0", orders, success, sold)
+
+	// ---------- 阶段 6：SIGTERM 正常退出（证明新增采样 goroutine 不影响关闭） ----------
+	p.sendSIGTERM()
+	if code, elapsed := p.waitExit(lifecycleMaxExitWait); code != 0 {
+		t.Fatalf("退出码=%d（期望 0），耗时 %s", code, elapsed)
+	}
+	lifecycleAssertNoResidualBinary(t, bin)
+	t.Logf("PASS 关闭：SIGTERM 后进程正常退出（退出码 0）")
+}
+
+// lifecycleDockerMust 执行 docker 子命令；故障注入本身不可静默跳过。
+func lifecycleDockerMust(t *testing.T, args ...string) {
+	t.Helper()
+	cmd := exec.Command("docker", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker %s 失败: %v\n%s", strings.Join(args, " "), err, out)
+	}
+}
+
+// lifecycleWaitKafkaHealthy 等待 Kafka 容器 healthy，并留出 Broker 元数据恢复时间。
+func lifecycleWaitKafkaHealthy(t *testing.T, container string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		out, err := exec.Command("docker", "inspect", "-f", "{{.State.Health.Status}}", container).Output()
+		if err == nil && strings.TrimSpace(string(out)) == "healthy" {
+			time.Sleep(2 * time.Second)
+			return
+		}
+		time.Sleep(2 * time.Second)
+	}
+	t.Fatalf("Kafka 容器 %s 未在 %s 内恢复 healthy", container, timeout)
 }

@@ -164,6 +164,14 @@ func flashWaitSuccess(t *testing.T, base string, activityID int64, token, key st
 // 这正是 at-least-once 的恢复窗口，不能把「暂时未标记」误判为丢事件。
 func flashAssertPublished(t *testing.T, activityID, skuID int64, key string, timeout time.Duration) {
 	t.Helper()
+	flashAssertRequestPublished(t, activityID, skuID, key, 1, timeout)
+}
+
+// flashAssertRequestPublished 是 flashAssertPublished 的可指定 sold 期望版本：
+// 一个活动上可能有多笔成功请求（多用户），全活动口径的 sold = 成功请求数，
+// 不能沿用「sold 必须为 1」的单请求断言。
+func flashAssertRequestPublished(t *testing.T, activityID, skuID int64, key string, wantSold int64, timeout time.Duration) {
+	t.Helper()
 	deadline := time.Now().Add(timeout)
 	var last string
 	for {
@@ -187,8 +195,8 @@ func flashAssertPublished(t *testing.T, activityID, skuID int64, key string, tim
 			if err != nil {
 				t.Fatalf("查询 sold: %v", err)
 			}
-			if sold.Int64() != 1 {
-				t.Fatalf("sold 应为 1，实际 %d", sold.Int64())
+			if sold.Int64() != wantSold {
+				t.Fatalf("sold 应为 %d，实际 %d", wantSold, sold.Int64())
 			}
 			return
 		}
@@ -428,7 +436,13 @@ func TestKafkaFlashSalePublisherRestartRecoversOutbox(t *testing.T) {
 	flashAssertPublished(t, activityID, skuID, key, 10*time.Second)
 }
 
-// TestKafkaFlashSaleBrokerOutageRecovery 覆盖 Kafka 暂时不可用后恢复。
+// TestKafkaFlashSaleBrokerOutageRecovery 覆盖 T2-02-D 的核心验收：
+//
+//	正常启动 → /health 200、/ready 200、consumer_joined=1
+//	→ 停 Kafka Broker → 进程与 HTTP 仍然可用（/health 200、/ready 仍 200）
+//	→ consumer_joined=0、Outbox backlog 反映真实积压、请求仍可靠写入 MySQL
+//	→ 恢复 Kafka → consumer_joined 回到 1、积压收敛、请求进入正确终态且不重复
+//
 // 需要显式设置 FLASH_SALE_KAFKA_E2E_DOCKER=1（会 stop/start Compose 中的 kafka 容器）。
 func TestKafkaFlashSaleBrokerOutageRecovery(t *testing.T) {
 	broker := kafkaE2EContext(t)
@@ -449,7 +463,27 @@ func TestKafkaFlashSaleBrokerOutageRecovery(t *testing.T) {
 	defer cancel()
 	_ = startE2ERuntime(t, ctx)
 
-	// 先确认链路正常。
+	// ---------- 阶段 1：正常状态 ----------
+	assertHealthAndReady(t, base, 200, 200)
+	waitMetricValue(t, base, metricConsumerJoined, 1, 60*time.Second)
+
+	// 指标元数据验收：名称/类型/HELP/无标签（真实 HTTP 抓取，而不是只看 registry 是否注册）。
+	healthyBody := scrapeMetrics(t, base)
+	for _, name := range []string{metricConsumerJoined, metricOutboxBacklogPending} {
+		if typ, ok := metricType(healthyBody, name); !ok || typ != "gauge" {
+			t.Fatalf("指标 %s 类型=%q（ok=%v），期望 gauge", name, typ, ok)
+		}
+		if help, ok := metricHelp(healthyBody, name); !ok || help == "" {
+			t.Fatalf("指标 %s 缺少非空 HELP", name)
+		}
+	}
+	waitMetricValue(t, base, metricOutboxBacklogPending, 0, 30*time.Second)
+	// 真实 HTTP 抓取的数值证据（报告与排障时可直接对照）。
+	for _, name := range []string{metricConsumerJoined, metricOutboxBacklogPending} {
+		v, ok := metricValue(scrapeMetrics(t, base), name)
+		t.Logf("GET /metrics → %s=%v (series_present=%v)", name, v, ok)
+	}
+
 	firstKey := "outage-ok-1"
 	if env := flashOrderCall(t, base, activityID, token, map[string]any{
 		"sku_id": skuID, "idempotency_key": firstKey,
@@ -457,11 +491,17 @@ func TestKafkaFlashSaleBrokerOutageRecovery(t *testing.T) {
 		t.Fatalf("故障前下单失败: status=%d code=%d", env.Status, env.Code)
 	}
 	flashWaitSuccess(t, base, activityID, token, firstKey, 20*time.Second)
+	flashAssertPublished(t, activityID, skuID, firstKey, 10*time.Second)
 
+	// ---------- 阶段 2：真实 Kafka 停机 ----------
 	dockerMust(t, "stop", container)
 	t.Cleanup(func() {
 		_ = exec.Command("docker", "start", container).Run()
 	})
+
+	// Consumer 必须失去成员资格（回调证据 → 指标 0），这期间进程仍存活。
+	waitMetricValue(t, base, metricConsumerJoined, 0, 120*time.Second)
+	assertHealthAndReady(t, base, 200, 200)
 
 	// Broker 不可用时 HTTP 仍可受理：Redis 准入门 + MySQL Request/Outbox 不依赖 Kafka。
 	// 秒杀一人一单，因此第二个请求换一个用户。
@@ -469,14 +509,45 @@ func TestKafkaFlashSaleBrokerOutageRecovery(t *testing.T) {
 	secondToken := flashMintUserToken(t, 950402)
 	if env := flashOrderCall(t, base, activityID, secondToken, map[string]any{
 		"sku_id": skuID, "idempotency_key": secondKey,
-	}); env.Status != 200 || env.Code != 0 {
-		t.Fatalf("Broker 故障期间受理失败（HTTP 不应依赖 Kafka）: status=%d code=%d", env.Status, env.Code)
+	}); env.Status != 200 || env.Code != 0 || env.Data == nil || env.Data.Status != "queued" {
+		t.Fatalf("Broker 故障期间受理失败（HTTP 不应依赖 Kafka）: status=%d code=%d msg=%q", env.Status, env.Code, env.Message)
 	}
-	time.Sleep(2 * time.Second)
 
+	// Outbox 待发布数量必须反映真实积压（第一个请求已发布，只有第二个待发布）。
+	waitMetricValue(t, base, metricOutboxBacklogPending, 1, 60*time.Second)
+
+	// 积压期间再等一个 readiness 缓存窗口（默认 3s），证明 /ready 不会因 Kafka 故障被摘流。
+	time.Sleep(4 * time.Second)
+	assertHealthAndReady(t, base, 200, 200)
+
+	// 请求已可靠落在 MySQL：queued 且未发布（Kafka 不可用不是业务失败）。
+	secondRow := flashRequestRow(t, activityID, secondKey)
+	if secondRow.Status != 0 || secondRow.Published {
+		t.Fatalf("Kafka 故障期间请求状态异常（应 queued 且未发布）: %+v", secondRow)
+	}
+
+	// ---------- 阶段 3：恢复 Kafka ----------
 	dockerMust(t, "start", container)
 	waitKafkaHealthy(t, container, 120*time.Second)
+
+	waitMetricValue(t, base, metricConsumerJoined, 1, 180*time.Second)
 	flashWaitSuccess(t, base, activityID, secondToken, secondKey, 180*time.Second)
+	// 该活动上已有两笔成功请求（两个用户），全活动口径 sold 期望为 2。
+	flashAssertRequestPublished(t, activityID, skuID, secondKey, 2, 60*time.Second)
+	// 积压收敛：采样器下一次写入必须归零（失败不得把上一次值保留成永久假积压）。
+	waitMetricValue(t, base, metricOutboxBacklogPending, 0, 120*time.Second)
+
+	// ---------- 一致性核对 ----------
+	if n := flashOrderCount(t, activityID); n != 2 {
+		t.Fatalf("两个用户应各产生一单，实际订单数 %d（可能漏单或重复落单）", n)
+	}
+	flashAssertNoDuplicateOrders(t, activityID)
+	if sold := flashBindingSold(t, activityID, skuID); sold != 2 {
+		t.Fatalf("SKU sold=%d want 2（不得超卖/重复扣减）", sold)
+	}
+	if st := flashRequestStatusForKey(t, secondKey); st != 1 {
+		t.Fatalf("恢复后请求状态应为 success(1)，实际 %d", st)
+	}
 }
 
 // TestKafkaFlashSaleMySQLOutageRecovery 覆盖 MySQL 暂时不可用后恢复：
@@ -522,6 +593,50 @@ func TestKafkaFlashSaleMySQLOutageRecovery(t *testing.T) {
 	//   - Consumer 已落终态时，消费事务用消息的 partition/offset 补写发布凭证。
 	// 两种路径都必须最终写入 published_at；这里覆盖整个恢复窗口，证明不会丢事件。
 	flashAssertPublished(t, activityID, skuID, key, 120*time.Second)
+}
+
+// flashRequestState 是故障注入断言需要的请求事实子集。
+type flashRequestState struct {
+	Status    int
+	Published bool
+}
+
+// flashRequestRow 读取指定请求的状态与发布事实。
+func flashRequestRow(t *testing.T, activityID int64, key string) flashRequestState {
+	t.Helper()
+	rec, err := g.DB().Model("flash_sale_order_requests").Ctx(context.Background()).
+		Fields("status,published_at").
+		Where("activity_id", activityID).Where("idempotency_key", key).One()
+	if err != nil || rec == nil || rec.IsEmpty() {
+		t.Fatalf("查询请求 %s: %v", key, err)
+	}
+	return flashRequestState{Status: rec["status"].Int(), Published: !rec["published_at"].IsNil()}
+}
+
+// flashAssertNoDuplicateOrders 断言同一 (user_id, idempotency_key) 只落一单。
+func flashAssertNoDuplicateOrders(t *testing.T, activityID int64) {
+	t.Helper()
+	rows, err := g.DB().GetAll(context.Background(),
+		`SELECT user_id, idempotency_key, COUNT(*) AS c
+		   FROM flash_sale_orders WHERE activity_id = ?
+		  GROUP BY user_id, idempotency_key HAVING c > 1`, activityID)
+	if err != nil {
+		t.Fatalf("检查重复订单: %v", err)
+	}
+	if len(rows) > 0 {
+		t.Fatalf("存在重复订单: %v", rows)
+	}
+}
+
+// flashBindingSold 返回活动 SKU 的已售数量（超卖/重复扣减的直接证据）。
+func flashBindingSold(t *testing.T, activityID, skuID int64) int64 {
+	t.Helper()
+	sold, err := g.DB().Model("flash_sale_activity_skus").Ctx(context.Background()).
+		Where("activity_id", activityID).Where("sku_id", skuID).Value("sold")
+	if err != nil {
+		t.Fatalf("查询 sold: %v", err)
+	}
+	return sold.Int64()
 }
 
 // dockerMust 执行 docker 子命令；失败直接终止测试（故障注入本身不可静默跳过）。

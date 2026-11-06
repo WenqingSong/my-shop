@@ -87,10 +87,25 @@ HTTP drain 的 10s 划分：前 9s 用于优雅 drain（同时作为 GoFrame 内
 ## 6. 网络与健康检查
 
 - `app:8000` 是稳定的 Compose 内部服务入口，**不映射宿主机端口**；外部只能经 Nginx（`${NGINX_PORT:-8080}`）访问。
-- `/health` 为 liveness（`status=ok` + 时间，判定不依赖 DB/Redis）：进程存活且 HTTP server 在监听即 200。
-- `/ready` 为 readiness（fail-closed）：探测 MySQL Ping + Redis PING（探测超时 1s，结果进程内缓存 TTL 3s，缓存窗口内重复探测不新增 DB/Redis 访问）；DB 或 Redis 任一不可达 → 503（`codes.CodeServiceUnavailable`），响应/日志不泄漏数据库地址、Redis 信息或错误堆栈。schema 就绪由启动 bootstrap 保证（`serve` 仅在 `checkSchemaReady` 通过后监听），不逐次探测。
+- 健康检查语义（T2-02 冻结，后续 K8s probe 直接复用）：
+
+  | 接口 | 检查内容 | Kafka 故障时 |
+  | --- | --- | --- |
+  | `/health`（liveness） | 仅判断 HTTP 服务进程是否存活；不访问 MySQL/Redis/Kafka，不检查消费组/积压 | 200 |
+  | `/ready`（readiness） | MySQL `PingMaster` + Redis `PING` 均成功；任一不可达 503（fail-closed） | 200（前提是两者正常） |
+
+  探测超时默认 1s（`READINESS_PROBE_TIMEOUT`），结果进程内缓存默认 3s（`READINESS_CACHE_TTL`），
+  缓存窗口内重复调用不新增 DB/Redis 访问，依赖恢复后在一个 TTL 窗口内恢复 200；响应/日志不泄漏
+  数据库地址、Redis 信息或错误堆栈。schema 就绪由启动 bootstrap 保证（`serve` 仅在
+  `checkSchemaReady` 通过后监听），不逐次探测。
+- **Kafka 明确不在健康判定内**：Broker 不可达、Consumer 未加入消费组、Outbox 积压都不影响
+  `/health` 与 `/ready`。Kafka 故障时 HTTP 写入路径仍可把请求可靠写入 MySQL Outbox，
+  系统表现为异步处理延迟增加；把 Kafka 纳入 readiness 会让一次 Broker 抖动摘掉整个 HTTP 入口，
+  这是被禁止的（`internal/logic/health` 用依赖调用计数与真实 Kafka 停机故障注入锁定该语义）。
+  异步侧状态由 `flashsale_consumer_joined`、`flashsale_outbox_backlog_pending` 观测，
+  详见 `docs/development/kafka.md` §10.12 / §10.13。
 - `/health` 经 Nginx 公开透传（最小探活响应）；`/ready` 当前仅作未来 K8s readinessProbe 目标，Compose 的 app/nginx healthcheck 仍用 `/health`（Compose 无 Service 摘流机制，用 `/ready` 作 healthcheck 会放大 DB/Redis 抖动为 unhealthy + `restart` 误触发）。
-- Prometheus 抓取目标为 `app:8000`（不经 `host.docker.internal`、不经 Nginx）；`/metrics` 仅在 `FLASH_SALE_METRICS_ENABLED=true`（`flash_sale.metrics.enabled`）时暴露，抓取内容与开关语义不变；Nginx 公共入口对 `/metrics` 返回 404，不转发。
+- Prometheus 抓取目标为 `app:8000`（不经 `host.docker.internal`、不经 Nginx）；`/metrics` 仅在 `FLASH_SALE_METRICS_ENABLED=true`（`flash_sale.metrics.enabled`）时暴露，抓取内容与开关语义不变；Nginx 公共入口对 `/metrics` 返回 404，不转发。`/metrics` 抓取路径不查数据库：Outbox 积压由进程内 5s 采样器写入 Gauge（查询失败保留上一次值），因此抓取超时不等于依赖故障。
 
 ## 7. Nginx 反向代理模型（统一入口）
 
@@ -119,6 +134,7 @@ Nginx 是面向外部的唯一 HTTP 入口，职责为纯反向代理（无 Lua/
 - INV-010（readiness 摘流）：`/ready` 在 DB 或 Redis 不可达时返回 503，响应/日志不泄漏凭据、路径、堆栈。
 - INV-011（readiness 探测负载）：`/ready` 探测带超时 + 结果缓存，缓存窗口内重复调用不新增 DB/Redis 探测。
 - INV-012（优雅停机一致性）：停机不产生半成品；消费事务被打断整体回滚、请求保持 `queued`，重启后不重复下单。
+- INV-013（Kafka 不参与健康判定）：`/health` 与 `/ready` 的判定集合不包含 Kafka 连接、消费组状态、Consumer 运行状态与 Outbox 积压；Kafka 故障期间进程不退出、两个端点仍按各自语义返回 200。
 
 ## 9. 一致性模型与失败语义
 
@@ -129,6 +145,7 @@ Nginx 是面向外部的唯一 HTTP 入口，职责为纯反向代理（无 Lua/
 - **七牛凭据缺失 / 首次建号缺 `ADMIN_SUPER_PASSWORD`**：`serve` fail-fast 非零退出，日志指认字段名、不泄漏凭据值。
 - 部分完成：migration dirty 需人工 `force` 恢复。
 - **运行时依赖失效**：DB/Redis 不可达时 `/ready` 返回 503（fail-closed，不泄漏敏感信息），结果缓存 TTL 内不重复打库/打缓存，恢复后下一 TTL 窗口返回 200；`/health` 仍 200（liveness 不依赖依赖）。
+- **Kafka 失效（Broker 停机 / Consumer 未加入 / 发布持续失败）**：`/health` 与 `/ready` 均保持 200，进程不退出；HTTP 继续受理并把请求写入 MySQL Outbox（`status=queued`、`published_at IS NULL`），`flashsale_consumer_joined` 变为 0、`flashsale_outbox_backlog_pending` 上升；Broker 恢复后 Consumer 重新加入（指标回到 1）、积压收敛、请求进入正确终态且不重复下单/不超卖。
 - **优雅停机**：SIGTERM/SIGINT 触发后 HTTP 停收新连接并在 `server.graceful_timeout`（默认 10s）内 drain 在途请求；超时则在预算内强制关闭 listener 与全部连接，确认 `http_server_stopped` 后才按 Publisher → Consumer → Producer → Scanner 顺序关闭后台组件（`flash_sale.shutdown_timeout`，默认 30s），扫描器停止领取新任务、在途单事务回滚或完成；预算不足时 serve 启动 fail-fast，实际终止宽限期与预算见 §4.1。消费被打断 → 事务回滚 + 请求保持 `queued`，重启后重试/对账恢复，不产生半成品或重复下单。事实来源不变：MySQL 为业务权威、Redis 为派生缓存，无 MQ。
 
 ## 10. 安全与凭据边界

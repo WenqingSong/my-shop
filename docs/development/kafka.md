@@ -516,14 +516,18 @@ Kafka 消费不新建第二套 Redis 库存体系，完全复用既有机制：
 | `flashsale_consumer_commit_failures_total` | 位移提交失败次数 |
 | `flashsale_consumer_restarts_total` | 意外退出后的重建次数（正常 SIGTERM 不计数） |
 | `flashsale_consumer_processing_seconds{result}` | 单条消息处理耗时 |
+| `flashsale_consumer_joined` | **Gauge**：Consumer 当前是否已加入消费组（1/0），见 10.12 |
+| `flashsale_outbox_backlog_pending` | **Gauge**：Outbox 待发布记录数（含退避中/租约中），见 10.12 |
 | `flashsale_outbox_mark_skipped_total{reason="lock_busy"}` | 标记遇到业务行锁（NOWAIT），等待租约恢复 |
 
 业务侧仍复用既有的 `flashsale_requests_total{interface="consume", result=...}` 与耗时直方图。
 不包含 `request_id` / `user_id` / `activity_id` 等高基数标签。
 
-**Consumer Lag 未实现**：当前只依赖 `franz-go/pkg/kgo`（v1.18.1），
-Lag 需要消费组元数据 API（`kadm`），为避免在 B3 引入新依赖并伪造数据，本批次不提供
-Lag 指标，列为后续监控集成事项（可用 `kafka-consumer-groups.sh --describe` 人工核查）。
+**Consumer Lag 仍然未实现**：当前只依赖 `franz-go/pkg/kgo`（v1.18.1），
+Lag 需要消费组元数据 API（`kadm`），为避免引入新依赖并伪造数据，本仓库不提供 Lag 指标
+（可用 `kafka-consumer-groups.sh --describe` 人工核查）。
+`flashsale_consumer_joined` 与 `flashsale_outbox_backlog_pending` **都不是 Lag**，
+三者语义不同，见 10.12.3。
 
 ### 9.9 已知限制
 
@@ -633,6 +637,7 @@ Consumer 在独立 goroutine 中运行 `RequestedEventConsumer.Run`：
 
 `FlashSaleRuntime.Shutdown` 使用统一预算 `flash_sale.shutdown_timeout`（默认 30s）：
 
+0. 取消积压采样 ctx，等待采样循环退出（只读组件，先停它避免关闭过程中产生新查询）；
 1. 取消 Publisher ctx，等待当前 `PublishBatch` 结束（不再领取新记录）；
 2. 取消 Consumer ctx，等待 `Run` 返回；监督循环退出前关闭 Consumer 客户端；
 3. 关闭 Producer（有界 Flush）；此后不会再有 Publish；
@@ -643,7 +648,8 @@ Consumer 在独立 goroutine 中运行 `RequestedEventConsumer.Run`：
 未提交的 Kafka Offset 会在重启后重投。
 
 每一步都会输出带 `elapsed_ms` / `timed_out` 的结构化事件（`flashsale_runtime_shutdown_begin` →
-`flashsale_publisher_stopped` → `flashsale_consumer_stopped` → `flashsale_producer_closed` →
+`flashsale_outbox_backlog_sampler_stopped` → `flashsale_publisher_stopped` →
+`flashsale_consumer_stopped` → `flashsale_producer_closed` →
 `flashsale_scanners_stopped` → `flashsale_runtime_shutdown_complete`），`serve` 在 HTTP drain
 结束后输出 `http_server_stopped`；这些事件是进程级关闭时序的可观测证据。
 
@@ -773,7 +779,156 @@ Compose 中的 Kafka 是单节点 KRaft（RF=1）。它只能验证「Broker 短
 **不能**证明 Broker 永久故障下的数据不丢失、副本切换或高可用；这些需要 3 Broker / RF=3 /
 `min.insync.replicas=2` 的集群环境，属于后续部署阶段。
 
+### 10.12 T2-02：健康检查语义与异步状态指标
+
+本节的结论是冻结的，后续任务不得把 Kafka 塞回健康判定。
+
+#### 10.12.1 健康检查：Kafka 不参与任何判定
+
+| 接口 | 检查内容 | Kafka 故障时 |
+| --- | --- | --- |
+| `/health`（liveness） | 仅判断 HTTP 服务进程是否存活；不访问 MySQL/Redis/Kafka，不检查消费组与积压 | **200** |
+| `/ready`（readiness） | MySQL `PingMaster` + Redis `PING` 均成功才 200；任一失败 503（fail-closed） | **200**（前提是 MySQL/Redis 正常） |
+
+约束：
+
+- `/ready` 的依赖集合被冻结为「MySQL + Redis」，不得加入 Kafka 连接状态、Consumer Group 状态、
+  Consumer 是否正在消费、Outbox 积压；
+- 探测超时默认 1s（`READINESS_PROBE_TIMEOUT`），结果进程内缓存默认 3s（`READINESS_CACHE_TTL`），
+  依赖恢复后在缓存 TTL 窗口内恢复 200；配置读取统一走 `internal/config`（T2-01）；
+- 503 响应不暴露数据库地址、Redis 信息与内部堆栈（只返回业务码 1005 / HTTP 503）；
+- Kafka 故障时进程不退出：`Consumer.Run` 失败只触发监督循环的有界重建，
+  `Producer` 发布失败只写退避，HTTP 写入路径继续把请求可靠写入 MySQL Outbox。
+
+为什么这样设计：Kafka 不可用时，秒杀请求仍然可以经 Redis 准入 + MySQL Request/Outbox 落库，
+系统表现为「异步处理延迟增加」；如果把它纳入 readiness，一次 Broker 抖动就会把整个 HTTP 入口
+从负载均衡摘掉，把可恢复的异步延迟放大成入口级故障。
+
+自动化证据（不是「代码里看起来没有 Ping」）：
+
+- `internal/logic/health` 的依赖替身会统计 MySQL/Redis 探测调用次数：连续调用 `Liveness`
+  时次数必须为 0，`/ready` 失败时 MySQL 必须恰好 1 次且 Redis 被短路；
+- 同一测试用真实 HTTP 断言 `/health` 恒 200、`/ready` 在四种依赖组合下为 200/503；
+- `test/e2e` 与 `serve_lifecycle` 的故障注入用**真实 Kafka 容器停机**验证：
+  `/health` 200、`/ready` 200（跨多个 3s 缓存窗口）、进程存活。
+
+#### 10.12.2 Consumer Group 成员资格：`flashsale_consumer_joined`
+
+类型：Gauge，无标签。取值：
+
+- `1`：有可靠证据证明 Consumer 已加入消费组；
+- `0`：未加入（初始化、Run 退出、重建期间、Shutdown、会话结束/成员资格丢失）。
+
+**可靠证据是什么**：franz-go v1.18.1 的 `kgo.OnPartitionsAssigned`
+（`pkg/kgo/consumer_group.go`）。源码事实：
+
+- 该回调在 `joinAndSync` 成功后的 `setupAssignedAndHeartbeat` 中被调用；
+- `assign()` 注释明确写明 "We always call on assigned, even if nothing new is assigned"，
+  因此**空分区分配同样代表已加入消费组**，不能把「分区数为 0」当作未加入；
+- `OnPartitionsRevoked` 在组会话结束时触发（cooperative 消费者即使没有分区丢失也会触发，
+  源码注释："calling onRevoke at the end of a session even though no partitions were lost"）；
+- `OnPartitionsLost` 在致命组错误（IllegalGeneration / UnknownMemberID / 鉴权失败）时触发，
+  且**可能在从未成功加入时触发**。
+
+因此以下事实都**不是**加入证据：`NewConsumer` 成功、`Run()` 已启动、进程还在跑。
+
+状态转换：
+
+| 事件 | 指标 | 说明 |
+| --- | --- | --- |
+| `NewConsumer` 返回（Consumer 初始化） | 0 | 只有客户端对象，未连接、未入组 |
+| `OnPartitionsAssigned`（含空分配） | 1 | JoinGroup/SyncGroup 成功、分配已下发 |
+| `OnPartitionsRevoked`（会话结束/再平衡/离组） | 0 | 会话结束，等待下一次分配 |
+| `OnPartitionsLost`（致命组错误） | 0 | 成员资格丢失，客户端会重新入组 |
+| `Consumer.Run` 返回（正常或意外） | 0 | 不再有消费组会话 |
+| 监督循环重建期间 / Runtime Shutdown | 0 | 直到新实例再次收到 `OnPartitionsAssigned` |
+
+日志：首次成功加入时输出一次结构化事件 `flashsale_consumer_joined`，字段为
+`consumer_group`、`topic`、`partitions`（分区数）、`event_time`，不含任何凭据或 broker 地址细节。
+每个客户端实例只输出一次，rebalance 不会重复刷「首次加入」。会话结束与成员资格丢失分别输出
+`flashsale_consumer_left_group`（Info，reason=revoked）与 `flashsale_consumer_group_lost`
+（Warning，reason=lost），便于区分「正常再平衡」与「被踢出组」。
+
+如何读这个指标：
+
+- **从未加入**：进程启动后指标一直为 0，且日志中没有 `flashsale_consumer_joined`
+  → 检查 Broker 可达性、Topic 是否存在、消费组鉴权；
+- **加入后退出**：指标 1 → 0，且出现 `flashsale_consumer_left_group` / `flashsale_consumer_group_lost`
+  → 检查 Broker 是否停机、是否有更严格的 `session.timeout`、是否有其他成员触发再平衡；
+- **退出后重新加入**：0 → 1，同时 `flashsale_consumer_restarts_total` 增加（意外退出才计数）。
+
+适用范围（重要）：该指标只适用于 `flash_sale.dispatch_mode=kafka`。
+`db_scanner` 模式没有 Kafka Consumer，**不导出该序列**（而不是导出 0），
+避免把「模式不适用」误读成「Consumer 未加入」。指标关闭（`FLASH_SALE_METRICS_ENABLED=false`）时
+`/metrics` 端点本身不暴露，观测调用为空操作，不会改写已有值。
+
+#### 10.12.3 Outbox 待发布积压：`flashsale_outbox_backlog_pending`
+
+类型：Gauge，无标签。取值 = `OutboxPublisher.Backlog()` 的 `Pending`，统计口径**复用现有 SQL**：
+
+```sql
+SELECT COUNT(*) FROM flash_sale_order_requests
+ WHERE status = 0            -- queued
+   AND published_at IS NULL  -- 尚未获得 Broker 确认
+```
+
+因此它包含：等待首次发布的记录、发布失败退避中（`next_publish_at` 在未来）的记录、
+被某个 Publisher 领取但尚未成功标记（`publish_lease_until` 未到期）的记录。
+它**不包含**已发布（`published_at` 非空）或已进入业务终态（`status != 0`）的记录。
+
+采样机制（不在 `/metrics` 抓取路径上查库）：
+
+- 由 `FlashSaleRuntime` 在 kafka 模式下启动独立采样循环，周期 5s（代码常量，不新增配置项），
+  单次查询预算 3s（小于周期，不会堆积并发查询）；
+- 使用现有 `OutboxPublisher.Backlog()`，不另写统计 SQL，保证指标口径与领取口径一致；
+- 查询失败只记录 `flashsale_outbox_backlog_sample_failed`，**保留上一次有效值**，
+  绝不会把积压伪造成 0；
+- 采样失败不影响订单、Outbox 发布与 Consumer（只读、独立 goroutine、独立预算）；
+- 采样循环纳入 Runtime 生命周期：`Shutdown` 第一段取消并等待它退出；
+- 指标关闭时不执行任何查询；`db_scanner` 模式不启动采样、不导出该序列。
+
+三个概念不要混淆：
+
+| 指标/工具 | 含义 |
+| --- | --- |
+| `flashsale_outbox_backlog_pending` | **MySQL 中还没有被 Kafka 确认**的待发布记录数（本仓库的发布侧积压） |
+| Kafka Consumer Lag（`kafka-consumer-groups.sh --describe`） | 已进入 Kafka、尚未被消费组消费的消息条数（消费侧积压） |
+| `published_at` 非空但请求仍 `queued` | 消息已发布、Consumer 尚未处理完（在途窗口，不是积压） |
+
+因此「backlog=0 且 Lag>0」是正常的：发布侧已清空，消费侧仍在追赶；
+「backlog>0 且 Lag=0」通常意味着 Broker 不可达或发布持续失败。
+
+### 10.13 Kafka 故障排查流程（T2-02）
+
+按顺序排查，避免只盯一个指标下结论：
+
+1. **看 Consumer joined**（`flashsale_consumer_joined`）：
+   0 且从未出现 `flashsale_consumer_joined` 日志 → 从未加入组（Broker/Topic/鉴权/配置问题）；
+   1 → 0 → 检查 `flashsale_consumer_left_group` / `flashsale_consumer_group_lost` 与 Broker 状态。
+2. **看 Outbox backlog**（`flashsale_outbox_backlog_pending`）：
+   持续上涨 → 发布侧没有进展；结合 `/metrics` 中 `flashsale_outbox_publish_failed_total{reason}`
+   区分 `kafka`（Broker 明确失败）/ `unknown`（结果未知）/ `encode`（历史数据不满足契约）。
+3. **检查 Kafka Broker**：容器健康、Broker API 可用、Topic 存在且分区正常（见第 11 节命令）。
+4. **检查 Consumer Group**：`kafka-consumer-groups.sh --describe --group <group>` 看成员与 Lag；
+   `UnknownMemberId` / `IllegalGeneration` 通常对应会话超时或被踢出组。
+5. **检查发布错误日志**：`flashsale_outbox_publish_failed`（含 request_id、错误原因）、
+   `flashsale_outbox_loop_backoff`（本轮无进展的退避）、`flashsale_outbox_mark_*`（标记未命中）。
+6. **恢复后验证积压收敛**：`flashsale_consumer_joined` 回到 1 → backlog 回落 → 请求
+   `status=success` 且 `published_at` 已写；必要时用 `kafka-consumer-groups.sh` 确认位移推进。
+
+必须牢记：**Kafka 故障期间不要重启进程来「修健康检查」**——`/health` 与 `/ready` 本来就应该
+是 200，重启只会让在途的 Outbox 领取租约到期、延长恢复时间。
+
 ## 11. 如何检查 Kafka 是否正常运行
+
+最快的两个进程内信号（语义与判读见 10.12，故障排查步骤见 10.13）：
+
+```bash
+# 只在 FLASH_SALE_METRICS_ENABLED=true 时存在 /metrics
+curl -s http://127.0.0.1:8000/metrics | grep -E 'flashsale_consumer_joined|flashsale_outbox_backlog_pending'
+# flashsale_consumer_joined 1            → 已加入消费组（0 见 10.12.2）
+# flashsale_outbox_backlog_pending 0     → 发布侧没有积压（>0 结合 10.12.3 判读）
+```
 
 ```bash
 # 1) 容器健康（healthy 才代表 Broker API 可用）
@@ -839,12 +994,16 @@ docker compose --profile kafka logs -f kafka
   Consumer 并发 Race 门禁；
 - B4：`serve` 启动装配与 `dispatch_mode` 二选一、Publisher 后台发布循环、Consumer 监督与
   有界重启、统一优雅关闭预算、Scanner 与 Kafka 严格互斥（启动层测试）、F-03 逐条结果语义、
-  F-04 NOWAIT 标记 + 预算、真实 MySQL/Redis/Kafka/HTTP 端到端门禁与故障注入。
+  F-04 NOWAIT 标记 + 预算、真实 MySQL/Redis/Kafka/HTTP 端到端门禁与故障注入；
+- T2-02：`/health`、`/ready` 语义冻结（Kafka 不参与健康判定）、
+  `flashsale_consumer_joined`（消费组成员资格）、`flashsale_outbox_backlog_pending`
+  （Outbox 待发布积压，后台有界采样）、真实 Kafka 停机故障注入（进程级 + 进程内）、
+  健康检查与异步状态指标文档（见 10.12 / 10.13）。
 
 未实现（后续阶段）：
 
 - Kubernetes/Helm 部署、多 Broker 生产集群、Kafka 多实例容量验证；
-- Consumer Lag 指标与消费堆积告警（需要消费组元数据 API，见 9.8）；
+- Consumer Lag 指标与消费堆积告警（需要消费组元数据 API，见 9.8/10.12.3）；
 - 分区暂停/恢复、消费端 seek 重试；
 - 运行中热切换模式（B4 明确要求通过重启生效）；
 - Schema Registry、Kafka 分区键重新设计。

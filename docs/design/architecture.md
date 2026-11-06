@@ -192,6 +192,8 @@ CNB CI（`.cnb.yml`）：
 ### 4.3 Prometheus
 
 - 指标仅覆盖秒杀域（`flashsale_*`：`flashsale_requests_total`、`flashsale_request_duration_seconds`），按 `interface/result` 低基数维度区分，用于 QPS / 成功率 / 拒绝率 / p95 / p99。
+- 异步链路状态指标（T2-02，无标签 Gauge，仅 `dispatch_mode=kafka` 导出）：`flashsale_consumer_joined`（是否已加入消费组，证据是 franz-go `OnPartitionsAssigned` 回调）、`flashsale_outbox_backlog_pending`（MySQL Outbox 中待发布的记录数，由进程内 5s 采样器写入，抓取路径不查库）。
+- 健康检查与 Kafka 解耦（T2-02 冻结）：`/health` 只表示进程存活，`/ready` 只判定 MySQL + Redis；Kafka 故障不摘流 HTTP，异步侧状态靠指标观测，详见 `docs/development/kafka.md` §10.12。
 - 默认关闭；`FLASH_SALE_METRICS_ENABLED=true`（`flash_sale.metrics.enabled`）时才暴露 `GET /metrics`（Prometheus 文本格式，位于统一 JSON 响应包装之外）。
 - 抓取目标为 Compose DNS 名 `app:8000`（不经 Nginx、不经宿主机端口）；`prometheus/prometheus.yml` 附带 p95/p99 recording rule（`promtool check rules` 校验）。Nginx 公共入口对 `/metrics` 返回 404。
 

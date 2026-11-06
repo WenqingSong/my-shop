@@ -16,7 +16,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"cnb.cool/go-cloud-devops/my-shop/internal/logic/flashsale"
+	"cnb.cool/go-cloud-devops/my-shop/internal/metrics"
 	"cnb.cool/go-cloud-devops/my-shop/internal/mq"
 	kafkamq "cnb.cool/go-cloud-devops/my-shop/internal/mq/kafka"
 )
@@ -46,10 +49,16 @@ type runtimeProbe struct {
 	consumerBehavior func(ctx context.Context, n int) error
 	// outboxBehavior 决定 PublishBatch 的行为（call 从 1 开始）。
 	outboxBehavior func(ctx context.Context, limit, call int) (flashsale.OutboxStats, error)
+	// outboxBacklogBehavior 决定 Backlog 的行为（call 从 1 开始）。
+	outboxBacklogBehavior func(ctx context.Context, call int) (flashsale.OutboxBacklog, error)
+	// backlogCalls 统计积压采样次数（用于证明采样受生命周期与开关控制）。
+	backlogCalls atomic.Int32
 	// consumerClientErr 非 nil 时，重建 Consumer 客户端直接失败。
 	consumerClientErr error
 	// outboxEntered 在每次进入 PublishBatch 时收到一次信号（非阻塞）。
 	outboxEntered chan struct{}
+	// backlogEntered 在每次进入 Backlog 时收到一次信号（非阻塞）。
+	backlogEntered chan struct{}
 	// consumerStarted 在每次进入 Run 时收到一次信号（非阻塞）。
 	consumerStarted chan struct{}
 	// events 按发生顺序记录组件生命周期事件，用于断言关闭顺序未改变。
@@ -74,6 +83,7 @@ func newRuntimeProbe() *runtimeProbe {
 	return &runtimeProbe{
 		scannerStarts:   map[string]int{},
 		outboxEntered:   make(chan struct{}, 32),
+		backlogEntered:  make(chan struct{}, 32),
 		consumerStarted: make(chan struct{}, 32),
 	}
 }
@@ -156,10 +166,26 @@ func (c *fakeConsumerClient) Close(context.Context) error {
 	return nil
 }
 
-// fakeOutbox 是可编程的发布循环替身。
+// fakeOutbox 是可编程的发布循环 + 积压采样替身。
 type fakeOutbox struct {
 	probe *runtimeProbe
 	calls atomic.Int32
+}
+
+// Backlog 模拟 OutboxPublisher.Backlog：行为由 probe 注入，默认返回零积压。
+func (o *fakeOutbox) Backlog(ctx context.Context) (flashsale.OutboxBacklog, error) {
+	call := int(o.probe.backlogCalls.Add(1))
+	select {
+	case o.probe.backlogEntered <- struct{}{}:
+	default:
+	}
+	o.probe.mu.Lock()
+	behavior := o.probe.outboxBacklogBehavior
+	o.probe.mu.Unlock()
+	if behavior != nil {
+		return behavior(ctx, call)
+	}
+	return flashsale.OutboxBacklog{}, nil
 }
 
 func (o *fakeOutbox) PublishBatch(ctx context.Context, limit int) (flashsale.OutboxStats, error) {
@@ -233,7 +259,7 @@ func newProbeDeps(cfg flashSaleRuntimeConfig, probe *runtimeProbe) flashSaleRunt
 			probe.consumerClients++
 			return &fakeConsumerClient{probe: probe}, nil
 		},
-		newOutbox: func(mq.Publisher, string, flashsale.OutboxOptions) (outboxRunner, error) {
+		newOutbox: func(mq.Publisher, string, flashsale.OutboxOptions) (outboxBackend, error) {
 			probe.mu.Lock()
 			probe.outboxesCreated++
 			probe.mu.Unlock()
@@ -260,9 +286,10 @@ func newProbeDeps(cfg flashSaleRuntimeConfig, probe *runtimeProbe) flashSaleRunt
 			probe.countScanner("consume")
 			waitCtx("consume")(ctx, wg)
 		},
-		consumerRestartBase:  10 * time.Millisecond,
-		consumerRestartMax:   40 * time.Millisecond,
-		consumerCloseTimeout: time.Second,
+		consumerRestartBase:   10 * time.Millisecond,
+		consumerRestartMax:    40 * time.Millisecond,
+		consumerCloseTimeout:  time.Second,
+		backlogSampleInterval: 10 * time.Millisecond,
 	}
 }
 
@@ -689,6 +716,154 @@ func TestLoadFlashSaleRuntimeConfigFromEnv(t *testing.T) {
 	}
 	if cfg.ShutdownTimeout != 45*time.Second {
 		t.Fatalf("shutdown_timeout 读取错误: %s", cfg.ShutdownTimeout)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T2-02-C：Outbox 积压采样
+// ---------------------------------------------------------------------------
+
+// T2-02 新增的两个无标签指标名。
+const (
+	backlogMetricName        = "flashsale_outbox_backlog_pending"
+	consumerJoinedMetricName = "flashsale_consumer_joined"
+)
+
+// unlabelledGauge 读取指定无标签 Gauge 的当前值；未被观测过（db_scanner 模式）时 ok=false。
+func unlabelledGauge(t *testing.T, name string) (value float64, ok bool) {
+	t.Helper()
+	families, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatalf("gather metrics: %v", err)
+	}
+	for _, fam := range families {
+		if fam.GetName() != name {
+			continue
+		}
+		for _, m := range fam.GetMetric() {
+			if m.GetGauge() != nil {
+				return m.GetGauge().GetValue(), true
+			}
+		}
+	}
+	return 0, false
+}
+
+// backlogGauge 读取 Outbox 积压指标当前值。
+func backlogGauge(t *testing.T) (value float64, ok bool) {
+	t.Helper()
+	return unlabelledGauge(t, backlogMetricName)
+}
+
+// consumerJoinedGauge 读取消费组成员资格指标当前值。
+func consumerJoinedGauge(t *testing.T) (value float64, ok bool) {
+	t.Helper()
+	return unlabelledGauge(t, consumerJoinedMetricName)
+}
+
+// TestFlashSaleRuntimeOutboxBacklogSampler 覆盖 T2-02-C 的采样语义：
+//   - kafka 模式由后台采样写入指标（不依赖 /metrics 抓取）；
+//   - 采样失败只记录日志，绝不把上一次有效积压覆盖为 0；
+//   - 采样失败不影响发布循环；
+//   - Shutdown 后采样循环真正退出，不再产生查询。
+func TestFlashSaleRuntimeOutboxBacklogSampler(t *testing.T) {
+	t.Setenv("FLASH_SALE_METRICS_ENABLED", "true")
+	probe := newRuntimeProbe()
+	var failing atomic.Bool
+	probe.outboxBacklogBehavior = func(context.Context, int) (flashsale.OutboxBacklog, error) {
+		if failing.Load() {
+			return flashsale.OutboxBacklog{}, errors.New("mysql: connection refused")
+		}
+		return flashsale.OutboxBacklog{Pending: 7}, nil
+	}
+
+	rt, err := startFlashSaleRuntime(context.Background(), newProbeDeps(testRuntimeConfig(flashSaleModeKafka, true), probe))
+	if err != nil {
+		t.Fatalf("kafka 模式启动失败: %v", err)
+	}
+
+	waitFor(t, 2*time.Second, "后台采样写入积压指标", func() bool {
+		v, ok := backlogGauge(t)
+		return ok && v == 7
+	})
+
+	// 采样失败：指标必须保持 7，且采样仍在继续尝试（不是停摆）。
+	failing.Store(true)
+	before := probe.backlogCalls.Load()
+	waitFor(t, 2*time.Second, "采样失败后仍有新的采样尝试", func() bool {
+		return probe.backlogCalls.Load() >= before+3
+	})
+	if v, ok := backlogGauge(t); !ok || v != 7 {
+		t.Fatalf("采样失败后积压指标=(%v,%v)，必须保留上一次有效值 7", v, ok)
+	}
+	// 采样失败不得影响发布循环。
+	published := probe.outboxEntered
+	waitFor(t, 2*time.Second, "发布循环不受采样失败影响", func() bool {
+		select {
+		case <-published:
+			return true
+		default:
+			return false
+		}
+	})
+
+	if err := rt.Shutdown(); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	stopped := probe.backlogCalls.Load()
+	time.Sleep(50 * time.Millisecond)
+	if after := probe.backlogCalls.Load(); after != stopped {
+		t.Fatalf("Shutdown 后仍在采样：%d → %d（采样循环未纳入生命周期）", stopped, after)
+	}
+}
+
+// TestFlashSaleRuntimeDBScannerModeSkipsBacklogSampling 覆盖 T2-02 的适用范围：
+// db_scanner 模式没有 Kafka Consumer / Outbox Publisher，因此
+//   - 不得产生任何积压查询；
+//   - 不得把消费组指标写成 0（那会被误读成「Consumer 未加入」的 Kafka 故障）。
+func TestFlashSaleRuntimeDBScannerModeSkipsBacklogSampling(t *testing.T) {
+	t.Setenv("FLASH_SALE_METRICS_ENABLED", "true")
+	// 模拟「同一进程此前运行过 kafka 模式」：指标为 1，db_scanner 启动不得覆盖它。
+	metrics.MarkConsumerJoined(context.Background(), true)
+	before, okBefore := consumerJoinedGauge(t)
+	if !okBefore || before != 1 {
+		t.Fatalf("前置条件失败：消费组指标=(%v,%v) want (true,1)", before, okBefore)
+	}
+
+	probe := newRuntimeProbe()
+	cfg := testRuntimeConfig(flashSaleModeDBScanner, false)
+	cfg.Kafka = kafkamq.Config{Enabled: false}
+
+	rt, err := startFlashSaleRuntime(context.Background(), newProbeDeps(cfg, probe))
+	if err != nil {
+		t.Fatalf("db_scanner 启动失败: %v", err)
+	}
+	defer func() { _ = rt.Shutdown() }()
+
+	time.Sleep(50 * time.Millisecond)
+	if calls := probe.backlogCalls.Load(); calls != 0 {
+		t.Fatalf("db_scanner 模式不得查询 Outbox 积压，实际 %d 次", calls)
+	}
+	if after, okAfter := consumerJoinedGauge(t); !okAfter || after != 1 {
+		t.Fatalf("db_scanner 模式不得改写消费组指标：(%v,%v) want (true,1)", after, okAfter)
+	}
+}
+
+// TestFlashSaleRuntimeBacklogSamplingDisabledWithMetrics 覆盖 FLASH_SALE_METRICS_ENABLED 语义：
+// 指标关闭时采样器不得产生任何 DB 查询（节省负载，且不会写入关闭的指标）。
+func TestFlashSaleRuntimeBacklogSamplingDisabledWithMetrics(t *testing.T) {
+	t.Setenv("FLASH_SALE_METRICS_ENABLED", "false")
+	probe := newRuntimeProbe()
+
+	rt, err := startFlashSaleRuntime(context.Background(), newProbeDeps(testRuntimeConfig(flashSaleModeKafka, true), probe))
+	if err != nil {
+		t.Fatalf("kafka 模式启动失败: %v", err)
+	}
+	defer func() { _ = rt.Shutdown() }()
+
+	time.Sleep(60 * time.Millisecond)
+	if calls := probe.backlogCalls.Load(); calls != 0 {
+		t.Fatalf("指标关闭时不得执行积压查询，实际 %d 次", calls)
 	}
 }
 

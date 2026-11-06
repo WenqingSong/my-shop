@@ -10,6 +10,8 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kgo"
 
+	"cnb.cool/go-cloud-devops/my-shop/internal/logx"
+	"cnb.cool/go-cloud-devops/my-shop/internal/metrics"
 	"cnb.cool/go-cloud-devops/my-shop/internal/mq"
 )
 
@@ -46,6 +48,18 @@ const (
 type Consumer struct {
 	cl *kgo.Client
 
+	// group / topic 只用于结构化日志与指标诊断，不含任何凭据。
+	group string
+	topic string
+
+	// joined 记录「当前是否处于已加入消费组的会话中」，来源是 franz-go 的分区回调
+	// （OnPartitionsAssigned / OnPartitionsRevoked / OnPartitionsLost），
+	// 不是 NewConsumer 成功或 Run 已启动这类弱证据。
+	joined atomic.Bool
+	// joinLogged 保证「首次成功加入」日志每个客户端实例只输出一次：
+	// rebalance 会反复 revoke/assign，但首次加入是排障锚点，不需要每次重复。
+	joinLogged atomic.Bool
+
 	// closed 供 Poll/Commit 无锁快速判断生命周期；closeMu 只保证 Close 的幂等执行。
 	closed  atomic.Bool
 	closeMu sync.Mutex
@@ -61,6 +75,10 @@ var _ mq.Consumer = (*Consumer)(nil)
 // 构造阶段只校验配置并创建客户端，不连接 Broker、不加入消费组：
 // 首次 Poll 才会触发组协调与分区分配。因此 Kafka 暂时不可用不会阻塞启动，
 // 但也不要在构造后假设「消费已就绪」——就绪性需要由调用方通过 Poll 错误观察。
+//
+// 加入消费组的可靠证据是 franz-go 的 OnPartitionsAssigned 回调（JoinGroup/SyncGroup
+// 成功后、分区分配下发时触发），本类型据此维护 joined 状态并驱动
+// flashsale_consumer_joined 指标，不把「构造成功 / Run 已启动」当作加入证据。
 func NewConsumer(cfg Config) (*Consumer, error) {
 	if !cfg.Enabled {
 		return nil, disabledError("Consumer")
@@ -68,6 +86,7 @@ func NewConsumer(cfg Config) (*Consumer, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("初始化 Kafka Consumer: %w", err)
 	}
+	c := &Consumer{group: cfg.ConsumerGroup, topic: cfg.Topic}
 	cl, err := kgo.NewClient(
 		kgo.SeedBrokers(cfg.Brokers...),
 		kgo.ClientID(consumerClientID),
@@ -79,11 +98,90 @@ func NewConsumer(cfg Config) (*Consumer, error) {
 		kgo.BlockRebalanceOnPoll(),
 		kgo.SessionTimeout(consumerSessionTimeout),
 		kgo.HeartbeatInterval(consumerHeartbeatInterval),
+		// 消费组生命周期回调：只做状态维护、指标与日志，绝不阻塞回调
+		// （franz-go 要求回调快，否则会拖长 rebalance 窗口）。
+		kgo.OnPartitionsAssigned(c.onPartitionsAssigned),
+		kgo.OnPartitionsRevoked(c.onPartitionsRevoked),
+		kgo.OnPartitionsLost(c.onPartitionsLost),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("初始化 Kafka Consumer（brokers=%v, group=%q）: %w", cfg.Brokers, cfg.ConsumerGroup, err)
 	}
-	return &Consumer{cl: cl}, nil
+	c.cl = cl
+	// 初始化即「未加入消费组」：构造成功只说明客户端对象存在。
+	// 用 Background ctx 而非请求 ctx：这是组件级状态，不属于某一次调用。
+	metrics.MarkConsumerJoined(context.Background(), false)
+	return c, nil
+}
+
+// onPartitionsAssigned 是 franz-go 在「已加入消费组且分区分配完成」后触发的回调。
+//
+// franz-go v1.18.1 源码依据（pkg/kgo/consumer_group.go）：
+//   - assign() 的注释明确说明："We always call on assigned, even if nothing new is
+//     assigned." —— 空分区分配同样会回调，因此不能用「分区数为 0」推断未加入；
+//   - 该回调只在 joinAndSync 成功后的 setupAssignedAndHeartbeat 中被调用，
+//     是本适配器能拿到的最强「成员资格已建立」证据。
+//
+// 首次成功加入输出一次结构化日志 flashsale_consumer_joined（每个客户端实例一次），
+// 避免每次 rebalance 都重复输出；后续 rebalance 的状态变化由指标表达。
+func (c *Consumer) onPartitionsAssigned(ctx context.Context, _ *kgo.Client, assigned map[string][]int32) {
+	joinedBefore := c.joined.Swap(true)
+	metrics.MarkConsumerJoined(ctx, true)
+	if joinedBefore {
+		return
+	}
+	if !c.joinLogged.CompareAndSwap(false, true) {
+		return
+	}
+	logx.Info(ctx, "flashsale_consumer_joined", "Kafka Consumer 已加入消费组", logx.Fields{
+		"consumer_group": c.group,
+		"topic":          c.topic,
+		"partitions":     countPartitions(assigned),
+		"event_time":     time.Now().Format(time.RFC3339Nano),
+	})
+}
+
+// onPartitionsRevoked 在组会话结束（再平衡开始、主动离组）时触发。
+//
+// franz-go 语义：eager 消费者在每次会话结束时都可能收到该回调；cooperative 消费者
+// 即使没有任何分区丢失，也会在会话结束时收到（"calling onRevoke at the end of a
+// session even though no partitions were lost"）。因此语义是「当前会话已结束、
+// 尚未重新加入」，指标置 0，等待下一次 onPartitionsAssigned 再置 1。
+func (c *Consumer) onPartitionsRevoked(ctx context.Context, _ *kgo.Client, revoked map[string][]int32) {
+	if c.joined.Swap(false) {
+		logx.Info(ctx, "flashsale_consumer_left_group", "Kafka Consumer 已结束消费组会话，等待重新加入", logx.Fields{
+			"consumer_group": c.group,
+			"topic":          c.topic,
+			"reason":         "revoked",
+			"partitions":     countPartitions(revoked),
+		})
+	}
+	metrics.MarkConsumerJoined(ctx, false)
+}
+
+// onPartitionsLost 在致命组错误（IllegalGeneration / UnknownMemberID / 鉴权失败）时触发。
+//
+// franz-go 明确说明该回调**可能在从未成功加入消费组时**触发，因此这里只把状态置 0，
+// 不输出「首次加入」日志；日志用独立事件名区分「成员资格丢失」与「正常离组」。
+func (c *Consumer) onPartitionsLost(ctx context.Context, _ *kgo.Client, lost map[string][]int32) {
+	if c.joined.Swap(false) {
+		logx.Warning(ctx, "flashsale_consumer_group_lost", "Kafka Consumer 失去消费组成员资格", logx.Fields{
+			"consumer_group": c.group,
+			"topic":          c.topic,
+			"reason":         "lost",
+			"partitions":     countPartitions(lost),
+		})
+	}
+	metrics.MarkConsumerJoined(ctx, false)
+}
+
+// countPartitions 统计分配/撤销/丢失事件涉及的分区数（低基数，仅用于日志）。
+func countPartitions(assignment map[string][]int32) int {
+	total := 0
+	for _, partitions := range assignment {
+		total += len(partitions)
+	}
+	return total
 }
 
 // Poll 拉取至多 maxMessages 条消息（maxMessages<=0 时使用 defaultPollRecords）。
@@ -225,6 +323,9 @@ func (c *Consumer) Close(ctx context.Context) error {
 		return c.closeErr
 	}
 	c.closed.Store(true)
+	// 客户端即将离组：成员资格立即失效（后续 revoke 回调是幂等的重复置 0）。
+	c.joined.Store(false)
+	metrics.MarkConsumerJoined(ctx, false)
 
 	// 先 AllowRebalance 再离组：BlockRebalanceOnPoll 下若有未处理完的 Poll 批次，
 	// 直接离组会在等待分区回收时挂住；关闭流程本身不会再提交位移，放弃批次所有权是安全的。

@@ -22,6 +22,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/auth"
 	"cnb.cool/go-cloud-devops/my-shop/internal/boot"
 	"cnb.cool/go-cloud-devops/my-shop/internal/cmd"
+	healthController "cnb.cool/go-cloud-devops/my-shop/internal/controller/health"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
 	// 触发各 logic 包的 init()，注册 service.Iam / service.Admin。
@@ -119,6 +120,8 @@ func setupIsolationServer(t *testing.T) string {
 	s.SetAddr(":0")
 	s.Group("/", func(group *ghttp.RouterGroup) {
 		group.Middleware(middleware.Response)
+		// 与生产 serve 同款健康检查路由：/health（liveness）与 /ready（MySQL+Redis）。
+		group.Bind(healthController.NewV1())
 		cmd.RegisterFrontendRoutes(group)
 		cmd.RegisterAdminRoutes(group)
 	})
