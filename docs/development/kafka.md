@@ -3,8 +3,10 @@
 本文面向本地开发与后续批次实现者，说明 SurgeCart 引入 Kafka 的职责边界、配置方式、
 本地 KRaft 环境、Producer/Consumer 使用方式，以及各批次的功能边界。
 
-> **当前状态（B4）**：Kafka 基础设施与消息契约（B1）、Request Outbox 发布器（B2/B2.1）、
-> 业务 Consumer 核心（B3）与 **serve 集成/生命周期闭环（B4，见第 10 节）** 均已完成并有测试覆盖。
+> **当前状态（B4.1）**：Kafka 基础设施与消息契约（B1）、Request Outbox 发布器（B2/B2.1）、
+> 业务 Consumer 核心（B3）与 **serve 集成/生命周期闭环（B4，见第 10 节）** 均已完成并有测试覆盖；
+> **B4.1 已补齐真实 serve 进程级验收**（操作系统 SIGTERM、在途请求收敛、关闭顺序与数据一致性，
+> 见 10.11）。
 > **默认仍是 `dispatch_mode=db_scanner`**（只运行 MySQL 扫描器，不需要 Kafka）。
 > 启用 Kafka 需要同时设置 `dispatch_mode=kafka` 与 `kafka.enabled=true`，并按第 5 节显式创建 Topic；
 > 两种模式严格互斥，切换需重启进程。单节点 KRaft 只用于本地联调，不代表生产高可用。
@@ -640,6 +642,17 @@ Consumer 在独立 goroutine 中运行 `RequestedEventConsumer.Run`：
 不会因单个组件挂起而永久阻塞其他资源释放。未提交的 MySQL 事务由数据库回滚；
 未提交的 Kafka Offset 会在重启后重投。
 
+每一步都会输出带 `elapsed_ms` / `timed_out` 的结构化事件（`flashsale_runtime_shutdown_begin` →
+`flashsale_publisher_stopped` → `flashsale_consumer_stopped` → `flashsale_producer_closed` →
+`flashsale_scanners_stopped` → `flashsale_runtime_shutdown_complete`），`serve` 在 HTTP drain
+结束后输出 `http_server_stopped`；这些事件是进程级关闭时序的可观测证据。
+
+**B4.1 修复：信号 ctx 不得作为 runtime 的父 ctx。** 原实现把 `signal.NotifyContext` 的 ctx
+传给 `StartFlashSaleRuntime`，SIGTERM 会在信号到达瞬间同时取消 Publisher / Consumer / Scanner，
+绕过上面的关闭顺序，并让正在进行的 `PublishBatch` 被就地中断（已领取记录只能等租约到期后重发）。
+现在运行期使用 `context.WithoutCancel` 派生 ctx，关闭顺序只由 `Shutdown()` 编排；
+HTTP drain 期间 Publisher/Consumer 仍在工作，drain 结束后再按序停止。
+
 **BlockRebalanceOnPoll 的关闭语义**：Consumer 客户端 `Close` 先 `AllowRebalance` 再离组，
 避免未处理完的 Poll 批次阻塞分区回收；`Run` 在批次处理完（含异常路径）通过 `defer AllowRebalance`
 释放阻塞。B4 还修复了一个关键泄漏：`Poll` 返回错误/空批次时低层适配器必须自行
@@ -724,7 +737,30 @@ MySQL Outbox → Kafka → Consumer → 订单 → Offset）、模式切换、Pu
 Kafka/MySQL 停机恢复、Publisher 与 Consumer 同时运行时的关闭。
 设置 `B4_E2E_FAULTS=0` 可跳过 stop/start 容器的故障注入；`B4_E2E_RUN='^TestName$'` 可单用例调试。
 
-### 10.10 单节点局限
+### 10.10 B4.1 进程级 serve 生命周期门禁
+
+```bash
+make test-serve-lifecycle    # = bash scripts/test-serve-lifecycle.sh
+```
+
+该门禁启动**真实编译产物**（`test/serveproc`，与生产 `main.go` 同一命令装配），而不是在
+测试进程内调用 `runtime.Shutdown()`：
+
+1. 专用 MySQL 库（`my_shop_serve_lifecycle`）、专用 Redis DB（默认 7）、唯一 Topic/DLQ/Group；
+2. 真实 `serve`：`boot.Bootstrap` → 七牛启动校验 → `StartFlashSaleRuntime` → HTTP 监听 → `/health`；
+3. 预热一条秒杀请求，证明 Publisher/Consumer 已真实工作；
+4. 持续提交秒杀请求后，向应用 PID 发送操作系统 SIGTERM；
+5. 断言退出码 0、未被信号杀死、关闭事件顺序、`within_budget=true`、无组件 `timed_out`；
+6. 同配置重启，等待全部已受理请求收敛，核对订单数 / `sold` / 重复订单 / Kafka 消息 /
+   Consumer Offset 已提交。
+
+**七牛校验的处理**：测试环境没有真实七牛凭据，SDK 也不支持仅靠配置改 UC endpoint，因此
+测试专用入口在 `serve_lifecycle` 构建标签下把 `storage.SetUcHosts` 指向本地 HTTPS Mock
+（`mock` 只返回 UC/bucketInfo 协议响应）。生产二进制不包含这段代码，`upload.ValidateConfig`
+的结构校验、必填校验、签名与 `GetBucketInfo` 调用全部保留；不存在 `skip_qiniu_validation`
+一类开关。真实七牛外网 endpoint 的校验在本环境标记为 NOT_VERIFIED。
+
+### 10.11 单节点局限
 
 Compose 中的 Kafka 是单节点 KRaft（RF=1）。它只能验证「Broker 短时不可用后恢复」，
 **不能**证明 Broker 永久故障下的数据不丢失、副本切换或高可用；这些需要 3 Broker / RF=3 /

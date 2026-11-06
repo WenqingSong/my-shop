@@ -3,9 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os/signal"
 	"strconv"
-	"syscall"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -125,16 +123,22 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 		return err
 	}
 
-	// 优雅关闭根 ctx：SIGINT/SIGTERM 触发取消，驱动秒杀后台组件停止领取新任务、
-	// 在途单事务回滚或完成。HTTP 侧优雅 drain 仍由 GoFrame s.Run() 负责
-	// （其处理同一批信号），两者并存由 Go 标准库多 channel 接收保证。
-	signalCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
+	// 秒杀后台组件不得直接继承信号 ctx（B4.1）：
+	// 若父 ctx 由 signal.NotifyContext 派生，SIGTERM 会在信号到达瞬间同时取消
+	// Publisher / Consumer / Scanner，绕过 runtime.Shutdown 的「Publisher → Consumer →
+	// Producer → Scanner」顺序编排，并让正在进行的 PublishBatch 被就地中断
+	// （已领取的 Outbox 记录只能等租约到期后重发）。
+	// 因此运行期使用脱离取消信号的 ctx，由 HTTP Server 完成优雅 drain 后、serve 返回时
+	// 统一调用 runtime.Shutdown 编排关闭顺序。启动阶段收到 SIGTERM 仍由默认信号语义
+	// 立即终止进程（GoFrame 的 HTTP 信号处理器在 s.Run 内注册，覆盖运行期）。
+	//
+	// WithoutCancel 保留 ctx 中的值（如链路标识），只剥离取消传播。
+	runtimeCtx := context.WithoutCancel(ctx)
 
 	// 秒杀链路装配：dispatch_mode 决定唯一消费入口（db_scanner 或 kafka），
 	// 两者严格互斥。Kafka 模式下 Producer / Outbox Publisher / Consumer 在此真正启动；
 	// 配置矛盾或 Kafka 配置非法会 fail-fast，不带着「无消费者」状态对外提供服务。
-	runtime, err := worker.StartFlashSaleRuntime(signalCtx)
+	runtime, err := worker.StartFlashSaleRuntime(runtimeCtx)
 	if err != nil {
 		return err
 	}
@@ -170,6 +174,8 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 	})
 	s.Run()
 	// s.Run() 返回后（HTTP 已完成优雅 drain），由 defer 中的 runtime.Shutdown 停止后台组件并收尾。
+	// 该日志是进程级关闭时序的显式证据：它必须早于 runtime 的关闭步骤日志。
+	logx.Info(ctx, "http_server_stopped", "HTTP Server 已退出（优雅 drain 结束），开始关闭秒杀后台组件", nil)
 	return nil
 }
 

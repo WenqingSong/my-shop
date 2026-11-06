@@ -272,6 +272,9 @@ func (r *FlashSaleRuntime) startKafka(ctx context.Context, deps flashSaleRuntime
 	r.publisherWG.Add(1)
 	go func() {
 		defer r.publisherWG.Done()
+		// 退出时刻是关闭时序的权威证据：它必须发生在 HTTP drain 之后，
+		// 证明 Publisher 不是被信号父 ctx 提前并发取消的。
+		defer logx.Info(context.Background(), "flashsale_publisher_loop_exited", "秒杀 Outbox 发布循环已退出", nil)
 		r.runOutboxPublisher(pubCtx, outbox)
 	}()
 
@@ -281,6 +284,7 @@ func (r *FlashSaleRuntime) startKafka(ctx context.Context, deps flashSaleRuntime
 	r.consumerWG.Add(1)
 	go func() {
 		defer r.consumerWG.Done()
+		defer logx.Info(context.Background(), "flashsale_consumer_supervisor_exited", "秒杀 Kafka Consumer 监督循环已退出", nil)
 		r.superviseConsumer(consCtx, deps, consumer, client)
 	}()
 
@@ -456,21 +460,36 @@ func (r *FlashSaleRuntime) Shutdown() error {
 }
 
 func (r *FlashSaleRuntime) shutdown() error {
-	deadline := time.Now().Add(r.shutdownTimeout)
+	started := time.Now()
+	deadline := started.Add(r.shutdownTimeout)
 	var errs []error
+	logx.Info(context.Background(), "flashsale_runtime_shutdown_begin", "开始关闭秒杀后台组件", logx.Fields{
+		"mode":   r.mode,
+		"budget": r.shutdownTimeout.String(),
+	})
 
 	if r.publisherCancel != nil {
 		r.publisherCancel()
-		if !waitGroupUntil(&r.publisherWG, deadline) {
+		stopped := waitGroupUntil(&r.publisherWG, deadline)
+		if !stopped {
 			errs = append(errs, r.shutdownTimeoutError("Outbox Publisher"))
 		}
+		logx.Info(context.Background(), "flashsale_publisher_stopped", "秒杀 Outbox Publisher 已停止（当前 PublishBatch 已返回）", logx.Fields{
+			"elapsed_ms": time.Since(started).Milliseconds(),
+			"timed_out":  !stopped,
+		})
 	}
 
 	if r.consumerCancel != nil {
 		r.consumerCancel()
-		if !waitGroupUntil(&r.consumerWG, deadline) {
+		stopped := waitGroupUntil(&r.consumerWG, deadline)
+		if !stopped {
 			errs = append(errs, r.shutdownTimeoutError("Kafka Consumer"))
 		}
+		logx.Info(context.Background(), "flashsale_consumer_stopped", "秒杀 Kafka Consumer 已停止（Run 返回且客户端已关闭）", logx.Fields{
+			"elapsed_ms": time.Since(started).Milliseconds(),
+			"timed_out":  !stopped,
+		})
 	}
 
 	// Producer 最后关闭：Consumer 的死信投递依赖它；此时消费循环已停止，不会再有新 Publish。
@@ -483,17 +502,41 @@ func (r *FlashSaleRuntime) shutdown() error {
 		if closeErr != nil {
 			errs = append(errs, fmt.Errorf("关闭 Kafka Producer: %w", closeErr))
 		}
+		logx.Info(context.Background(), "flashsale_producer_closed", "秒杀 Kafka Producer 已 Flush 并关闭", logx.Fields{
+			"elapsed_ms": time.Since(started).Milliseconds(),
+			"error":      errorText(closeErr),
+		})
 	}
 
 	r.baseCancel()
-	if !waitGroupUntil(&r.scannerWG, deadline) {
+	stopped := waitGroupUntil(&r.scannerWG, deadline)
+	if !stopped {
 		errs = append(errs, r.shutdownTimeoutError("后台扫描器"))
 	}
+	logx.Info(context.Background(), "flashsale_scanners_stopped", "秒杀后台扫描器已停止", logx.Fields{
+		"elapsed_ms": time.Since(started).Milliseconds(),
+		"timed_out":  !stopped,
+	})
 
+	err := error(nil)
 	if len(errs) > 0 {
-		return errors.Join(errs...)
+		err = errors.Join(errs...)
 	}
-	return nil
+	logx.Info(context.Background(), "flashsale_runtime_shutdown_complete", "秒杀后台组件关闭流程结束", logx.Fields{
+		"elapsed_ms":    time.Since(started).Milliseconds(),
+		"within_budget": time.Since(started) <= r.shutdownTimeout,
+		"errors":        len(errs),
+		"error":         errorText(err),
+	})
+	return err
+}
+
+// errorText 返回可写入结构化日志的错误文本（nil 时为空串）。
+func errorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // closeProducer 用于启动失败路径：尽力关闭已创建的 Producer，同样受关闭预算约束。
