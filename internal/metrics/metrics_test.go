@@ -243,6 +243,74 @@ func TestHistogramBucketsCoverRepresentativeDurations(t *testing.T) {
 	}
 }
 
+// TestObserveOutboxMetrics 覆盖 B2 Outbox 指标：
+// 领取/发布/失败/重试/租约回收/标记跳过/耗时均可观测，且标签只有固定的低基数枚举，
+// 绝不把 user_id/request_id/activity_id 变成 Prometheus Label。
+func TestObserveOutboxMetrics(t *testing.T) {
+	t.Setenv("FLASH_SALE_METRICS_ENABLED", "true")
+	ctx := context.Background()
+
+	const (
+		metricClaimed   = "flashsale_outbox_claimed_total"
+		metricReclaimed = "flashsale_outbox_lease_reclaimed_total"
+		metricPublished = "flashsale_outbox_published_total"
+		metricFailed    = "flashsale_outbox_publish_failed_total"
+		metricRetried   = "flashsale_outbox_retried_total"
+		metricSkipped   = "flashsale_outbox_mark_skipped_total"
+		metricDuration  = "flashsale_outbox_publish_round_duration_seconds"
+	)
+
+	claimedBefore := counterValue(t, metricClaimed, nil)
+	reclaimedBefore := counterValue(t, metricReclaimed, nil)
+	publishedBefore := counterValue(t, metricPublished, nil)
+	retriedBefore := counterValue(t, metricRetried, nil)
+
+	ObserveOutboxClaim(ctx, 3, 1)
+	ObserveOutboxPublished(ctx)
+	ObserveOutboxPublished(ctx)
+	ObserveOutboxRetried(ctx)
+	ObserveOutboxFailed(ctx, OutboxFailureKafka)
+	ObserveOutboxMarkSkipped(ctx, OutboxMarkLeaseLost)
+	ObserveOutboxPublishDuration(ctx, 25*time.Millisecond)
+
+	if delta := counterValue(t, metricClaimed, nil) - claimedBefore; delta != 3 {
+		t.Fatalf("claimed delta=%v want 3", delta)
+	}
+	if delta := counterValue(t, metricReclaimed, nil) - reclaimedBefore; delta != 1 {
+		t.Fatalf("lease reclaimed delta=%v want 1", delta)
+	}
+	if delta := counterValue(t, metricPublished, nil) - publishedBefore; delta != 2 {
+		t.Fatalf("published delta=%v want 2", delta)
+	}
+	if delta := counterValue(t, metricRetried, nil) - retriedBefore; delta != 1 {
+		t.Fatalf("retried delta=%v want 1", delta)
+	}
+	if counterValue(t, metricFailed, map[string]string{"reason": OutboxFailureKafka}) == 0 {
+		t.Fatalf("publish failure metric not observed for reason=%s", OutboxFailureKafka)
+	}
+	if counterValue(t, metricSkipped, map[string]string{"reason": OutboxMarkLeaseLost}) == 0 {
+		t.Fatalf("mark skipped metric not observed for reason=%s", OutboxMarkLeaseLost)
+	}
+	if histogramOf(t, metricDuration, nil) == nil {
+		t.Fatalf("outbox publish duration histogram not observed")
+	}
+
+	// 标签只允许固定枚举（reason），不得出现业务 ID。
+	for _, name := range []string{metricFailed, metricSkipped} {
+		fam := gatherFamily(t, name)
+		if fam == nil {
+			t.Fatalf("metric %s not found", name)
+		}
+		for _, m := range fam.GetMetric() {
+			for k := range labelsOf(m) {
+				if k != "reason" {
+					t.Fatalf("metric %s has unexpected label %q (want only reason)", name, k)
+				}
+			}
+		}
+	}
+}
+
 // TestObserveDisabledIsNoOp 覆盖失败语义：指标关闭时 Observe 为空操作，不产生观测。
 func TestObserveDisabledIsNoOp(t *testing.T) {
 	t.Setenv("FLASH_SALE_METRICS_ENABLED", "false")

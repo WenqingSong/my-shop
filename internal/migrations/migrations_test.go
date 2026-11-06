@@ -13,8 +13,8 @@ import (
 // baselineVersion 是内嵌 baseline 迁移的版本号（14 位时间戳）。
 const baselineVersion = uint(20261001000001)
 
-// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + … + coupon + order_coupon_amounts + legacy_id_map）。
-const latestMigrationVersion = uint(20261001000023)
+// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + … + legacy_id_map + flash_sale_request_outbox）。
+const latestMigrationVersion = uint(20261001000024)
 
 // businessTables 是 migration 应建立的 37 张业务表。
 // 注意顺序：order_items 通过外键引用 orders（ON DELETE CASCADE），故 order_items 排在 orders 之前；
@@ -732,6 +732,15 @@ var expectedSchema = []tableSpec{
 			{Name: "next_attempt_at", Type: "datetime", Nullable: true},
 			{Name: "last_error_code", Type: "int", Nullable: true},
 			{Name: "flash_order_id", Type: "bigint unsigned", Nullable: true},
+			// B2 Request Outbox：发布状态与领取租约（idx_dequeue / uk_request_idempotency 保持不变）。
+			{Name: "published_at", Type: "datetime(6)", Nullable: true},
+			{Name: "publish_claim_token", Type: "varchar(64)", Nullable: true},
+			{Name: "publish_lease_until", Type: "datetime(6)", Nullable: true},
+			{Name: "publish_attempts", Type: "int unsigned", Default: strPtr("0")},
+			{Name: "next_publish_at", Type: "datetime(6)", Nullable: true},
+			{Name: "last_publish_error", Type: "varchar(255)", Nullable: true},
+			{Name: "published_partition", Type: "int", Nullable: true},
+			{Name: "published_offset", Type: "bigint", Nullable: true},
 			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
 			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
 		},
@@ -739,6 +748,7 @@ var expectedSchema = []tableSpec{
 			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
 			{Name: "uk_request_idempotency", Unique: true, Columns: []string{"user_id", "idempotency_key"}},
 			{Name: "idx_dequeue", Unique: false, Columns: []string{"status", "next_attempt_at", "id"}},
+			{Name: "idx_outbox_claim", Unique: false, Columns: []string{"status", "published_at", "next_publish_at", "id"}},
 		},
 	},
 	{

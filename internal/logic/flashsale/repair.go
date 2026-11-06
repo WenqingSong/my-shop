@@ -38,6 +38,12 @@ type requestAuditRow struct {
 
 // RepairRequest 人工修复异常请求（仅 dead→queued）：条件更新 WHERE status=dead 保证并发下仅迁移一次，
 // 与审计记录同事务写入 flash_sale_request_audits（append-only）。调用前已由 RequirePermission("flash_sale:repair") 授权。
+//
+// B2 适配：同一次条件更新内同步重置发布状态（published_at / claim token / 租约 / next_publish_at /
+// 发布尝试次数），使修复后的请求立即重新符合 Outbox 的领取条件（status=queued、未发布、无租约、无退避）。
+// 重置 token 是关键：旧 Publisher 若持有修复前的租约，其迟到标记会因 token 不匹配而落空，
+// 不会污染修复后这一代租约；旧消息与修复后重新发布的新消息可能同时存在，
+// 消费方必须按 event_id（由 request_id 稳定推导）做业务幂等，而不是假设同一 request_id 只出现一次。
 func (s *sFlashSale) RepairRequest(ctx context.Context, adminID int64, req *v1.RepairRequestReq) (*v1.RepairRequestRes, error) {
 	if req.Id <= 0 {
 		return nil, codes.New(codes.CodeInvalidArgument)
@@ -84,6 +90,17 @@ func (s *sFlashSale) RepairRequest(ctx context.Context, adminID int64, req *v1.R
 				"retry_count":     0,
 				"next_attempt_at": nil,
 				"last_error_code": nil,
+				// B2 发布状态重置：让修复后的请求重新成为「未发布、无租约、无退避」的待发布记录。
+				// published_at 必须清空：dead 之前可能已经发布过事件，修复后需要重新投递一次，
+				// 否则 Kafka 模式下的消费者永远收不到这次重排队请求。
+				"published_at":        nil,
+				"publish_claim_token": nil,
+				"publish_lease_until": nil,
+				"next_publish_at":     nil,
+				"publish_attempts":    0,
+				"last_publish_error":  nil,
+				"published_partition": nil,
+				"published_offset":    nil,
 			}).Update()
 		if e != nil {
 			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("修复秒杀请求状态: %w", e))
