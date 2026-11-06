@@ -11,7 +11,7 @@ PLANNING
 
 | # | 步骤 | 负责角色 | 状态 | 证据 |
 | --- | --- | --- | --- | --- |
-| 1 | 撤销 V2 初始化、建立正式任务记录与 `task/surgecart-baseline-audit` 分支 | TASK-BUILDER | DONE | commit 见 `handoff.md` |
+| 1 | 撤销 V2 初始化、建立正式任务记录与 `task/surgecart-baseline-audit` 分支 | TASK-BUILDER | DONE | commit `e2949d1278f94a4851cd750f99c7b47e38f5b3a9` |
 | 2 | 版本锚定：复核 HEAD、工作区与基线，写入 D1 首页 | 待 Lead 指派 | PENDING | — |
 | 3 | 测绘调用链与源码入口地图（D1） | 待 Lead 指派 | PENDING | — |
 | 4 | 梳理数据层定位清单与不变量（D2） | 待 Lead 指派 | PENDING | — |
