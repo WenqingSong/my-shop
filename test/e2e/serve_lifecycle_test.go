@@ -16,6 +16,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"cnb.cool/go-cloud-devops/my-shop/internal/termination"
 )
 
 const (
@@ -24,10 +26,14 @@ const (
 	// 突发请求的独立用户数与目标受理数（秒杀一人一单，必须一人一请求）。
 	lifecycleBurstUsers     = 60
 	lifecycleTargetAccepted = 36
-	// 进程退出上限 = server.graceful_timeout(10s) + flash_sale.shutdown_timeout(30s) + 余量。
-	lifecycleMaxExitWait = 45 * time.Second
+	// 进程退出上限 = HTTP drain(10s) + runtime shutdown(30s) + 安全余量(15s)。
+	// preStop 由 Kubernetes 执行，本测试直接发送 SIGTERM，因此不包含 pre_stop_delay。
+	lifecycleMaxExitWait = termination.DefaultHTTPDrainTimeout +
+		termination.DefaultRuntimeShutdownTimeout + termination.DefaultSafetyMargin
 	// flash_sale.shutdown_timeout 的验收上限。
-	lifecycleShutdownBudget = 30 * time.Second
+	lifecycleShutdownBudget = termination.DefaultRuntimeShutdownTimeout
+	// HTTP drain 单段预算上限。
+	lifecycleDrainBudget = termination.DefaultHTTPDrainTimeout
 )
 
 func TestServeProcessLifecycle(t *testing.T) {
@@ -83,6 +89,23 @@ func TestServeProcessLifecycle(t *testing.T) {
 	if !strings.Contains(started.Line, `"mode":"kafka"`) {
 		t.Fatalf("Kafka Runtime 未按 kafka 模式装配: %s", started.Line)
 	}
+	// ---------- 启动日志：终止预算契约 ----------
+	budgetEvent := p1.waitLogEvent("termination_budget", 30*time.Second)
+	budgetFields := lifecycleEventFields(t, budgetEvent.Line)
+	frozenBudget := map[string]string{
+		"pre_stop_delay":              "5s",
+		"http_drain_timeout":          "10s",
+		"runtime_shutdown_timeout":    "30s",
+		"required_termination_budget": "45s",
+		"termination_grace_period":    "60s",
+		"safety_margin":               "15s",
+	}
+	for key, want := range frozenBudget {
+		if got := fmt.Sprint(budgetFields[key]); got != want {
+			t.Fatalf("终止预算日志 %s = %q，期望 %q；日志: %s", key, got, want, budgetEvent.Line)
+		}
+	}
+	t.Logf("PASS 终止预算启动日志：termination_grace_period=60s，必需预算=45s，安全余量=15s（preStop 5s + drain 10s + runtime 30s）")
 	if mock.BucketInfoCalls() == 0 {
 		t.Fatalf("serve 启动未执行七牛 bucket 可用性校验（Mock 未收到 /v2/bucketInfo）")
 	}
@@ -170,17 +193,28 @@ func TestServeProcessLifecycle(t *testing.T) {
 	if elapsed > lifecycleMaxExitWait {
 		t.Fatalf("进程退出耗时 %s 超出上限 %s", elapsed, lifecycleMaxExitWait)
 	}
+	// 无残留：进程必须真正退出，且不得留下同二进制的子进程。
+	if p1.Alive() {
+		t.Fatalf("serve 进程退出后仍存活（pid=%d）", p1.cmd.Process.Pid)
+	}
+	lifecycleAssertNoResidualBinary(t, bin)
 	mu.Lock()
 	httpAcceptedCount := len(accepted)
 	mu.Unlock()
 
-	// 关闭过程证据：信号 → HTTP drain → Publisher → Consumer → Producer → Scanner。
+	// 关闭过程证据：SIGTERM → HTTP drain（有界）→ Publisher → Consumer → Producer → Scanner。
 	logs := p1.Logs()
 	events := lifecycleParseEvents(logs)
-	if !strings.Contains(logs, "server gracefully shutting down by signal: terminated") {
-		t.Fatalf("日志中缺少操作系统信号接收证据（GoFrame signal shutdown 日志）；日志尾部:\n%s", lifecycleTail(logs, 60))
+	drainIdx := lifecycleEventIndex(events, "http_server_drain_begin")
+	if drainIdx < 0 {
+		t.Fatalf("日志中缺少操作系统信号接收证据 http_server_drain_begin；日志尾部:\n%s", lifecycleTail(logs, 60))
+	}
+	if !strings.Contains(events[drainIdx].Line, `"signal":"terminated"`) {
+		t.Fatalf("HTTP drain 未记录 SIGTERM 信号: %s", events[drainIdx].Line)
 	}
 	order := []string{
+		"http_server_drain_begin",
+		"http_server_stopped",
 		"flashsale_runtime_shutdown_begin",
 		"flashsale_publisher_stopped",
 		"flashsale_consumer_stopped",
@@ -200,8 +234,13 @@ func TestServeProcessLifecycle(t *testing.T) {
 		lastIdx = idx
 	}
 	httpIdx := lifecycleEventIndex(events, "http_server_stopped")
-	if httpIdx < 0 {
-		t.Fatalf("缺少 http_server_stopped 事件")
+	// HTTP drain 必须在冻结预算内结束（有界 drain），而不是无限等待在途请求。
+	httpStoppedFields := lifecycleEventFields(t, events[httpIdx].Line)
+	if timedOut, ok := httpStoppedFields["timed_out"].(bool); !ok || timedOut {
+		t.Fatalf("HTTP drain 未在预算内完成: %s", events[httpIdx].Line)
+	}
+	if ms, ok := httpStoppedFields["elapsed_ms"].(float64); ok && time.Duration(ms)*time.Millisecond > lifecycleDrainBudget {
+		t.Fatalf("HTTP drain 耗时 %dms 超出预算 %s", int64(ms), lifecycleDrainBudget)
 	}
 	if beginIdx := lifecycleEventIndex(events, "flashsale_runtime_shutdown_begin"); beginIdx < httpIdx {
 		t.Fatalf("runtime 关闭早于 HTTP Server 退出（http=%d begin=%d）", httpIdx, beginIdx)
@@ -364,6 +403,7 @@ func TestServeProcessLifecycle(t *testing.T) {
 	if code, elapsed2 := p2.waitExit(lifecycleMaxExitWait); code != 0 {
 		t.Fatalf("重启进程退出码=%d（期望 0），耗时 %s", code, elapsed2)
 	}
+	lifecycleAssertNoResidualBinary(t, bin)
 	lifecycleAssertNoRedelivery(t, env.Broker, env.Topic, env.Group)
 	t.Logf("PASS 消费位移已提交：同组新消费者未重新收到任何消息")
 

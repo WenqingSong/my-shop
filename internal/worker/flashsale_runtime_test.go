@@ -52,6 +52,22 @@ type runtimeProbe struct {
 	outboxEntered chan struct{}
 	// consumerStarted 在每次进入 Run 时收到一次信号（非阻塞）。
 	consumerStarted chan struct{}
+	// events 按发生顺序记录组件生命周期事件，用于断言关闭顺序未改变。
+	events []string
+}
+
+// record 记录一个生命周期事件（关闭顺序断言的证据）。
+func (p *runtimeProbe) record(event string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.events = append(p.events, event)
+}
+
+// eventLog 返回事件快照。
+func (p *runtimeProbe) eventLog() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.events...)
 }
 
 func newRuntimeProbe() *runtimeProbe {
@@ -112,6 +128,7 @@ func (p *fakeProducer) Close(context.Context) error {
 	p.probe.mu.Lock()
 	p.probe.producerCloseCalls++
 	p.probe.mu.Unlock()
+	p.probe.record("producer_closed")
 	return nil
 }
 
@@ -134,6 +151,7 @@ func (c *fakeConsumerClient) Close(context.Context) error {
 		c.probe.mu.Lock()
 		c.probe.consumerCloseCalls++
 		c.probe.mu.Unlock()
+		c.probe.record("consumer_client_closed")
 	})
 	return nil
 }
@@ -176,21 +194,27 @@ func (c *fakeConsumerRunner) Run(ctx context.Context) error {
 	c.probe.mu.Lock()
 	behavior := c.probe.consumerBehavior
 	c.probe.mu.Unlock()
+	var err error
 	if behavior != nil {
-		return behavior(ctx, n)
+		err = behavior(ctx, n)
+	} else {
+		<-ctx.Done()
 	}
-	<-ctx.Done()
-	return nil
+	c.probe.record("consumer_loop_exited")
+	return err
 }
 
 // newProbeDeps 构造注入替身的依赖；scanner 启动器只等待 ctx 取消，模拟真实扫描器退出。
 func newProbeDeps(cfg flashSaleRuntimeConfig, probe *runtimeProbe) flashSaleRuntimeDeps {
-	waitCtx := func(ctx context.Context, wg *sync.WaitGroup) {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			<-ctx.Done()
-		}()
+	waitCtx := func(name string) func(ctx context.Context, wg *sync.WaitGroup) {
+		return func(ctx context.Context, wg *sync.WaitGroup) {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-ctx.Done()
+				probe.record("scanner_stopped:" + name)
+			}()
+		}
 	}
 	return flashSaleRuntimeDeps{
 		loadConfig: func(context.Context) (flashSaleRuntimeConfig, error) { return cfg, nil },
@@ -226,15 +250,15 @@ func newProbeDeps(cfg flashSaleRuntimeConfig, probe *runtimeProbe) flashSaleRunt
 		newRequestConsumer: func() flashsale.RequestConsumer { return nil },
 		startOrderCancel: func(ctx context.Context, wg *sync.WaitGroup) {
 			probe.countScanner("order_cancel")
-			waitCtx(ctx, wg)
+			waitCtx("order_cancel")(ctx, wg)
 		},
 		startReconcile: func(ctx context.Context, wg *sync.WaitGroup) {
 			probe.countScanner("reconcile")
-			waitCtx(ctx, wg)
+			waitCtx("reconcile")(ctx, wg)
 		},
 		startConsumeScanner: func(ctx context.Context, wg *sync.WaitGroup) {
 			probe.countScanner("consume")
-			waitCtx(ctx, wg)
+			waitCtx("consume")(ctx, wg)
 		},
 		consumerRestartBase:  10 * time.Millisecond,
 		consumerRestartMax:   40 * time.Millisecond,

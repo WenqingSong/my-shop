@@ -93,6 +93,12 @@ services:
     image: my-shop-app:local
     container_name: my-shop-app
     restart: unless-stopped
+    # 容器终止预算（T2-03 冻结契约）：preStop 5s + HTTP drain 10s + runtime shutdown 30s
+    # + 安全余量 15s = 60s，与 manifest/config/config.yaml 的 lifecycle.termination_grace_period
+    # 及后续 Kubernetes terminationGracePeriodSeconds 同源。
+    # 覆盖 Compose 默认的 10s：`docker compose stop/down` 不会在第 10 秒提前 SIGKILL，
+    # 从而给 Publisher → Consumer → Producer → Scanner 的关闭顺序留出完整预算。
+    stop_grace_period: 60s
     # 依赖编排：mysql/redis 健康后才启动 app；应用内 waitForDependencies 再重试兜底。
     depends_on:
       mysql:

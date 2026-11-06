@@ -110,6 +110,19 @@ if grep -Eq 'DATABASE_DEFAULT_CHARSET:[[:space:]]*"utf8"([^m]|$)' <<<"${compose_
   fail "docker-compose.yml 的 DATABASE_DEFAULT_CHARSET 仍为 utf8（应统一为 utf8mb4）"
 fi
 
+# 终止预算（T2-03）：app 必须显式声明 stop_grace_period: 60s。
+# Compose 默认 10s 会在 Publisher/Consumer 关闭完成前 SIGKILL，破坏关闭顺序；
+# 60s 与 manifest/config/config.yaml 的 lifecycle.termination_grace_period 及后续
+# Kubernetes terminationGracePeriodSeconds 同源（Go 侧契约测试见 internal/termination）。
+if ! awk '/^  app:/{in_app=1; next} in_app && /^  [A-Za-z0-9_-]+:/{exit} in_app' "${COMPOSE_CFG}" |
+  grep -qE '^[[:space:]]+stop_grace_period:[[:space:]]*60s[[:space:]]*$'; then
+  fail "docker-compose.yml 的 app 服务缺少 stop_grace_period: 60s（Compose 默认 10s 会提前 SIGKILL）"
+fi
+# 其他容器（mysql / redis / kafka / nginx / prometheus）的生命周期不受本任务影响。
+if [[ "$(grep -cE '^[[:space:]]+stop_grace_period:' <<<"${compose_body}")" != "1" ]]; then
+  fail "docker-compose.yml 只允许 app 服务声明 stop_grace_period（不得改变其他容器生命周期）"
+fi
+
 # 可选：docker 可用时校验 compose 可解析（与 test-prometheus.sh 保持一致）。
 # 注意：compose 已对 MYSQL_ROOT_PASSWORD / AUTH_JWT_SECRET 使用 ${VAR:?} 必填（无内置默认回退），
 # 语法校验时经 lib.sh 的 docker_compose_placeholder 注入占位值（非真实凭据）以通过必填拦截；

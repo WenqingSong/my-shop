@@ -175,7 +175,7 @@ SurgeCart 基于 GoFrame v2 提供 HTTP API，MySQL 保存交易与身份数据�
 - 敏感凭据（JWT secret、MySQL/Redis 密码、七牛 AK/SK/bucket/domain、超管密码）仅经环境变量注入，无内置默认回退，缺失 fail-fast；`config.yaml` 敏感字段保持空值。
 - 启动生命周期：entrypoint `migrate up`（幂等 + `GET_LOCK` 串行）→ `serve`（依赖重试 → schema 就绪只读校验 → seed → 七牛校验 → 扫描器 → 路由）。
 - 持久化：`mysql_data` / `redis_data` / `app_storage` 三个 named volume。
-- 优雅停机：`SIGINT/SIGTERM` 取消根 ctx → 扫描器停止领取新任务、在途单事务回滚或完成 → HTTP drain（`server.graceful_timeout`）→ 进程退出。
+- 优雅停机：`SIGINT/SIGTERM` → HTTP 停收新连接并在 `server.graceful_timeout`（10s）内有界 drain → Publisher → Consumer → Producer → Scanner 顺序关闭（`flash_sale.shutdown_timeout`，30s）→ 进程退出；容器终止宽限期 60s = preStop 5s + drain 10s + runtime 30s + 安全余量 15s（见 `docs/design/deployment.md` §4.1）。
 
 ### 4.2 CI/CD
 

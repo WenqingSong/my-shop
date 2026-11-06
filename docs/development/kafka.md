@@ -647,6 +647,10 @@ Consumer 在独立 goroutine 中运行 `RequestedEventConsumer.Run`：
 `flashsale_scanners_stopped` → `flashsale_runtime_shutdown_complete`），`serve` 在 HTTP drain
 结束后输出 `http_server_stopped`；这些事件是进程级关闭时序的可观测证据。
 
+上述顺序只在 HTTP drain 结束后开始（`http_server_stopped` 必须先于 `flashsale_runtime_shutdown_begin`）。
+整个终止过程受 T2-03 冻结预算约束：preStop 5s + HTTP drain 10s + Runtime 30s + 安全余量 15s = 60s 宽限期，
+应用启动时输出 `termination_budget` 事件并在预算不足时 fail-fast；详见 `docs/design/deployment.md` §4.1。
+
 **B4.1 修复：信号 ctx 不得作为 runtime 的父 ctx。** 原实现把 `signal.NotifyContext` 的 ctx
 传给 `StartFlashSaleRuntime`，SIGTERM 会在信号到达瞬间同时取消 Publisher / Consumer / Scanner，
 绕过上面的关闭顺序，并让正在进行的 `PublishBatch` 被就地中断（已领取记录只能等租约到期后重发）。

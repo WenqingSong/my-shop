@@ -306,6 +306,12 @@ func (r *FlashSaleRuntime) startKafka(ctx context.Context, deps flashSaleRuntime
 	return nil
 }
 
+// ShutdownTimeout 返回运行期统一关闭预算（flash_sale.shutdown_timeout 的生效值）。
+// serve 用它计算容器终止预算契约，保证日志与校验使用同一个生效值而非默认常量。
+func (r *FlashSaleRuntime) ShutdownTimeout() time.Duration {
+	return r.shutdownTimeout
+}
+
 // applyTimingDefaults 补齐测试未注入的时长参数。
 func (r *FlashSaleRuntime) applyTimingDefaults() {
 	if r.consumerRestartBase <= 0 {
