@@ -13,7 +13,7 @@
 | 1 | `/root/projects/my-shop` | `go build ./...` | 0 | `PASS` | 无输出（仅首次依赖下载） |
 | 2 | `/root/projects/my-shop` | `go vet ./...` | 0 | `PASS` | 无输出 |
 | 3 | `/root/projects/my-shop` | `gofmt -l .` | 0 | `PASS` | 输出 0 行（无未格式化文件） |
-| 4 | `/root/projects/my-shop` | `bash scripts/test-unit.sh` | 0 | `PASS` | 11 个包 ok（见 §2） |
+| 4 | `/root/projects/my-shop` | `bash scripts/test-unit.sh` | 0 | `PASS` | 10 个包 ok + 1 个 `[no tests to run]`（见 §2） |
 | 5 | `/root/projects/my-shop` | `bash scripts/test-race.sh` | 0 | `PASS` | `ok internal/logic/flashsale 1.039s` |
 | 6 | `/root/projects/my-shop` | `bash scripts/test-integration.sh`（内部 `go test -p 1 ./...`，`DATABASE_DEFAULT_PASS=root`） | 0 | `PASS` | 全部包 ok；`test/e2e 91.922s`；`internal/migrations 28.978s` |
 | 7 | `/root/projects/my-shop` | `bash scripts/test-container.sh` | 0 | `PASS` | 容器化静态断言通过 |
