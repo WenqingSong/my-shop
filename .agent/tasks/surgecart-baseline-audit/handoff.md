@@ -41,3 +41,11 @@
 - Files: `.agent/tasks/surgecart-baseline-audit/{handoff.md,delivery.md}`
 - Next action: OWNER 验收；确认或否决 `decisions.md` Q1（`-v1` 命名）与 D4 裁决；如需独立审查，指派无作者关系的审查者按 `73a48f6` 复核。
 - Open findings: F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12
+
+## 2026-11-06T02:48:00Z LEAD → OWNER（记录更正）
+
+- Commit: `03ac46bdc56ad94a447b990b50ef5ef331532025`（更正前）
+- Result: 更正自检发现的一处引用错误：`engineering-inventory.md` §2 原写「`go vet` 位于 `scripts/test.sh:18`」，实际为 `scripts/test.sh:13-14`（已按 `grep -n "go vet" scripts/test.sh` 核实）。审计结论不受影响，仅行号引用更正。
+- Files: `docs/reports/surgecart-baseline-audit/engineering-inventory.md`
+- Next action: OWNER 验收；此后不再改动审计内容。
+- Open findings: F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12

@@ -27,7 +27,7 @@
 | 检查 | 是否在仓库/CI 中执行 | 状态 | 证据 |
 | --- | --- | --- | --- |
 | `gofmt` | 仓库脚本**未包含**；本次手工执行 | 已实现且有源码证据（手工） | `gofmt -l .` 输出 0 行 |
-| `go vet` | `scripts/test.sh:18`，CI `make test` | 已实现且有源码证据 | 实跑退出码 0 |
+| `go vet` | `scripts/test.sh:13-14`，CI `make test` | 已实现且有源码证据 | 实跑退出码 0 |
 | `go build` | CI push 阶段 `make build`（`scripts/build.sh`） | 已配置但未验证运行（本地 `go build ./...` 通过；`make build` 产物未执行） | `.cnb.yml:75-76`；`go build ./...` 退出码 0 |
 | `go test` | `scripts/test.sh` → unit + integration | 已实现且有源码证据 | 实跑退出码 0 |
 | `go test -race` | `scripts/test.sh` 外的独立 `make test-race`，CI 单独 stage | 已发现但不完整 | `.cnb.yml:49-50`、`:72-73`；`scripts/test-race.sh:16` **仅** `-run 'TestCircuitBreakerStateMachine' ./internal/logic/flashsale/...`，即 race 只覆盖熔断器，不覆盖消费/E2E |
