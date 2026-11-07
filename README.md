@@ -187,6 +187,8 @@ curl http://127.0.0.1:8080/health   # liveness：进程存活即 200
 | `make build` | 本地静态编译 `bin/my-shop`（与 Dockerfile 一致） |
 | `make docker-build` | 构建发布镜像并打标签（短 SHA + `latest`） |
 | `make test-container-runtime` | 真实 Docker 镜像与容器生命周期门禁（构建/非 root/只读/SIGTERM/drain/退出码） |
+| `make test-k8s-manifest` | 校验 Kustomize 部署体系（真实构建 + 构建产物断言 + API Schema；需 kubectl） |
+| `make deploy-k8s` | Kubernetes 发布：先执行迁移 Job，成功后更新 Deployment（需集群与 kubectl） |
 | `make migrate-up` | 应用所有未执行 migration |
 | `make migrate-version` | 查看当前 migration 版本与 dirty 状态 |
 | `make migrate-force` | 标记指定版本已应用（`make migrate-force VERSION=<14位时间戳>`） |
@@ -203,7 +205,7 @@ make test-race               # 竞态检测
 make test-container-runtime  # 真实镜像构建 + 容器生命周期（非 root/只读/SIGTERM/drain/退出码）
 ```
 
-`make test` 依次执行 `go vet`、单元测试（不依赖 MySQL/Redis）、集成测试（需 MySQL/Redis）、数据库迁移门禁（真实 MySQL + 多进程）、Registry 一致性校验、容器化静态断言与 Kubernetes 迁移清单校验。集成测试前需先就绪依赖（`make init` 或 `make deps-start`）。独立目标：`test-unit` / `test-integration` / `test-race` / `test-migration` / `test-prometheus` / `test-container` / `test-container-runtime` / `test-k8s-manifest` / `test-nginx` / `test-lib` / `test-storage`（真实存储 E2E，需七牛凭据）。容器构建、运行安全、扫描与排障详见 [容器构建与运行安全](docs/development/container-security.md)，迁移执行与并发锁详见 [数据库迁移运维](docs/development/migrations.md)。
+`make test` 依次执行 `go vet`、单元测试（不依赖 MySQL/Redis）、集成测试（需 MySQL/Redis）、数据库迁移门禁（真实 MySQL + 多进程）、Registry 一致性校验、容器化静态断言与 Kustomize 部署体系校验（真实构建 + 构建产物断言 + API Schema，需要 kubectl）。集成测试前需先就绪依赖（`make init` 或 `make deps-start`）。独立目标：`test-unit` / `test-integration` / `test-race` / `test-migration` / `test-prometheus` / `test-container` / `test-container-runtime` / `test-k8s-manifest` / `test-nginx` / `test-lib` / `test-storage`（真实存储 E2E，需七牛凭据）。容器构建、运行安全、扫描与排障详见 [容器构建与运行安全](docs/development/container-security.md)，迁移执行与并发锁详见 [数据库迁移运维](docs/development/migrations.md)，Kubernetes 发布流程详见 [Kubernetes 部署体系](docs/development/kubernetes.md)。
 
 ## Task 管理（Agent Workflow）
 
@@ -227,16 +229,17 @@ make test-container-runtime  # 真实镜像构建 + 容器生命周期（非 roo
 - **本地/单机**：Docker Compose 编排 nginx/app/MySQL/Redis/Prometheus 五个服务，Nginx 为对外唯一入口，app 仅暴露 Compose 内网端口；`make init` + `make up` 两阶段拉起。
 - **镜像发布**：`make docker-build` / `make docker-push` 构建并推送短 SHA + `latest` 双标签镜像（同源同 digest）。
 - **CI/CD**：CNB 流水线（`.cnb.yml`）按「测试 → 竞态检测 → 构建 → 镜像发布」顺序执行，任一阶段失败即中断；`latest` 仅指向测试全绿的构建。
+- **Kubernetes（Kustomize，单副本）**：两个独立构建入口——应用 `manifest/kubernetes/overlays/production`、迁移 `manifest/kubernetes/migration/overlays/production`。发布顺序固定为「构建镜像 → 执行迁移 Job → 成功后更新 Deployment」，由 `make deploy-k8s`（`scripts/deploy-k8s.sh`）强制；构建校验用 `make test-k8s-manifest`。默认 `ClusterIP`，不含 Ingress/TLS（无真实域名与证书方案）。详见 [Kubernetes 部署体系](docs/development/kubernetes.md)。
 - **秒杀消费模式**：`flash_sale.dispatch_mode` 二选一——`db_scanner`（默认，仅 MySQL 扫描器）或 `kafka`（Redis 准入 + MySQL Outbox + Kafka Publisher/Consumer，需同时设置 `kafka.enabled=true`）。两种模式严格互斥，切换需重启进程；默认模式不需要安装 Kafka。详见 [Kafka 开发说明](docs/development/kafka.md#10-b4serve-集成与运行闭环)。
 
-详细部署模型、启动生命周期、持久化与健康检查语义见 [部署设计](docs/design/deployment.md)。
+详细部署模型、启动生命周期、持久化与健康检查语义见 [部署设计](docs/design/deployment.md)；Kubernetes 资源、配置边界与发布命令见 [Kubernetes 部署体系](docs/development/kubernetes.md)。
 
 ## 文档索引
 
 - [项目导览](docs/project-overview.md)：系统与两条核心交易链路的总览。
 - [系统架构](docs/design/architecture.md)：分层结构、模块边界、核心业务流程与基础设施。
 - 核心设计：[订单](docs/design/order.md)、[秒杀](docs/design/flash-sale.md)、[商品](docs/design/product.md)、[分类](docs/design/category.md)、[SKU](docs/design/sku.md)、[库存](docs/design/inventory.md)、[购物车](docs/design/cart.md)、[IAM](docs/design/iam.md)、[RBAC](docs/design/rbac.md)、[优惠券](docs/design/coupon.md)、[退款](docs/design/refund.md)。
-- 部署与运维：[容器化部署](docs/design/deployment.md)、[容器构建与运行安全](docs/development/container-security.md)、[数据库迁移（机制）](docs/design/migration.md)、[数据库迁移（运维 / K8s Job）](docs/development/migrations.md)、[错误码](docs/design/error-codes.md)、[对象存储](docs/design/storage.md)。
+- 部署与运维：[容器化部署](docs/design/deployment.md)、[Kubernetes 部署体系](docs/development/kubernetes.md)、[容器构建与运行安全](docs/development/container-security.md)、[数据库迁移（机制）](docs/design/migration.md)、[数据库迁移（运维 / K8s Job）](docs/development/migrations.md)、[错误码](docs/design/error-codes.md)、[对象存储](docs/design/storage.md)。
 - 开发环境：[Kafka 开发说明](docs/development/kafka.md)（B4 已完成：两种运行模式、serve 装配、Publisher/Consumer 生命周期、F-03/F-04 修复、优雅关闭与真实端到端门禁）。
 - Task 管理：[Task 管理入口](docs/task-management/README.md)、[Task 目录](docs/task-management/task-catalog.md)、[Task 关系图](docs/task-management/task-relationships.md)、[Owner 决策清单](docs/task-management/owner-decisions.md)。
 - 运营与内容：[轮播图](docs/design/banner.md)、[文章](docs/design/article.md)、[推荐位](docs/design/recommendation.md)、[评价](docs/design/review.md)、[数据大屏](docs/design/dashboard.md)、[收藏](docs/design/favorite.md)、[点赞](docs/design/like.md)。

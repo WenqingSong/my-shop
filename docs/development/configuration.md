@@ -137,7 +137,7 @@ Kubernetes 严格配置模式校验失败（2 项）：
 
 ### 4.3 结论
 
-后续 T2-06 的 Kubernetes ConfigMap **必须**设置：
+T2-06 的 Kubernetes ConfigMap 已按此设置（`manifest/kubernetes/shared/database-configmap.yaml`，Application 与 Migration 共用）：
 
 ```yaml
 DEPLOYMENT_REQUIRE_EXTERNAL_ENDPOINTS: "true"
@@ -161,7 +161,7 @@ DEPLOYMENT_REQUIRE_EXTERNAL_ENDPOINTS: "true"
 
 - 这是「migration 少要求」，不是「应用少要求」。`ValidateExternalEndpoints` 仍然要求三项，T2-01 冻结的应用严格模式未被放宽（`internal/config/migration_test.go` 有对照断言）。
 - 校验发生在**建立任何数据库连接之前**（`migrations.Preflight` → `config.ValidateMigration`），漏配时错误直接指出环境变量名，而不是连接超时。
-- 迁移 Job 的 ConfigMap 示例见 `manifest/kubernetes/migration-configmap.yaml`，完整运维语义见 `docs/development/migrations.md`。
+- 迁移 Job 与 Application 共用数据库 ConfigMap（`manifest/kubernetes/shared/database-configmap.yaml`），完整运维语义见 `docs/development/migrations.md` 与 `docs/development/kubernetes.md`。
 
 ---
 
@@ -328,7 +328,7 @@ DEPLOYMENT_REQUIRE_EXTERNAL_ENDPOINTS: "true"
 - **只读根文件系统**：`manifest/config/config.yaml` 在镜像内为 `root:root 0444`，运行用户只读；应用不得在启动时改写配置文件（GoFrame 只读取，不写回）。
 - **唯一写路径**：`/app/storage`（named volume）与 `/tmp`（tmpfs）。`STORAGE_LOCAL_ROOT` 必须指向 `/app/storage`；其他以相对路径 `./storage` 写入的配置在只读根文件系统下会失败。
 - **环境变量注入**：敏感项（`DATABASE_DEFAULT_PASS`、`REDIS_DEFAULT_PASS`、`AUTH_JWT_SECRET`、`ADMIN_SUPER_PASSWORD`、`QINIU_SECRET_KEY` 等）继续仅经运行时环境变量注入；镜像内默认值为空，Compose 对必填项使用 `${VAR:?}`，缺失即启动失败。
-- **Secret 边界**：本地用 `.env`（Git 忽略），集群用 Kubernetes Secret（T2-06）；不要把真实值写入 Compose 默认值、镜像层、命令行或日志。
-- **迁移 Job**：只读根文件系统 + 非 root + 仅 `/tmp` 可写，`DATABASE_DEFAULT_PASS` 由 Secret 注入、其余连接参数由 ConfigMap 提供；见 [数据库迁移运维](migrations.md) 与 `manifest/kubernetes/`。
+- **Secret 边界**：本地用 `.env`（Git 忽略），集群用 Kubernetes Secret（T2-06：`surgecart-db-credentials` 与 `surgecart-app-credentials`）；不要把真实值写入 Compose 默认值、镜像层、命令行或日志。
+- **迁移 Job**：只读根文件系统 + 非 root + 仅 `/tmp` 可写，`DATABASE_DEFAULT_PASS` 由 `surgecart-db-credentials` 注入、其余连接参数由共享 ConfigMap 提供；见 [数据库迁移运维](migrations.md)、[Kubernetes 部署体系](kubernetes.md) 与 `manifest/kubernetes/`。
 
 构建、非 root/只读验证、扫描与排障命令见 [容器构建与运行安全](container-security.md)。

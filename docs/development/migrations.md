@@ -1,6 +1,6 @@
 # 数据库迁移（Migration）运维与设计（T2-05）
 
-本文说明 SurgeCart 数据库迁移的架构、执行原理、配置要求、本地与 Kubernetes 执行方式、并发锁、失败恢复与 `migrate force` 风险。设计事实来源为 `internal/migrations`、`internal/cmd/cmd.go` 与 `manifest/kubernetes/migration-job.yaml`；机制背景见 `docs/design/migration.md`。
+本文说明 SurgeCart 数据库迁移的架构、执行原理、配置要求、本地与 Kubernetes 执行方式、并发锁、失败恢复与 `migrate force` 风险。设计事实来源为 `internal/migrations`、`internal/cmd/cmd.go` 与 `manifest/kubernetes/migration/`（Kustomize，T2-06）；机制背景见 `docs/design/migration.md`，部署体系见 `docs/development/kubernetes.md`。
 
 ## 1. 架构
 
@@ -112,31 +112,45 @@ docker run --rm --network my-shop_default \
 
 ## 5. Kubernetes Job 执行方式
 
-清单：`manifest/kubernetes/`（`migration-configmap.yaml`、`migration-secret.example.yaml`、`migration-job.yaml`）。
+T2-06 起，迁移 Job 由 Kustomize 管理，独立于应用部署入口：
+
+| 路径 | 作用 |
+|---|---|
+| `manifest/kubernetes/migration/base/` | Job 基础层（命令、重试、超时、TTL、加固），不带发布版本 |
+| `manifest/kubernetes/migration/overlays/production/` | 发布入口：版本化 Job 名称 + 迁移镜像版本 + 外部数据库地址 |
+| `manifest/kubernetes/shared/database-configmap.yaml` | 与 Application 共用的数据库连接配置（同一份） |
+| `manifest/kubernetes/examples/secrets/database-secret.example.yaml` | `surgecart-db-credentials` 模板（只有占位符） |
+
+推荐用发布脚本（顺序由脚本强制，见 `docs/development/kubernetes.md` §9）：
 
 ```bash
-# 0) 前置：命名空间与镜像版本
-kubectl create namespace surgecart --dry-run=client -o yaml | kubectl apply -f -
-MIGRATION_IMAGE="docker.cnb.cool/framework-station/my-shop:<短SHA>"
-
-# 1) 非敏感配置
-kubectl -n surgecart apply -f manifest/kubernetes/migration-configmap.yaml
-
-# 2) 凭据（二选一）
-#    a. 外部注入的同名 Secret（推荐：External Secrets / Sealed Secrets / CI）
-#    b. 手工创建，口令不落盘
-kubectl -n surgecart create secret generic surgecart-db-credentials \
-  --from-literal=DATABASE_DEFAULT_PASS="$DATABASE_DEFAULT_PASS" \
-  --dry-run=client -o yaml | kubectl apply -f -
-
-# 3) 执行迁移（Job 名字固定，重跑前先删除上一次）
-kubectl -n surgecart set image job/surgecart-migrate 2>/dev/null || true
-sed "s#REPLACE_WITH_COMMIT_SHA#${MIGRATION_IMAGE##*:}#" \
-  manifest/kubernetes/migration-job.yaml | kubectl -n surgecart apply -f -
-
-# 4) 等待结果（成功才能继续发布）
-kubectl -n surgecart wait --for=condition=complete job/surgecart-migrate --timeout=15m
+bash scripts/deploy-k8s.sh
 ```
+
+等价的 kubectl 流程：
+
+```bash
+TAG=<短SHA>          # 必须与 manifest/kubernetes/overlays/production 的镜像版本一致
+
+# 1) 构建（含 Namespace、数据库 ConfigMap、版本化 Job）
+kubectl kustomize manifest/kubernetes/migration/overlays/production > /tmp/migration.yaml
+
+# 2) 应用（Job 名形如 surgecart-migrate-<短SHA>，每个版本一个新 Job）
+kubectl apply -f /tmp/migration.yaml
+
+# 3) 等待结果（成功才能继续发布应用）
+kubectl -n surgecart wait --for=condition=complete \
+  job/surgecart-migrate-${TAG} --timeout=900s
+```
+
+`surgecart-db-credentials` 必须先存在（创建方式见 `docs/development/kubernetes.md` §4.2）；
+`scripts/deploy-k8s.sh` 会在迁移之前检查，缺失即失败，避免 Job 反复认证失败消耗 `backoffLimit`。
+
+**Job 名称为什么带版本后缀**：Kubernetes Job 的 `spec.template` 不可变，同一名称的下一次发布
+无法原地更新镜像。版本化名称（`nameSuffix: -<短SHA>`）让每个版本是一个新 Job，`kubectl apply`
+永不撞上不可变字段；历史 Job 由 `ttlSecondsAfterFinished` 清理。跨 Job 的并发互斥仍由数据库
+`GET_LOCK` 保证，`parallelism: 1` 只是单 Job 内并行度。
+
 
 Job 字段说明：
 
@@ -158,24 +172,27 @@ Job 字段说明：
 
 ## 6. Job 生命周期与发布门禁
 
-1. **何时创建**：镜像已推送、发布流程准备更新 Deployment **之前**。一个版本一次，Job 名固定，重跑前删除旧 Job（`kubectl -n surgecart delete job surgecart-migrate --ignore-not-found`）。
-2. **如何判断成功**：`kubectl -n surgecart wait --for=condition=complete job/surgecart-migrate --timeout=15m`；退出码 0 且日志出现 `migration 执行完成` 或 `没有待执行的 migration`。
-3. **如何判断失败**：`kubectl -n surgecart get job surgecart-migrate -o jsonpath='{.status.conditions}'` 出现 `Failed`，或 `kubectl -n surgecart get pods -l job-name=surgecart-migrate` 中有 `Error`/`OOMKilled`。
-4. **失败后如何重试**：修正根因（网络、凭据、锁冲突、SQL 错误）后删除 Job 重新 apply；**不要**通过放宽 `backoffLimit` 或改成 `force` 来「让它过」。
-5. **如何看日志**：`kubectl -n surgecart logs job/surgecart-migrate --tail=200`（`ttlSecondsAfterFinished` 到期后日志随 Job 删除）。
-6. **如何清理**：TTL 自动清理；提前清理用 `kubectl -n surgecart delete job surgecart-migrate`。
-7. **如何阻止应用升级**：发布流程必须**串行**——Job 未 `Complete` 时不得执行 `kubectl set image` / `kubectl rollout restart`；`kubectl wait` 失败即中断流水线。最后的防线是 `serve` 的只读 schema 校验：数据库非 dirty 且版本已到最新才监听端口，否则进程非零退出（`checkSchemaReady`）。
+1. **何时创建**：镜像已推送、发布流程准备更新 Deployment **之前**。每个发布版本一个新 Job（名称 `surgecart-migrate-<短SHA>`），同名版本重跑前删除该 Job（`kubectl -n surgecart delete job surgecart-migrate-<短SHA>`）。
+2. **如何判断成功**：`kubectl -n surgecart wait --for=condition=complete job/surgecart-migrate-<短SHA> --timeout=900s`；退出码 0 且日志出现 `migration 执行完成` 或 `没有待执行的 migration`。
+3. **如何判断失败**：`kubectl -n surgecart get job surgecart-migrate-<短SHA> -o jsonpath='{.status.conditions}'` 出现 `Failed`，或 `kubectl -n surgecart get pods -l job-name=surgecart-migrate-<短SHA>` 中有 `Error`/`OOMKilled`。
+4. **失败后如何重试**：修正根因（网络、凭据、锁冲突、SQL 错误）后删除该 Job 重新构建并 apply；**不要**通过放宽 `backoffLimit` 或改成 `force` 来「让它过」。
+5. **如何看日志**：`kubectl -n surgecart logs job/surgecart-migrate-<短SHA> --tail=200`（`ttlSecondsAfterFinished` 到期后日志随 Job 删除）。
+6. **如何清理**：TTL 自动清理；提前清理用 `kubectl -n surgecart delete job -l app.kubernetes.io/component=database-migration`（或用具体名称）。
+7. **如何阻止应用升级**：发布流程必须**串行**——Job 未 `Complete` 时不得更新应用清单；`scripts/deploy-k8s.sh` 在迁移失败时以退出码 `2` 终止且不 apply 应用。最后的防线是 `serve` 的只读 schema 校验：数据库非 dirty 且版本已到最新才监听端口，否则进程非零退出（`checkSchemaReady`）。
 
-示例（发布脚本中的顺序，不使用 `&&` 掩盖失败）：
+示例（发布脚本中的顺序，任一步失败即退出，不使用 `&&` 掩盖失败）：
 
 ```bash
 set -euo pipefail
-kubectl -n surgecart apply -f manifest/kubernetes/migration-configmap.yaml
-kubectl -n surgecart delete job surgecart-migrate --ignore-not-found
-kubectl -n surgecart apply -f manifest/kubernetes/migration-job.yaml
-kubectl -n surgecart wait --for=condition=complete job/surgecart-migrate --timeout=15m
-kubectl -n surgecart set image deployment/surgecart app="$MIGRATION_IMAGE"
-kubectl -n surgecart rollout status deployment/surgecart --timeout=5m
+TAG=<短SHA>
+kubectl kustomize manifest/kubernetes/migration/overlays/production > /tmp/migration.yaml
+kubectl apply -f /tmp/migration.yaml
+kubectl -n surgecart wait --for=condition=complete \
+  job/surgecart-migrate-${TAG} --timeout=900s
+# 迁移成功后才应用应用清单（脚本内由退出码保证）
+kubectl kustomize manifest/kubernetes/overlays/production > /tmp/application.yaml
+kubectl apply -f /tmp/application.yaml
+kubectl -n surgecart rollout status deployment/surgecart --timeout=600s
 ```
 
 ## 7. 并发锁机制
@@ -245,7 +262,7 @@ bash scripts/test-migration.sh
          image: docker.cnb.cool/framework-station/my-shop:<短SHA>
          command: ["/app/my-shop", "migrate", "version"]
          envFrom:
-           - configMapRef: {name: surgecart-migration-config}
+           - configMapRef: {name: surgecart-database-config}
            - secretRef: {name: surgecart-db-credentials}
          securityContext:
            readOnlyRootFilesystem: true
@@ -288,13 +305,14 @@ go test -count=1 -run 'TestMigrate' ./internal/cmd/
 # 真实 MySQL：锁、连接释放、幂等、dirty、并发
 bash scripts/test-migration.sh
 
-# Kubernetes 清单静态校验（无需集群）
+# Kustomize 构建 + 结构化断言 + API Schema 校验（无需集群）
 bash scripts/test-k8s-manifest.sh
 ```
 
 未验证项（NOT_VERIFIED）：
 
 - 真实 Kubernetes 集群上的 Job 调度、`kubectl wait` 流转、TTL 清理与 NetworkPolicy 连通性（本仓库无目标集群）。
+- 版本化 Job 名称在真实发布中的行为（新版本创建新 Job、旧 Job 未完成时的并发表现）只做了构建产物断言，未在集群实测。
 - 镜像 `docker.cnb.cool/framework-station/my-shop` 的短 SHA 标签在集群内的拉取（验证时使用本地构建镜像）。
 - MDL（metadata lock）长时间阻塞下的 `activeDeadlineSeconds` 实测。
 - 多可用区数据库故障切换期间的迁移行为。

@@ -23,7 +23,7 @@
 - 不连接 Redis（配置校验也不要求 `REDIS_DEFAULT_ADDRESS`）；
 - 自行按 `database.default.*` 构造 DSN、建立迁移专用连接，结束（成功或失败）后关闭；
 - 执行前先做配置校验（`migrations.Preflight` → `config.ValidateMigration`），失败不建立任何连接；
-- 生产由 Kubernetes Job 执行（`manifest/kubernetes/migration-job.yaml`），发布顺序为「镜像 → Job → Deployment」，Job 未成功不得升级应用。
+- 生产由 Kubernetes Job 执行（`manifest/kubernetes/migration/overlays/production`，T2-06 起由 Kustomize 管理、Job 名称带发布版本后缀），发布顺序为「镜像 → Job → Deployment」，Job 未成功不得升级应用。
 
 运维细节（本地/集群命令、Job 字段、重试与恢复）见 `docs/development/migrations.md`。
 

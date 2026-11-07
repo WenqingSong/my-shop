@@ -1,0 +1,26 @@
+# 生产 Overlay（Migration 部署入口）。
+#
+#   kubectl kustomize manifest/kubernetes/migration/overlays/production
+#   kubectl apply -k manifest/kubernetes/migration/overlays/production
+#
+# 产物：Namespace + 数据库连接 ConfigMap + 一个带发布版本后缀的迁移 Job。
+# 不产出 Deployment / Service / PVC —— 迁移与应用是两个独立入口，
+# 顺序由 scripts/deploy-k8s.sh 强制：迁移成功后才允许应用升级。
+#
+# 更新机制：Job 名称来自 job/ 层的 nameSuffix（每个版本一个新 Job），
+# 因此不存在「Job Pod 模板不可变、下一次 apply 失败」的问题。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # 版本化 Job（内部引用 migration/base，并施加 nameSuffix + images）。
+  - job
+  # 与 Application 共用的 Namespace 与数据库连接配置（同一份资源，不重复定义）。
+  - ../../../shared
+
+namespace: surgecart
+
+patches:
+  # 环境专属：数据库地址。必须与 ../../../../overlays/production/database-patch.yaml
+  # 保持同值（由 scripts/test-k8s-manifest.sh 断言）。
+  - path: database-patch.yaml

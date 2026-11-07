@@ -1,6 +1,6 @@
 # 容器化部署模型（Deployment / Compose）
 
-本文面向项目接手者，说明 SurgeCart 后端（及依赖）的容器化部署模型：服务编排、镜像与配置模型、启动生命周期、持久化、网络与健康检查语义。事实来源为 `backend-container-v1`、`nginx-reverse-proxy-v1` 与 `container-runtime-hardening-v1` 的 APPROVED Contract。Kubernetes / Ingress / HTTPS/TLS / 多实例负载均衡不在本文范围（另见各相关任务）；`/ready` readiness 端点已落地，但 K8s readinessProbe 编排清单不在本文范围。
+本文面向项目接手者，说明 SurgeCart 后端（及依赖）的容器化部署模型：服务编排、镜像与配置模型、启动生命周期、持久化、网络与健康检查语义。事实来源为 `backend-container-v1`、`nginx-reverse-proxy-v1` 与 `container-runtime-hardening-v1` 的 APPROVED Contract，以及 T2-06 交付的 Kustomize 清单。Compose 单机编排是本地与演示默认形态；Kubernetes 部署（单副本 Deployment/Service/迁移 Job、探针与终止预算映射）见 §12 与 `docs/development/kubernetes.md`，Ingress/HTTPS/TLS 与环境对外入口仍不在本仓库范围（无真实域名与证书方案）。
 
 ## 1. 职责与边界
 
@@ -97,7 +97,7 @@ HTTP drain 的 10s 划分：前 9s 用于优雅 drain（同时作为 GoFrame 内
 
 - 应用启动时校验该关系（不足即 fail-fast）并输出 `termination_budget` 结构化日志，字段为 `pre_stop_delay` / `http_drain_timeout` / `runtime_shutdown_timeout` / `required_termination_budget` / `termination_grace_period` / `safety_margin`。
 - `docker compose stop/down` 使用 `stop_grace_period: 60s`，避免 Compose 默认 10s 提前 SIGKILL；其他容器不声明该字段。
-- 后续 Kubernetes 清单必须使用 `terminationGracePeriodSeconds: 60` 与 5s preStop；`internal/termination` 的契约测试已断言 Go 默认值、`config.yaml`、`docker-compose.yml` 三方一致，T2-06 落地清单时需在同一处补充清单断言，而不是修改期望值。
+- Kubernetes 清单（T2-06）使用 `terminationGracePeriodSeconds: 60` 与 5s preStop（`/bin/sh -c "sleep 5"`），并由 `test/manifest` 从 Kustomize 构建产物断言 preStop、宽限期与 `LIFECYCLE_*` 环境变量同源；`internal/termination` 的契约测试继续断言 Go 默认值、`config.yaml`、`docker-compose.yml` 三方一致，两处断言互不替代。
 
 ### 4.2 生产迁移独立执行（T2-05）
 
@@ -118,11 +118,11 @@ HTTP drain 的 10s 划分：前 9s 用于优雅 drain（同时作为 GoFrame 内
 
 要点：
 
-- **Job 先于 Deployment**：`kubectl wait --for=condition=complete job/surgecart-migrate` 成功后才允许 `kubectl set image`/`rollout restart`；失败即中止发布。
+- **Job 先于 Deployment**：`kubectl wait --for=condition=complete job/surgecart-migrate-<短SHA>` 成功后才允许更新应用清单；`scripts/deploy-k8s.sh` 在迁移失败时以非零退出码终止且不 apply 应用。
 - **最后防线是 serve**：`serve` 启动时只读校验 `schema_migrations`（非 dirty 且 `current >= latest`），未就绪直接非零退出，不会以「旧 schema + 新代码」对外服务。
 - **不使用 `latest` 作为迁移锚点**：Job 镜像使用短 SHA，保证回滚时能回到确切版本对应的 schema 状态。
 - **不使用 `migrate force` 作为 Job 命令**：force 是人工风险操作（见 `docs/development/migrations.md` §9）。
-- 清单与运维命令见 `manifest/kubernetes/`、`docs/development/migrations.md`；完整 Deployment/Service/Ingress/HPA 与 Kustomize overlays 由 T2-06 交付。
+- 清单与运维命令见 `manifest/kubernetes/migration/`、`docs/development/migrations.md`；Kustomize 部署体系见 `docs/development/kubernetes.md`。
 
 ## 5. 持久化
 
@@ -211,12 +211,45 @@ Nginx 是面向外部的唯一 HTTP 入口，职责为纯反向代理（无 Lua/
 - **发布顺序**：`make test` → `make test-race` → `make build`（go build）→ `make docker-build`（含 `docker tag :latest`）→ `make docker-push`（先短 SHA 后 `latest`）；任一 stage 失败即中断、后续不执行。短 SHA 先于 `latest` 推送，保证 `latest` 只会指向「短 SHA 标签已存在」的构建。
 - **目标平台**：单平台 `linux/amd64`（沿用 Dockerfile `CGO_ENABLED=0 GOOS=linux` 静态编译，native build，不显式 `--platform`、不引入 buildx/QEMU）。
 - **凭据**：制品库认证使用 CNB 内置凭据（流水线内置触发者凭据 / `CNB_TOKEN`），推送 CNB 制品库无需手动 `docker login`；`.cnb.yml` 与运行日志不出现硬编码密码。
-- **回滚方法**：部署回滚用历史成功构建的短 SHA 标签拉取并运行目标版本（`docker run docker.cnb.cool/framework-station/my-shop:<短SHA>`），不依赖 `latest`；`latest` 仅表达「默认最新」，不作为可回滚的历史锚点。
+- **回滚方法**：部署回滚用历史成功构建的短 SHA 标签拉取并运行目标版本（`docker run docker.cnb.cool/framework-station/my-shop:<短SHA>`），不依赖 `latest`；`latest` 仅表达「默认最新」，不作为可回滚的历史锚点。Kubernetes 回滚同理：把 overlay 的 `images.newTag` 改回上一个短 SHA，只重新构建并应用 **Application** 入口；迁移不回滚（schema 向前兼容是发布前提），见 `docs/development/kubernetes.md` §10。
 
-## 12. Deferred / 已知留白
+## 12. Kubernetes 部署体系（T2-06）
 
-- Kubernetes/Ingress、HTTPS/TLS、多实例负载均衡（后续任务）。
-- K8s 编排清单（Deployment/Pod/Probe/SecurityContext/HPA/Service/Ingress）：T2-05 仅产出数据库迁移 Job、迁移专用 ConfigMap 与 Secret 模板（`manifest/kubernetes/`），用于在更新 Deployment 之前独立执行 `migrate up`；应用 Deployment/Service/Ingress 与 Kustomize overlays 由 T2-06 交付。
+生产部署从「Compose 单机编排」扩展到「Kustomize + Kubernetes 资源」，但**不改变**启动、
+探针与终止语义。完整操作手册见 `docs/development/kubernetes.md`，这里只记录与 Compose 模型
+的对应关系与差异。
+
+| 维度 | Compose（本地） | Kubernetes（生产） |
+|---|---|---|
+| 部署单元 | `app` 服务（单实例） | `Deployment/surgecart`（`replicas: 1`，`Recreate`） |
+| 配置 | `.env` + `manifest/config/config.yaml` | ConfigMap（非敏感）+ Secret（凭据） |
+| 入口 | Nginx → `app:8000`（Compose 网络） | `Service/surgecart`（ClusterIP，集群内） |
+| 迁移 | `docker-entrypoint.sh`：`migrate up` → `exec serve` | 独立 Migration Job（版本化 Job 名称），先于应用 |
+| 存储 | named volume `app_storage` | PVC `surgecart-storage`（RWO 5Gi，单副本） |
+| 健康检查 | Docker `HEALTHCHECK /health` | `startupProbe`/`livenessProbe` `/health`、`readinessProbe` `/ready` |
+| 终止预算 | `stop_grace_period: 60s` | `terminationGracePeriodSeconds: 60` + preStop 5s |
+| 安全上下文 | `read_only`、非 root、`cap_drop: ALL` | Pod/Container `securityContext`（同等级，见 `docs/development/container-security.md`） |
+
+发布顺序（两入口独立，不可合并）：
+
+```text
+构建并推送镜像（短 SHA）
+    → 更新 Kustomize 镜像版本（Application + Migration 同值）
+    → 构建 Migration 清单 → 创建 Job → 等待完成
+         ├─ 失败 → 阻止应用升级
+         └─ 成功 → 应用 Application 清单 → 等待 Deployment Available → 校验 Readiness
+```
+
+已知边界（详见 `docs/development/kubernetes.md`）：
+
+- 单副本是**当前存储模型**的结论，不是临时保守：本地文件目录不是共享存储，多 Pod 会各写各的。
+- 没有 Ingress/TLS：仓库不虚构域名与证书方案，对外入口由环境叠加。
+- 未在真实集群验证：调度、滚动、PVC 绑定、preStop/SIGTERM 实测均为 NOT_VERIFIED。
+
+## 13. Deferred / 已知留白
+
+- Kubernetes/Ingress、HTTPS/TLS、多实例负载均衡（后续任务；T2-06 已交付单副本 Deployment/Service/Kustomize，Ingress 与环境对外入口仍留待真实集群方案）。
+- 应用侧 HPA：当前存储模型为单副本 + RWO PVC，扩容前置条件是共享存储或对象存储改造，暂不引入 HPA。
 - 迁移 Job 未在真实集群验证：调度、`kubectl wait` 流转、TTL 清理、NetworkPolicy 连通性、镜像拉取凭据均为 NOT_VERIFIED（见 `docs/development/migrations.md` §12）。
 - 生产镜像的 `serve` 启动需要真实七牛凭据（`GetBucketInfo` 外部只读校验）。容器生命周期验证使用同一运行层、仅额外启用 `serve_lifecycle` 构建标签的 `lifecycle-verify` 目标（见 `docs/development/container-security.md`）；生产二进制本身不包含测试路由或绕过开关。
 - CNB DinD 环境的真实构建/卷/网络能力以集成验证（AC-013）为准。

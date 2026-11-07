@@ -1,0 +1,12 @@
+# 生产副本数：固定单副本。
+#
+# 原因不是「不想扩容」，而是当前文件存储模型不支持多副本：
+# /app/storage 是 ReadWriteOnce PVC，多 Pod 只会拿到各自节点的独立卷副本，
+# 轮播图占位图会在不同 Pod 上出现不同内容（docs/development/kubernetes.md §7）。
+# 扩容前置条件：共享 RWX 存储或外部对象存储改造完成后，再提高该值并改用滚动更新策略。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: surgecart
+spec:
+  replicas: 1

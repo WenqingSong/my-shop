@@ -1,0 +1,21 @@
+# 生产环境专属的非敏感应用配置。
+#
+# 这些值取决于目标环境（托管 Redis 地址、七牛空间与域名），因此不写进 base，
+# 也不提供「看起来可用」的默认值：保持 REPLACE_WITH_* 占位符时，
+# scripts/deploy-k8s.sh 会拒绝发布（不会带着错误配置把 Pod 拉起来）。
+#
+# 修改方式（发布前）：
+#   1. 直接把本文件的值改成目标环境的真实值；或
+#   2. 为环境单独复制一份 overlay（不提交真实拓扑到公共仓库）。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: surgecart-config
+data:
+  # 外部/集群内 Redis 地址，必须是非回环地址（严格模式会拒绝 localhost/127.0.0.1/::1）。
+  # 必须是 host:port 形式；只开 Redis 认证时密码来自 Secret surgecart-app-credentials。
+  REDIS_DEFAULT_ADDRESS: "REPLACE_WITH_REDIS_ENDPOINT"
+
+  # 七牛空间名与对外访问域名：serve 启动时校验（GetBucketInfo），缺失或错误即启动失败。
+  QINIU_BUCKET: "REPLACE_WITH_QINIU_BUCKET"
+  QINIU_DOMAIN: "REPLACE_WITH_QINIU_DOMAIN"

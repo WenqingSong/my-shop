@@ -1,12 +1,14 @@
-# T2-05 数据库迁移 Job。
+# 数据库迁移 Job（T2-05 起步，T2-06 纳入 Kustomize）。
 #
 # 定位：把 schema 变更从应用启动流程中独立出来，在 Deployment 升级之前单独执行一次。
 #
-#   kubectl -n surgecart apply -f manifest/kubernetes/migration-configmap.yaml
-#   kubectl -n surgecart apply -f manifest/kubernetes/migration-secret.example.yaml   # 或改用外部注入的同名 Secret
-#   kubectl -n surgecart delete job surgecart-migrate --ignore-not-found
-#   kubectl -n surgecart apply -f manifest/kubernetes/migration-job.yaml
-#   kubectl -n surgecart wait --for=condition=complete job/surgecart-migrate --timeout=15m
+# 本文件是 base：Job 名称不带版本后缀，仅用于构建检查或自建 overlay 引用。
+# 正式发布走 migration/overlays/production，该入口通过 nameSuffix 给 Job 加上
+# 发布版本后缀（如 surgecart-migrate-a1b2c3d4），从而绕开 Kubernetes Job 的不可变字段：
+# 同一个 Job 名称无法在下一次发布时原地更新 Pod 模板，而新名称天然是一次新 Job。
+#
+#   bash scripts/deploy-k8s.sh            # 推荐：先迁移、确认成功、再发布应用
+#   kubectl kustomize manifest/kubernetes/migration/overlays/production
 #
 # 关键约束：
 #   - 只执行 `migrate up`，永不执行 `migrate force`（force 是人工风险操作）；
@@ -66,9 +68,10 @@ spec:
 
       containers:
         - name: migrate
-          # 必须替换为实际发布的不可变标签（CI 产出的短 SHA）。
+          # base 中的 tag 是占位值；发布版本由 migration/overlays/production 的
+          # kustomize images 覆盖为与 Application 完全相同的不可变短 SHA。
           # 不使用 latest：迁移与回滚都需要可追溯的确切版本。
-          image: docker.cnb.cool/framework-station/my-shop:REPLACE_WITH_COMMIT_SHA
+          image: docker.cnb.cool/framework-station/my-shop:unreleased
           imagePullPolicy: IfNotPresent
 
           # 覆盖镜像 ENTRYPOINT（docker-entrypoint.sh 会再启动 serve），
@@ -76,9 +79,12 @@ spec:
           command: ["/app/my-shop"]
           args: ["migrate", "up"]
 
+          # 只注入数据库连接所需的配置与凭据：
+          #   - ConfigMap 与 Application 共用同一份（同一 DB host/user/name，杜绝两库漂移）；
+          #   - Secret 只有数据库密码，不注入 JWT / 超管 / 七牛凭据。
           envFrom:
             - configMapRef:
-                name: surgecart-migration-config
+                name: surgecart-database-config
             - secretRef:
                 name: surgecart-db-credentials
 

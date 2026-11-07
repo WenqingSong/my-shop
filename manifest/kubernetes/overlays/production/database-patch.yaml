@@ -1,0 +1,14 @@
+# 生产环境的数据库地址（与 Migration 入口的
+# migration/overlays/production/database-patch.yaml 必须一致）。
+#
+# 一致性由 scripts/test-k8s-manifest.sh 断言：两个入口若指向不同数据库，
+# 会出现「迁移在 A 库、应用连 B 库」这类最难排查的发布事故。
+#
+# 占位符保持原样时 scripts/deploy-k8s.sh 拒绝发布。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: surgecart-database-config
+data:
+  # 托管数据库域名或集群内 Service DNS，禁止 localhost / 127.0.0.1 / ::1。
+  DATABASE_DEFAULT_HOST: "REPLACE_WITH_MYSQL_HOST"

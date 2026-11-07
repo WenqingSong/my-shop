@@ -1,0 +1,20 @@
+# SurgeCart 命名空间。
+#
+# 这是 Application 与 Migration 两个部署入口共同持有的**同一个**资源：
+#   kubectl kustomize manifest/kubernetes/overlays/production
+#   kubectl kustomize manifest/kubernetes/migration/overlays/production
+# 因此不存在「先创建的 namespace 与后创建的 namespace 不一致」的问题。
+#
+# pod-security.kubernetes.io/enforce=restricted：本命名空间内的 Pod 必须满足
+# Kubernetes restricted Pod Security Standard。应用与迁移容器在 T2-04 已满足该标准
+# （非 root、无特权、capabilities 全丢弃、seccomp RuntimeDefault、只读根文件系统），
+# 由 scripts/test-k8s-manifest.sh 从构建产物断言，不依赖该标签「碰巧通过」。
+# 目标集群若未启用 Pod Security Admission（< 1.23），标签被忽略但不影响部署。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: surgecart
+  labels:
+    app.kubernetes.io/name: surgecart
+    app.kubernetes.io/part-of: surgecart
+    pod-security.kubernetes.io/enforce: restricted

@@ -7,7 +7,7 @@
 - 生产镜像：`Dockerfile` 默认目标 `runtime`。
 - 验证镜像：`Dockerfile` 目标 `lifecycle-verify`，仅用于真实容器生命周期验证（见 §7）。
 - 编排：`docker-compose.yml` 的 `app` 服务；MySQL / Redis / Kafka / Nginx / Prometheus 的运行语义不变。
-- 不覆盖：Kubernetes 清单、Ingress、多副本滚动更新（T2-06）。
+- Kubernetes SecurityContext 映射（§3.5）与迁移 Job 安全（§6.1）在 T2-06 补充；不覆盖 Ingress/TLS、多副本与集群侧网络策略（真实集群未验证）。
 
 ## 2. 镜像构建
 
@@ -115,6 +115,26 @@ security_opt:
 - `app` 不发布宿主机端口；Compose 网络内由 Nginx（`${NGINX_PORT:-8080}`）作为唯一外部入口，Prometheus 直连 `app:8000`。
 - 不使用 host 网络：应用需要访问 Compose DNS（`mysql` / `redis` / `kafka`），也需要出站 HTTPS 访问七牛对象存储。
 - 数据库/Redis 宿主机映射仍绑定 `127.0.0.1`（未改变原有边界）。
+- Kubernetes 侧同样不使用 `hostNetwork` / `hostPID` / `hostIPC`，不挂载 Docker Socket 与 `hostPath`；对外只有集群内 `ClusterIP` Service（`docs/development/kubernetes.md` §6）。
+
+### 3.5 Kubernetes SecurityContext 映射（T2-06）
+
+容器加固策略在 Kubernetes 上按两级 `securityContext` 落地，语义与 Compose 一致：
+
+| 加固目标 | Compose | Kubernetes |
+|---|---|---|
+| 非 root | `user: "10001:10001"` | Pod `runAsNonRoot: true`、`runAsUser/runAsGroup: 10001` |
+| 只读根文件系统 | `read_only: true` | Container `readOnlyRootFilesystem: true` |
+| 禁止提权 | `security_opt: no-new-privileges:true` | Container `allowPrivilegeEscalation: false` |
+| capabilities | `cap_drop: [ALL]` | Container `capabilities.drop: [ALL]` |
+| seccomp | Docker 默认 profile | Pod `seccompProfile.type: RuntimeDefault` |
+| 可写 `/tmp` | `tmpfs /tmp`（64m） | `emptyDir{medium: Memory, sizeLimit: 16Mi}` |
+| 可写业务目录 | named volume `app_storage` | PVC `surgecart-storage`（`fsGroup: 10001`） |
+| 不访问 API Server | —（无 ServiceAccount） | `automountServiceAccountToken: false` |
+| 命名空间基线 | — | `pod-security.kubernetes.io/enforce: restricted` |
+
+`test/manifest` 从 Kustomize 构建产物断言上述字段，并负向断言不存在 `hostNetwork`/`hostPID`/`hostIPC`、
+`privileged: true`、`hostPath` 卷与自动挂载的 ServiceAccount Token。
 
 ## 4. 进程生命周期与优雅关闭
 
@@ -148,11 +168,12 @@ exec /app/my-shop serve
 
 ### 4.3 真实容器验证结果（2026-11-07）
 
-`bash scripts/test-container-runtime.sh`，15 项断言全部 PASS：
+`bash scripts/test-container-runtime.sh`，16 项断言全部 PASS（镜像 `my-shop-app:t204`，digest `sha256:92555df0b53a10049775fa5205318e1dab337254841d208cf66131419aa86c60`）：
 
-- 空闲停止：`SIGTERM(signal=terminated) → http_server_stopped(timed_out=false) → flashsale_runtime_shutdown_complete`，退出码 0，耗时 269ms。
-- 有在途阻塞请求（`/__lifecycle/block`）：`drain_begin → drain_timeout(9000ms, active_connections=1) → force_closed(forced_connections=1) → stopped(timed_out=true) → runtime_shutdown_begin → shutdown_complete`，退出码 0，容器停止耗时 9227ms（< 60s 预算）。
+- 空闲停止：`SIGTERM(signal=terminated) → http_server_stopped(timed_out=false) → flashsale_runtime_shutdown_complete`，退出码 0，耗时 227ms。
+- 有在途阻塞请求（`/__lifecycle/block`）：`drain_begin → drain_timeout(9000ms, active_connections=1) → force_closed(forced_connections=1) → stopped(timed_out=true) → runtime_shutdown_begin → shutdown_complete`，退出码 0，容器停止耗时 9397ms（< 60s 预算）。
 - 停止后容器 PID=0、宿主机 PID 不再存活、`OOMKilled=false`；退出码非 137，说明 Docker 未提前 SIGKILL。
+- **preStop 兼容（T2-06）**：在真实运行镜像内执行 `/bin/sh -c 'command -v sleep && sleep 0.1'` 成功（PASS[4]），证明 Kubernetes preStop 的 `/bin/sh -c "sleep 5"` 在 Alpine/busybox 运行层可用，不会因缺少二进制让摘流窗口退化为 0。
 
 ## 5. 健康检查
 
@@ -160,7 +181,7 @@ exec /app/my-shop serve
 | --- | --- | --- |
 | 镜像 `HEALTHCHECK` | `wget /health`，10s 间隔 / 5s 超时 / 60s 启动宽限 / 5 次重试 | 仅进程存活，供 `docker run` 使用 |
 | Compose `app.healthcheck` | 同值 `/health` | 不因 DB/Redis 抖动触发 restart |
-| Kubernetes（T2-06） | livenessProbe `/health`、readinessProbe `/ready` | K8s 忽略镜像 HEALTHCHECK |
+| Kubernetes（T2-06） | startupProbe `/health`、livenessProbe `/health`、readinessProbe `/ready` | K8s 忽略镜像 HEALTHCHECK；参数选择见 `docs/development/kubernetes.md` §5.1 |
 
 - `/health` 不访问 MySQL/Redis/Kafka；`/ready` 只判定 MySQL + Redis，Kafka 故障不影响两者。
 - 镜像不额外安装 curl/wget：alpine 自带 busybox wget 已满足健康检查。
@@ -186,29 +207,33 @@ exec /app/my-shop serve
 | `FLASH_SALE_*` | 否 | 秒杀消费模式与 Kafka 参数 |
 
 - 本地：`.env`（`make init` 生成，Git 忽略），Compose 注入；缺失必填值由 `${VAR:?}` 与 serve fail-fast 双重拦截。
-- 集群：由 Kubernetes Secret 注入同名环境变量；Secret 名称、RBAC 与轮换由部署环境确定（T2-06）。不要把真实值写入镜像、Compose 默认值、命令行参数或日志。
+- 集群：由 Kubernetes Secret 注入同名环境变量——数据库密码走 `surgecart-db-credentials`（应用与迁移共用），其余敏感项走 `surgecart-app-credentials`（仅应用）；Secret 的 RBAC、静态加密与轮换由部署环境确定（T2-06）。不要把真实值写入镜像、Compose 默认值、命令行参数或日志。
 - 验证：`docker image inspect -f '{{json .Config.Env}}' my-shop-app:local` 只应包含 `PATH` 等非敏感变量；门禁用关键字扫描断言。
 
-### 6.1 迁移 Job 的容器安全（T2-05）
+### 6.1 迁移 Job 的容器安全（T2-05 / T2-06）
 
 数据库迁移 Job 复用同一生产镜像，但以**更小的暴露面**运行：只执行 `migrate up`，不监听端口、不连接 Redis/Kafka、不挂载存储卷。
 
 | 字段 | 值 | 与 T2-04 的关系 |
 |---|---|---|
 | `runAsNonRoot` / `runAsUser` / `runAsGroup` | `true` / `10001` / `10001` | 与镜像 `USER 10001:10001` 一致 |
+| `fsGroup` | `10001` | 与 Pod 身份一致（迁移不写卷，保持与 T2-05 相同的加固形态） |
 | `seccompProfile` | `RuntimeDefault` | 与 Docker 默认 profile 等价 |
 | `allowPrivilegeEscalation` | `false` | 阻断 setuid/setgid 提权 |
 | `readOnlyRootFilesystem` | `true` | 迁移不写镜像层 |
 | `capabilities.drop` | `["ALL"]` | 迁移不需要任何 capability |
 | `privileged` | `false`（显式声明） | 禁止特权容器 |
 | `automountServiceAccountToken` | `false` | 迁移不访问 Kubernetes API |
+| `enableServiceLinks` | `false` | 不注入集群内 Service 环境变量 |
 | 可写路径 | 仅 `/tmp`（`emptyDir{medium: Memory}`） | 与 Compose `tmpfs /tmp` 同义 |
 | 资源 | requests `50m/64Mi`、limits `500m/256Mi` | 短时低负载任务 |
-| 凭据 | `secretRef` 注入 `DATABASE_DEFAULT_PASS` | 与 ConfigMap 分离，禁止明文 |
+| 凭据 | 只注入 `surgecart-db-credentials`（`DATABASE_DEFAULT_PASS`） | 不接触 JWT / 超管 / 七牛凭据 |
+| 配置 | 只引用共享的 `surgecart-database-config` | 与 Application 同一份数据库事实 |
+| Job 名称 | `surgecart-migrate-<短SHA>` | 版本化名称，规避 Job 模板不可变 |
 
-- 这些字段由 `scripts/test-k8s-manifest.sh`（`test/manifest/manifest_test.go`）静态断言，避免后续修改清单时削弱加固。
+- 这些字段由 `scripts/test-k8s-manifest.sh`（`test/manifest/`，解析 Kustomize 构建产物）断言，避免后续修改清单时削弱加固。
 - 迁移 Job 与业务 Deployment 共用镜像，因此镜像层的非 root、只读配置、静态二进制等加固自动继承；Job 不额外安装工具、不挂载 Docker Socket、不使用 `hostNetwork`/`hostPID`。
-- 未在真实集群验证：Pod Security Admission（restricted）、NetworkPolicy 到数据库的连通性、镜像拉取凭据。见 `docs/development/migrations.md` §12。
+- 未在真实集群验证：Pod Security Admission（restricted）实际准入、NetworkPolicy 到数据库的连通性、镜像拉取凭据。见 `docs/development/migrations.md` §12。
 
 ## 7. 验证命令
 
@@ -241,8 +266,12 @@ docker stop my-shop-app
 docker inspect -f '{{.State.ExitCode}}' my-shop-app
 docker logs my-shop-app | grep -E 'http_server|flashsale_runtime_shutdown'
 
-# 6) T2-05：迁移 Job 清单静态校验（生命周期 / 安全上下文 / Secret 边界，无需集群）
+# 6) T2-06：Kustomize 构建 + 构建产物断言 + API Schema（生命周期 / 安全上下文 / Secret 边界，无需集群）
+#    需要 kubectl（推荐）或独立 kustomize CLI；缺失即失败，不会静默跳过
 make test-k8s-manifest
+
+# 7) 手工检查构建产物中的安全字段
+kubectl kustomize manifest/kubernetes/overlays/production | grep -A6 securityContext
 ```
 
 `lifecycle-verify` 说明：生产 `serve` 启动需要真实七牛凭据（`GetBucketInfo` 外部只读校验）。容器生命周期门禁使用：
@@ -304,12 +333,13 @@ Trivy/govulncheck 的漏洞库随时间变化；本文记录的是上述日期�
 
 以下项目在本任务环境无法真实验证，明确标记为 NOT_VERIFIED，不用静态检查冒充运行结果：
 
-1. **Kubernetes 探针与滚动更新**：无集群，`terminationGracePeriodSeconds`、preStop、readinessProbe 摘流未在集群验证（T2-06）。
+1. **Kubernetes 探针与发布时序**：无集群，`terminationGracePeriodSeconds`、preStop、readinessProbe 摘流、`Recreate` 发布窗口未在集群验证（T2-06）。清单字段与预算映射由构建产物断言覆盖，不等于集群行为已验证。
 2. **生产镜像完整 `serve` 启动**：需要真实七牛凭据与外网 `GetBucketInfo`。生产镜像已验证构建、元数据、文件系统、非 root/只读下执行 `migrate version`、配置可读；HTTP/SIGTERM 语义在 `lifecycle-verify` 目标（同一 runtime-base、同一 entrypoint、同一 USER，二进制仅多测试构建标签）上验证。生产二进制不含测试路由/绕过开关。
 3. **生产镜像的 Docker HEALTHCHECK 健康态**：`serve` 未在容器内完整启动，无法观察到 `healthy`；同值 HEALTHCHECK 在 `lifecycle-verify` 容器上验证为 `healthy`。
 4. **多副本并发 migration/seed、Kafka Consumer Group 重平衡、跨 Pod 本地存储**：单副本范围外的行为未验证。
 5. **Secret 轮换/外部密钥管理**：环境变量注入方式未改变；具体 Secret 管理系统不在本任务范围。
-6. **Kubernetes 迁移 Job（T2-05）**：清单字段由静态断言覆盖，Job 调度、`kubectl wait` 流转、TTL 清理、NetworkPolicy 到数据库的连通性、镜像拉取凭据未在真实集群验证；迁移进程级语义（锁/超时/终止/恢复）已在本地用真实二进制 + 真实 MySQL 验证。
+6. **Kubernetes 迁移 Job（T2-05 / T2-06）**：清单字段由构建产物断言覆盖，Job 调度、`kubectl wait` 流转、版本化 Job 名称的并发表现、TTL 清理、NetworkPolicy 到数据库的连通性、镜像拉取凭据未在真实集群验证；迁移进程级语义（锁/超时/终止/恢复）已在本地用真实二进制 + 真实 MySQL 验证。
+7. **Pod Security Admission 准入**：`pod-security.kubernetes.io/enforce=restricted` 标签未在真实集群触发过准入校验；只能确认 SecurityContext 满足该标准的字段要求。
 
 ## 11. 变更影响
 

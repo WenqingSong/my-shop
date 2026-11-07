@@ -43,6 +43,20 @@ main:
             export AUTH_JWT_SECRET=ci-placeholder-jwt-secret-not-for-prod
             make deps-start
 
+        - name: install-kubectl
+          # T2-06：make test 内的 Kustomize 构建校验需要 kubectl 客户端。
+          # 这里只做离线构建（kubectl kustomize），不连接任何集群。
+          script: |
+            set -eu
+            if command -v kubectl >/dev/null 2>&1; then
+              kubectl version --client
+              exit 0
+            fi
+            curl -fsSL -o /usr/local/bin/kubectl \
+              https://dl.k8s.io/release/v1.31.4/bin/linux/amd64/kubectl
+            chmod +x /usr/local/bin/kubectl
+            kubectl version --client
+
         - name: test
           script: make test
 
@@ -68,6 +82,19 @@ main:
             export MYSQL_ROOT_PASSWORD=root
             export AUTH_JWT_SECRET=ci-placeholder-jwt-secret-not-for-prod
             make deps-start
+
+        - name: install-kubectl
+          # T2-06：与 pr-check 相同，make test 需要 kubectl 客户端做离线 Kustomize 构建。
+          script: |
+            set -eu
+            if command -v kubectl >/dev/null 2>&1; then
+              kubectl version --client
+              exit 0
+            fi
+            curl -fsSL -o /usr/local/bin/kubectl \
+              https://dl.k8s.io/release/v1.31.4/bin/linux/amd64/kubectl
+            chmod +x /usr/local/bin/kubectl
+            kubectl version --client
 
         - name: test
           script: make test

@@ -176,6 +176,14 @@ if grep -qiE 'PASSWORD|SECRET|TOKEN|JWT|ACCESS_KEY|SECRET_KEY' <<<"${IMAGE_ENV}"
 fi
 pass "镜像环境变量不含凭据"
 
+# T2-06：Kubernetes preStop 使用 `/bin/sh -c "sleep 5"`。
+# 在真实运行镜像里执行一次，防止「清单写了命令、镜像里没有对应二进制」——
+# 那会让摘流窗口静默退化为 0（kubelet 忽略 preStop 失败并立即发送 SIGTERM）。
+if ! docker run --rm --entrypoint /bin/sh my-shop-app:t204 -c 'command -v sleep >/dev/null 2>&1 && sleep 0.1' >/dev/null 2>&1; then
+  fail "运行镜像缺少 /bin/sh 或 sleep：Kubernetes preStop 无法执行（T2-06）"
+fi
+pass "preStop 兼容（运行镜像内 /bin/sh + sleep 可用）"
+
 # ---------------------------------------------------------------------------
 # 2) 镜像文件系统审计（导出 tar 列表，不启动容器）
 # ---------------------------------------------------------------------------

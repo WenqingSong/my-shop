@@ -39,7 +39,7 @@ log_info "校验 Prometheus 接入配置..."
 log_info "校验容器化配置（Dockerfile / .dockerignore / compose / config 凭据分离）..."
 "${SCRIPT_DIR}/test-container.sh"
 
-log_info "校验 Kubernetes 迁移 Job 清单（T2-05：生命周期/安全上下文/Secret 边界）..."
+log_info "校验 Kustomize 部署体系（T2-06：真实构建 + 构建产物断言 + API Schema）..."
 "${SCRIPT_DIR}/test-k8s-manifest.sh"
 
 log_info "校验 Nginx 反向代理配置..."
