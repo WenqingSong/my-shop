@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -255,7 +256,13 @@ kind: Job
 metadata:
   name: surgecart-migrate-%[1]s
   namespace: surgecart
+  labels:
+    app.kubernetes.io/name: surgecart
+    app.kubernetes.io/component: database-migration
 spec:
+  parallelism: 1
+  completions: 1
+  activeDeadlineSeconds: 5
   template:
     spec:
       containers:
@@ -309,6 +316,25 @@ spec:
 	}
 }
 
+// setJobDeadline 重写迁移清单里的 activeDeadlineSeconds（AUD-04：脚本等待上限与
+// Job 自身截止时间必须有明确关系）。
+func (f *fixture) setJobDeadline(sec int) {
+	f.t.Helper()
+	path := filepath.Join(f.stateDir, fakestate.MigrationManifest)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		f.t.Fatalf("读取迁移清单: %v", err)
+	}
+	re := regexp.MustCompile(`(?m)^  activeDeadlineSeconds: [0-9]+$`)
+	if !re.Match(raw) {
+		f.t.Fatalf("迁移清单缺少 activeDeadlineSeconds：\n%s", raw)
+	}
+	updated := re.ReplaceAll(raw, []byte(fmt.Sprintf("  activeDeadlineSeconds: %d", sec)))
+	if err := os.WriteFile(path, updated, 0o644); err != nil {
+		f.t.Fatalf("写入迁移清单: %v", err)
+	}
+}
+
 // readyDeployment 返回一个「已收敛」的 Deployment 状态。
 func readyDeployment(tag string, generation int) fakestate.Deployment {
 	image := repository + ":" + tag
@@ -337,6 +363,8 @@ func defaultState(tag, currentVersion string) *fakestate.State {
 		Permissions:      fakestate.Permissions{Get: true, Create: true, Update: true, Patch: true},
 		Secrets:          []string{"surgecart-db-credentials", "surgecart-app-credentials"},
 		Job: fakestate.Job{
+			Name:     "surgecart-migrate-" + tag,
+			UID:      "job-uid-" + tag,
 			Exists:   true,
 			Complete: true,
 			Logs:     "migrate: applied 37 migrations\n",
@@ -344,6 +372,7 @@ func defaultState(tag, currentVersion string) *fakestate.State {
 		Deployment:           current,
 		DeploymentAfterApply: []fakestate.Deployment{readyDeployment(tag, 4)},
 		ApplyFailures:        map[string]bool{},
+		ApplyErrorsApplied:   map[string]bool{},
 	}
 }
 
@@ -375,6 +404,41 @@ func (f *fixture) updateState(fn func(*fakestate.State)) {
 	if err := fakestate.Save(f.stateDir, state); err != nil {
 		f.t.Fatalf("写回 fake 状态: %v", err)
 	}
+}
+
+// 迁移生命周期注解的键（与 scripts/deploy-k8s.sh 的数据契约一致）。
+const (
+	annMigrationState  = "deploy-lock.surgecart.io/migration-state"
+	annMigrationJob    = "deploy-lock.surgecart.io/migration-job"
+	annMigrationUID    = "deploy-lock.surgecart.io/migration-job-uid"
+	annMigrationDetail = "deploy-lock.surgecart.io/migration-detail"
+)
+
+// leaseRecord 返回锁上记录的迁移生命周期（state, job, uid）。
+func (f *fixture) leaseRecord() (string, string, string) {
+	f.t.Helper()
+	lease := f.state().Lease
+	if lease == nil {
+		f.t.Fatal("Lease 不存在：无法读取迁移生命周期记录")
+	}
+	return lease.Annotations[annMigrationState], lease.Annotations[annMigrationJob],
+		lease.Annotations[annMigrationUID]
+}
+
+// setLeaseRecord 直接改写锁上的迁移记录，用于构造「上一轮 Runner 的遗留状态」。
+func (f *fixture) setLeaseRecord(state, job, uid string) {
+	f.t.Helper()
+	f.updateState(func(st *fakestate.State) {
+		if st.Lease == nil {
+			st.Lease = &fakestate.Lease{ResourceVersion: "1", UID: "lease-uid-seed"}
+		}
+		if st.Lease.Annotations == nil {
+			st.Lease.Annotations = map[string]string{}
+		}
+		st.Lease.Annotations[annMigrationState] = state
+		st.Lease.Annotations[annMigrationJob] = job
+		st.Lease.Annotations[annMigrationUID] = uid
+	})
 }
 
 func (f *fixture) events() []string { return fakestate.Read(f.stateDir, fakestate.EventsFileName) }

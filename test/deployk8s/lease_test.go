@@ -17,16 +17,34 @@ import (
 func rfc3339(at time.Time) string { return at.UTC().Format(time.RFC3339) }
 
 // slowMigration 让迁移等待循环至少跑几轮（用于观察续租、并发与信号行为）。
+// POLL_INTERVAL=2s，因此 2 个「运行中」快照 ≈ 4s，足够观察 ≥2 次续租（间隔 1s）。
 func slowMigration(f *fixture) {
 	f.updateState(func(st *fakestate.State) {
 		st.JobScript = []fakestate.Job{
 			{Exists: true},
+			{Exists: true},
+			{Exists: true, Complete: true},
+		}
+	})
+}
+
+// longMigration 让迁移等待时间足够长（≈6s），使「后台续租至少发生一次」在
+// 并行压测（CPU 竞争导致 sleep 抖动）下也可以稳定观察到。
+func longMigration(f *fixture) {
+	f.updateState(func(st *fakestate.State) {
+		st.JobScript = []fakestate.Job{
 			{Exists: true},
 			{Exists: true},
 			{Exists: true},
 			{Exists: true, Complete: true},
 		}
 	})
+}
+
+// leaseArgs 返回满足 AUD-03 参数不变量的租期组合：
+// renew_interval(1) + renew_request_timeout(5) + safety_margin(5) = 11 < 15。
+func leaseArgs() []string {
+	return []string{"--lease-duration", "15", "--lease-renew-interval", "1"}
 }
 
 // TestLeaseFirstDeployment 覆盖「首次部署」：Deployment 不存在也必须有锁，
@@ -196,14 +214,12 @@ func TestLeaseExpiredIsTakenOver(t *testing.T) {
 func TestLeaseRenewedDuringDeploy(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, fixtureOptions{})
-	slowMigration(f)
+	longMigration(f)
 
-	res := runDeploy(t, f,
+	res := runDeploy(t, f, append([]string{
 		"--migration-timeout", "60",
 		"--rollout-timeout", "30",
-		"--lease-duration", "5",
-		"--lease-renew-interval", "1",
-	)
+	}, leaseArgs()...)...)
 
 	res.requireSuccess(t)
 	if got := f.countEvents("lease.renew"); got < 2 {
@@ -217,15 +233,13 @@ func TestLeaseRenewedDuringDeploy(t *testing.T) {
 func TestLeaseRenewFailureStopsApplicationApply(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, fixtureOptions{})
-	slowMigration(f)
-	f.updateState(func(st *fakestate.State) { st.LeaseReplaceFailures = 1 })
+	longMigration(f)
+	f.updateState(func(st *fakestate.State) { st.LeaseRenewFailures = 1 })
 
-	res := runDeploy(t, f,
+	res := runDeploy(t, f, append([]string{
 		"--migration-timeout", "60",
 		"--rollout-timeout", "30",
-		"--lease-duration", "5",
-		"--lease-renew-interval", "1",
-	)
+	}, leaseArgs()...)...)
 
 	res.requireCode(t, 3)
 	res.requireNoSuccess(t)
@@ -244,12 +258,10 @@ func TestLeaseTakenOverCannotBeReleased(t *testing.T) {
 		st.LeaseStealHolder = "deploy-new-runner-5678"
 	})
 
-	res := runDeploy(t, f,
+	res := runDeploy(t, f, append([]string{
 		"--migration-timeout", "60",
 		"--rollout-timeout", "30",
-		"--lease-duration", "5",
-		"--lease-renew-interval", "1",
-	)
+	}, leaseArgs()...)...)
 
 	res.requireCode(t, 3)
 	res.requireNoSuccess(t)

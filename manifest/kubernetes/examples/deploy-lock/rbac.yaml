@@ -7,11 +7,16 @@
 # 用途：由集群管理员**一次性**授予「执行发布的身份」下述权限。
 #
 # 需要的动词（对应 scripts/deploy-k8s.sh 的实际调用）：
-#   get    读取锁记录（holderIdentity / renewTime / resourceVersion）
+#   get    读取锁记录（holderIdentity / renewTime / resourceVersion / 迁移记录注解）
 #   create 首次获取锁（原子创建，AlreadyExists 即表示已被占用）
-#   update 续租 / 接管过期锁 / 释放锁（PUT + metadata.resourceVersion 做 CAS）
+#   update 续租 / 接管过期锁 / 释放锁 / 写迁移记录（PUT + metadata.resourceVersion 做 CAS）
 # patch 不参与发布流程，仅供人工恢复 runbook 使用（见 docs/development/deploy-lock.md §8），
 # 授予它可以让值班人员在不具备 update 的情况下清理卡死的锁；不授予也不影响发布。
+#
+# T2-06.1.1 起额外需要 jobs 的 get/list：接管发布锁之前必须核验上一轮 Migration Job
+# 是否已经终结（只信 Lease 注解是不够的），发布前还要扫描命名空间里是否存在未终结的
+# 迁移 Job。缺少这两个动词时脚本会在权限预检阶段失败（退出码 3），不会带着未知的
+# 迁移状态继续发布。
 #
 # 注意：Lease 是 namespaced 资源，权限必须落在 surgecart 命名空间内，
 # 不要授予集群级 leases 权限（那会让该身份能干扰其他命名空间的协调类资源）。
@@ -36,6 +41,11 @@ rules:
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     verbs: ["create"]
+  # 迁移生命周期核验（T2-06.1.1）：按名称读取 Job + 列表扫描「是否存在未终结的迁移」。
+  # 只读，不含 delete/create：删除 Job 仍然必须由人工执行（脚本永不自动删除）。
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list"]
 ---
 # 把上面的 Role 绑定到执行发布的身份。
 #

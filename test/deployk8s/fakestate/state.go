@@ -1,11 +1,12 @@
-// Package fakestate 是 T2-06.1 发布脚本行为测试的「集群状态」模型。
+// Package fakestate 是 T2-06.1 / T2-06.1.1 发布脚本行为测试的「集群状态」模型。
 //
 // 设计边界（必须如实理解）：
 //   - 这是 fake kubectl 的状态文件，不是 Kubernetes API Server 的模拟器；
-//   - 它只实现 deploy-k8s.sh 真正用到的语义：Lease 的原子 create / CAS replace、
-//     Deployment 状态字段、Job 条件、Pod 状态；
-//   - 因此它能证明「脚本在给定状态序列下的行为」，不能证明「真实 API Server 的并发语义」。
-//     真实集群验证仍然是 NOT_VERIFIED（见 docs/reports/t2-06-1-deploy-safety）。
+//   - 它只实现 deploy-k8s.sh 真正用到的语义：Lease 的原子 create / CAS replace（含
+//     resourceVersion 与 UID 校验）、Job 条件与 UID、Deployment 状态字段、Pod 状态；
+//   - 它能证明「脚本在给定状态序列下的行为」，**不能**证明「真实 API Server 的并发语义」
+//     （etcd 事务、多 apiserver、watch 缓存）。真实集群验证仍然是 NOT_VERIFIED
+//     （见 docs/development/kubernetes.md §14）。
 package fakestate
 
 import (
@@ -36,14 +37,25 @@ type Permissions struct {
 }
 
 // Lease 是 coordination.k8s.io/v1 Lease 中脚本实际读写的字段。
+//
+// Annotations 承载迁移生命周期记录（T2-06.1.1）：脚本用注解把「本轮迁移 Job」与锁绑定，
+// fake 必须在 create/replace 时完整持久化它，否则「PUT 丢记录」这类缺陷无法被发现。
 type Lease struct {
-	ResourceVersion string `json:"resourceVersion"`
-	UID             string `json:"uid"`
-	HolderIdentity  string `json:"holderIdentity"`
-	AcquireTime     string `json:"acquireTime"`
-	RenewTime       string `json:"renewTime"`
-	DurationSeconds int    `json:"leaseDurationSeconds"`
-	Transitions     int    `json:"leaseTransitions"`
+	ResourceVersion string            `json:"resourceVersion"`
+	UID             string            `json:"uid"`
+	HolderIdentity  string            `json:"holderIdentity"`
+	AcquireTime     string            `json:"acquireTime"`
+	RenewTime       string            `json:"renewTime"`
+	DurationSeconds int               `json:"leaseDurationSeconds"`
+	Transitions     int               `json:"leaseTransitions"`
+	Annotations     map[string]string `json:"annotations"`
+}
+
+// Container 是一个容器状态（AUD-11：多容器 Pod 只能按名字取应用容器）。
+type Container struct {
+	Name  string `json:"name"`
+	Image string `json:"image"`
+	Ready bool   `json:"ready"`
 }
 
 // Pod 是发布验证与迁移超时判定需要的 Pod 字段。
@@ -54,6 +66,9 @@ type Pod struct {
 	Version  string `json:"version"`
 	Image    string `json:"image"`
 	Ready    bool   `json:"ready"`
+	// Containers 非空时按它渲染（可构造 sidecar / 多容器场景）；
+	// 为空时 fake 使用默认的单个 app 容器。
+	Containers []Container `json:"containers"`
 }
 
 // Deployment 是 Deployment 的结构化快照（只含脚本读取的字段）。
@@ -73,7 +88,11 @@ type Deployment struct {
 
 // Job 是迁移 Job 的状态快照。
 type Job struct {
+	// Name 为空时，fake 按请求的 Job 名渲染（便于脚本按名称核验）。
+	Name     string `json:"name"`
+	UID      string `json:"uid"`
 	Exists   bool   `json:"exists"`
+	Deleting bool   `json:"deleting"`
 	Complete bool   `json:"complete"`
 	Failed   bool   `json:"failed"`
 	Reason   string `json:"reason"`
@@ -88,7 +107,8 @@ type Job struct {
 //   - Deployment 表示「Application 清单 apply 之前」的线上状态（版本降级保护读取它）；
 //   - DeploymentAfterApply 是 apply 之后逐个 get 返回的状态序列（最后一个重复），
 //     用来构造「收敛中」「收敛后又被他方改写」「Pod 未 Ready」等时序场景；
-//   - JobScript 同理，是迁移等待循环每次 get 返回的状态序列。
+//   - JobScript 同理，是迁移等待循环每次 get 返回的状态序列；
+//   - Jobs 是 `get jobs -l ...` 的列表结果（迁移生命周期扫描用），为空时退化为 st.Job。
 type State struct {
 	ClusterReachable bool        `json:"clusterReachable"`
 	NamespaceExists  bool        `json:"namespaceExists"`
@@ -96,30 +116,65 @@ type State struct {
 	Secrets          []string    `json:"secrets"`
 
 	Lease *Lease `json:"lease"`
-	// LeaseReplaceFailures 让接下来 N 次 replace（续租/接管/释放）返回 API 500，
-	// 用于模拟「续租失败」与「API Server 抖动」。
+	// LeaseReplaceFailures 让接下来 N 次 replace（续租/接管/释放）返回 API 500。
 	LeaseReplaceFailures int `json:"leaseReplaceFailures"`
 	// LeaseGetFailures 让接下来 N 次 get lease 返回 API 500。
 	LeaseGetFailures int `json:"leaseGetFailures"`
+	// LeaseReplaceConflicts 让接下来 N 次 replace 返回确定性 409（resourceVersion 冲突）。
+	LeaseReplaceConflicts int `json:"leaseReplaceConflicts"`
+	// LeaseReplaceUIDConflicts 让接下来 N 次 replace 返回「UID 不匹配」的 409。
+	LeaseReplaceUIDConflicts int `json:"leaseReplaceUIDConflicts"`
+	// LeaseReplaceTimeouts 让接下来 N 次 replace 以客户端请求超时失败。
+	LeaseReplaceTimeouts int `json:"leaseReplaceTimeouts"`
+	// LeaseGetTimeouts 让接下来 N 次 get lease 以客户端请求超时失败。
+	LeaseGetTimeouts int `json:"leaseGetTimeouts"`
+	// 续租专用故障（只作用于 lease-renew.yaml 的 replace）：
+	// 续租是最不能慢/最不能失败的请求，需要与「迁移记录写入」区分开的确定性注入。
+	LeaseRenewFailures     int `json:"leaseRenewFailures"`
+	LeaseRenewConflicts    int `json:"leaseRenewConflicts"`
+	LeaseRenewTimeouts     int `json:"leaseRenewTimeouts"`
+	LeaseRenewUIDConflicts int `json:"leaseRenewUIDConflicts"`
 	// LeaseStealAfterGets > 0 时，在第 N 次 get lease 之后把持有者替换为 LeaseStealHolder，
 	// 模拟「旧持有者的锁已过期并被其他 Runner 接管」。
 	LeaseStealAfterGets int    `json:"leaseStealAfterGets"`
 	LeaseStealHolder    string `json:"leaseStealHolder"`
-	LeaseGets           int    `json:"leaseGets"`
+	// LeaseStealAfterState 非空时，一旦某次 replace 成功写入该迁移状态
+	// （注解 deploy-lock.surgecart.io/migration-state），锁立即被 LeaseStealHolder 接管。
+	// 这是确定性的「写入成功后立刻失锁」注入，用于验证脚本不再发起新操作。
+	LeaseStealAfterState string `json:"leaseStealAfterState"`
+	MigrationApplied     bool   `json:"migrationApplied"`
 	// LeaseAcquisitions 统计成功获取锁的次数（create 成功或非空持有者接管成功）。
+	LeaseGets         int `json:"leaseGets"`
 	LeaseAcquisitions int `json:"leaseAcquisitions"`
 
 	Job       Job   `json:"job"`
 	JobScript []Job `json:"jobScript"`
 	JobGets   int   `json:"jobGets"`
+	// Jobs 是命名空间内全部迁移 Job（生命周期扫描用）；为空时退化为 []Job{st.Job}。
+	Jobs           []Job `json:"jobs"`
+	JobGetFailures int   `json:"jobGetFailures"`
+	JobGetTimeouts int   `json:"jobGetTimeouts"`
+	// JobGetFailAt > 0 时，第 N 次 get job 返回 API 500（只触发一次）。
+	// 用于「等待循环读得到、二次判定读失败」这类确定性时序。
+	JobGetFailAt     int `json:"jobGetFailAt"`
+	JobsListFailures int `json:"jobsListFailures"`
+	JobsListTimeouts int `json:"jobsListTimeouts"`
+	PodsGetFailures  int `json:"podsGetFailures"`
+	PodsGetTimeouts  int `json:"podsGetTimeouts"`
 
 	Deployment           Deployment   `json:"deployment"`
 	DeploymentAfterApply []Deployment `json:"deploymentAfterApply"`
 	DeploymentGets       int          `json:"deploymentGets"`
-	Applied              bool         `json:"applied"`
+	// DeploymentGetError 非空时 get deployment 直接返回该错误（模拟命名空间不存在、
+	// 鉴权失败等「NotFound 但不是 Deployment 不存在」的场景，AUD-09）。
+	DeploymentGetError string `json:"deploymentGetError"`
+	Applied            bool   `json:"applied"`
 
-	// ApplyFailures 按清单类型（migration / application）注入 apply 失败。
+	// ApplyFailures 按清单类型（migration / application）注入 apply 失败（对象未被创建）。
 	ApplyFailures map[string]bool `json:"applyFailures"`
+	// ApplyErrorsApplied 按清单类型注入「API 返回错误，但对象实际已创建」
+	// （客户端超时 / 网关错误；AUD-01 要求脚本不能靠 apply 的退出码判断是否创建）。
+	ApplyErrorsApplied map[string]bool `json:"applyErrorsApplied"`
 }
 
 // Dir 返回状态目录（由测试通过环境变量注入）。

@@ -41,27 +41,37 @@ func TestClusterUnreachable(t *testing.T) {
 	f.requireNoEvent(t, "apply.migration")
 }
 
-// TestApplyFailureDuringMigrationReleasesLock 覆盖「发布过程中 API Server 返回错误」：
-// 退出非零，且已经获得的锁必须被释放（不能让下一次发布白等一个租期）。
+// TestApplyFailureDuringMigrationReleasesLock 覆盖「迁移 apply 失败且对象确实没有创建」：
+// 退出码 1，锁必须释放（迁移从未发生，不能让下一次发布白等一个租期）。
 func TestApplyFailureDuringMigrationReleasesLock(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, fixtureOptions{})
-	f.updateState(func(st *fakestate.State) { st.ApplyFailures["migration"] = true })
+	f.updateState(func(st *fakestate.State) {
+		st.ApplyFailures["migration"] = true
+		// apply 失败且 Job 确实不存在：这是「确定未创建」，不是「状态不明」。
+		st.Job = fakestate.Job{Exists: false}
+		st.JobScript = []fakestate.Job{{Exists: false}}
+	})
 
-	res := runDeploy(t, f)
+	res := runDeploy(t, f, "--migration-timeout", "8")
 
 	res.requireCode(t, 1)
 	res.requireNoSuccess(t)
-	res.requireContains(t, "Migration 清单应用失败")
+	res.requireContains(t, "Migration 清单应用失败", "确实不存在")
 	f.requireEvent(t, "lease.release")
 	if lease := f.state().Lease; lease == nil || lease.HolderIdentity != "" {
-		t.Fatalf("apply 失败后必须释放锁，实际: %+v", lease)
+		t.Fatalf("确认 Job 未创建后必须释放锁，实际: %+v", lease)
+	}
+	state, _, _ := f.leaseRecord()
+	if state != "NO_MIGRATION" {
+		t.Fatalf("确认迁移未发生时应把记录复位为 NO_MIGRATION，实际 %q", state)
 	}
 	f.requireNoEvent(t, "apply.application")
 }
 
-// TestSigtermReleasesLock 覆盖 SIGTERM：中止发布、释放锁、清理临时文件、不报告成功。
-func TestSigtermReleasesLock(t *testing.T) {
+// TestSigtermDuringMigrationKeepsLease 覆盖 SIGTERM（迁移仍在运行）：
+// AUD-01 要求信号路径遵循同一套生命周期规则 —— 迁移未终态就**不得**释放锁。
+func TestSigtermDuringMigrationKeepsLease(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, fixtureOptions{})
 	slowMigration(f)
@@ -75,11 +85,20 @@ func TestSigtermReleasesLock(t *testing.T) {
 
 	res.requireCode(t, 143)
 	res.requireNoSuccess(t)
-	res.requireContains(t, "收到 SIGTERM")
-	f.requireEvent(t, "lease.release")
+	res.requireContains(t, "收到 SIGTERM", "不释放发布锁")
+	f.requireNoEvent(t, "lease.release")
 	f.requireNoEvent(t, "apply.application")
-	if lease := f.state().Lease; lease == nil || lease.HolderIdentity != "" {
-		t.Fatalf("SIGTERM 后锁必须被释放（无 SIGKILL 时应尽力释放），实际: %+v", lease)
+
+	lease := f.state().Lease
+	if lease == nil || lease.HolderIdentity == "" {
+		t.Fatalf("迁移未终态时 SIGTERM 不得释放锁，实际: %+v", lease)
+	}
+	state, job, uid := f.leaseRecord()
+	if state != "MIGRATION_PENDING" && state != "MIGRATION_RUNNING" {
+		t.Fatalf("SIGTERM 后必须保留「未终态」记录，实际 state=%q", state)
+	}
+	if job == "" || uid == "" {
+		t.Fatalf("关联信息（job/uid）必须保留，实际 job=%q uid=%q", job, uid)
 	}
 	f.tmpDirEmpty(t)
 }
@@ -100,11 +119,21 @@ func TestCrashLeaseExpiresAndIsTakenOver(t *testing.T) {
 		t.Fatalf("SIGKILL 后锁记录应保持被持有（无法执行清理），实际: %+v", crashed.Lease)
 	}
 
-	// 模拟时间流逝：租期（30s）已过，且迁移本身已完成。
+	// 上一个 Runner 的迁移关联记录必须被保留（崩溃不会清理）。
+	// 注意 uid 允许为空：崩溃可能发生在「apply 之后、UID 回写之前」这个窗口，
+	// 此时记录里只有 Job 名 —— 后续 Runner 必须靠真实对象核验，不能只信注解。
+	state, job, _ := f.leaseRecord()
+	if job == "" || (state != "MIGRATION_PENDING" && state != "MIGRATION_RUNNING") {
+		t.Fatalf("崩溃后必须保留「未终态 + Job 名」记录，实际 state=%q job=%q", state, job)
+	}
+
+	// 模拟时间流逝：租期（30s）已过，且迁移本身已完成（同名同 uid）。
 	f.updateState(func(st *fakestate.State) {
 		st.Lease.RenewTime = time.Now().Add(-10 * time.Minute).UTC().Format(time.RFC3339)
 		st.JobScript = nil
-		st.Job = fakestate.Job{Exists: true, Complete: true}
+		st.Job.Exists = true
+		st.Job.Complete = true
+		st.Job.Failed = false
 		st.JobGets = 0
 	})
 

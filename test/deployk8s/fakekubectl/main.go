@@ -1,15 +1,21 @@
-// fake kubectl —— T2-06.1 发布脚本行为测试的执行替身。
+// fake kubectl —— T2-06.1 / T2-06.1.1 发布脚本行为测试的执行替身。
 //
 // 它不是 kubectl 的完整实现，只忠实实现 scripts/deploy-k8s.sh 真正依赖的语义：
 //
 //	version                               集群可达性
 //	kustomize <path>                      输出预置清单（migration.yaml / application.yaml）
-//	auth can-i <verb> leases...           权限预检
-//	create -f <Lease>                     原子创建（同名只能成功一次）
-//	replace -f <Lease>                    PUT + metadata.resourceVersion 的 CAS
+//	auth can-i <verb> <resource>          权限预检
+//	create -f <Lease>                     原子创建（同名只能成功一次），持久化注解
+//	replace -f <Lease>                    PUT + resourceVersion/UID 校验的 CAS，持久化注解
 //	apply -f <manifest>                   记录 apply，并按清单 kind 推进阶段
-//	get namespace|secret|lease|job|deployment|pods
+//	get namespace|secret|lease|job|jobs|deployment|pods
 //	logs | describe | wait                只输出文本，供失败 runbook 使用
+//
+// 故障注入（T2-06.1.1 / AUD-03、AUD-04）：
+//   - API 500 / 客户端请求超时 / 确定性 409 / UID 冲突；
+//   - Job 不存在、Job 状态按脚本序列推进、Job 删除中；
+//   - 「apply 返回错误但对象已创建」；
+//   - 迁移之后第一次 get lease 时锁被接管（检查-写入竞态窗口）。
 //
 // 关键点：并发 Runner 的 create/replace 用 flock 串行化，因此「两个 Runner 同时申请锁
 // 只有一个成功」在**脚本行为**层面是真实竞争出来的，不是预设结论。
@@ -33,6 +39,8 @@ import (
 const (
 	lockName  = "surgecart-deploy-lock"
 	namespace = "surgecart"
+	// 迁移生命周期记录的状态注解键（与 scripts/deploy-k8s.sh 的数据契约一致）。
+	annMigrationState = "deploy-lock.surgecart.io/migration-state"
 )
 
 func main() {
@@ -237,6 +245,9 @@ func cmdAuth(dir string, inv invocation) int {
 			allowed = st.Permissions.Update
 		case "patch":
 			allowed = st.Permissions.Patch
+		case "list":
+			// 迁移生命周期核验需要 jobs 的 list 权限，沿用 get 的授权开关。
+			allowed = st.Permissions.Get
 		default:
 			allowed = false
 		}
@@ -253,10 +264,11 @@ func cmdAuth(dir string, inv invocation) int {
 type leaseManifest struct {
 	Kind     string `yaml:"kind"`
 	Metadata struct {
-		Name            string `yaml:"name"`
-		Namespace       string `yaml:"namespace"`
-		ResourceVersion string `yaml:"resourceVersion"`
-		UID             string `yaml:"uid"`
+		Name            string            `yaml:"name"`
+		Namespace       string            `yaml:"namespace"`
+		ResourceVersion string            `yaml:"resourceVersion"`
+		UID             string            `yaml:"uid"`
+		Annotations     map[string]string `yaml:"annotations"`
 	} `yaml:"metadata"`
 	Spec struct {
 		HolderIdentity       string `yaml:"holderIdentity"`
@@ -306,12 +318,19 @@ func cmdCreate(dir string, inv invocation) int {
 			RenewTime:       manifest.Spec.RenewTime,
 			DurationSeconds: manifest.Spec.LeaseDurationSeconds,
 			Transitions:     manifest.Spec.LeaseTransitions,
+			Annotations:     manifest.Metadata.Annotations,
 		}
 		st.LeaseAcquisitions++
 		fakestate.Append(dir, fakestate.EventsFileName, "lease.acquire holder="+manifest.Spec.HolderIdentity)
 		fmt.Printf("lease.coordination.k8s.io/%s created\n", lockName)
 		return 0
 	})
+}
+
+// conflictMessage 与真实 API Server 的 409 文案同形：脚本用「409 Conflict / 已修改」
+// 作为「CAS 失败」的唯一判据。
+func conflictMessage(reason string) {
+	fmt.Fprintf(os.Stderr, "Error from server (Conflict): Operation cannot be fulfilled on leases.coordination.k8s.io %q: %s\n", lockName, reason)
 }
 
 func cmdReplace(dir string, inv invocation) int {
@@ -330,15 +349,63 @@ func cmdReplace(dir string, inv invocation) int {
 			fmt.Fprintf(os.Stderr, "Error from server (NotFound): leases.coordination.k8s.io %q not found\n", lockName)
 			return 1
 		}
+		// 续租故障是「持续性」的：脚本会对 409 做有限重试，单次失败不足以判定失锁，
+		// 因此这几个计数器不递减（模拟 API 持续不可用 / 锁持续被抢占）。
+		isRenew := filepath.Base(path) == "lease-renew.yaml"
+		if isRenew && st.LeaseRenewTimeouts > 0 {
+			fakestate.Append(dir, fakestate.EventsFileName, "lease.renew-timeout")
+			fmt.Fprintln(os.Stderr, "Unable to connect to the server: net/http: request canceled (Client.Timeout exceeded while awaiting headers)")
+			return 1
+		}
+		if isRenew && st.LeaseRenewFailures > 0 {
+			fakestate.Append(dir, fakestate.EventsFileName, "lease.renew-error")
+			fmt.Fprintln(os.Stderr, `Error from server (InternalError): an error on the server ("injected renew failure") has prevented the request from succeeding`)
+			return 1
+		}
+		if isRenew && st.LeaseRenewConflicts > 0 {
+			fakestate.Append(dir, fakestate.EventsFileName, "lease.renew-conflict")
+			conflictMessage("the object has been modified; please apply your changes to the latest version and try again")
+			return 1
+		}
+		if isRenew && st.LeaseRenewUIDConflicts > 0 {
+			fakestate.Append(dir, fakestate.EventsFileName, "lease.renew-uid-conflict")
+			conflictMessage("the UID in the precondition does not match the UID in record")
+			return 1
+		}
+		if st.LeaseReplaceTimeouts > 0 {
+			st.LeaseReplaceTimeouts--
+			fakestate.Append(dir, fakestate.EventsFileName, "lease.replace-timeout")
+			fmt.Fprintln(os.Stderr, "Unable to connect to the server: net/http: request canceled (Client.Timeout exceeded while awaiting headers)")
+			return 1
+		}
 		if st.LeaseReplaceFailures > 0 {
 			st.LeaseReplaceFailures--
 			fakestate.Append(dir, fakestate.EventsFileName, "lease.replace-error")
 			fmt.Fprintln(os.Stderr, `Error from server (InternalError): an error on the server ("injected lease failure") has prevented the request from succeeding`)
 			return 1
 		}
+		if st.LeaseReplaceConflicts > 0 {
+			st.LeaseReplaceConflicts--
+			fakestate.Append(dir, fakestate.EventsFileName, "lease.conflict")
+			conflictMessage("the object has been modified; please apply your changes to the latest version and try again")
+			return 1
+		}
+		if st.LeaseReplaceUIDConflicts > 0 {
+			st.LeaseReplaceUIDConflicts--
+			fakestate.Append(dir, fakestate.EventsFileName, "lease.uid-conflict")
+			conflictMessage("the UID in the precondition does not match the UID in record")
+			return 1
+		}
+		// UID 校验（T2-06.1.1）：真实 API Server 会拒绝 uid 与现存对象不一致的 PUT，
+		// 这正是「同名 Lease 被删除重建」时旧持有者不能写入的原因。
+		if manifest.Metadata.UID != "" && manifest.Metadata.UID != st.Lease.UID {
+			fakestate.Append(dir, fakestate.EventsFileName, "lease.uid-conflict")
+			conflictMessage("the UID in the precondition does not match the UID in record")
+			return 1
+		}
 		if manifest.Metadata.ResourceVersion != st.Lease.ResourceVersion {
 			fakestate.Append(dir, fakestate.EventsFileName, "lease.conflict")
-			fmt.Fprintf(os.Stderr, "Error from server (Conflict): Operation cannot be fulfilled on leases.coordination.k8s.io %q: the object has been modified; please apply your changes to the latest version and try again\n", lockName)
+			conflictMessage("the object has been modified; please apply your changes to the latest version and try again")
 			return 1
 		}
 
@@ -348,7 +415,18 @@ func cmdReplace(dir string, inv invocation) int {
 		st.Lease.RenewTime = manifest.Spec.RenewTime
 		st.Lease.DurationSeconds = manifest.Spec.LeaseDurationSeconds
 		st.Lease.Transitions = manifest.Spec.LeaseTransitions
+		// PUT 覆盖整个对象：注解必须整体回写，否则记录丢失。
+		st.Lease.Annotations = manifest.Metadata.Annotations
 		st.Lease.ResourceVersion = nextResourceVersion(st.Lease.ResourceVersion)
+
+		// 确定性注入：记录写入成功后锁立刻被别的 Runner 接管。
+		if state := manifest.Metadata.Annotations[annMigrationState]; state != "" && st.LeaseStealAfterState == state {
+			st.LeaseStealAfterState = ""
+			holder := st.Lease.HolderIdentity
+			st.Lease.HolderIdentity = st.LeaseStealHolder
+			st.Lease.ResourceVersion = nextResourceVersion(st.Lease.ResourceVersion)
+			fakestate.Append(dir, fakestate.EventsFileName, "lease.stolen-after-state state="+state+" previous="+holder)
+		}
 
 		switch {
 		case manifest.Spec.HolderIdentity == "":
@@ -390,17 +468,42 @@ func cmdApply(dir string, inv invocation) int {
 			fmt.Fprintf(os.Stderr, `Error from server (InternalError): an error on the server ("injected apply failure for %s") has prevented the request from succeeding`+"\n", kind)
 			return 1
 		}
-		fakestate.Append(dir, fakestate.EventsFileName, "apply."+kind)
-		switch kind {
-		case "application":
-			st.Applied = true
-			st.DeploymentGets = 0
-		case "namespace":
-			st.NamespaceExists = true
+		// 「API 返回错误但对象已创建」：脚本不能靠 apply 的退出码判断是否创建。
+		if st.ApplyErrorsApplied[kind] {
+			fakestate.Append(dir, fakestate.EventsFileName, "apply.error-but-created "+kind)
+			applyKind(st, kind)
+			fmt.Fprintf(os.Stderr, `Error from server (Timeout): the server was unable to return a response in the time allotted, but the request may have been processed`+"\n")
+			return 1
 		}
+		fakestate.Append(dir, fakestate.EventsFileName, "apply."+kind)
+		applyKind(st, kind)
 		fmt.Printf("%s applied\n", kind)
 		return 0
 	})
+}
+
+func applyKind(st *fakestate.State, kind string) {
+	switch kind {
+	case "application":
+		st.Applied = true
+		st.DeploymentGets = 0
+	case "namespace":
+		st.NamespaceExists = true
+	case "migration":
+		// 迁移已发起：后续第一次 get lease 可能触发「检查后被接管」的注入。
+		st.MigrationApplied = true
+		// 迁移 Job 进入命名空间：后续 Runner 的「是否存在未终结迁移」扫描必须能看到它。
+		// 用脚本序列的最后一个快照代表它的最终状态。
+		snapshot := st.Job
+		if len(st.JobScript) > 0 {
+			snapshot = st.JobScript[len(st.JobScript)-1]
+		}
+		snapshot.Exists = true
+		if snapshot.Name == "" {
+			snapshot.Name = "surgecart-migrate"
+		}
+		st.Jobs = append(st.Jobs, snapshot)
+	}
 }
 
 // classifyManifest 按清单内容判断类型：发布脚本用「先迁移后应用」的顺序，
@@ -445,6 +548,8 @@ func cmdGet(dir string, inv invocation) int {
 		return cmdGetLease(dir, inv)
 	case "job":
 		return cmdGetJob(dir, inv)
+	case "jobs":
+		return cmdGetJobs(dir, inv)
 	case "deployment":
 		return cmdGetDeployment(dir, inv)
 	case "pods":
@@ -495,8 +600,14 @@ func cmdGetSecret(dir string, inv invocation) int {
 }
 
 func cmdGetLease(dir string, inv invocation) int {
-	code := mutate(dir, func(st *fakestate.State) int {
+	return mutate(dir, func(st *fakestate.State) int {
 		st.LeaseGets++
+		if st.LeaseGetTimeouts > 0 {
+			st.LeaseGetTimeouts--
+			fakestate.Append(dir, fakestate.EventsFileName, "lease.get-timeout")
+			fmt.Fprintln(os.Stderr, "Unable to connect to the server: net/http: request canceled (Client.Timeout exceeded while awaiting headers)")
+			return 1
+		}
 		if st.LeaseGetFailures > 0 {
 			st.LeaseGetFailures--
 			fakestate.Append(dir, fakestate.EventsFileName, "lease.get-error")
@@ -509,17 +620,65 @@ func cmdGetLease(dir string, inv invocation) int {
 		}
 		if st.LeaseStealAfterGets > 0 && st.LeaseGets >= st.LeaseStealAfterGets {
 			st.LeaseStealAfterGets = 0
-			st.Lease.HolderIdentity = st.LeaseStealHolder
-			st.Lease.ResourceVersion = nextResourceVersion(st.Lease.ResourceVersion)
-			fakestate.Append(dir, fakestate.EventsFileName, "lease.stolen holder="+st.LeaseStealHolder)
+			stealLease(st)
 		}
 		return render(inv.Output, leaseObject(st.Lease), leaseTable(st.Lease))
 	})
-	return code
+}
+
+func stealLease(st *fakestate.State) {
+	st.Lease.HolderIdentity = st.LeaseStealHolder
+	st.Lease.ResourceVersion = nextResourceVersion(st.Lease.ResourceVersion)
+	fakestate.Append(fakestate.Dir(), fakestate.EventsFileName, "lease.stolen holder="+st.LeaseStealHolder)
+}
+
+func jobNameFor(explicit, requested string) string {
+	if explicit != "" {
+		return explicit
+	}
+	if requested != "" {
+		return requested
+	}
+	return "surgecart-migrate"
+}
+
+// jobUIDFor 决定 Job 的 uid：显式值 > 状态里已有对象的 uid > 按名称派生的稳定值。
+// JobScript 模拟的是**同一个对象**的状态变化，uid 必须保持不变，否则脚本的
+// 「同名 Job 是否被删除重建」判断会被测试替身自己打乱。
+func jobUIDFor(explicit, fallback, name string) string {
+	if explicit != "" {
+		return explicit
+	}
+	if fallback != "" {
+		return fallback
+	}
+	return "uid-" + name
 }
 
 func cmdGetJob(dir string, inv invocation) int {
+	requested := ""
+	if len(inv.Positional) >= 3 {
+		requested = inv.Positional[2]
+	}
 	return mutate(dir, func(st *fakestate.State) int {
+		if st.JobGetFailAt > 0 && st.JobGets+1 == st.JobGetFailAt {
+			st.JobGetFailAt = 0
+			fakestate.Append(dir, fakestate.EventsFileName, "job.get-error")
+			fmt.Fprintln(os.Stderr, `Error from server (InternalError): an error on the server ("injected job read failure") has prevented the request from succeeding`)
+			return 1
+		}
+		if st.JobGetTimeouts > 0 {
+			st.JobGetTimeouts--
+			fakestate.Append(dir, fakestate.EventsFileName, "job.get-timeout")
+			fmt.Fprintln(os.Stderr, "Unable to connect to the server: net/http: request canceled (Client.Timeout exceeded while awaiting headers)")
+			return 1
+		}
+		if st.JobGetFailures > 0 {
+			st.JobGetFailures--
+			fakestate.Append(dir, fakestate.EventsFileName, "job.get-error")
+			fmt.Fprintln(os.Stderr, `Error from server (InternalError): an error on the server ("injected job read failure") has prevented the request from succeeding`)
+			return 1
+		}
 		job := st.Job
 		if len(st.JobScript) > 0 {
 			index := st.JobGets
@@ -530,15 +689,50 @@ func cmdGetJob(dir string, inv invocation) int {
 		}
 		st.JobGets++
 		if !job.Exists {
-			fmt.Fprintf(os.Stderr, "Error from server (NotFound): jobs.batch %q not found\n", "surgecart-migrate")
+			fmt.Fprintf(os.Stderr, "Error from server (NotFound): jobs.batch %q not found\n", requested)
 			return 1
 		}
-		return render(inv.Output, jobObject(job), jobTable(job))
+		return render(inv.Output, jobObject(job, requested, st.Job.UID), jobTable(job))
+	})
+}
+
+func cmdGetJobs(dir string, inv invocation) int {
+	return mutate(dir, func(st *fakestate.State) int {
+		if st.JobsListTimeouts > 0 {
+			st.JobsListTimeouts--
+			fakestate.Append(dir, fakestate.EventsFileName, "jobs.list-timeout")
+			fmt.Fprintln(os.Stderr, "Unable to connect to the server: net/http: request canceled (Client.Timeout exceeded while awaiting headers)")
+			return 1
+		}
+		if st.JobsListFailures > 0 {
+			st.JobsListFailures--
+			fakestate.Append(dir, fakestate.EventsFileName, "jobs.list-error")
+			fmt.Fprintln(os.Stderr, `Error from server (InternalError): an error on the server ("injected job list failure") has prevented the request from succeeding`)
+			return 1
+		}
+		// 只返回「集群里真实存在的 Job」：st.Job / JobScript 是脚本按名称读取的
+		// 状态序列，不代表对象已经存在（apply 之前它必须不在列表里）。
+		jobs := st.Jobs
+		items := make([]any, 0, len(jobs))
+		for _, job := range jobs {
+			items = append(items, jobObject(job, job.Name, st.Job.UID))
+		}
+		return render(inv.Output, map[string]any{
+			"apiVersion": "batch/v1",
+			"kind":       "JobList",
+			"items":      items,
+		}, jobsTable(jobs))
 	})
 }
 
 func cmdGetDeployment(dir string, inv invocation) int {
 	return mutate(dir, func(st *fakestate.State) int {
+		// AUD-09：命名空间/鉴权类错误必须原样暴露，不能被脚本当成「Deployment 不存在」。
+		if st.DeploymentGetError != "" {
+			fakestate.Append(dir, fakestate.EventsFileName, "deployment.get-error")
+			fmt.Fprintln(os.Stderr, st.DeploymentGetError)
+			return 1
+		}
 		deployment := st.Deployment
 		if st.Applied && len(st.DeploymentAfterApply) > 0 {
 			index := st.DeploymentGets
@@ -558,6 +752,20 @@ func cmdGetDeployment(dir string, inv invocation) int {
 
 func cmdGetPods(dir string, inv invocation) int {
 	return mutate(dir, func(st *fakestate.State) int {
+		if strings.Contains(inv.Selector, "job-name=") {
+			if st.PodsGetTimeouts > 0 {
+				st.PodsGetTimeouts--
+				fakestate.Append(dir, fakestate.EventsFileName, "pods.get-timeout")
+				fmt.Fprintln(os.Stderr, "Unable to connect to the server: net/http: request canceled (Client.Timeout exceeded while awaiting headers)")
+				return 1
+			}
+			if st.PodsGetFailures > 0 {
+				st.PodsGetFailures--
+				fakestate.Append(dir, fakestate.EventsFileName, "pods.get-error")
+				fmt.Fprintln(os.Stderr, `Error from server (InternalError): an error on the server ("injected pod list failure") has prevented the request from succeeding`)
+				return 1
+			}
+		}
 		var pods []fakestate.Pod
 		if strings.Contains(inv.Selector, "job-name=") {
 			pods = st.Job.Pods
@@ -622,15 +830,19 @@ func renderTemplate(expr string, object any) int {
 }
 
 func leaseObject(lease *fakestate.Lease) map[string]any {
+	metadata := map[string]any{
+		"name":            lockName,
+		"namespace":       namespace,
+		"resourceVersion": lease.ResourceVersion,
+		"uid":             lease.UID,
+	}
+	if lease.Annotations != nil {
+		metadata["annotations"] = lease.Annotations
+	}
 	return map[string]any{
 		"apiVersion": "coordination.k8s.io/v1",
 		"kind":       "Lease",
-		"metadata": map[string]any{
-			"name":            lockName,
-			"namespace":       namespace,
-			"resourceVersion": lease.ResourceVersion,
-			"uid":             lease.UID,
-		},
+		"metadata":   metadata,
 		"spec": map[string]any{
 			"holderIdentity":       lease.HolderIdentity,
 			"acquireTime":          lease.AcquireTime,
@@ -696,7 +908,8 @@ func deploymentTable(deployment fakestate.Deployment) string {
 		deployment.AvailableReplicas, deployment.Replicas, deployment.UpdatedReplicas, deployment.AvailableReplicas)
 }
 
-func jobObject(job fakestate.Job) map[string]any {
+func jobObject(job fakestate.Job, requested, defaultUID string) map[string]any {
+	name := jobNameFor(job.Name, requested)
 	conditions := []any{}
 	if job.Complete {
 		conditions = append(conditions, map[string]any{"type": "Complete", "status": "True"})
@@ -709,14 +922,22 @@ func jobObject(job fakestate.Job) map[string]any {
 			"message": job.Message,
 		})
 	}
+	metadata := map[string]any{
+		"name":      name,
+		"namespace": namespace,
+		"uid":       jobUIDFor(job.UID, defaultUID, name),
+		"labels": map[string]any{
+			"app.kubernetes.io/component": "database-migration",
+		},
+	}
+	if job.Deleting {
+		metadata["deletionTimestamp"] = "2026-11-07T00:00:00Z"
+	}
 	object := map[string]any{
 		"apiVersion": "batch/v1",
 		"kind":       "Job",
-		"metadata": map[string]any{
-			"name":      "surgecart-migrate",
-			"namespace": namespace,
-		},
-		"spec": map[string]any{"parallelism": 1, "completions": 1},
+		"metadata":   metadata,
+		"spec":       map[string]any{"parallelism": 1, "completions": 1},
 	}
 	if len(conditions) > 0 {
 		object["status"] = map[string]any{"conditions": conditions}
@@ -731,8 +952,37 @@ func jobTable(job fakestate.Job) string {
 		state = "Complete"
 	case job.Failed:
 		state = "Failed"
+	case job.Deleting:
+		state = "Terminating"
 	}
 	return fmt.Sprintf("NAME\tSTATUS\tCOMPLETIONS\tAGE\nsurgecart-migrate\t%s\t1/1\t1m\n", state)
+}
+
+func jobsTable(jobs []fakestate.Job) string {
+	var builder strings.Builder
+	builder.WriteString("NAME\tSTATUS\tCOMPLETIONS\tAGE\n")
+	for _, job := range jobs {
+		state := "Running"
+		switch {
+		case job.Complete:
+			state = "Complete"
+		case job.Failed:
+			state = "Failed"
+		case job.Deleting:
+			state = "Terminating"
+		}
+		fmt.Fprintf(&builder, "%s\t%s\t1/1\t1m\n", jobNameFor(job.Name, ""), state)
+	}
+	return builder.String()
+}
+
+// podContainers 返回 Pod 的容器状态：Containers 非空时按它渲染（可构造 sidecar），
+// 否则退化为单个 app 容器。
+func podContainers(pod fakestate.Pod) []fakestate.Container {
+	if len(pod.Containers) > 0 {
+		return pod.Containers
+	}
+	return []fakestate.Container{{Name: "app", Image: pod.Image, Ready: pod.Ready}}
 }
 
 func podsListObject(pods []fakestate.Pod) map[string]any {
@@ -746,18 +996,26 @@ func podsListObject(pods []fakestate.Pod) map[string]any {
 			metadata["deletionTimestamp"] = "2026-11-07T00:00:00Z"
 		}
 		status := map[string]any{"phase": pod.Phase}
+		specContainers := make([]any, 0, 2)
 		// Pending 且未启动容器时没有 containerStatuses：脚本必须按「未 Ready」处理。
 		if pod.Phase != "Pending" {
-			status["containerStatuses"] = []any{
-				map[string]any{"name": "app", "image": pod.Image, "ready": pod.Ready},
+			statuses := make([]any, 0, 2)
+			for _, container := range podContainers(pod) {
+				statuses = append(statuses, map[string]any{
+					"name": container.Name, "image": container.Image, "ready": container.Ready,
+				})
 			}
+			status["containerStatuses"] = statuses
+		}
+		for _, container := range podContainers(pod) {
+			specContainers = append(specContainers, map[string]any{
+				"name": container.Name, "image": container.Image,
+			})
 		}
 		items = append(items, map[string]any{
 			"metadata": metadata,
 			"status":   status,
-			"spec": map[string]any{
-				"containers": []any{map[string]any{"name": "app", "image": pod.Image}},
-			},
+			"spec":     map[string]any{"containers": specContainers},
 		})
 	}
 	return map[string]any{"apiVersion": "v1", "kind": "List", "items": items}

@@ -998,3 +998,69 @@ func TestDeployLockContract(t *testing.T) {
 		}
 	}
 }
+
+// TestMigrationTimeoutTracksJobDeadline 断言发布脚本的默认迁移等待上限与 Job 的
+// activeDeadlineSeconds 保持「脚本上限 > Job 截止时间 + 最小余量」的关系（AUD-04/06）。
+//
+// 这是静态契约，行为验证在 test/deployk8s（脚本会拒绝不合法的组合）。
+// 只改一处默认值（Job 或脚本）会让两者再次相等，从而重新引入「超时 vs Deadline」竞态。
+func TestMigrationTimeoutTracksJobDeadline(t *testing.T) {
+	job := migrationJob(t)
+	deadline := intOf(t, mapAt(t, job, "spec")["activeDeadlineSeconds"], "job.spec.activeDeadlineSeconds")
+
+	path := filepath.Join(repoRoot(t), "scripts", "deploy-k8s.sh")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("读取发布脚本 %s: %v", path, err)
+	}
+	match := regexp.MustCompile(`(?m)^MIGRATION_TIMEOUT=([0-9]+)$`).FindSubmatch(raw)
+	if match == nil {
+		t.Fatalf("scripts/deploy-k8s.sh 缺少 MIGRATION_TIMEOUT 默认值")
+	}
+	timeout, err := strconv.Atoi(string(match[1]))
+	if err != nil {
+		t.Fatalf("解析 MIGRATION_TIMEOUT: %v", err)
+	}
+	const minMargin = 60
+	if timeout < deadline+minMargin {
+		t.Fatalf("MIGRATION_TIMEOUT=%ds 与 Job activeDeadlineSeconds=%ds 的余量不足 %ds：脚本可能先于 Job 自己的截止时间超时",
+			timeout, deadline, minMargin)
+	}
+	t.Logf("迁移等待上限 %ds > Job activeDeadlineSeconds %ds（余量 %ds）", timeout, deadline, timeout-deadline)
+}
+
+// TestLeaseRenewBudgetContract 断言发布脚本的默认租期参数满足 AUD-03 不变量：
+//
+//	renew_interval + renew_request_timeout + safety_margin < lease_duration
+//
+// 旧默认值（10 + 30 > 30）会让锁在续租请求返回之前就过期。
+func TestLeaseRenewBudgetContract(t *testing.T) {
+	path := filepath.Join(repoRoot(t), "scripts", "deploy-k8s.sh")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("读取发布脚本 %s: %v", path, err)
+	}
+	value := func(name string) int {
+		pattern := regexp.MustCompile(`(?m)^` + name + `=([0-9]+)$`)
+		match := pattern.FindSubmatch(raw)
+		if match == nil {
+			t.Fatalf("scripts/deploy-k8s.sh 缺少 %s 默认值", name)
+		}
+		number, convErr := strconv.Atoi(string(match[1]))
+		if convErr != nil {
+			t.Fatalf("解析 %s: %v", name, convErr)
+		}
+		return number
+	}
+
+	duration := value("LOCK_LEASE_DURATION")
+	interval := value("LOCK_RENEW_INTERVAL")
+	requestTimeout := value("LOCK_RENEW_REQUEST_TIMEOUT")
+	margin := value("LOCK_SAFETY_MARGIN")
+	budget := interval + requestTimeout + margin
+	if budget >= duration {
+		t.Fatalf("租期预算 %d + %d + %d = %d 必须小于 lease_duration=%d：否则锁会在续租返回前过期",
+			interval, requestTimeout, margin, budget, duration)
+	}
+	t.Logf("租期预算 %d + %d + %d = %d < %d", interval, requestTimeout, margin, budget, duration)
+}

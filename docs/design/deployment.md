@@ -235,18 +235,22 @@ Nginx 是面向外部的唯一 HTTP 入口，职责为纯反向代理（无 Lua/
 ```text
 构建并推送镜像（短 SHA）
     → 更新三处版本（镜像 tag / 版本标记 / 迁移 Job 后缀，三者同值）
-    → 获取发布锁 Lease/surgecart-deploy-lock（原子 create + resourceVersion CAS）
+    → 获取发布锁 Lease/surgecart-deploy-lock（原子 create + resourceVersion CAS；
+      接管前先核验上一轮 Migration Job 是否已终态，否则拒绝接管）
     → 锁内版本降级保护（当前版本 vs 目标版本，Git 祖先关系）
-    → 构建 Migration 清单 → 创建 Job → 等待完成
+    → 构建 Migration 清单 → 记录预期 Job 名（Lease 注解）→ 创建 Job → 回写真实 Job UID
+    → 等待完成
          ├─ Failed=True     → 阻止应用升级（退出码 2，不 force、不删 Job）
-         ├─ 等待超时        → 不删 Job、不应用（退出码 6，超时≠失败）
+         ├─ 等待超时        → 不删 Job、不应用（退出码 6，超时≠失败；锁不释放，
+         │                     关联记录保留，下一个 Runner 会先核验该 Job）
+         ├─ Job 状态不明    → 阻止发布（退出码 7，人工核实）
          └─ Complete        → 应用 Application 清单 → 等待 Deployment 收敛
     → 发布成功判定（镜像 / 版本标记 / generation / 副本 / 实际 Pod）
-    → 释放发布锁 → 打印 DEPLOY_K8S_SUCCESS
+    → 释放发布锁（保留迁移记录）→ 打印 DEPLOY_K8S_SUCCESS
 ```
 
-发布锁的设计、CAS 语义与剩余风险（没有 fencing token、时钟依赖）见
-`docs/design/deploy-lock.md`。
+发布锁的设计、迁移生命周期绑定、CAS 语义与剩余风险（没有 fencing token、时钟依赖、
+当前是 cooperative/advisory 互斥）见 `docs/design/deploy-lock.md`。
 
 已知边界（详见 `docs/development/kubernetes.md`）：
 
