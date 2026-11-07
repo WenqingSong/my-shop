@@ -21,6 +21,9 @@ coverage.out
 logs/
 *.log
 
+# T2-04 容器运行门禁运行时产物（自签测试证书 / qiniu-mock 二进制）
+/test/container/.artifacts/
+
 # 秒杀压测基线（运行时生成，不入库）
 /scripts/flashsale-loadtest/baselines/*.json
 

@@ -1,0 +1,24 @@
+# syntax=docker/dockerfile:1.7
+
+# T2-04 容器生命周期验证专用七牛 Mock 镜像（非生产）。
+# 构建上下文为 test/container（包含 .artifacts/qiniu-mock 预编译二进制）。
+# 该镜像复用与生产运行层相同的基础镜像与非 root 约定，避免验证环境本身成为攻击面。
+
+ARG ALPINE_IMAGE=alpine:3.24.4
+FROM ${ALPINE_IMAGE}
+
+RUN addgroup -g 10001 -S mock \
+    && adduser -D -H -u 10001 -G mock -S -s /sbin/nologin mock \
+    && mkdir -p /certs \
+    && chmod 0755 /certs
+
+COPY .artifacts/qiniu-mock /usr/local/bin/qiniu-mock
+RUN chmod 0555 /usr/local/bin/qiniu-mock
+
+# 自签测试证书经命名构建上下文 t204-certs 注入（仅测试镜像，不进入生产镜像）。
+COPY --from=t204-certs server.crt /certs/server.crt
+COPY --from=t204-certs server.key /certs/server.key
+
+USER 10001:10001
+
+ENTRYPOINT ["/usr/local/bin/qiniu-mock"]

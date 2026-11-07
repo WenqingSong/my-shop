@@ -1,0 +1,87 @@
+# =============================================================================
+# T2-04 真实容器生命周期验证覆盖文件（仅测试使用）
+#
+# 用法：
+#   docker compose -p t204-runtime-verify \
+#     -f docker-compose.yml -f test/container/compose.runtime-verify.yml up -d
+#
+# 设计：
+#   - app 服务只覆盖「镜像/网络/测试环境变量」，运行安全字段（user、read_only、
+#     cap_drop、security_opt、stop_grace_period、healthcheck）全部继承 docker-compose.yml，
+#     确保验证的是生产编排，而不是另一套配置；
+#   - qiniu-mock 在 127.0.0.1:9443 提供 TLS 的 UC / bucketInfo 响应；app 通过
+#     network_mode: service:qiniu-mock 共享其网络命名空间，从而在不使用 host 网络、
+#     不修改生产二进制的前提下，让七牛 SDK 访问 loopback Mock；
+#   - app 的 8000 端口经 qiniu-mock 的端口映射发布到宿主机回环地址，供测试客户端
+#     发起真实 HTTP 请求（生产 Compose 不发布 app 端口，此处仅为测试可观测性）。
+#
+# 该文件不参与发布：scripts/test-container-runtime.sh 使用独立 project 名与
+# 独立 container_name，避免影响开发环境容器与数据卷。
+# =============================================================================
+
+services:
+  mysql:
+    container_name: t204-runtime-verify-mysql
+    # 不发布宿主机端口：验证栈与开发环境的 3306 绑定互不影响。
+    ports: !reset []
+
+  redis:
+    container_name: t204-runtime-verify-redis
+    ports: !reset []
+
+  qiniu-mock:
+    build:
+      context: test/container
+      dockerfile: Dockerfile.mock
+    image: my-shop-qiniu-mock:t204-verify
+    container_name: t204-runtime-verify-qiniu-mock
+    restart: "no"
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      QINIU_MOCK_ADDR: "127.0.0.1:9443"
+      QINIU_MOCK_CERT: "/certs/server.crt"
+      QINIU_MOCK_KEY: "/certs/server.key"
+    ports:
+      # 与 app 共享网络命名空间：发布 mock 容器的 8000 即发布 app 的 HTTP 端口。
+      - "127.0.0.1:${T204_APP_PORT:-18000}:8000"
+
+  app:
+    image: my-shop-app:t204-verify
+    container_name: t204-runtime-verify-app
+    build:
+      target: lifecycle-verify
+    restart: "no"
+    # 与 qiniu-mock 共享网络命名空间：127.0.0.1:9443 即 mock；同时继承 mock 的
+    # Compose 网络，仍可通过 DNS 名访问 mysql / redis。
+    network_mode: "service:qiniu-mock"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qiniu-mock:
+        condition: service_started
+    environment:
+      DATABASE_DEFAULT_NAME: "${MYSQL_DATABASE:-my_shop_container_verify}"
+      ADMIN_SUPER_PASSWORD: "${T204_ADMIN_PASSWORD:-t204-admin-placeholder}"
+      # 七牛凭据仅为测试占位值；Mock 只校验请求协议与签名流程，不校验真实账户。
+      QINIU_ACCESS_KEY: "t204-container-verify-ak"
+      QINIU_SECRET_KEY: "t204-container-verify-sk"
+      QINIU_BUCKET: "t204-container-verify-bucket"
+      QINIU_DOMAIN: "cdn.t204.test"
+      # 测试构建专属：把七牛 UC 解析地址指向 loopback Mock（生产二进制不读取该变量）。
+      SERVE_LIFECYCLE_QINIU_UC_HOST: "https://127.0.0.1:9443"
+      # 信任测试 CA（自签，仅本机验证用；该文件只存在于 lifecycle-verify 镜像）。
+      SSL_CERT_FILE: "/app/test-certs/ca.crt"
+      # 不依赖 Kafka，聚焦容器进程生命周期与 HTTP drain。
+      FLASH_SALE_DISPATCH_MODE: "db_scanner"
+      FLASH_SALE_KAFKA_ENABLED: "false"
+      FLASH_SALE_METRICS_ENABLED: "true"
+      STORAGE_LOCAL_ROOT: "/app/storage"
