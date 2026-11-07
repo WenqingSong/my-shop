@@ -15,6 +15,18 @@
 
 不提供 `migrate down`（无回滚能力、无 `.down.sql`）。
 
+### 1.1 独立执行（T2-05）
+
+`migrate up/force/version` 是**独立运维命令**，不经过 `boot.Bootstrap`：
+
+- 不启动 HTTP Server、FlashSale Runtime、Kafka Consumer、Publisher 或后台 Scanner；
+- 不连接 Redis（配置校验也不要求 `REDIS_DEFAULT_ADDRESS`）；
+- 自行按 `database.default.*` 构造 DSN、建立迁移专用连接，结束（成功或失败）后关闭；
+- 执行前先做配置校验（`migrations.Preflight` → `config.ValidateMigration`），失败不建立任何连接；
+- 生产由 Kubernetes Job 执行（`manifest/kubernetes/migration-job.yaml`），发布顺序为「镜像 → Job → Deployment」，Job 未成功不得升级应用。
+
+运维细节（本地/集群命令、Job 字段、重试与恢复）见 `docs/development/migrations.md`。
+
 ## 2. 数据模型
 
 ### 2.1 迁移文件
@@ -73,16 +85,19 @@ baseline 内容 = 迁移前 `boot.go` 中 7 张既有表的等价 DDL（`users`�
 
 ## 4. 一致性模型与失败语义
 
-- 事实来源：MySQL。`schema_migrations` 为「已应用」的权威记录，7 张表为结构事实。Redis 仅被 ping，不参与迁移状态；无 MQ、无跨系统事务。
+- 事实来源：MySQL。`schema_migrations` 为「已应用」的权威记录，业务表为结构事实。migration 运行时不需要 Redis（只有 `serve` 的 `/ready` 才 ping Redis），无 MQ、无跨系统事务。
 - `migrate up` 成功 = 所有未应用 migration 按序执行成功并写入 `schema_migrations`，`dirty=false`；已全部应用时返回成功（幂等，不视为错误）。
-- `migrate up` 失败 = 当前 migration 执行失败，返回错误、不记录该版本、不执行后续；MySQL DDL 隐式提交导致部分语句可能已生效，依赖 `dirty` 标记 + 人工 `force` 恢复，不自动重试。
+- `migrate up` 失败 = 当前 migration 执行失败，返回错误、不记录该版本、不执行后续；MySQL DDL 隐式提交导致部分语句可能已生效，依赖 `dirty` 标记 + 人工 `force` 恢复，不自动重试、不自动 force。
 - serve 成功 = readiness check 通过（`schema_migrations` 已初始化、非 dirty、`current >= latest`）+ seed 完成 + HTTP 启动；serve 只代表「schema 已就绪」，不代表「刚执行过 migration」。
-- 并发：golang-migrate MySQL driver 默认 `GET_LOCK` 串行化迁移段，崩溃时连接关闭自动释放锁。
-- 部分完成：baseline 为多语句单文件，中途失败进入 `dirty`；V1 接受「人工 force 恢复」，不做多语句事务包裹（DDL 无法回滚）。
+- **并发**：golang-migrate MySQL driver 在一条专用连接上执行 `SELECT GET_LOCK(<crc32(db:schema_migrations)>, 10)`，并在整个迁移（含追踪表首次创建）期间持有；另一个进程等待最多 10s，超时返回 `database.ErrLocked`（本次零 DDL，可安全重试）。锁是会话级锁，连接断开（Pod 删除/进程被杀/网络中断）即自动释放，不会永久残留。
+- **失败分类**：CLI 把「锁冲突」与「dirty」翻译为明确的运维信息（`未获取到数据库级 migration 锁…` / `数据库处于 dirty 状态（版本 …）…`），其余错误保留底层 SQL 原因；错误文本不含数据库密码。
+- 部分完成：baseline 为多语句单文件，中途失败进入 `dirty`；V1 接受「人工 force 恢复」，不做多语句事务包裹（DDL 无法回滚）。MySQL 8 的**单条** DDL 是原子的，但多语句迁移文件整体不是事务。
+- 进程被 SIGKILL 的中间态：可能「记录未写但 DDL 已生效」或「部分生效」；重跑会得到明确的 `dirty` 或表已存在错误，需要人工核对 schema 后 `force` 或清理重建，不会静默通过（`internal/migrations/process_test.go` 锁定该语义）。
 
 ## 5. 安全与权限边界
 
 - 迁移是运维操作（CLI），不经 HTTP 暴露；无鉴权中间件参与。
+- 迁移在建立连接之前完成配置校验：`database.default.*` 严格解析、密码必须显式注入；严格模式（`DEPLOYMENT_REQUIRE_EXTERNAL_ENDPOINTS=true`）下 `DATABASE_DEFAULT_HOST` / `DATABASE_DEFAULT_NAME` 必须由环境变量提供且非回环。migration 不要求 Redis 地址（不连接 Redis），应用严格模式不变。
 - serve 的 readiness check 严格 fail-fast：dirty、未初始化或版本落后均拒绝启动，明确提示先执行 `migrate up`（dirty 时提示人工 `force`）。
 - DSN 从 `database.default.*` 配置构造，启用 `multiStatements=true`（支持 baseline 多语句文件）；凭据不硬编码、无内置默认密码回退（密码缺失时 fail-fast，不回退 `root`）。
 - 连接字符集为 `utf8mb4`（DSN `charset=utf8mb4`），与表结构（`DEFAULT CHARSET=utf8mb4`）及应用连接一致，支持四字节 Unicode 字符迁移读写。
@@ -101,3 +116,5 @@ migration 不新增业务错误码；失败通过 `gerror` 返回并由 CLI 进�
 - 仅提供 `.up.sql`，任何 `down` 调用会报错；V1 已禁止 down，风险可控。
 - 14 位时间戳作 version，`force` 需指定完整时间戳数字，可读性差；需在 CLI 帮助中明确 baseline 版本号与 `force` 语义（不执行 SQL、不校验结构）。
 - dirty 恢复依赖人工 `force`，存在误操作风险。
+- 迁移 Job 未在真实 Kubernetes 集群验证（调度、`kubectl wait`、TTL 清理、NetworkPolicy、镜像拉取凭据）；已用本地真实二进制 + 真实 MySQL + 独立进程覆盖锁、超时、终止与恢复语义。
+- 锁等待上限由 golang-migrate driver 固定为 10s，不可配置；超过 10s 的并发迁移依赖上层重试（K8s Job `backoffLimit`）而不是排队等待。

@@ -17,7 +17,7 @@ type strictEndpoint struct {
 	hostPort bool
 }
 
-// strictEndpoints 是严格模式要求显式注入的关键连接参数。
+// strictEndpoints 是应用启动（serve）严格模式要求显式注入的关键连接参数。
 //
 // 只覆盖「漏配后会静默连本机」的三项：DB Host、DB Name、Redis Address。
 // DB 密码/Redis 密码不在此列：它们本就有缺失即启动失败的独立校验。
@@ -25,6 +25,19 @@ var strictEndpoints = []strictEndpoint{
 	{env: MustSpecOf(KeyDatabaseDefaultHost).Env, label: "数据库主机", hostPort: false},
 	{env: MustSpecOf(KeyDatabaseDefaultName).Env, label: "数据库名", hostPort: false},
 	{env: MustSpecOf(KeyRedisDefaultAddress).Env, label: "Redis 地址", hostPort: true},
+}
+
+// migrationStrictEndpoints 是 migration 严格模式要求显式注入的连接参数。
+//
+// migration 只连接 MySQL：不装配 HTTP Server、不连接 Redis、不启动 Kafka
+// Publisher/Consumer 或后台扫描器。因此这里只要求数据库两项，不要求
+// REDIS_DEFAULT_ADDRESS——否则运维为了执行一次 DDL 必须注入无关服务的配置。
+//
+// 注意：这是「migration 少要求」，不是「应用少要求」。应用部署仍由
+// strictEndpoints（含 Redis）把关，T2-01 冻结的严格模式没有被放宽。
+var migrationStrictEndpoints = []strictEndpoint{
+	{env: MustSpecOf(KeyDatabaseDefaultHost).Env, label: "数据库主机", hostPort: false},
+	{env: MustSpecOf(KeyDatabaseDefaultName).Env, label: "数据库名", hostPort: false},
 }
 
 // RequireExternalEndpoints 返回部署期严格开关（deployment.require_external_endpoints）。
@@ -47,6 +60,11 @@ func RequireExternalEndpoints(ctx context.Context) (bool, error) {
 // 开关关闭（默认）时该方法直接返回 nil，本地开发仍可使用 config.yaml 的默认值。
 // 该方法必须在建立任何数据库/Redis 连接之前调用。
 func (l *Loader) ValidateExternalEndpoints(ctx context.Context) error {
+	return l.validateStrictEndpoints(ctx, strictEndpoints, "Kubernetes 严格配置模式")
+}
+
+// validateStrictEndpoints 按给定连接项集合执行严格模式校验，scope 用于错误信息前缀。
+func (l *Loader) validateStrictEndpoints(ctx context.Context, endpoints []strictEndpoint, scope string) error {
 	required, err := l.RequireExternalEndpoints(ctx)
 	if err != nil {
 		return err
@@ -55,8 +73,8 @@ func (l *Loader) ValidateExternalEndpoints(ctx context.Context) error {
 		return nil
 	}
 
-	problems := make([]string, 0, len(strictEndpoints))
-	for _, endpoint := range strictEndpoints {
+	problems := make([]string, 0, len(endpoints))
+	for _, endpoint := range endpoints {
 		raw, exists := l.lookupEnv(endpoint.env)
 		if !exists {
 			problems = append(problems, fmt.Sprintf(
@@ -85,8 +103,8 @@ func (l *Loader) ValidateExternalEndpoints(ctx context.Context) error {
 		return nil
 	}
 	return fmt.Errorf(
-		"Kubernetes 严格配置模式校验失败（%d 项）：\n  - %s",
-		len(problems), strings.Join(problems, "\n  - "),
+		"%s校验失败（%d 项）：\n  - %s",
+		scope, len(problems), strings.Join(problems, "\n  - "),
 	)
 }
 

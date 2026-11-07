@@ -52,7 +52,7 @@ var (
 	migrateCmd = gcmd.Command{
 		Name:  "migrate",
 		Usage: "my-shop migrate <up|force|version>",
-		Brief: "管理数据库 migration（显式执行，serve 不自动执行）",
+		Brief: "管理数据库 migration（独立执行：不启动 HTTP/Redis/Kafka，serve 不自动执行）",
 	}
 
 	migrateUpCmd = gcmd.Command{
@@ -231,14 +231,27 @@ func registerMetricsRoute(ctx context.Context, s *ghttp.Server) {
 }
 
 // migrateUp 执行所有未应用 migration。
+//
+// 执行顺序固定：前置配置校验 → 建立迁移专用连接 → 迁移 → 关闭连接 → 退出。
+// migrate 子命令不调用 boot.Bootstrap：不启动 HTTP Server / FlashSale Runtime /
+// Kafka Consumer / Publisher / 后台 Scanner，也不连接 Redis。
 func migrateUp(ctx context.Context, _ *gcmd.Parser) error {
+	if err := migrations.Preflight(ctx); err != nil {
+		return err
+	}
 	return migrations.Up(ctx)
 }
 
 // migrateForce 标记指定版本已应用（不执行 SQL）。
+//
+// 风险操作：不执行、不校验、不修复任何 DDL，只改 schema_migrations。
+// 仅用于 baseline 接管与 dirty 的人工恢复，禁止自动化流程调用。
 func migrateForce(ctx context.Context, parser *gcmd.Parser) error {
 	version, err := migrateForceVersion(parser)
 	if err != nil {
+		return err
+	}
+	if err := migrations.Preflight(ctx); err != nil {
 		return err
 	}
 	return migrations.Force(ctx, version)
@@ -246,6 +259,9 @@ func migrateForce(ctx context.Context, parser *gcmd.Parser) error {
 
 // migrateVersion 只读打印当前版本与 dirty 状态。
 func migrateVersion(ctx context.Context, _ *gcmd.Parser) error {
+	if err := migrations.Preflight(ctx); err != nil {
+		return err
+	}
 	current, dirty, latest, err := migrations.Status(ctx)
 	if err != nil {
 		return err

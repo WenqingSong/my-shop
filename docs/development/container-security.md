@@ -189,6 +189,27 @@ exec /app/my-shop serve
 - 集群：由 Kubernetes Secret 注入同名环境变量；Secret 名称、RBAC 与轮换由部署环境确定（T2-06）。不要把真实值写入镜像、Compose 默认值、命令行参数或日志。
 - 验证：`docker image inspect -f '{{json .Config.Env}}' my-shop-app:local` 只应包含 `PATH` 等非敏感变量；门禁用关键字扫描断言。
 
+### 6.1 迁移 Job 的容器安全（T2-05）
+
+数据库迁移 Job 复用同一生产镜像，但以**更小的暴露面**运行：只执行 `migrate up`，不监听端口、不连接 Redis/Kafka、不挂载存储卷。
+
+| 字段 | 值 | 与 T2-04 的关系 |
+|---|---|---|
+| `runAsNonRoot` / `runAsUser` / `runAsGroup` | `true` / `10001` / `10001` | 与镜像 `USER 10001:10001` 一致 |
+| `seccompProfile` | `RuntimeDefault` | 与 Docker 默认 profile 等价 |
+| `allowPrivilegeEscalation` | `false` | 阻断 setuid/setgid 提权 |
+| `readOnlyRootFilesystem` | `true` | 迁移不写镜像层 |
+| `capabilities.drop` | `["ALL"]` | 迁移不需要任何 capability |
+| `privileged` | `false`（显式声明） | 禁止特权容器 |
+| `automountServiceAccountToken` | `false` | 迁移不访问 Kubernetes API |
+| 可写路径 | 仅 `/tmp`（`emptyDir{medium: Memory}`） | 与 Compose `tmpfs /tmp` 同义 |
+| 资源 | requests `50m/64Mi`、limits `500m/256Mi` | 短时低负载任务 |
+| 凭据 | `secretRef` 注入 `DATABASE_DEFAULT_PASS` | 与 ConfigMap 分离，禁止明文 |
+
+- 这些字段由 `scripts/test-k8s-manifest.sh`（`test/manifest/manifest_test.go`）静态断言，避免后续修改清单时削弱加固。
+- 迁移 Job 与业务 Deployment 共用镜像，因此镜像层的非 root、只读配置、静态二进制等加固自动继承；Job 不额外安装工具、不挂载 Docker Socket、不使用 `hostNetwork`/`hostPID`。
+- 未在真实集群验证：Pod Security Admission（restricted）、NetworkPolicy 到数据库的连通性、镜像拉取凭据。见 `docs/development/migrations.md` §12。
+
 ## 7. 验证命令
 
 ```bash
@@ -219,6 +240,9 @@ docker run --rm --name my-shop-app \
 docker stop my-shop-app
 docker inspect -f '{{.State.ExitCode}}' my-shop-app
 docker logs my-shop-app | grep -E 'http_server|flashsale_runtime_shutdown'
+
+# 6) T2-05：迁移 Job 清单静态校验（生命周期 / 安全上下文 / Secret 边界，无需集群）
+make test-k8s-manifest
 ```
 
 `lifecycle-verify` 说明：生产 `serve` 启动需要真实七牛凭据（`GetBucketInfo` 外部只读校验）。容器生命周期门禁使用：
@@ -285,6 +309,7 @@ Trivy/govulncheck 的漏洞库随时间变化；本文记录的是上述日期�
 3. **生产镜像的 Docker HEALTHCHECK 健康态**：`serve` 未在容器内完整启动，无法观察到 `healthy`；同值 HEALTHCHECK 在 `lifecycle-verify` 容器上验证为 `healthy`。
 4. **多副本并发 migration/seed、Kafka Consumer Group 重平衡、跨 Pod 本地存储**：单副本范围外的行为未验证。
 5. **Secret 轮换/外部密钥管理**：环境变量注入方式未改变；具体 Secret 管理系统不在本任务范围。
+6. **Kubernetes 迁移 Job（T2-05）**：清单字段由静态断言覆盖，Job 调度、`kubectl wait` 流转、TTL 清理、NetworkPolicy 到数据库的连通性、镜像拉取凭据未在真实集群验证；迁移进程级语义（锁/超时/终止/恢复）已在本地用真实二进制 + 真实 MySQL 验证。
 
 ## 11. 变更影响
 

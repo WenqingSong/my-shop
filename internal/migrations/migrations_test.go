@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"io/fs"
+	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
@@ -322,16 +323,34 @@ func TestUpFailsFastAndMarksDirty(t *testing.T) {
 		"0002_broken.up.sql":         "THIS IS NOT VALID SQL;",
 	})
 
-	if err := Up(ctx); err == nil {
+	firstErr := Up(ctx)
+	if firstErr == nil {
 		t.Fatalf("expected Up to fail on broken migration")
+	}
+	// 失败信息必须保留底层 SQL 原因，不能只输出笼统的「失败」。
+	if !strings.Contains(firstErr.Error(), "migration") {
+		t.Errorf("失败信息应说明 migration 失败，实际: %v", firstErr)
 	}
 	if !dirtyState(t, db) {
 		t.Errorf("expected dirty=true after failed migration")
 	}
 
-	// dirty 状态下再次 Up 应拒绝执行。
-	if err := Up(ctx); err == nil {
+	// dirty 状态下再次 Up 应拒绝执行，且必须明确报告 dirty + 人工 force 的恢复路径，
+	// 不能自动 force、不能静默继续。
+	err := Up(ctx)
+	if err == nil {
 		t.Fatalf("expected Up to refuse while dirty")
+	}
+	for _, want := range []string{"dirty", "force"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("dirty 错误信息应包含 %q，实际: %v", want, err)
+		}
+	}
+	if !dirtyState(t, db) {
+		t.Error("拒绝执行时不得自动清除 dirty")
+	}
+	if v := currentVersion(t, db); v != 2 {
+		t.Errorf("拒绝执行时版本不得前进，期望 2，实际 %d", v)
 	}
 
 	// force 恢复 dirty。

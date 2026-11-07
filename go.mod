@@ -15,6 +15,7 @@ require (
 	github.com/twmb/franz-go v1.18.1
 	github.com/twmb/franz-go/pkg/kmsg v1.9.0
 	golang.org/x/crypto v0.58.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -61,6 +62,5 @@ require (
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/fileutil v1.0.0 // indirect
 )

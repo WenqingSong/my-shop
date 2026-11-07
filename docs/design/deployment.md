@@ -99,6 +99,31 @@ HTTP drain 的 10s 划分：前 9s 用于优雅 drain（同时作为 GoFrame 内
 - `docker compose stop/down` 使用 `stop_grace_period: 60s`，避免 Compose 默认 10s 提前 SIGKILL；其他容器不声明该字段。
 - 后续 Kubernetes 清单必须使用 `terminationGracePeriodSeconds: 60` 与 5s preStop；`internal/termination` 的契约测试已断言 Go 默认值、`config.yaml`、`docker-compose.yml` 三方一致，T2-06 落地清单时需在同一处补充清单断言，而不是修改期望值。
 
+### 4.2 生产迁移独立执行（T2-05）
+
+生产发布把 schema 变更从应用启动流程中拆出来：
+
+```text
+构建镜像（短 SHA） → 执行 Migration Job（migrate up） → 成功 → 更新 Deployment
+                          └─ 失败 → 阻止升级，人工排障
+```
+
+| 维度 | Compose（本地） | Kubernetes（生产） |
+|---|---|---|
+| 迁移执行者 | `docker-entrypoint.sh`：`migrate up` → `exec serve` | 独立 Job：`/app/my-shop migrate up` |
+| 应用镜像默认入口 | 同左（镜像默认 `serve`，Compose 覆盖为 entrypoint） | `serve`，不执行任何 DDL |
+| 迁移失败表现 | 容器非零退出被 `restart` 重试（dirty 需人工） | Job `Failed` + `kubectl wait` 超时，流水线中止 |
+| 并发保护 | 同一 Compose 单实例；多容器并发同样由 `GET_LOCK` 串行 | 跨 Pod 由数据库 `GET_LOCK` 互斥，Job `parallelism: 1` |
+| 配置校验 | 严格模式默认关闭（本机地址可用） | `DEPLOYMENT_REQUIRE_EXTERNAL_ENDPOINTS=true`，迁移只校验数据库两项 |
+
+要点：
+
+- **Job 先于 Deployment**：`kubectl wait --for=condition=complete job/surgecart-migrate` 成功后才允许 `kubectl set image`/`rollout restart`；失败即中止发布。
+- **最后防线是 serve**：`serve` 启动时只读校验 `schema_migrations`（非 dirty 且 `current >= latest`），未就绪直接非零退出，不会以「旧 schema + 新代码」对外服务。
+- **不使用 `latest` 作为迁移锚点**：Job 镜像使用短 SHA，保证回滚时能回到确切版本对应的 schema 状态。
+- **不使用 `migrate force` 作为 Job 命令**：force 是人工风险操作（见 `docs/development/migrations.md` §9）。
+- 清单与运维命令见 `manifest/kubernetes/`、`docs/development/migrations.md`；完整 Deployment/Service/Ingress/HPA 与 Kustomize overlays 由 T2-06 交付。
+
 ## 5. 持久化
 
 - MySQL/Redis：named volume `mysql_data`/`redis_data`，`down`（保留卷）+ `up` 重建不丢数据。
@@ -191,6 +216,7 @@ Nginx 是面向外部的唯一 HTTP 入口，职责为纯反向代理（无 Lua/
 ## 12. Deferred / 已知留白
 
 - Kubernetes/Ingress、HTTPS/TLS、多实例负载均衡（后续任务）。
-- K8s 编排清单（Deployment/Pod/Probe/SecurityContext/HPA/Service/Ingress）：本次已落地容器运行能力（非 root、只读根文件系统、cap_drop ALL、`/health` liveness、`/ready` readiness、优雅退出），但不产出 K8s 部署文件；`/ready` 将作为未来 readinessProbe 目标。
+- K8s 编排清单（Deployment/Pod/Probe/SecurityContext/HPA/Service/Ingress）：T2-05 仅产出数据库迁移 Job、迁移专用 ConfigMap 与 Secret 模板（`manifest/kubernetes/`），用于在更新 Deployment 之前独立执行 `migrate up`；应用 Deployment/Service/Ingress 与 Kustomize overlays 由 T2-06 交付。
+- 迁移 Job 未在真实集群验证：调度、`kubectl wait` 流转、TTL 清理、NetworkPolicy 连通性、镜像拉取凭据均为 NOT_VERIFIED（见 `docs/development/migrations.md` §12）。
 - 生产镜像的 `serve` 启动需要真实七牛凭据（`GetBucketInfo` 外部只读校验）。容器生命周期验证使用同一运行层、仅额外启用 `serve_lifecycle` 构建标签的 `lifecycle-verify` 目标（见 `docs/development/container-security.md`）；生产二进制本身不包含测试路由或绕过开关。
 - CNB DinD 环境的真实构建/卷/网络能力以集成验证（AC-013）为准。

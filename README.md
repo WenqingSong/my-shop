@@ -203,7 +203,7 @@ make test-race               # 竞态检测
 make test-container-runtime  # 真实镜像构建 + 容器生命周期（非 root/只读/SIGTERM/drain/退出码）
 ```
 
-`make test` 依次执行 `go vet`、单元测试（不依赖 MySQL/Redis）、集成测试（需 MySQL/Redis）、Registry 一致性校验与容器化静态断言。集成测试前需先就绪依赖（`make init` 或 `make deps-start`）。独立目标：`test-unit` / `test-integration` / `test-race` / `test-prometheus` / `test-container` / `test-container-runtime` / `test-nginx` / `test-lib` / `test-storage`（真实存储 E2E，需七牛凭据）。容器构建、运行安全、扫描与排障详见 [容器构建与运行安全](docs/development/container-security.md)。
+`make test` 依次执行 `go vet`、单元测试（不依赖 MySQL/Redis）、集成测试（需 MySQL/Redis）、数据库迁移门禁（真实 MySQL + 多进程）、Registry 一致性校验、容器化静态断言与 Kubernetes 迁移清单校验。集成测试前需先就绪依赖（`make init` 或 `make deps-start`）。独立目标：`test-unit` / `test-integration` / `test-race` / `test-migration` / `test-prometheus` / `test-container` / `test-container-runtime` / `test-k8s-manifest` / `test-nginx` / `test-lib` / `test-storage`（真实存储 E2E，需七牛凭据）。容器构建、运行安全、扫描与排障详见 [容器构建与运行安全](docs/development/container-security.md)，迁移执行与并发锁详见 [数据库迁移运维](docs/development/migrations.md)。
 
 ## Task 管理（Agent Workflow）
 
@@ -236,7 +236,7 @@ make test-container-runtime  # 真实镜像构建 + 容器生命周期（非 roo
 - [项目导览](docs/project-overview.md)：系统与两条核心交易链路的总览。
 - [系统架构](docs/design/architecture.md)：分层结构、模块边界、核心业务流程与基础设施。
 - 核心设计：[订单](docs/design/order.md)、[秒杀](docs/design/flash-sale.md)、[商品](docs/design/product.md)、[分类](docs/design/category.md)、[SKU](docs/design/sku.md)、[库存](docs/design/inventory.md)、[购物车](docs/design/cart.md)、[IAM](docs/design/iam.md)、[RBAC](docs/design/rbac.md)、[优惠券](docs/design/coupon.md)、[退款](docs/design/refund.md)。
-- 部署与运维：[容器化部署](docs/design/deployment.md)、[容器构建与运行安全](docs/development/container-security.md)、[数据库迁移](docs/design/migration.md)、[错误码](docs/design/error-codes.md)、[对象存储](docs/design/storage.md)。
+- 部署与运维：[容器化部署](docs/design/deployment.md)、[容器构建与运行安全](docs/development/container-security.md)、[数据库迁移（机制）](docs/design/migration.md)、[数据库迁移（运维 / K8s Job）](docs/development/migrations.md)、[错误码](docs/design/error-codes.md)、[对象存储](docs/design/storage.md)。
 - 开发环境：[Kafka 开发说明](docs/development/kafka.md)（B4 已完成：两种运行模式、serve 装配、Publisher/Consumer 生命周期、F-03/F-04 修复、优雅关闭与真实端到端门禁）。
 - Task 管理：[Task 管理入口](docs/task-management/README.md)、[Task 目录](docs/task-management/task-catalog.md)、[Task 关系图](docs/task-management/task-relationships.md)、[Owner 决策清单](docs/task-management/owner-decisions.md)。
 - 运营与内容：[轮播图](docs/design/banner.md)、[文章](docs/design/article.md)、[推荐位](docs/design/recommendation.md)、[评价](docs/design/review.md)、[数据大屏](docs/design/dashboard.md)、[收藏](docs/design/favorite.md)、[点赞](docs/design/like.md)。
