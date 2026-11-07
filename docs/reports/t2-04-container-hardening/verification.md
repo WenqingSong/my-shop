@@ -78,6 +78,10 @@ Runtime:    alpine:3.24.4 @ sha256:93b41ef40b1677fce8fcc64ff4af09daddfacf5040afd
 
 镜像文件系统审计：包含 `/app/my-shop`、`/app/manifest/config/config.yaml`、`/app/docker-entrypoint.sh`、`/usr/share/zoneinfo/Asia/Shanghai`、`/etc/ssl/certs/ca-certificates.crt`；不含 `*.go`、`/src`、`/usr/local/go`、`.env`、`test/`。私钥/开发默认 JWT 密钥模式扫描无命中。
 
+运行层 apk 包（18 个）：`alpine-baselayout`、`alpine-baselayout-data`、`alpine-keys`、`alpine-release`、`apk-tools`、`busybox`、`busybox-binsh`、`ca-certificates`、`ca-certificates-bundle`、`libapk`、`libcrypto3`、`libssl3`、`musl`、`musl-utils`、`scanelf`、`ssl_client`、`tzdata`、`zlib`。无 curl / wget / bash / 编译器 / 数据库客户端等额外软件包。
+
+干净重建：`docker build --no-cache --target runtime` 成功（49.6s，退出码 0）；与缓存构建产物的二进制 sha256 一致：`8110f19254d8cdf033d09ebe69fad9370734b7bc0a15f000e1b46e3bd66e16bb`。
+
 ## 5. 验收项结果
 
 | 验收项 | 结果 | 证据 |

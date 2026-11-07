@@ -45,7 +45,7 @@ make docker-build
 - `-trimpath`：去除构建宿主路径；`-buildvcs=false`：不嵌入 VCS 信息，构建目录无 `.git` 时结果一致。
 - `-ldflags="-s -w"`：去除符号表与 DWARF。
 - 构建上下文由 `.dockerignore` 收敛：排除 `.env`、`bin/`、`tmp/`、`logs/`、`storage/` 运行数据、`.git/`、IDE、`docs/`、`.agent/`、`*.md`、`*_test.go`、容器测试产物、`nginx/`、`prometheus/`、编排与流水线文件。`test/serveproc` 保留在上下文中，仅供 `lifecycle-verify` 目标编译。
-- 已验证从干净上下文构建成功（BuildKit，缓存为空时仍可完成）。镜像大小约 60.6 MiB（`docker image inspect -f '{{.Size}}'`）。
+- 已验证缓存构建与 `docker build --no-cache` 干净重建均成功（干净重建约 50s），两次构建的 `/app/my-shop` 二进制 sha256 完全一致（`8110f19254d8cdf033d09ebe69fad9370734b7bc0a15f000e1b46e3bd66e16bb`）。镜像大小约 60.6 MiB（`docker image inspect -f '{{.Size}}'`）。
 
 ### 2.4 镜像内容
 
@@ -61,6 +61,8 @@ make docker-build
 ```
 
 不含：Go 工具链、源码（`*.go`）、测试文件、`.env`、文档、构建工具、curl/wget/bash 等额外诊断软件包（健康检查使用 busybox wget）。`scripts/test-container-runtime.sh` 通过导出镜像文件系统列表对这些事实做自动断言。
+
+运行层 apk 包（18 个，全部来自 alpine base 与本任务显式安装）：`alpine-baselayout`、`alpine-baselayout-data`、`alpine-keys`、`alpine-release`、`apk-tools`、`busybox`、`busybox-binsh`、`ca-certificates`、`ca-certificates-bundle`、`libapk`、`libcrypto3`、`libssl3`、`musl`、`musl-utils`、`scanelf`、`ssl_client`、`tzdata`、`zlib`。其中 `apk-tools` 及其依赖是 alpine base 的一部分，用于构建期 `apk upgrade`，运行期不再使用；未额外安装客户端工具。
 
 ## 3. 运行时安全
 
