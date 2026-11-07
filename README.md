@@ -40,10 +40,10 @@ Redis 预扣仅作准入闸门，MySQL 始终是订单与已售数量的最终�
 
 ### 工程化体系
 
-- **容器化交付**：Docker 多阶段构建（`CGO_ENABLED=0` 静态编译）与非 root 运行，Compose 一键编排 nginx/app/MySQL/Redis/Prometheus。
+- **容器化交付**：Docker 多阶段构建（`CGO_ENABLED=0` 静态编译、基础镜像 patch 版本固定），非 root + 只读根文件系统 + `cap_drop: ALL` + `no-new-privileges` 运行，Compose 一键编排 nginx/app/MySQL/Redis/Prometheus。
 - **版本化迁移**：golang-migrate 管理 schema，`migrate up` 幂等 + `GET_LOCK` 串行，schema 未就绪不对外。
 - **凭据分离**：敏感值仅经环境变量注入（`${VAR:?}` 必填，无内置默认回退），`config.yaml` 敏感字段保持空值。
-- **健康检查与优雅停机**：`/health` liveness、`/ready` readiness（DB/Redis 不可达返回 503），`SIGTERM` 取消根 ctx 后 drain 在途请求再退出。
+- **健康检查与优雅停机**：`/health` liveness、`/ready` readiness（DB/Redis 不可达返回 503），`SIGTERM` 后先 stop accepting 并 drain 在途请求（有界），再按 Publisher → Consumer → Producer → Scanner 关闭后台组件。
 - **可观测与 CI/CD**：Prometheus 秒杀指标与 recording rules；CNB 流水线覆盖测试、竞态检测、构建与镜像发布。
 
 详见 [部署设计](docs/design/deployment.md)、[数据库迁移](docs/design/migration.md)。
@@ -63,7 +63,7 @@ Redis 预扣仅作准入闸门，MySQL 始终是订单与已售数量的最终�
 | 层 | 技术选型 |
 | --- | --- |
 | 后端框架 | GoFrame v2 |
-| 语言 | Go 1.23（纯 Go 依赖，支持 `CGO_ENABLED=0` 静态编译） |
+| 语言 | Go 1.27.3（镜像构建工具链；`go.mod` go 指令 1.26.0；纯 Go 依赖，`CGO_ENABLED=0` 静态编译） |
 | 数据库 | MySQL 8.0（业务数据与 migration 状态权威来源） |
 | 缓存 | Redis 7（登录会话、秒杀准入闸门与派生缓存） |
 | 对象存储 | 七牛云（上传直传凭证签发） |
@@ -186,22 +186,24 @@ curl http://127.0.0.1:8080/health   # liveness：进程存活即 200
 | `make health` | 校验各服务健康状态 |
 | `make build` | 本地静态编译 `bin/my-shop`（与 Dockerfile 一致） |
 | `make docker-build` | 构建发布镜像并打标签（短 SHA + `latest`） |
+| `make test-container-runtime` | 真实 Docker 镜像与容器生命周期门禁（构建/非 root/只读/SIGTERM/drain/退出码） |
 | `make migrate-up` | 应用所有未执行 migration |
 | `make migrate-version` | 查看当前 migration 版本与 dirty 状态 |
 | `make migrate-force` | 标记指定版本已应用（`make migrate-force VERSION=<14位时间戳>`） |
 | `make config-check` | 启动前预检（七牛与超管条件校验） |
 | `make clean` | 清理编译产物与临时文件 |
 
-其余目标（`deps-start` / `docker-push` / `test-unit` / `test-integration` / `test-prometheus` / `test-container` / `test-nginx` / `test-lib`）见 `make help`。
+其余目标（`deps-start` / `docker-push` / `test-unit` / `test-integration` / `test-prometheus` / `test-container` / `test-container-runtime` / `test-nginx` / `test-lib`）见 `make help`。
 
 ## 测试
 
 ```bash
-make test       # 统一入口：go vet + 单元测试 + 集成测试 + Registry 校验 + 容器化静态断言
-make test-race  # 竞态检测
+make test                    # 统一入口：go vet + 单元测试 + 集成测试 + Registry 校验 + 容器化静态断言
+make test-race               # 竞态检测
+make test-container-runtime  # 真实镜像构建 + 容器生命周期（非 root/只读/SIGTERM/drain/退出码）
 ```
 
-`make test` 依次执行 `go vet`、单元测试（不依赖 MySQL/Redis）、集成测试（需 MySQL/Redis）、Registry 一致性校验与容器化静态断言。集成测试前需先就绪依赖（`make init` 或 `make deps-start`）。独立目标：`test-unit` / `test-integration` / `test-race` / `test-prometheus` / `test-container` / `test-nginx` / `test-lib` / `test-storage`（真实存储 E2E，需七牛凭据）。
+`make test` 依次执行 `go vet`、单元测试（不依赖 MySQL/Redis）、集成测试（需 MySQL/Redis）、Registry 一致性校验与容器化静态断言。集成测试前需先就绪依赖（`make init` 或 `make deps-start`）。独立目标：`test-unit` / `test-integration` / `test-race` / `test-prometheus` / `test-container` / `test-container-runtime` / `test-nginx` / `test-lib` / `test-storage`（真实存储 E2E，需七牛凭据）。容器构建、运行安全、扫描与排障详见 [容器构建与运行安全](docs/development/container-security.md)。
 
 ## Task 管理（Agent Workflow）
 
@@ -234,7 +236,7 @@ make test-race  # 竞态检测
 - [项目导览](docs/project-overview.md)：系统与两条核心交易链路的总览。
 - [系统架构](docs/design/architecture.md)：分层结构、模块边界、核心业务流程与基础设施。
 - 核心设计：[订单](docs/design/order.md)、[秒杀](docs/design/flash-sale.md)、[商品](docs/design/product.md)、[分类](docs/design/category.md)、[SKU](docs/design/sku.md)、[库存](docs/design/inventory.md)、[购物车](docs/design/cart.md)、[IAM](docs/design/iam.md)、[RBAC](docs/design/rbac.md)、[优惠券](docs/design/coupon.md)、[退款](docs/design/refund.md)。
-- 部署与运维：[容器化部署](docs/design/deployment.md)、[数据库迁移](docs/design/migration.md)、[错误码](docs/design/error-codes.md)、[对象存储](docs/design/storage.md)。
+- 部署与运维：[容器化部署](docs/design/deployment.md)、[容器构建与运行安全](docs/development/container-security.md)、[数据库迁移](docs/design/migration.md)、[错误码](docs/design/error-codes.md)、[对象存储](docs/design/storage.md)。
 - 开发环境：[Kafka 开发说明](docs/development/kafka.md)（B4 已完成：两种运行模式、serve 装配、Publisher/Consumer 生命周期、F-03/F-04 修复、优雅关闭与真实端到端门禁）。
 - Task 管理：[Task 管理入口](docs/task-management/README.md)、[Task 目录](docs/task-management/task-catalog.md)、[Task 关系图](docs/task-management/task-relationships.md)、[Owner 决策清单](docs/task-management/owner-decisions.md)。
 - 运营与内容：[轮播图](docs/design/banner.md)、[文章](docs/design/article.md)、[推荐位](docs/design/recommendation.md)、[评价](docs/design/review.md)、[数据大屏](docs/design/dashboard.md)、[收藏](docs/design/favorite.md)、[点赞](docs/design/like.md)。

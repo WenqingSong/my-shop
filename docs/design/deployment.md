@@ -29,14 +29,34 @@ Compose 服务（`docker-compose.yml`）：
 
 ## 3. 镜像与配置模型（凭据分离）
 
-- **多阶段构建**：builder（Go 1.23，`CGO_ENABLED=0` 静态编译，依赖全为纯 Go）→ runtime（alpine + `tzdata` + `ca-certificates`），工作目录 `/app`。`manifest/config/config.yaml` COPY 进镜像默认路径，保证 `time.LoadLocation("Asia/Shanghai")` 等时区语义可用（无 DST）。
-- **非 root 运行**：runtime 阶段创建专用用户 `app:app`（`uid=10001`、`gid=10001`），`USER 10001:10001`；`/app` 与 `/app/storage` 提前 `chown`，保证非 root 下运行时目录可写、轮播图占位图 seed 可执行。主进程有效 UID 非 0（不用 alpine `nobody`，固定身份便于未来 K8s `SecurityContext` 对接）。
+- **多阶段构建**：builder（Go 1.27.3，`CGO_ENABLED=0` 静态编译，依赖全为纯 Go）→ runtime（alpine 3.24.4 + `tzdata` + `ca-certificates`），工作目录 `/app`。`manifest/config/config.yaml` COPY 进镜像默认路径，保证 `time.LoadLocation("Asia/Shanghai")` 等时区语义可用（无 DST）。
+- **基础镜像与可复现构建**：`FROM` 使用 patch 级固定标签（`golang:1.27.3-alpine3.24`、`alpine:3.24.4`），不使用 `latest` 或浮动 minor；`GOTOOLCHAIN=local`、`GOFLAGS=-mod=readonly`、`-trimpath`、`-buildvcs=false`，`go mod download` 与 `go build` 使用 BuildKit cache mount。实际 digest 与依赖版本记录在 `docs/development/container-security.md`。
+- **非 root 运行**：runtime 阶段创建专用用户 `app:app`（`uid=10001`、`gid=10001`），`USER 10001:10001`；仅 `/app/storage` 归属运行用户。二进制、`config.yaml`、entrypoint 保持 `root` 所有且只读（`0555` / `0444`），运行用户无法篡改镜像内容。主进程有效 UID 非 0（不用 alpine `nobody`，固定身份便于未来 K8s `SecurityContext` 对接）。
+- **只读根文件系统**：容器以 `read_only: true` 运行，唯一可写路径为 `/app/storage`（named volume）与 `/tmp`（`tmpfs`，`noexec/nosuid/nodev`）。容器启动时不修改任何文件权限，不需要 root。
 - **配置与敏感凭据分离**：
   - `manifest/config/config.yaml` 仅保留普通非敏感配置（`server.address`、`dashboard.timezone`、`storage.local.root`、`order.*`、`flash_sale.*`、`qiniu.region/token_ttl/max_file_size/白名单` 等），敏感字段（`auth.jwt.secret`、`database.default.pass`、`qiniu.secret_key`、`admin.super.password`）默认值为空，可安全打包进镜像。
   - 敏感凭据（JWT secret、MySQL/Redis 密码、七牛 AK/SK/bucket/domain、超管密码）统一经运行时环境变量注入（Compose `environment` + `.env`），缺失时 `auth.Secret`/MySQL 认证/七牛 `ValidateConfig` fail-fast，**不回退任何内置默认密钥/密码**。
   - **无内置默认回退**：`docker-compose.yml` 对 `MYSQL_ROOT_PASSWORD`、`AUTH_JWT_SECRET` 使用 `${VAR:?error}` 必填语法，禁止 `${VAR:-default}`；`scripts/init.sh` 将二者加入 `REQUIRED_VARS` 缺失即报错（空字符串不可绕过）。`serve` 启动对 `DATABASE_DEFAULT_PASS`、`AUTH_JWT_SECRET` 显式非空校验，缺失非零退出、不监听端口、不回退内置默认值。
   - **连接字符集**：应用连接（`database.default.charset`）与 Migration DSN 统一为 `utf8mb4`，四字节 Unicode 字符（emoji / 补充平面字符）可经连接正确读写；表结构已为 utf8mb4，本次为连接层统一。
-  - `.env.example` 为模板（敏感字段留空并注明必填）；`.env` 不提交 Git、不进镜像（`.dockerignore` 排除 `.env`、`bin/`、`tmp/`、`storage/` 运行数据）。
+  - `.env.example` 为模板（敏感字段留空并注明必填）；`.env` 不提交 Git、不进镜像（`.dockerignore` 排除 `.env`、`bin/`、`tmp/`、`storage/`、`docs/`、`.agent/`、测试文件与运行数据）。
+
+### 3.1 容器运行时安全（T2-04）
+
+app 服务在 `docker-compose.yml` 中固定以下字段（其他服务不声明，保持原有生命周期与运行语义）：
+
+| 字段 | 值 | 作用 |
+| --- | --- | --- |
+| `user` | `10001:10001` | 与镜像 `USER` 一致，防止编排层以 root 运行 |
+| `read_only` | `true` | 只读根文件系统，阻断运行期写入镜像层 |
+| `tmpfs` | `/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777` | 唯一临时写路径，容器重建即清空 |
+| `cap_drop` | `ALL` | 应用监听 8000，不需要任何 Linux capability |
+| `security_opt` | `no-new-privileges:true` | 阻断 setuid/setgid 提权 |
+| `stop_grace_period` | `60s` | 与 T2-03 终止预算同源，避免 Compose 默认 10s 提前 SIGKILL |
+| `volumes` | `app_storage:/app/storage` | 唯一持久化写路径 |
+
+不使用的配置：`privileged`、`cap_add`、`network_mode: host`、`pid: host`、Docker Socket 挂载。seccomp 沿用 Docker 默认 profile；镜像与 Compose 均不发布 app 宿主机端口（Nginx 是唯一入口）。数据卷首次挂载继承镜像内 `/app/storage` 的 `app:app` 属主，非 root 可直接写入，无需启动期 `chown`。
+
+完整构建、验证、扫描与排障命令见 `docs/development/container-security.md`。
 
 ## 4. 启动生命周期
 
@@ -105,6 +125,7 @@ HTTP drain 的 10s 划分：前 9s 用于优雅 drain（同时作为 GoFrame 内
   异步侧状态由 `flashsale_consumer_joined`、`flashsale_outbox_backlog_pending` 观测，
   详见 `docs/development/kafka.md` §10.12 / §10.13。
 - `/health` 经 Nginx 公开透传（最小探活响应）；`/ready` 当前仅作未来 K8s readinessProbe 目标，Compose 的 app/nginx healthcheck 仍用 `/health`（Compose 无 Service 摘流机制，用 `/ready` 作 healthcheck 会放大 DB/Redis 抖动为 unhealthy + `restart` 误触发）。
+- **健康检查职责分工（T2-04）**：镜像内 `HEALTHCHECK`（`--interval=10s --timeout=5s --start-period=60s --retries=5`，`wget /health`）服务于 `docker run` 场景；Compose 显式声明同值 healthcheck（`scripts/test-container.sh` 断言两处一致）；Kubernetes 忽略 Dockerfile `HEALTHCHECK`，改用 livenessProbe `/health` 与 readinessProbe `/ready`。镜像不额外安装 curl/wget/bash，健康检查复用 alpine 自带 busybox wget。
 - Prometheus 抓取目标为 `app:8000`（不经 `host.docker.internal`、不经 Nginx）；`/metrics` 仅在 `FLASH_SALE_METRICS_ENABLED=true`（`flash_sale.metrics.enabled`）时暴露，抓取内容与开关语义不变；Nginx 公共入口对 `/metrics` 返回 404，不转发。`/metrics` 抓取路径不查数据库：Outbox 积压由进程内 5s 采样器写入 Gauge（查询失败保留上一次值），因此抓取超时不等于依赖故障。
 
 ## 7. Nginx 反向代理模型（统一入口）
@@ -151,6 +172,7 @@ Nginx 是面向外部的唯一 HTTP 入口，职责为纯反向代理（无 Lua/
 ## 10. 安全与凭据边界
 
 - 敏感凭据仅经运行时环境变量注入，不进镜像、不进 `config.yaml` 默认值、不进日志/响应；缺失即 fail-fast，**无内置默认回退**。
+- 镜像安全扫描（Trivy 镜像/配置 + govulncheck）的命令、分级结果与未修复漏洞说明见 `docs/development/container-security.md`；扫描是发布前门禁的一部分，不得以「工具未安装」代替通过结论。
 - `make init`/`make up` 复用两阶段初始化：`make init` 起 MySQL/Redis、生成 `.env`（要求已填 `MYSQL_ROOT_PASSWORD`，`scripts/init.sh` 缺失即报错，不要求七牛凭据、不启动后端）；`make up` 起 app（Compose 注入 `.env` 变量，要求 `AUTH_JWT_SECRET`，缺失由 `${VAR:?}` 与 serve fail-fast 双重拦截）。
 - 开发命令（`make up/down/status/logs/health`）全面容器化，不再启动宿主机进程，杜绝双启动。
 
@@ -169,5 +191,6 @@ Nginx 是面向外部的唯一 HTTP 入口，职责为纯反向代理（无 Lua/
 ## 12. Deferred / 已知留白
 
 - Kubernetes/Ingress、HTTPS/TLS、多实例负载均衡（后续任务）。
-- K8s 编排清单（Deployment/Pod/Probe/SecurityContext/HPA/Service/Ingress）：本次已落地容器运行能力（非 root、`/health` liveness、`/ready` readiness、优雅退出），但不产出 K8s 部署文件；`/ready` 将作为未来 readinessProbe 目标。
+- K8s 编排清单（Deployment/Pod/Probe/SecurityContext/HPA/Service/Ingress）：本次已落地容器运行能力（非 root、只读根文件系统、cap_drop ALL、`/health` liveness、`/ready` readiness、优雅退出），但不产出 K8s 部署文件；`/ready` 将作为未来 readinessProbe 目标。
+- 生产镜像的 `serve` 启动需要真实七牛凭据（`GetBucketInfo` 外部只读校验）。容器生命周期验证使用同一运行层、仅额外启用 `serve_lifecycle` 构建标签的 `lifecycle-verify` 目标（见 `docs/development/container-security.md`）；生产二进制本身不包含测试路由或绕过开关。
 - CNB DinD 环境的真实构建/卷/网络能力以集成验证（AC-013）为准。

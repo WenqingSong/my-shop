@@ -171,7 +171,7 @@ SurgeCart 基于 GoFrame v2 提供 HTTP API，MySQL 保存交易与身份数据�
 
 关键语义：
 
-- 多阶段构建（Go 1.23 静态编译 → alpine + tzdata + ca-certificates），非 root 运行（`uid=10001`）。
+- 多阶段构建（Go 1.27.3 静态编译 → alpine 3.24 + tzdata + ca-certificates），非 root 运行（`uid=10001`）、只读根文件系统、`cap_drop: ALL` 与 `no-new-privileges`；二进制/配置由 root 只读持有，仅 `/app/storage` 与 `/tmp`（tmpfs）可写。详见 `docs/development/container-security.md`。
 - 敏感凭据（JWT secret、MySQL/Redis 密码、七牛 AK/SK/bucket/domain、超管密码）仅经环境变量注入，无内置默认回退，缺失 fail-fast；`config.yaml` 敏感字段保持空值。
 - 启动生命周期：entrypoint `migrate up`（幂等 + `GET_LOCK` 串行）→ `serve`（依赖重试 → schema 就绪只读校验 → seed → 七牛校验 → 扫描器 → 路由）。
 - 持久化：`mysql_data` / `redis_data` / `app_storage` 三个 named volume。
