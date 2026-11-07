@@ -175,10 +175,11 @@ Job 字段说明：
 1. **何时创建**：镜像已推送、发布流程准备更新 Deployment **之前**。每个发布版本一个新 Job（名称 `surgecart-migrate-<短SHA>`），同名版本重跑前删除该 Job（`kubectl -n surgecart delete job surgecart-migrate-<短SHA>`）。
 2. **如何判断成功**：`kubectl -n surgecart wait --for=condition=complete job/surgecart-migrate-<短SHA> --timeout=900s`；退出码 0 且日志出现 `migration 执行完成` 或 `没有待执行的 migration`。
 3. **如何判断失败**：`kubectl -n surgecart get job surgecart-migrate-<短SHA> -o jsonpath='{.status.conditions}'` 出现 `Failed`，或 `kubectl -n surgecart get pods -l job-name=surgecart-migrate-<短SHA>` 中有 `Error`/`OOMKilled`。
+   **注意「等待超时」不是「失败」**（T2-06.1）：超时可能只是 Job 仍在执行 DDL，此时删除 Job 会中断迁移并留下 dirty 状态；先看 Pod 是否仍在 `Running`/终止中，再决定下一步（见 `docs/development/kubernetes.md` §10.2）。
 4. **失败后如何重试**：修正根因（网络、凭据、锁冲突、SQL 错误）后删除该 Job 重新构建并 apply；**不要**通过放宽 `backoffLimit` 或改成 `force` 来「让它过」。
 5. **如何看日志**：`kubectl -n surgecart logs job/surgecart-migrate-<短SHA> --tail=200`（`ttlSecondsAfterFinished` 到期后日志随 Job 删除）。
 6. **如何清理**：TTL 自动清理；提前清理用 `kubectl -n surgecart delete job -l app.kubernetes.io/component=database-migration`（或用具体名称）。
-7. **如何阻止应用升级**：发布流程必须**串行**——Job 未 `Complete` 时不得更新应用清单；`scripts/deploy-k8s.sh` 在迁移失败时以退出码 `2` 终止且不 apply 应用。最后的防线是 `serve` 的只读 schema 校验：数据库非 dirty 且版本已到最新才监听端口，否则进程非零退出（`checkSchemaReady`）。
+7. **如何阻止应用升级**：发布流程必须**串行**——Job 未 `Complete` 时不得更新应用清单；`scripts/deploy-k8s.sh` 在迁移失败时以退出码 `2`、等待超时时以退出码 `6` 终止，两种情况都不 apply 应用。发布级的互斥由 `Lease/surgecart-deploy-lock` 提供（T2-06.1，见 `docs/design/deploy-lock.md`）：数据库 `GET_LOCK` 只保护迁移本身，不能替代发布锁。最后的防线是 `serve` 的只读 schema 校验：数据库非 dirty 且版本已到最新才监听端口，否则进程非零退出（`checkSchemaReady`）。
 
 示例（发布脚本中的顺序，任一步失败即退出，不使用 `&&` 掩盖失败）：
 

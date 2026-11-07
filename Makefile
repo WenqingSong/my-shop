@@ -10,7 +10,7 @@ SHELL := /bin/bash
 
 SCRIPTS := scripts
 
-.PHONY: help bootstrap init up down restart status logs health deps-start test test-unit test-integration test-race test-prometheus test-container test-container-runtime test-nginx test-lib test-storage test-kafka-e2e test-serve-lifecycle test-migration test-k8s-manifest deploy-k8s clean build docker-build docker-push migrate-up migrate-version migrate-force config-check
+.PHONY: help bootstrap init up down restart status logs health deps-start test test-unit test-integration test-race test-prometheus test-container test-container-runtime test-nginx test-lib test-storage test-kafka-e2e test-serve-lifecycle test-migration test-k8s-manifest test-deploy-k8s deploy-k8s clean build docker-build docker-push migrate-up migrate-version migrate-force config-check
 
 help: ## 列出所有可用目标及说明
 	@bash $(SCRIPTS)/help.sh
@@ -68,6 +68,9 @@ test-migration: ## T2-05 迁移门禁：真实 MySQL + 真实多进程（并发�
 
 test-k8s-manifest: ## 校验 Kustomize 部署体系（构建产物结构化断言/安全上下文/Secret 边界，无需集群）
 	@bash $(SCRIPTS)/test-k8s-manifest.sh
+
+test-deploy-k8s: ## T2-06.1 发布脚本行为门禁（真实执行脚本 + fake kubectl：发布锁/降级保护/成功判定，无需集群）
+	@bash $(SCRIPTS)/test-deploy-k8s.sh
 
 deploy-k8s: ## Kubernetes 发布：先执行迁移 Job，成功后才更新应用 Deployment（需 kubectl）
 	@bash $(SCRIPTS)/deploy-k8s.sh

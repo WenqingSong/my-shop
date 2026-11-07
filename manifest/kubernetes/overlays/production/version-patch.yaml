@@ -1,0 +1,25 @@
+# 发布版本标记（T2-06.1）。
+#
+# 作用：把「本次发布的 Git 提交」记录在 Deployment 与其 Pod 模板上，使下一次发布能够
+# 可靠地回答「线上跑的是哪个 commit」——这是发布脚本做版本降级判断的事实来源。
+#
+#   1. Deployment metadata.labels.app.kubernetes.io/version
+#   2. Pod 模板 labels.app.kubernetes.io/version（随 Pod 复制，可用于实际 Pod 校验）
+#
+# 约束（由 scripts/test-k8s-manifest.sh 断言）：
+#   - 本文件的取值必须与 overlays/production/kustomization.yaml 的 images.newTag 相同；
+#   - 也必须与 migration/overlays/production/job/kustomization.yaml 的 nameSuffix 相同。
+# 三处不一致意味着「镜像版本 / 迁移 Job 版本 / 版本标记」互相矛盾，发布脚本会拒绝发布。
+#
+# 0000000 是占位值：仓库内保留它以保证构建可复现，scripts/deploy-k8s.sh 会拒绝发布。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: surgecart
+  labels:
+    app.kubernetes.io/version: "0000000"
+spec:
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/version: "0000000"

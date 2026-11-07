@@ -211,7 +211,7 @@ Nginx 是面向外部的唯一 HTTP 入口，职责为纯反向代理（无 Lua/
 - **发布顺序**：`make test` → `make test-race` → `make build`（go build）→ `make docker-build`（含 `docker tag :latest`）→ `make docker-push`（先短 SHA 后 `latest`）；任一 stage 失败即中断、后续不执行。短 SHA 先于 `latest` 推送，保证 `latest` 只会指向「短 SHA 标签已存在」的构建。
 - **目标平台**：单平台 `linux/amd64`（沿用 Dockerfile `CGO_ENABLED=0 GOOS=linux` 静态编译，native build，不显式 `--platform`、不引入 buildx/QEMU）。
 - **凭据**：制品库认证使用 CNB 内置凭据（流水线内置触发者凭据 / `CNB_TOKEN`），推送 CNB 制品库无需手动 `docker login`；`.cnb.yml` 与运行日志不出现硬编码密码。
-- **回滚方法**：部署回滚用历史成功构建的短 SHA 标签拉取并运行目标版本（`docker run docker.cnb.cool/framework-station/my-shop:<短SHA>`），不依赖 `latest`；`latest` 仅表达「默认最新」，不作为可回滚的历史锚点。Kubernetes 回滚同理：把 overlay 的 `images.newTag` 改回上一个短 SHA，只重新构建并应用 **Application** 入口；迁移不回滚（schema 向前兼容是发布前提），见 `docs/development/kubernetes.md` §10。
+- **回滚方法**：部署回滚用历史成功构建的短 SHA 标签拉取并运行目标版本（`docker run docker.cnb.cool/framework-station/my-shop:<短SHA>`），不依赖 `latest`；`latest` 仅表达「默认最新」，不作为可回滚的历史锚点。Kubernetes 回滚同理：把三处版本（`images.newTag` / `app.kubernetes.io/version` / 迁移 Job `nameSuffix`）改回上一个短 SHA，由人工显式执行 `bash scripts/deploy-k8s.sh --allow-downgrade`（T2-06.1 默认禁止降级，CI 还需 `DEPLOY_K8S_ALLOW_DOWNGRADE_IN_CI=1`）；迁移不回滚（schema 向前兼容是发布前提），见 `docs/development/kubernetes.md` §9.5 与 §10。
 
 ## 12. Kubernetes 部署体系（T2-06）
 
@@ -234,17 +234,26 @@ Nginx 是面向外部的唯一 HTTP 入口，职责为纯反向代理（无 Lua/
 
 ```text
 构建并推送镜像（短 SHA）
-    → 更新 Kustomize 镜像版本（Application + Migration 同值）
+    → 更新三处版本（镜像 tag / 版本标记 / 迁移 Job 后缀，三者同值）
+    → 获取发布锁 Lease/surgecart-deploy-lock（原子 create + resourceVersion CAS）
+    → 锁内版本降级保护（当前版本 vs 目标版本，Git 祖先关系）
     → 构建 Migration 清单 → 创建 Job → 等待完成
-         ├─ 失败 → 阻止应用升级
-         └─ 成功 → 应用 Application 清单 → 等待 Deployment Available → 校验 Readiness
+         ├─ Failed=True     → 阻止应用升级（退出码 2，不 force、不删 Job）
+         ├─ 等待超时        → 不删 Job、不应用（退出码 6，超时≠失败）
+         └─ Complete        → 应用 Application 清单 → 等待 Deployment 收敛
+    → 发布成功判定（镜像 / 版本标记 / generation / 副本 / 实际 Pod）
+    → 释放发布锁 → 打印 DEPLOY_K8S_SUCCESS
 ```
+
+发布锁的设计、CAS 语义与剩余风险（没有 fencing token、时钟依赖）见
+`docs/design/deploy-lock.md`。
 
 已知边界（详见 `docs/development/kubernetes.md`）：
 
 - 单副本是**当前存储模型**的结论，不是临时保守：本地文件目录不是共享存储，多 Pod 会各写各的。
 - 没有 Ingress/TLS：仓库不虚构域名与证书方案，对外入口由环境叠加。
-- 未在真实集群验证：调度、滚动、PVC 绑定、preStop/SIGTERM 实测均为 NOT_VERIFIED。
+- 未在真实集群验证：调度、滚动、PVC 绑定、preStop/SIGTERM 实测、Lease 的真实并发语义均为 NOT_VERIFIED。
+- 发布锁只串行化「经过 `scripts/deploy-k8s.sh` 的发布」；直接 `kubectl apply` 不受保护。
 
 ## 13. Deferred / 已知留白
 

@@ -1,0 +1,65 @@
+# 发布锁（Lease）的最小 RBAC 示例 —— T2-06.1。
+#
+# 这不是部署清单的一部分：scripts/deploy-k8s.sh 不会 apply 本文件（发布身份不一定有
+# 授权 RBAC 的权限），也不把 Lease 放进 Kustomize 入口——把锁资源放进部署清单意味着
+# 每次 apply 都可能把别人的 holderIdentity 覆盖成空，等于绕过锁。
+#
+# 用途：由集群管理员**一次性**授予「执行发布的身份」下述权限。
+#
+# 需要的动词（对应 scripts/deploy-k8s.sh 的实际调用）：
+#   get    读取锁记录（holderIdentity / renewTime / resourceVersion）
+#   create 首次获取锁（原子创建，AlreadyExists 即表示已被占用）
+#   update 续租 / 接管过期锁 / 释放锁（PUT + metadata.resourceVersion 做 CAS）
+# patch 不参与发布流程，仅供人工恢复 runbook 使用（见 docs/development/deploy-lock.md §8），
+# 授予它可以让值班人员在不具备 update 的情况下清理卡死的锁；不授予也不影响发布。
+#
+# 注意：Lease 是 namespaced 资源，权限必须落在 surgecart 命名空间内，
+# 不要授予集群级 leases 权限（那会让该身份能干扰其他命名空间的协调类资源）。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: surgecart-deploy-lock
+  namespace: surgecart
+  labels:
+    app.kubernetes.io/name: surgecart
+    app.kubernetes.io/component: deploy-lock
+    app.kubernetes.io/part-of: surgecart
+rules:
+  # 只允许操作**这一个** Lease 对象：resourceNames 限制避免误伤同命名空间内的其他 Lease
+  # （例如未来引入的控制器选主锁）。
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    resourceNames: ["surgecart-deploy-lock"]
+    verbs: ["get", "update", "patch"]
+  # create 不能带 resourceNames（对象尚未存在），因此单独一条：
+  # 拿到 create 的身份可以创建任意名称的 Lease，这是 Kubernetes RBAC 的固有限制。
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["create"]
+---
+# 把上面的 Role 绑定到执行发布的身份。
+#
+# subjects 必须替换为真实身份，例如：
+#   - kind: ServiceAccount, name: ci-deployer, namespace: ci        （集群内 Runner）
+#   - kind: User,           name: ci-deployer                       （外部 kubeconfig 用户）
+#   - kind: Group,          name: surgecart-deployers               （团队共享身份）
+#
+# 不要绑到应用自己的 ServiceAccount：应用 Pod 的 automountServiceAccountToken=false，
+# 不需要也不应该具备发布权限（否则一个被攻破的 Pod 就能改写发布锁）。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: surgecart-deploy-lock
+  namespace: surgecart
+  labels:
+    app.kubernetes.io/name: surgecart
+    app.kubernetes.io/component: deploy-lock
+    app.kubernetes.io/part-of: surgecart
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: surgecart-deploy-lock
+subjects:
+  - kind: ServiceAccount
+    name: REPLACE_WITH_DEPLOYER_SERVICE_ACCOUNT
+    namespace: REPLACE_WITH_DEPLOYER_NAMESPACE

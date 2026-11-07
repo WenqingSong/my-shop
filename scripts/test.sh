@@ -42,6 +42,11 @@ log_info "校验容器化配置（Dockerfile / .dockerignore / compose / config 
 log_info "校验 Kustomize 部署体系（T2-06：真实构建 + 构建产物断言 + API Schema）..."
 "${SCRIPT_DIR}/test-k8s-manifest.sh"
 
+# T2-06.1：发布脚本行为语义（发布锁互斥/版本降级保护/发布成功判定/Migration 失败与超时分离）。
+# 真正执行 deploy-k8s.sh + fake kubectl；不依赖集群，也不把「静态文本包含某段话」当行为验证。
+log_info "校验发布脚本行为（T2-06.1：发布锁 + 降级保护 + 成功判定 + 故障恢复）..."
+"${SCRIPT_DIR}/test-deploy-k8s.sh"
+
 log_info "校验 Nginx 反向代理配置..."
 "${SCRIPT_DIR}/test-nginx.sh"
 

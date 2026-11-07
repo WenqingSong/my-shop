@@ -7,9 +7,10 @@
 # 它不包含任何 Job —— 数据库迁移有独立入口
 # （manifest/kubernetes/migration/overlays/production），发布顺序由 scripts/deploy-k8s.sh 强制。
 #
-# 每次发布必须同时更新两处版本号（二者由 scripts/test-k8s-manifest.sh 断言一致）：
+# 每次发布必须同时更新三处版本号（三者由 scripts/test-k8s-manifest.sh 断言一致）：
 #   1. 本文件的 images.newTag
 #   2. migration/overlays/production/job/kustomization.yaml 的 nameSuffix
+#   3. overlays/production/version-patch.yaml 的 app.kubernetes.io/version（标签）
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -25,6 +26,9 @@ images:
     newTag: "0000000"
 
 patches:
+  # 发布版本标记：app.kubernetes.io/version 必须等于上面的 images.newTag（T2-06.1）。
+  # 它是发布降级保护的事实来源：脚本读取上一版 Deployment 的该标签判断版本先后。
+  - path: version-patch.yaml
   # 环境专属：外部数据库地址（与迁移入口保持同值）。
   - path: database-patch.yaml
   # 环境专属：外部 Redis 地址、七牛 bucket/domain。

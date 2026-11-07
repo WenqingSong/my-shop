@@ -21,6 +21,9 @@ metadata:
     app.kubernetes.io/name: surgecart
     app.kubernetes.io/component: backend
     app.kubernetes.io/part-of: surgecart
+    # 发布版本标记（T2-06.1）：值等于本次发布的 Git 短 SHA。
+    # 由 overlays/production/version-patch.yaml 覆盖；base 的 unreleased 表示「不可发布」。
+    app.kubernetes.io/version: "unreleased"
 spec:
   # 单副本：本地文件存储（storage.local.root）不是共享存储，多 Pod 会各自写不同副本的
   # /app/storage；在提供共享对象存储之前不宣称多副本安全（docs/development/kubernetes.md §7）。
@@ -50,6 +53,11 @@ spec:
         app.kubernetes.io/name: surgecart
         app.kubernetes.io/component: backend
         app.kubernetes.io/part-of: surgecart
+        # 版本的事实来源（T2-06.1）：
+        #   - 该标签随 Pod 复制，发布脚本据此判断「当前 Deployment 是哪个 commit」；
+        #   - 发布成功判定同时校验该标签与镜像，缺一不可；
+        #   - 覆盖规则见 overlays/production/version-patch.yaml（必须等于镜像 tag）。
+        app.kubernetes.io/version: "unreleased"
     spec:
       # 应用不访问 Kubernetes API。
       automountServiceAccountToken: false

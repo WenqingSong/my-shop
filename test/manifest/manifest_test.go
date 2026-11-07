@@ -920,3 +920,81 @@ func walkStrings(value any, visit func(path, value string)) {
 	}
 	walk("", value)
 }
+
+// ---------------------------------------------------------------------------
+// 发布版本标记与发布锁契约（T2-06.1）
+// ---------------------------------------------------------------------------
+
+// TestVersionLabelTracksImageTag 断言 app.kubernetes.io/version 与镜像 tag 同值。
+//
+// 为什么这条断言必须存在：发布脚本用该标签回答「线上跑的是哪个 commit」，
+// 并据此决定「允许升级 / 拒绝降级」。标签与镜像不一致时，降级判断会基于错误事实，
+// 因此三处版本（镜像 tag / Job 名称后缀 / 版本标签）必须由测试钉死。
+func TestVersionLabelTracksImageTag(t *testing.T) {
+	deployment := appDeployment(t)
+	tag := imageTag(containerImage(t, deployment, "app"))
+	if tag == "" {
+		t.Fatal("应用 Deployment 镜像没有 tag：无法校验版本标记")
+	}
+
+	if got := stringOf(mapAt(t, deployment, "metadata", "labels")["app.kubernetes.io/version"]); got != tag {
+		t.Fatalf("Deployment metadata.labels.app.kubernetes.io/version = %q，期望 %q（必须等于镜像 tag）", got, tag)
+	}
+
+	podLabels := mapAt(t, deployment, "spec", "template", "metadata", "labels")
+	if got := stringOf(podLabels["app.kubernetes.io/version"]); got != tag {
+		t.Fatalf("Pod 模板 labels.app.kubernetes.io/version = %q，期望 %q：这是发布脚本读取线上版本的事实来源", got, tag)
+	}
+
+	// 迁移 Job 名称后缀必须同为该版本（两个入口来自同一次发布）。
+	if got := nameOf(migrationJob(t)); got != "surgecart-migrate-"+tag {
+		t.Fatalf("迁移 Job 名称 = %q，期望 %q", got, "surgecart-migrate-"+tag)
+	}
+
+	// 版本标签不得进入 selector：selector 不可变，加版本标签会让下一次发布被 API Server 拒绝。
+	selector := mapAt(t, deployment, "spec", "selector", "matchLabels")
+	if _, ok := selector["app.kubernetes.io/version"]; ok {
+		t.Fatal("selector 不得包含 app.kubernetes.io/version：selector 不可变，版本变化会导致 apply 失败")
+	}
+}
+
+// TestDeployLockContract 断言发布脚本与 RBAC 示例共用同一个锁资源名。
+//
+// 这是**静态一致性**断言，不能替代行为测试（行为测试在 test/deployk8s）：
+// 如果 RBAC 示例里的 resourceNames 与脚本使用的 Lease 名不一致，
+// 真实集群上脚本会在权限预检阶段失败，而示例看起来「已经授权」。
+func TestDeployLockContract(t *testing.T) {
+	scriptPath := filepath.Join(repoRoot(t), "scripts", "deploy-k8s.sh")
+	scriptRaw, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatalf("读取发布脚本: %v", err)
+	}
+	script := string(scriptRaw)
+
+	for _, fragment := range []string{"coordination.k8s.io/v1", "app.kubernetes.io/version", "--allow-downgrade"} {
+		if !strings.Contains(script, fragment) {
+			t.Fatalf("scripts/deploy-k8s.sh 缺少 %q：发布锁/版本保护契约被削弱", fragment)
+		}
+	}
+
+	rbacPath := filepath.Join(repoRoot(t), "manifest", "kubernetes", "examples", "deploy-lock", "rbac.yaml")
+	rbacRaw, err := os.ReadFile(rbacPath)
+	if err != nil {
+		t.Fatalf("读取发布锁 RBAC 示例 %s: %v（发布锁必须提供最小权限示例）", rbacPath, err)
+	}
+
+	lockNamePattern := regexp.MustCompile(`resourceNames:\s*\[\s*"([^"]+)"\s*\]`)
+	match := lockNamePattern.FindStringSubmatch(string(rbacRaw))
+	if match == nil {
+		t.Fatalf("%s 没有用 resourceNames 限定到具体 Lease：权限范围过大", rbacPath)
+	}
+	lockName := match[1]
+	if !strings.Contains(script, `LOCK_NAME="`+lockName+`"`) {
+		t.Fatalf("RBAC 示例授权的是 Lease %q，但 scripts/deploy-k8s.sh 的 LOCK_NAME 不匹配：真实集群上权限预检会失败", lockName)
+	}
+	for _, verb := range []string{"get", "update"} {
+		if !strings.Contains(string(rbacRaw), `"`+verb+`"`) {
+			t.Fatalf("%s 缺少 %q 动词：脚本的 create/CAS 更新/释放流程需要它", rbacPath, verb)
+		}
+	}
+}
