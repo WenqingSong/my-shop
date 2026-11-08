@@ -2,6 +2,7 @@ package fakestate
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -426,6 +427,57 @@ func (st *State) legacyInjections() []Injection {
 // 状态不变量：全局 resourceVersion、UID 语义、唯一 CAS helper
 // ---------------------------------------------------------------------------
 
+// leaseHistoryLimit 是 Lease 版本历史保留的条数（写意图判定只需要最近若干个版本）。
+const leaseHistoryLimit = 32
+
+// rememberLeaseVersion 记录当前 Lease 版本的记录注解快照。
+//
+// 用途：判定一次写是「续租」还是「写迁移记录」时，必须比较**调用方读到的那个版本**
+// 与它写出去的内容，而不是比较「当前服务端状态」。否则后台续租与主流程写记录并发时，
+// 续租请求携带的是它读到的旧记录（服务端已被主流程推进），会被误判成「写记录」——
+// 于是按续租注入的故障（409/500）就漏掉了，注入次数随并发时序漂移（这是真实回归，
+// 见 TestRenewThreeCASConflictsExhaustAttempts）。
+func (st *State) rememberLeaseVersion() {
+	if st.Lease == nil {
+		return
+	}
+	if st.LeaseHistory == nil {
+		st.LeaseHistory = map[string]map[string]string{}
+	}
+	st.LeaseHistory[st.Lease.ResourceVersion] = copyAnnotations(st.Lease.Annotations)
+	if len(st.LeaseHistory) <= leaseHistoryLimit {
+		return
+	}
+	// 超出上限：删除版本号最小的条目（resourceVersion 全局单调）。
+	oldestKey, oldestValue := "", int64(-1)
+	for key := range st.LeaseHistory {
+		var value int64
+		if _, err := fmt.Sscanf(key, "%d", &value); err != nil {
+			oldestKey = key
+			break
+		}
+		if oldestValue < 0 || value < oldestValue {
+			oldestValue, oldestKey = value, key
+		}
+	}
+	delete(st.LeaseHistory, oldestKey)
+}
+
+// LeaseBaseAnnotations 返回「调用方读到的那个版本」上的记录注解。
+// 未知版本返回 nil，调用方应据此按「未改写记录」处理（保守：不伪造 record 意图）。
+func (st *State) LeaseBaseAnnotations(resourceVersion string) map[string]string {
+	if resourceVersion == "" {
+		return nil
+	}
+	if annotations, ok := st.LeaseHistory[resourceVersion]; ok {
+		return annotations
+	}
+	if st.Lease != nil && st.Lease.ResourceVersion == resourceVersion {
+		return copyAnnotations(st.Lease.Annotations)
+	}
+	return nil
+}
+
 // ErrLeaseNotFound 表示 Lease 对象不存在。
 var ErrLeaseNotFound = errors.New("leases.coordination.k8s.io not found")
 
@@ -464,6 +516,26 @@ func TakeoverLease(st *State, holder string) error {
 	st.Lease.RenewTime = now
 	st.Lease.Transitions++
 	st.Lease.ResourceVersion = st.NextResourceVersion()
+	st.rememberLeaseVersion()
+	return nil
+}
+
+// ErrLeaseExists 表示同名 Lease 已存在（create 的 AlreadyExists）。
+var ErrLeaseExists = errors.New("leases.coordination.k8s.io already exists")
+
+// CreateLease 原子创建一个 Lease：分配全局 rv 与**新** uid（删除重建后不复用），
+// 并记录版本快照（写意图判定的基线）。
+func CreateLease(st *State, lease Lease) error {
+	if st.Lease != nil {
+		return ErrLeaseExists
+	}
+	created := lease
+	created.ResourceVersion = st.NextResourceVersion()
+	created.UID = st.NextLeaseUID()
+	created.Annotations = copyAnnotations(lease.Annotations)
+	st.Lease = &created
+	st.LeaseAcquisitions++
+	st.rememberLeaseVersion()
 	return nil
 }
 
@@ -511,6 +583,7 @@ func CommitLeaseUpdate(st *State, update LeaseUpdate) (*Lease, error) {
 	st.Lease.Transitions = update.Transitions
 	st.Lease.Annotations = copyAnnotations(update.Annotations)
 	st.Lease.ResourceVersion = st.NextResourceVersion()
+	st.rememberLeaseVersion()
 	return previous, nil
 }
 
