@@ -78,7 +78,7 @@ spec:
   holderIdentity: "deploy-<host>-<pid>-<utc>"   # 持有者身份
   leaseDurationSeconds: 45                       # 租期（释放时也保持该值，见 §5；T2-06.1.3 由 30 调整，理由见 §7）
   acquireTime: "<RFC3339>"                       # 本次获取时间
-  renewTime: "<RFC3339>"                         # 最近续租时间
+  renewTime: "<RFC3339>"                         # 最近一次租约写入请求的发出时刻（t_req，见 §7.5）
   leaseTransitions: 2                            # 被接管次数（排查用）
 ```
 
@@ -429,6 +429,38 @@ leaseDurationSeconds`：一旦已过期，立即按失锁返回失败，不再�
 **该不变量只降低「正常网络延迟下锁提前过期」的概率**，不能消除 Runner 暂停、网络分区
 与缺少 fencing 带来的问题（§10）。失锁窗口的推导见 §10.3。
 
+### 7.5 `renewTime` 锚点语义（T2-06.1.4 / B-1 · B-2）
+
+`renewTime` 该写哪个时刻，是审计 B-1 的根因。三个时刻必须分开：
+
+| 符号 | 含义 | 能否观测 |
+|---|---|---|
+| `t_req` | 客户端构造并发出 Create/PUT 请求的时刻（**本地时钟**） | 能（写进清单） |
+| `t_acc` | API Server 接受并提交该写入的时刻（服务端时钟） | **不能** |
+| `t_resp` | 客户端收到响应的时刻（本地时钟） | 能，但可能永远等不到（超时） |
+
+`t_req ≤ t_acc ≤ t_resp`（正常时钟下）。写入规则：
+
+1. **create / takeover**：`renewTime = t_req`（请求发出前一刻）。不能用脚本启动时刻 ——
+   旧实现用 `LOCK_ACQUIRED_AT`（脚本启动时刻），预检越长写得越旧；审计复现中预检 51s、
+   租期 30s，**Lease 创建时就已经过期**（B-1）。也不能写未来时刻（等于人为延长租期）。
+2. create/takeover 返回后**立即**做窗口断言 `lease_require_window`（`LEASE_WINDOW`
+   证据行 + `LEASE_ANCHOR_INVALID` fail-closed，退出码 3），随后**再续租一次**，
+   把锚点推到写入完成之后（B-2）。两步都不能省：请求耗时同样会吃掉窗口。
+3. **renew**：每次 attempt 的 PUT 用本次的 `t_req`；只有写入成功才记录 `t_resp`
+   （`LOCK_WRITE_CONFIRMED_AT`），失败分支不得改写 rv / uid / renewTime。
+4. 服务端过期时刻是 **精确的 `renewTime + leaseDurationSeconds`**（不需要推断）。
+   由于写入在 `t_acc ≥ t_req` 才生效，本 Runner 实际可用的持有窗口最多被
+   `t_acc - t_req ≤ 一次请求耗时（≤ 3s）` 扣减 —— 这是**保守方向**，不会推迟过期。
+
+对 §10.3 的影响：`t0` 就是写入的 `renewTime`（= `t_req`）。服务端最早可接管时刻是
+`t0 + D`；`t0 + D - G` 只是「扣掉一次请求耗时」的保守下界，两者都远大于检测时刻
+`t0 + I + A×(G+R) + B`。因此「停止发起新请求」的边界仍然成立，而「在途请求」不受影响。
+
+时钟偏移（B-1 的另一半）：本机时钟比服务器慢 → 服务器认为租约更早过期（保守）；
+比服务器快 → 服务器认为租约活得更久（**不安全方向**，可能让旧持有者以为锁还在）。
+这一项无法用脚本消除，**NOT_VERIFIED**，见 §13 与 §10.2。
+
 ## 8. 正确性论证（脚本实际提供的保证）
 
 | 要求 | 实现 | 保证强度 |
@@ -590,8 +622,10 @@ T2-06.1.4 的故障注入实验直接观察到了这一类跨接管的在途写�
 ### 10.3 失锁窗口推导（T2-06.1.3 / F-05）
 
 符号与默认值：`D` = 45s（租期）、`I` = 10s（续租间隔）、`G` = `R` = 3s（GET / PUT 超时）、
-`A` = 3（attempts）、`B` = 1s（退避预算）。`t0` = 最近一次**成功**续租的 `renewTime`
-（写入值是 renew 请求的**发出时刻**，因此真实过期时刻落在 `[t0+D-G, t0+D]`）。
+`A` = 3（attempts）、`B` = 1s（退避预算）。`t0` = 最近一次**成功**写入的 `renewTime`，
+其取值是那次写入请求的**发出时刻** `t_req`（§7.5）。服务端过期时刻**精确等于**
+`t0 + D`；`t0 + D - G` 是扣掉一次请求耗时（`t_acc - t_req ≤ G`）后的保守下界，
+表中两处都用「≥ `t0+42s`」是为了不依赖 `t_acc` 这个不可观测值。
 
 | # | 问题 | 推导 | 默认值 |
 |---|---|---|---|
@@ -733,7 +767,11 @@ kubectl auth can-i update leases.coordination.k8s.io -n surgecart    # 3) 自检
 |---|---|---|
 | `core/namespaces` | `get` | 严格判断命名空间是否存在（只有 NotFound 才算「不存在」） |
 | `core/namespaces` | `create` | 首次部署引导命名空间 |
+| `core/namespaces` | `patch` | `kubectl apply -f shared/namespace.yaml` 对**已存在**的命名空间走 PATCH（只给 create 时，第二次发布会失败） |
 | `authorization.k8s.io/selfsubjectaccessreviews` | `create` | `kubectl auth can-i` 本身就是一次 SSAR |
+
+`REQUIRED_PERMISSIONS` 共 **29** 条：命名空间级 25 条 + 集群级 4 条。没有
+`delete`/`deletecollection` —— 脚本永不删除 Job / Pod / Lease / Deployment / Namespace。
 
 **`namespaces` 为什么必须走 ClusterRole**：`namespaces` 是**集群级资源**，`Role` 的作用域是
 单个命名空间，无法授予集群级资源 —— 把 `namespaces get/create` 写进 `Role` 不会生效，
@@ -809,6 +847,9 @@ T2-06.1.3 及更早的示例完全没有这两项，因此「按示例授权 →
 | 脚本行为（锁/迁移生命周期/版本/判定/故障/续租参数/Pod 门禁/证据恢复/在途请求） | `go test ./test/deployk8s/`：真实执行脚本 + fake kubectl（真实进程、真实并发、真实 SIGTERM/SIGKILL/SIGSTOP、外部延迟包装） | 已验证（本仓库环境） |
 | 续租预算与实际耗时（F-02） | `TestRenewChainStaysWithinBudget`：GET/REPLACE 各延迟 0.9s（超时上限 1s），用外部包装的毫秒时间戳测量 3 次 attempt 的真实耗时并与公式上界比对 | 已验证（脚本语义 + 实测耗时） |
 | 租约过期后的续租（F-02.4） | `TestRenewAbortsWhenLeaseExpiresDuringRetries`：重试期间把服务端 `renewTime` 推过期，断言不再写 Lease | 已验证（脚本语义） |
+| `renewTime` 锚点（B-1 / B-2） | `TestMultiprocessPreflightDelayKeepsRenewTimeFresh`（预检 16s > 租期 15s：旧实现必然创建即过期）、`TestMultiprocessStaleRenewTimeAtCreateFailsClosed`（`LEASE_ANCHOR_INVALID` + `LEASE_WINDOW … verdict=expired`，退出码 3，零 apply、不改写过期锁的 `renewTime`） | 已验证（脚本语义 + 证据行自证） |
+| 过期锁不得被「续命」（B-3 / B-4） | `TestRecordWriteRefusedWhenLeaseExpired`：租约在服务端过期后，写 COMPLETE 记录被拒绝（退出码 3）、不写 Lease、不改 `renewTime` | 已验证（脚本语义） |
+| 退避预算与实现同源（B-5） | `TestRenewBackoffBudgetIsSingleSourced`：`LOCK_RENEW_BACKOFF_MS` → 实际 sleep → 预算三者一致，且最后一次失败后不再 sleep | 已验证（源码契约） |
 | 权限契约（F-01 / T2-06.1.4 A-1/A-2） | `test/manifest`：`TestDeliveredRBACMatchesRequiredPermissions`（脚本声明 ⊆ 交付 RBAC，按作用域）、`TestRequiredPermissionsCoversAuditFindings`、`TestRequiredPermissionsCoverBuiltManifests`、`TestScriptKubectlUsageIsDeclared`；`test/deployk8s/rbac_test.go`：`TestEveryRequiredPermissionIsEnforced` 等逐项拒绝 + Forbidden/unknown 区分 | 已验证（静态契约 + 脚本行为） |
 | Pod 查询错误分类（F-07） | `test/deployk8s/podquery_test.go`：空列表/全终态/活动 Pod/403/500/超时/归属不一致 | 已验证（脚本语义） |
 | 权限/业务资源错误分类（T2-06.1.4 / A-3 / AUD-09） | `test/deployk8s/rbac_test.go`：`TestSecretReadForbiddenIsNotMissingSecret`、`TestSecretReadFailureIsNotMissingSecret`、`TestSecretNotFoundIsReportedAsMissing`、`TestNamespaceReadFailureIsNotReportedAsAbsent`、`TestJobsListForbiddenIsNotUnfinishedJob`、`TestJobsListServerErrorIsNotUnfinishedJob`、`TestJobLogsForbiddenIsReported` | 已验证（脚本语义） |
