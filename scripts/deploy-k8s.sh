@@ -576,8 +576,36 @@ POD_GATE_CODE=0
 POD_GATE_SUMMARY=""
 MIGRATION_PODS_ERROR=""
 
+# 清理阶段标记与「清理期间收到的信号」的延后退出码（T2-06.1.4 加固）。
+#
+# 代码依据（真实调用链 + 实验证据，见 test/deployk8s/multiprocess_test.go
+# TestSignalsDuringCleanupDoNotCorruptCleanup）：
+#
+#   SIGTERM/SIGINT → on_signal() → exit → EXIT trap = cleanup()
+#   cleanup → stop_lease_renewer → [migration_record_write] → lease_release
+#           → rm -rf TMP_DIR → exit code
+#
+#   cleanup 执行到一半（例如正阻塞在 lease_release 的 kubectl replace 上）时若再收到
+#   信号，bash 会在该子进程返回后的**下一个命令边界**执行信号 trap，即重入
+#   on_signal；而 on_signal 的每条分支都以 exit 结束，于是 cleanup 被中途截断：
+#   锁可能不释放、TMP_DIR 一定不删除。实测证据（T2-06.1.4）：
+#   stderr 在同一进程里先后出现完整的「收到 SIGTERM」「收到 SIGINT」两轮处理，
+#   且 TMP_DIR 残留。极端时序下 bash 还会在 EXIT trap 内求值信号 trap 时以 2 退出
+#   （`trap: line 2: unexpected EOF while looking for matching )`），把既有的
+#   3（失锁）/143（信号）覆盖掉 —— 这正是集成期间观察到 2 次、未复现的失败形态。
+#
+# 因此：CLEANUP_ACTIVE=1 期间，信号只记录意图、不再调用 exit，由 cleanup 收尾时
+# 决定最终退出码。lease_release 本身已经幂等（入口 LOCK_HELD 守卫 + 每条分支置 0），
+# 所以这里不需要再引入「是否已释放」的额外状态。
+CLEANUP_ACTIVE=0
+# 清理期间收到的信号要采用的退出码；0 = 未收到。
+# 只有 cleanup 原本要以 0 退出时才采用它：非 0 的既有结论（失锁 3、失败 1/2/5/6/7）
+# 信息量更大，不允许被信号覆盖。
+DEFERRED_SIGNAL_CODE=0
+
 cleanup() {
   local code=$?
+  CLEANUP_ACTIVE=1
   # 清理路径不允许再触发 set -e 退出：这里必须尽最大努力释放锁并删除临时文件。
   set +e
   # 续租进程只有在 start_lease_renewer 之后才存在，此时 stop_lease_renewer 已定义。
@@ -596,6 +624,15 @@ cleanup() {
     log_warn "清理：迁移 Job/${MIG_JOB:-<未知>} 未确认终态（state=${MIG_STATE}），关联记录保留在 Lease 注解上"
   fi
   rm -rf "${TMP_DIR}"
+  # 清理期间到达的信号（on_signal 已延后处理）：清理已经完成，这里才决定退出码。
+  if (( DEFERRED_SIGNAL_CODE != 0 )); then
+    if (( code == 0 )); then
+      log_warn "清理期间收到信号：清理已完成（锁已按规则释放、TMP_DIR 已删除），退出码 0 → ${DEFERRED_SIGNAL_CODE}"
+      code="${DEFERRED_SIGNAL_CODE}"
+    else
+      log_warn "清理期间收到信号：清理已完成，保留既有退出码 ${code}（不被 ${DEFERRED_SIGNAL_CODE} 覆盖）"
+    fi
+  fi
   exit "${code}"
 }
 
@@ -614,6 +651,16 @@ cleanup() {
 # （AUD-02 = NOT_CLOSED）。
 on_signal() {
   local name="$1"
+  # 重入保护（见 CLEANUP_ACTIVE 注释）：cleanup 正在释放锁 / 删除临时文件，
+  # 此时**不能**调用 exit —— 那会截断清理，并可能在 EXIT trap 内求值信号 trap
+  # 时失败（bash 以 2 退出，覆盖既有的 3/143）。只记录信号意图，由 cleanup 采用。
+  if (( CLEANUP_ACTIVE )); then
+    if (( DEFERRED_SIGNAL_CODE == 0 )); then
+      DEFERRED_SIGNAL_CODE=143
+    fi
+    log_warn "清理进行中：已记录 SIG${name}，不在清理阶段调用 exit（不中断释放锁/删除临时文件；清理完成后按既有退出码或 ${DEFERRED_SIGNAL_CODE} 结束）"
+    return 0
+  fi
   if [[ -f "${LOCK_STATE_DIR}/lost" ]]; then
     log_error "收到 SIG${name} 且发布锁续租已失败：中止发布，不再变更任何资源"
     if (( APPLICATION_INFLIGHT )) || { (( APPLICATION_APPLY_ISSUED )) && (( ! APPLICATION_OUTCOME_VERIFIED )); }; then

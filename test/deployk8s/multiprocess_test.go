@@ -69,6 +69,10 @@ type wrapperSpec struct {
 	// verifyDelay：在 application apply **返回之后**延迟一次 `get deployment`
 	// （发布验证），用于构造「apply 已返回、结果尚未核实」的信号窗口（B-11）。
 	verifyDelay time.Duration
+	// releaseDelay：延迟一次 `replace -f .../lease-release.yaml`。
+	// 用于确定性地把 EXIT trap（cleanup）撑开一个窗口，从而可以
+	// 「在清理过程中」再投递信号 —— 这是 T2-06.1.4 清理重入保护的唯一可复现入口。
+	releaseDelay time.Duration
 }
 
 func secs(d time.Duration) string {
@@ -163,6 +167,17 @@ case " $args " in
     ;;
 esac
 
+# 3b) 释放锁（EXIT trap / cleanup 路径）延迟（只延迟一次）：
+#     构造「cleanup 正在释放锁时再收到信号」的确定性窗口。
+case " $args " in
+  *lease-release.yaml*)
+    if [ "%[9]s" != "0" ] && [ ! -f "${STATE}/.marker.release" ]; then
+      : > "${STATE}/.marker.release"
+      sleep %[9]s
+    fi
+    ;;
+esac
+
 "${REAL}" "$@"
 rc=$?
 case " $args " in
@@ -174,7 +189,7 @@ fi
 exit $rc
 `, secs(spec.preflightDelay), strconv.Itoa(spec.staleCreateSeconds), secs(spec.createDelay),
 		secs(spec.secretDelay), secs(spec.applyDelay), secs(spec.verifyDelay),
-		boolFlag(spec.createSnapshot), secs(spec.migrationApplyDelay))
+		boolFlag(spec.createSnapshot), secs(spec.migrationApplyDelay), secs(spec.releaseDelay))
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("写 kubectl 包装: %v", err)
 	}
@@ -499,6 +514,120 @@ func TestMultiprocessRenewalStallExpiresAndTakeoverSucceeds(t *testing.T) {
 	}
 	if lease := f.state().Lease; lease == nil || lease.HolderIdentity != "" {
 		t.Fatalf("发布结束后锁必须被 B 释放（A 不得覆盖），实际: %+v", lease)
+	}
+}
+
+// TestSignalsDuringCleanupDoNotCorruptCleanup 是「清理阶段被信号打断」的回归守卫。
+//
+// 背景：T2-06.1.4 集成期间观察到 2 次（仅在四路 Agent 并发跑测试的高负载下）
+// `TestMultiprocessRenewalStallExpiresAndTakeoverSucceeds` 以 **exit 2** 失败，
+// stderr 为：
+//
+//	deploy-k8s.sh: trap: line 2: unexpected EOF while looking for matching `)'
+//
+// 即 bash 在求值 trap 时报语法错误，用 2 覆盖了本应返回的 3（失锁）。
+// 该失败在 12+ 轮全量绿跑（含 4 路并发压测）中无法复现，**根因未得到实验确认**
+// （状态 NOT_VERIFIED，见 T2-06.1.4 交付报告）。
+//
+// 调用链分析（结论：**确实存在重入**，来源是外部信号而不是续租子 shell）：
+//   - cleanup 只由 exit 触发，bash 不会重跑 EXIT trap；
+//   - 后台续租子 shell **不继承** EXIT trap（实测：EXIT trap 只在主 PID 打印一次）；
+//   - stop_lease_renewer 先写 `stop` 再 kill，而续租子 shell 在失败分支里会先查
+//     `stop`，因此「cleanup 已开始」时它不会再去 kill 主 shell；
+//   - **但外部信号可以**：cleanup 阻塞在 lease_release 的 kubectl replace 上时收到
+//     SIGTERM/SIGINT，bash 会在该子进程返回后的下一个命令边界执行信号 trap，于是
+//     on_signal 在 cleanup 内部重入。实测（加保护之前）stderr 在**同一进程**里先后
+//     出现完整的「收到 SIGTERM」「收到 SIGINT」两轮处理，且 TMP_DIR 残留 ——
+//     on_signal 的 exit 把 cleanup 截断了。
+//
+// 因此脚本新增 CLEANUP_ACTIVE / DEFERRED_SIGNAL_CODE：清理阶段收到信号只记录意图，
+// 由 cleanup 收尾时决定退出码（非 0 的既有结论不被覆盖）。
+//
+// 因果性对照实验（同一台机器、同一用例、各 4 轮）：
+//   - 无保护                    → 4/4 失败：TMP_DIR 残留（cleanup 被 on_signal 的 exit 截断）
+//   - 保护分支被改成 `(( 0 && …))`（保持文件长度/时序不变，仅令其惰性）
+//     → 4/4 失败：TMP_DIR 残留（排除「多几行导致的时序漂移」）
+//   - 保护生效                  → 4/4 通过：清理完成、锁只释放一次、TMP_DIR 已删除
+//
+// 这证明失败原因是重入而非时序噪声。**但**原始 exit 2 / `trap: line 2: unexpected EOF`
+// 的形态仍未能复现，根因未得到实验确认（NOT_VERIFIED）。
+//
+// 断言：
+//  1. 退出码保持 143：既有信号结论不得被 bash 的 trap 求值错误（2）或 INT（130）覆盖；
+//  2. 信号被延后处理（stderr 出现「清理进行中」），即保护分支确实被走到；
+//  3. 清理完成：锁被释放（holder 为空）；
+//  4. 释放锁只发生一次（lease_release 幂等：入口 LOCK_HELD 守卫 + 每条分支置 0）；
+//  5. TMP_DIR 被删除（清理走到了 `rm -rf` 之后）；
+//  6. stderr 不得出现 bash 的 trap 求值错误。
+func TestSignalsDuringCleanupDoNotCorruptCleanup(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, fixtureOptions{})
+	// secretDelay：把 Runner 停在「已持锁、未开始迁移」，保证 cleanup 会去释放锁。
+	// releaseDelay：把「释放锁」请求延迟 3s，把 cleanup 撑成可投递信号的确定窗口。
+	installWrapper(t, f, wrapperSpec{secretDelay: 4 * time.Second, releaseDelay: 3 * time.Second})
+
+	a := f.start(append(shortLeaseArgs(),
+		"--migration-timeout", "20", "--rollout-timeout", "20")...)
+	f.waitForFile(t, filepath.Join(f.stateDir, ".marker.secret"), 30*time.Second)
+	time.Sleep(300 * time.Millisecond) // 让脚本真正进入 sleep（kubectl 请求在途）
+
+	// 第一个信号：触发 on_signal → exit 143 → 进入 cleanup。
+	if err := syscall.Kill(a.cmd.Process.Pid, syscall.SIGTERM); err != nil {
+		t.Fatalf("发送第一个 SIGTERM: %v", err)
+	}
+	// 等 cleanup 真的在发「释放锁」请求（窗口已打开）。
+	f.waitForFile(t, filepath.Join(f.stateDir, ".marker.release"), 30*time.Second)
+
+	// 清理期间连续投递信号（含不同类型），覆盖整个窗口。
+	// 进程可能已退出（ESRCH）不算失败：这只说明窗口已结束。
+	for i := 0; i < 12; i++ {
+		if err := syscall.Kill(a.cmd.Process.Pid, syscall.SIGTERM); err != nil && err != syscall.ESRCH {
+			t.Fatalf("清理期间发送 SIGTERM: %v", err)
+		}
+		if i%3 == 0 {
+			if err := syscall.Kill(a.cmd.Process.Pid, syscall.SIGINT); err != nil && err != syscall.ESRCH {
+				t.Fatalf("清理期间发送 SIGINT: %v", err)
+			}
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+
+	res := a.wait(t, 90*time.Second)
+
+	// 1) 退出码语义不变。
+	res.requireCode(t, 143)
+
+	// 2) 信号被延后处理：保护分支必须被走到。
+	// 注意 log_warn 写 stdout、log_error 写 stderr，因此这里必须看合并输出。
+	if !strings.Contains(res.output(), "清理进行中") {
+		t.Fatalf("清理期间收到信号必须走延后处理分支（否则 cleanup 会被 on_signal 的 exit 截断）；实际输出:\n%s", res.output())
+	}
+	// 6) 不得出现 bash 的 trap 求值错误（原始失败的表征）。
+	if strings.Contains(res.stderr, "unexpected EOF") || strings.Contains(res.stderr, "trap:") {
+		t.Fatalf("清理阶段出现 bash trap 求值错误（这正是 T2-06.1.4 观察到但未复现的缺陷）:\n%s", res.stderr)
+	}
+
+	// 2) 清理完成：锁已释放。
+	lease := f.state().Lease
+	if lease == nil {
+		t.Fatal("锁对象丢失：cleanup 未完成")
+	}
+	if lease.HolderIdentity != "" {
+		t.Fatalf("锁未被释放（holder=%q）：清理被信号中断了", lease.HolderIdentity)
+	}
+	// 3) 不重复释放。
+	if got := f.countEvents("lease.write kind=lease-release.yaml"); got != 1 {
+		t.Fatalf("释放锁的写入次数 = %d，期望恰好 1 次（不重复释放）；事件:\n%s",
+			got, strings.Join(f.events(), "\n"))
+	}
+
+	// 4) TMP_DIR 已删除。
+	entries, err := os.ReadDir(filepath.Join(f.root, "tmp"))
+	if err != nil {
+		t.Fatalf("读取 TMPDIR: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("TMP_DIR 未清理，残留 %d 项：%v\n--- stderr ---\n%s", len(entries), entries, res.stderr)
 	}
 }
 
