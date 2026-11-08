@@ -469,9 +469,22 @@ func (f *fixture) state() *fakestate.State {
 	return state
 }
 
+// updateState 在读-改-写**全程持有 fakestate.Lock**（T2-06.1.4 / C-5）。
+//
+// 旧实现直接 load → 修改 → save，绕过了 fake 进程用的文件锁：当发布脚本正在并发写
+// 同一个状态文件时，测试的改写会被 fake 的写入覆盖（或反过来），于是「注入生效了」
+// 与「注入没生效」都可能是假的。
 func (f *fixture) updateState(fn func(*fakestate.State)) {
 	f.t.Helper()
-	state := f.state()
+	unlock, err := fakestate.Lock(f.stateDir)
+	if err != nil {
+		f.t.Fatalf("获取 fake 状态锁: %v", err)
+	}
+	defer unlock()
+	state, err := fakestate.Load(f.stateDir)
+	if err != nil {
+		f.t.Fatalf("读取 fake 状态: %v", err)
+	}
 	fn(state)
 	if err := fakestate.Save(f.stateDir, state); err != nil {
 		f.t.Fatalf("写回 fake 状态: %v", err)
@@ -624,22 +637,13 @@ func (f *fixture) stealLease(holder string) {
 		if st.Lease == nil {
 			f.t.Fatal("stealLease: Lease 不存在")
 		}
-		before := st.Lease.ResourceVersion
-		st.Lease.HolderIdentity = holder
-		st.Lease.RenewTime = rfc3339(time.Now())
-		st.Lease.ResourceVersion = nextResourceVersion(before)
-		st.Lease.Transitions++
+		// 接管只有**一个**实现（T2-06.1.4 / C-3）：fakestate.TakeoverLease 会一起推进
+		// 全局 resourceVersion、holder、renewTime 与 leaseTransitions。测试里再写一套
+		// 「只改 holder 不推进 rv」的实现，会让 CAS 冲突不可证伪。
+		if err := fakestate.TakeoverLease(st, holder); err != nil {
+			f.t.Fatalf("stealLease: %v", err)
+		}
 	})
-}
-
-// nextResourceVersion 与 fake kubectl 的推进规则一致（真实集群里只要写入成功，
-// resourceVersion 就会变化，且不保证是「+1」；这里只保证严格递增）。
-func nextResourceVersion(current string) string {
-	var value int
-	if _, err := fmt.Sscanf(current, "%d", &value); err != nil {
-		return current + "1"
-	}
-	return fmt.Sprintf("%d", value+1)
 }
 
 func (f *fixture) events() []string { return fakestate.Read(f.stateDir, fakestate.EventsFileName) }
