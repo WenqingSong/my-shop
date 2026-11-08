@@ -100,9 +100,16 @@ LOCK_RENEW_INTERVAL=10
 LOCK_RENEW_REQUEST_TIMEOUT=3
 # 单次续租允许的尝试次数与退避时长（AUD-D7：重试的最坏耗时也必须计入租期预算）。
 LOCK_RENEW_MAX_ATTEMPTS=3
+# 相邻两次 attempt 之间的退避（毫秒）。这是退避时长的**唯一事实来源**：
+#   - lease_renew 的真实 sleep 由它换算（不再硬编码 0.2s）；
+#   - 退避预算 LOCK_RENEW_BACKOFF_BUDGET 由它推导，参数校验断言两者一致。
+# 真实退避总时长 = (LOCK_RENEW_MAX_ATTEMPTS - 1) × LOCK_RENEW_BACKOFF_MS = 400ms。
+# 只在 attempt **之间**退避：最后一次失败后不再 sleep —— 旧实现在 3 次失败后各 sleep
+# 一次（共 600ms），与「预算 400ms」不一致（T2-06.1.4 / B-5：常量成了死常量）。
 LOCK_RENEW_BACKOFF_MS=200
-# 退避总耗时的保守上界（秒）：(attempts-1) 次退避 × 0.2s = 0.4s，向上取整为 1s。
-# 下面的参数校验会断言该预算不小于实际退避总和，避免常量各改一处时预算被低估。
+# 退避总耗时的保守上界（秒）：上面的真实值 400ms 向上取整为 1s。
+# 参数校验会断言 LOCK_RENEW_BACKOFF_BUDGET == ceil((attempts-1)×BACKOFF_MS/1000)，
+# 避免"校验用一份预算、实现用另一份退避"（B-5）。
 LOCK_RENEW_BACKOFF_BUDGET=1
 # 参数不变量中的安全余量：吸收单次续租请求的网络抖动与进程调度延迟。
 LOCK_SAFETY_MARGIN=5
@@ -421,8 +428,12 @@ if (( LOCK_RENEW_MAX_ATTEMPTS < 1 )); then
   die 1 "内部参数错误：LOCK_RENEW_MAX_ATTEMPTS(${LOCK_RENEW_MAX_ATTEMPTS}) 必须 >= 1"
 fi
 lock_backoff_actual_ms=$(( (LOCK_RENEW_MAX_ATTEMPTS - 1) * LOCK_RENEW_BACKOFF_MS ))
-if (( lock_backoff_actual_ms > LOCK_RENEW_BACKOFF_BUDGET * 1000 )); then
-  die 1 "内部参数错误：退避预算 ${LOCK_RENEW_BACKOFF_BUDGET}s(${LOCK_RENEW_BACKOFF_BUDGET}000ms) 小于实际退避 ${lock_backoff_actual_ms}ms；预算会低估最坏耗时"
+# 预算必须**等于**向上取整后的真实退避（不是"不小于"就够）：
+# 只写"不小于"会允许实现与校验各用一套数字 —— 旧实现正是这样变成死常量的
+# （校验 400ms、代码里 3 次 sleep×0.2s=600ms，B-5）。
+lock_backoff_budget_min=$(( (lock_backoff_actual_ms + 999) / 1000 ))
+if (( LOCK_RENEW_BACKOFF_BUDGET != lock_backoff_budget_min )); then
+  die 1 "内部参数错误：退避预算 ${LOCK_RENEW_BACKOFF_BUDGET}s 与真实退避 (${LOCK_RENEW_MAX_ATTEMPTS}-1)×${LOCK_RENEW_BACKOFF_MS}ms=${lock_backoff_actual_ms}ms 不一致（应向上取整为 ${lock_backoff_budget_min}s）；预算与实现必须同源，否则最坏耗时会被低估"
 fi
 # 每个 attempt 的 GET / REPLACE 各自使用同一个 --lease-renew-timeout（LEASE_KUBECTL）。
 lock_get_timeout="${LOCK_RENEW_REQUEST_TIMEOUT}"
@@ -433,7 +444,7 @@ lock_budget=$(( LOCK_RENEW_INTERVAL + lock_chain_budget + LOCK_SAFETY_MARGIN ))
 if (( lock_budget >= LOCK_LEASE_DURATION )); then
   die 1 "租期参数不合法：renew_interval(${LOCK_RENEW_INTERVAL}) + attempts(${LOCK_RENEW_MAX_ATTEMPTS})×(get_timeout(${lock_get_timeout}) + replace_timeout(${lock_replace_timeout})) + backoff(${LOCK_RENEW_BACKOFF_BUDGET}) + safety_margin(${LOCK_SAFETY_MARGIN}) = ${lock_budget} 必须严格小于 lease_duration(${LOCK_LEASE_DURATION})；否则一次续租失败后的重试链会让锁先过期、被其他 Runner 接管（续租链最坏 ${lock_chain_budget}s，必须在 ${LOCK_LEASE_DURATION}s 内完成）"
 fi
-log_info "租期参数校验通过：${LOCK_RENEW_INTERVAL} + ${LOCK_RENEW_MAX_ATTEMPTS}×(${lock_get_timeout}+${lock_replace_timeout}) + ${LOCK_RENEW_BACKOFF_BUDGET} + ${LOCK_SAFETY_MARGIN} = ${lock_budget} < ${LOCK_LEASE_DURATION}（单次 attempt 最坏 ${lock_attempt_budget}s，续租链最坏 $(( LOCK_RENEW_INTERVAL + lock_chain_budget ))s）"
+log_info "租期参数校验通过：${LOCK_RENEW_INTERVAL} + ${LOCK_RENEW_MAX_ATTEMPTS}×(${lock_get_timeout}+${lock_replace_timeout}) + ${LOCK_RENEW_BACKOFF_BUDGET} + ${LOCK_SAFETY_MARGIN} = ${lock_budget} < ${LOCK_LEASE_DURATION}（单次 attempt 最坏 ${lock_attempt_budget}s，续租链最坏 $(( LOCK_RENEW_INTERVAL + lock_chain_budget ))s，真实退避 ${lock_backoff_actual_ms}ms=(${LOCK_RENEW_MAX_ATTEMPTS}-1)×${LOCK_RENEW_BACKOFF_MS}ms）"
 
 # CI 不允许「默认携带」降级授权：流水线必须显式再加一层开关，避免回滚开关被写进流水线后长期生效。
 is_ci_env() {
@@ -469,10 +480,38 @@ DOWNGRADE_AUTHORIZED=0
 # Application apply 的在途标记：失锁/信号路径据此输出 APPLICATION_OUTCOME_UNKNOWN。
 APPLICATION_INFLIGHT=0
 APPLICATION_APPLY_ISSUED=0
+# apply 是否**已经返回**（无论退出码）、其结果是否**已经核实**（verify_release 通过）。
+# B-11：apply 返回后、核实前的信号必须落到「结果未知」，既不能说"已成功"，
+# 也不能说"未应用"（客户端的返回码不能证明资源现状）。
+APPLICATION_APPLY_RETURNED=0
+APPLICATION_OUTCOME_VERIFIED=0
+# 迁移 apply 的结果是否只能标记为未知（D-1/D-2/B-13）。
+MIGRATION_OUTCOME_UNKNOWN=0
 HOLDER_IDENTITY="deploy-$(hostname 2>/dev/null || echo unknown)-$$-$(date -u +%Y%m%dT%H%M%SZ)"
 # holderIdentity 只保留 DNS 子集字符：避免影响锁记录解析与可读性。
 HOLDER_IDENTITY="$(printf '%s' "${HOLDER_IDENTITY}" | tr -c 'A-Za-z0-9._-' '-')"
-LOCK_ACQUIRED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+# ---------------------------------------------------------------------------
+# 时间语义（T2-06.1.4 / B-1）：Lease 的 renewTime 到底该取哪个时刻
+#
+# 三个时刻必须分开，混用会把「客户端发起请求之前」的时刻写成服务端 renewTime：
+#   t_req  ：客户端构造并发出 Create/PUT 请求的时刻（本地时钟）
+#   t_acc  ：API Server 接受并写入对象的时刻（服务端时钟，**客户端不可观测**）
+#   t_resp ：客户端收到响应的时刻（本地时钟）
+#
+# 正常时钟下 t_req <= t_acc <= t_resp；但客户端时钟可能偏快或偏慢，所以：
+#   - 不能把「比 t_req 更早的本地时刻」当 renewTime（旧实现用脚本启动时刻
+#     LOCK_ACQUIRED_AT，实测 preflight 51s 时，Lease 一创建就已过期 —— B-1）；
+#   - t_acc 不可观测，因此**唯一诚实**的取值是「本 Runner 观测到的、不早于写入
+#     完成」的时刻：创建时先写 t_req，create 返回后立即续租一次，把 renewTime
+#     推到这个写入完成之后（t_resp 之后）的时刻（B-2）；
+#   - 客户端时钟偏移无法消除：本机时钟比服务器慢 → 服务器认为租约更早过期（保守），
+#     比服务器快 → 服务器认为租约活得更久（**不安全方向**）。这一项如实记为
+#     NOT_VERIFIED，见 reports/agent-b-done.md 的「时间语义」一节。
+# ---------------------------------------------------------------------------
+LOCK_ACQUIRED_AT=""          # 仅作 acquireTime 的回退；由 create/takeover 的**服务端观测值**填充
+LOCK_REQUEST_ISSUED_AT=""    # t_req：最近一次 Lease 写入请求发出前的本地时刻
+LOCK_WRITE_CONFIRMED_AT=""   # t_resp：最近一次成功写入返回后的本地时刻
 
 # 迁移生命周期状态（内存镜像；写入 Lease 注解后才对其他 Runner 可见）。
 MIG_STATE="${MIG_STATE_NONE}"
@@ -560,14 +599,27 @@ cleanup() {
   exit "${code}"
 }
 
+# 信号路径的**结果确定性**（T2-06.1.4 / B-11）。
+#
+# 三条互斥的结论，任何一条信号都必须落到其中一条，不允许含糊：
+#   1) 结果未知 → 打印 APPLICATION_OUTCOME_UNKNOWN（apply 在途，或 apply 已返回但
+#      **尚未核实**）。此时既不能打印"已成功"，也不能打印"未应用"：
+#      - 客户端返回 0 不代表对象都写成功了（清单里可能有多个对象）；
+#      - 客户端返回非 0 也不代表没写成功（请求可能已被 API Server 接受）。
+#   2) 已核实生效 → 打印 APPLICATION_OUTCOME_VERIFIED（verify_release 已经通过，
+#      结论来自集群事实，不是本次请求的返回码）。
+#   3) 明确未开始应用 → 打印 APPLICATION_NOT_STARTED（本次从未发出 apply）。
+#
+# 注意：这里的「未知」不是保守话术，而是**事实**——已经发出的请求无法撤销
+# （AUD-02 = NOT_CLOSED）。
 on_signal() {
   local name="$1"
   if [[ -f "${LOCK_STATE_DIR}/lost" ]]; then
     log_error "收到 SIG${name} 且发布锁续租已失败：中止发布，不再变更任何资源"
-    if (( APPLICATION_INFLIGHT )); then
+    if (( APPLICATION_INFLIGHT )) || { (( APPLICATION_APPLY_ISSUED )) && (( ! APPLICATION_OUTCOME_VERIFIED )); }; then
       # 已经发出的请求无法撤销：客户端中止 ≠ 服务端没有生效（AUD-02/AUD-05）。
       printf 'APPLICATION_OUTCOME_UNKNOWN\n'
-      log_error "APPLICATION_OUTCOME_UNKNOWN: 失锁时 Application apply 仍在途，该请求可能已被 API Server 接受并生效。"
+      log_error "APPLICATION_OUTCOME_UNKNOWN: 失锁时 Application apply 在途或尚未核实，该请求可能已被 API Server 接受并生效。"
       log_error "  本 Runner 不会（也不能）撤销它；请按输出核对 Deployment 实际状态后再决定下一步。"
     fi
     if declare -F report_lock_lost >/dev/null; then
@@ -579,11 +631,31 @@ on_signal() {
     log_error "收到 SIG${name}：中止发布。迁移 Job/${MIG_JOB:-<未知>} 未确认终态 → **不释放发布锁**"
     log_error "  关联记录（state=${MIG_STATE}）保留在 Lease 注解上；锁按租期（${LOCK_LEASE_DURATION}s）自然过期，"
     log_error "  后续 Runner 会先核验该 Job 的真实状态，不会直接开始新一轮迁移。"
+    if (( MIGRATION_OUTCOME_UNKNOWN )) || (( APPLICATION_INFLIGHT )); then
+      printf 'APPLICATION_OUTCOME_UNKNOWN\n'
+      log_error "APPLICATION_OUTCOME_UNKNOWN: 收到 SIG${name} 时迁移/应用请求在途，结果未核实（不得据此断言未应用）。"
+    fi
     exit 143
   fi
   if (( APPLICATION_INFLIGHT )); then
     printf 'APPLICATION_OUTCOME_UNKNOWN\n'
     log_error "APPLICATION_OUTCOME_UNKNOWN: 收到 SIG${name} 时 Application apply 仍在途，请求可能已被 API Server 接受并生效。"
+  elif (( APPLICATION_APPLY_ISSUED )) && (( APPLICATION_OUTCOME_VERIFIED )); then
+    # 结论来自集群事实（verify_release 已经通过），不是"最后一次请求成功了"。
+    printf 'APPLICATION_OUTCOME_VERIFIED\n'
+    log_error "收到 SIG${name}：发布**已验证通过**但尚未释放锁；已应用的资源保持现状（不需要重跑）。"
+  elif (( APPLICATION_APPLY_RETURNED )) && (( ! APPLICATION_OUTCOME_VERIFIED )); then
+    # B-11 的核心场景：apply 已返回，但结果还没核实。
+    printf 'APPLICATION_OUTCOME_UNKNOWN\n'
+    log_error "APPLICATION_OUTCOME_UNKNOWN: 收到 SIG${name} 时 Application apply 已返回但**结果尚未核实**。"
+    log_error "  不能声称「发布成功」（未验证），也不能声称「应用未更新」（请求可能已生效且无法撤销）。"
+    log_error "  请核对：${KUBECTL[*]} -n ${NAMESPACE} get deployment/${DEPLOYMENT_NAME} -o yaml"
+  elif (( MIG_APPLY_ISSUED )) && (( ! MIG_TERMINAL )) && (( MIGRATION_OUTCOME_UNKNOWN )); then
+    printf 'APPLICATION_NOT_STARTED\n'
+    log_error "收到 SIG${name}：迁移 apply 的结果未知（不得断言未应用），本次未开始应用更新。"
+  else
+    printf 'APPLICATION_NOT_STARTED\n'
+    log_error "收到 SIG${name}：本次尚未发出 Application apply（应用清单未被本 Runner 应用）。"
   fi
   log_error "收到 SIG${name}：中止发布，释放发布锁（已应用的资源保持现状）"
   exit 143
@@ -614,6 +686,21 @@ epoch_of_rfc3339() {
     return 0
   fi
   return 1
+}
+
+# epoch 秒 → RFC3339（UTC，秒级）。时间语义归 B（见 COMMON_RULES §5）：A 只调用不实现。
+rfc3339_from_epoch() {
+  local epoch="$1"
+  [[ "${epoch}" =~ ^[0-9]+$ ]] || return 1
+  date -u -d "@${epoch}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || return 1
+}
+
+# 毫秒 → `sleep` 参数（秒，三位小数）。退避时长只能有一个数值来源
+# （LOCK_RENEW_BACKOFF_MS），否则常量会退化成"只用于校验"的死常量（B-5）。
+sleep_ms_arg() {
+  local ms="$1"
+  [[ "${ms}" =~ ^[0-9]+$ ]] || ms=0
+  printf '%d.%03d' $(( ms / 1000 )) $(( ms % 1000 ))
 }
 
 # 非数字 / 空值统一折叠成 0：用于 status 计数比较。
@@ -669,6 +756,12 @@ sanitize_annotation() {
 #     本脚本用「每次变更前检查续租状态 + 变更前服务端复核 holder/uid + CAS」把窗口压到最小，
 #     但无法做到「旧持有者的写一定被拒绝」。当前语义是 cooperative/advisory mutual
 #     exclusion，不是强 fencing（AUD-02，见 docs/design/deploy-lock.md §6）。
+#   - T2-06.1.4 之后的统一前置条件：**每一条**写 Lease 的路径（create / takeover /
+#     renew / record-write / release）在写入前都必须同时满足「holder 是自己」+
+#     「服务器上的 renewTime 未过期」。旧实现只有 renew 检查过期，record/release 只比
+#     holder，于是失锁后仍能写入并给过期锁续命一个租期（B-3/B-4）。
+#     这条前置条件只能阻止**新的**写入：已经发出的 kubectl 请求不可撤销（AUD-02 =
+#     NOT_CLOSED、AUD-05 = NOT_CLOSED），本脚本不声称能回滚在途请求。
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
@@ -768,8 +861,11 @@ lease_read() {
   return 0
 }
 
-# 锁是否已过期（renewTime + leaseDurationSeconds < now）。
+# 锁是否已过期（renewTime + leaseDurationSeconds <= now）。
 # 无法解析 renewTime 时返回「未过期」：宁可不接管，也不打断一个可能仍在执行的发布。
+#
+# 注意：返回 1 包含「真的没过期」与「无法判断」两种情形。需要 fail-closed 的写路径
+# 不能只看返回码，必须用 lease_window_evidence 拿到可核验的证据行。
 lease_expired() {
   local renew_epoch expiry now
   if ! renew_epoch="$(epoch_of_rfc3339 "${LEASE_RENEW}")"; then
@@ -781,11 +877,72 @@ lease_expired() {
   (( now >= expiry ))
 }
 
+# 打印服务器上剩余租期的证据（秒级，全部来自**服务器返回的** renewTime）。
+#
+# 固定格式，便于测试与值班 grep：
+#   LEASE_WINDOW stage=<阶段> renewTime=<rfc3339> renew_epoch=<n|unparsable>
+#                leaseDurationSeconds=<n> now_epoch=<n> remaining=<n|unknown> verdict=ok|expired|unparsable
+# 返回 0=窗口为正；1=已过期；2=无法解析（无法判断）。
+lease_window_evidence() {
+  local stage="$1" renew_epoch now duration remaining
+  duration="$(to_int "${LEASE_DURATION:-0}")"
+  now="$(date -u +%s)"
+  if ! renew_epoch="$(epoch_of_rfc3339 "${LEASE_RENEW}")"; then
+    printf 'LEASE_WINDOW stage=%s renewTime=%s renew_epoch=unparsable leaseDurationSeconds=%s now_epoch=%s remaining=unknown verdict=unparsable\n' \
+      "${stage}" "${LEASE_RENEW:-<empty>}" "${duration}" "${now}"
+    return 2
+  fi
+  remaining=$(( renew_epoch + duration - now ))
+  if (( remaining > 0 )); then
+    printf 'LEASE_WINDOW stage=%s renewTime=%s renew_epoch=%s leaseDurationSeconds=%s now_epoch=%s remaining=%s verdict=ok\n' \
+      "${stage}" "${LEASE_RENEW}" "${renew_epoch}" "${duration}" "${now}" "${remaining}"
+    return 0
+  fi
+  printf 'LEASE_WINDOW stage=%s renewTime=%s renew_epoch=%s leaseDurationSeconds=%s now_epoch=%s remaining=%s verdict=expired\n' \
+    "${stage}" "${LEASE_RENEW}" "${renew_epoch}" "${duration}" "${now}" "${remaining}"
+  return 1
+}
+
+# 写入完成后的窗口断言（T2-06.1.4 / B-2）：服务器上的 renewTime 必须仍在有效窗口内。
+#
+# 为什么必须在**创建之后立刻**做：Create/PUT 的耗时（以及 preflight 的耗时，如果
+# renewTime 取错时刻）都会吃掉租期窗口。若 renewTime + duration <= now，其他 Runner
+# **此刻**就可以合法接管；继续发布就等于在接管窗口里写入。这里 fail-closed，
+# 并且打印 renewTime / duration / now 的 epoch，让值班能直接核验而不是猜。
+#
+# 不通过延长 leaseDurationSeconds 来"修好"这个断言：那只会把问题推迟到下一次抖动。
+lease_require_window() {
+  local stage="$1" evidence rc=0
+  evidence="$(lease_window_evidence "${stage}")" || rc=$?
+  printf '%s\n' "${evidence}"
+  if (( rc == 0 )); then
+    return 0
+  fi
+  log_error "发布锁在「${stage}」之后就不满足窗口不变量（fail-closed）：服务器上的 renewTime 已无法覆盖当前时刻。"
+  log_error "  证据：${evidence}"
+  log_error "  含义：其他 Runner 现在就可以合法接管这把锁；本 Runner 若继续发布，就会在接管窗口里写入。"
+  log_error "  根因方向：renewTime 必须锚定在「请求发出那一刻」并在 create 返回后立即续租一次（B-1/B-2），"
+  log_error "  不能用脚本启动时刻。不得通过延长 leaseDurationSeconds 绕过本检查。"
+  printf 'LEASE_ANCHOR_INVALID stage=%s %s\n' "${stage}" "${evidence}"
+  die 3 "发布锁在「${stage}」后不满足窗口不变量（LEASE_ANCHOR_INVALID，fail-closed）"
+}
+
+# 新建 Lease：renewTime 锚定在**请求发出前一刻**（t_req），而不是脚本启动时刻。
+#
+# 为什么不能更晚：t_resp 在请求返回之前不可知，把未来时刻写进 renewTime 等于人为
+# 延长租期（禁止）。为什么不能更早：旧实现用脚本启动时刻，preflight 越长，写进去的
+# 租约越接近/已经过期（B-1，实测 preflight 51s → 创建即过期 → exit 3）。
+# create 成功后由 acquire_release_lock 立即续租一次，把 renewTime 推到这个写入完成
+# 之后（t_resp 之后）的时刻（B-2）。
 lease_create() {
   # 新建 Lease 意味着「没有上一轮」：记录必须显式清空，不能沿用内存里的残留值。
   lease_record_clear
-  lease_manifest "${HOLDER_IDENTITY}" "${LOCK_ACQUIRED_AT}" "${LOCK_ACQUIRED_AT}" \
+  LOCK_REQUEST_ISSUED_AT="$(timestamp_utc)"
+  lease_manifest "${HOLDER_IDENTITY}" "${LOCK_REQUEST_ISSUED_AT}" "${LOCK_REQUEST_ISSUED_AT}" \
     "${LOCK_LEASE_DURATION}" 0 "" "" > "${LOCK_STATE_DIR}/lease-create.yaml"
+  # 客户端在请求返回前观测不到 t_acc：这里写的 renewTime 只可能 ≤ t_acc。
+  # 请求自身的耗时（Create 延迟）会消耗掉同样长度的窗口，因此返回后必须立刻做
+  # 窗口断言 + 立即续租，二者都不可省略。
   "${LEASE_KUBECTL[@]}" -n "${NAMESPACE}" create -f "${LOCK_STATE_DIR}/lease-create.yaml" >/dev/null
 }
 
@@ -794,12 +951,15 @@ lease_create() {
 # AUD-D2：接管**必须**原样保留服务器上的迁移记录。旧实现用内存里的 MIG_*（此时还是
 # NO_MIGRATION）整体回写，等于把上一轮的 COMPLETE/FAILED + job + uid + detail 清空；
 # 而接管方随后可能因为版本降级保护退出，导致证据永久丢失。
+#
+# 时间语义与 create 相同：renewTime = 接管请求发出前一刻（t_req），返回后立即做
+# 窗口断言 + 续租（接管是 replace，窗口只被请求耗时消耗，但同样不能假设耗时为 0）。
 lease_takeover() {
-  local now transitions
-  now="$(timestamp_utc)"
+  local transitions
   transitions=$(( $(to_int "${LEASE_TRANSITIONS:-0}") + 1 ))
   lease_record_from_lease
-  lease_manifest "${HOLDER_IDENTITY}" "${now}" "${now}" \
+  LOCK_REQUEST_ISSUED_AT="$(timestamp_utc)"
+  lease_manifest "${HOLDER_IDENTITY}" "${LOCK_REQUEST_ISSUED_AT}" "${LOCK_REQUEST_ISSUED_AT}" \
     "${LOCK_LEASE_DURATION}" "${transitions}" "${LEASE_RV}" "${LEASE_UID}" \
     > "${LOCK_STATE_DIR}/lease-takeover.yaml"
   "${LEASE_KUBECTL[@]}" -n "${NAMESPACE}" replace -f "${LOCK_STATE_DIR}/lease-takeover.yaml" >/dev/null
@@ -832,6 +992,8 @@ lease_renew() {
       return 1
     fi
     if lease_expired; then
+      # 证据行：renewTime / duration / now 的 epoch 必须能直接核验（B-1/B-2）。
+      lease_window_evidence "renew-attempt-${attempt}" >&2 || true
       log_error "续租中止：服务器上的租约已过期（renewTime=${LEASE_RENEW:-<空>}，leaseDurationSeconds=${LEASE_DURATION:-<空>}）"
       log_error "  其他 Runner 已可合法接管，本 Runner 不再写入 Lease（第 ${attempt}/${LOCK_RENEW_MAX_ATTEMPTS} 次 attempt，fail-closed）。"
       log_error "  不通过「立即续租」复活一把可能已被抢走的锁：那会在接管窗口里继续写入。"
@@ -839,18 +1001,32 @@ lease_renew() {
     fi
     # AUD-D2：续租只刷新租期字段，迁移记录必须原样保留（读者可能是任何后续 Runner）。
     lease_record_from_lease
+    # renewTime 的取值（时间语义见文件头 B-1 注释）：
+    #   只能取「本 Runner 观测到的、不早于上一次写入完成」的时刻。这里取的是本次
+    #   PUT 发出前一刻（t_req）；PUT 完成后 renewTime 会略早于 t_resp，差值 ≤ 一次
+    #   请求耗时（受 --lease-renew-timeout 约束，已计入续租链预算）。
+    #   不写未来时刻（会人为延长租期），也不使用脚本启动时刻（B-1 的根因）。
+    LOCK_REQUEST_ISSUED_AT="$(timestamp_utc)"
     lease_manifest "${HOLDER_IDENTITY}" "${LEASE_ACQUIRE:-${LOCK_ACQUIRED_AT}}" \
-      "$(timestamp_utc)" "${LOCK_LEASE_DURATION}" \
+      "${LOCK_REQUEST_ISSUED_AT}" "${LOCK_LEASE_DURATION}" \
       "$(to_int "${LEASE_TRANSITIONS:-0}")" "${LEASE_RV}" "${LEASE_UID}" \
       > "${LOCK_STATE_DIR}/lease-renew.yaml"
-    LOCK_UID="${LEASE_UID}"
     if "${LEASE_KUBECTL[@]}" -n "${NAMESPACE}" replace -f "${LOCK_STATE_DIR}/lease-renew.yaml" \
         >/dev/null 2>"${LOCK_STATE_DIR}/lease-renew.err"; then
+      # 只有**写入成功**才更新本地状态：失败分支不得改写 rv/uid/renewTime，
+      # 否则一次 409 之后本地会以为"已经续上了"，下一次 attempt 会带着错误的
+      # 前提继续写（B-2 的失败分支要求）。
+      LOCK_UID="${LEASE_UID}"
+      LOCK_WRITE_CONFIRMED_AT="$(timestamp_utc)"
       return 0
     fi
     log_warn "续租 CAS 冲突（第 ${attempt}/${LOCK_RENEW_MAX_ATTEMPTS} 次）：$(tr '\n' ' ' < "${LOCK_STATE_DIR}/lease-renew.err" 2>/dev/null || true)"
-    # 退避必须明显短于续租间隔，且总耗时已计入租期预算（LOCK_RENEW_BACKOFF_BUDGET）。
-    sleep 0.2
+    # 退避时长的唯一来源是 LOCK_RENEW_BACKOFF_MS（预算由它推导，不再硬编码 0.2s）。
+    # 只在 attempt **之间**退避：最后一次失败后 sleep 等于把 (attempts-1) 次退避
+    # 变成 attempts 次，实测会比预算多 0.2s（B-5）。
+    if (( attempt < LOCK_RENEW_MAX_ATTEMPTS )); then
+      sleep "$(sleep_ms_arg "${LOCK_RENEW_BACKOFF_MS}")"
+    fi
   done
   return 1
 }
@@ -889,6 +1065,18 @@ lease_release() {
     fi
     if [[ "${LEASE_HOLDER}" != "${HOLDER_IDENTITY}" ]]; then
       log_warn "跳过释放发布锁：当前持有者是 ${LEASE_HOLDER:-<空>}，不是本 Runner（不释放他人的锁）"
+      LOCK_HELD=0
+      return 0
+    fi
+    if lease_expired; then
+      # T2-06.1.4 / B-4：过期锁**不得**通过释放把 renewTime 推进到 now。
+      # 过期意味着其他 Runner 此刻就能合法接管；我们若仍写入（即便是"清空 holder"），
+      # 就是在接管窗口里写一把不再属于自己的锁，而且会给一把过期锁续命一个租期，
+      # 让真正的新持有者读到「刚刚续过」的假象。
+      lease_window_evidence "release" >&2 || true
+      log_warn "跳过释放发布锁：本 Runner 的租约已过期（renewTime=${LEASE_RENEW:-<空>}，leaseDurationSeconds=${LEASE_DURATION:-<空>}）"
+      log_warn "  其他 Runner 已可合法接管；不为过期锁续命（不把 renewTime 推进到 now），也不写他人的锁。"
+      log_warn "  锁会在服务器上按原 renewTime 自然过期，无需人工处理。"
       LOCK_HELD=0
       return 0
     fi
@@ -945,9 +1133,15 @@ start_lease_renewer() {
 # 停止续租：必须在释放锁之前调用，否则续租的 CAS 写入可能与释放的 CAS 写入冲突
 # （表现为「发布成功却退出码 3」）。
 #
-# 这里只写 stop 标记 + 发 SIGTERM，不做 wait：续租进程可能正阻塞在 sleep 上
-# （bash 会延迟处理信号），wait 会让退出路径多等一个续租周期；它的输出已经重定向到
-# renew.log，不占用调用方管道，因此让它看到 stop 标记后自行退出即可。
+# B-16：旧注释说「bash 会延迟处理信号，所以 wait 会多等一个续租周期」——这是错的。
+# 实测（bash 5.x，子 shell 阻塞在外部 sleep 上）：收到 SIGTERM 后 1~2ms 内即终止，
+# 因为**默认动作**是立即终止；被延迟的只是 trap 的执行，而不是信号本身。
+# 这里省略 wait 的真实理由是：
+#   1) 续租子 shell 没有安装任何 trap（bash 会把子 shell 中被捕获的信号复位为默认），
+#      所以 kill -TERM 后它立刻死掉，wait 也只会立即返回；
+#   2) 残留的 `sleep` 子进程最多存活一个续租间隔，它不持有任何状态、不影响锁；
+#   3) 子 shell 的 stdout/stderr 已重定向到 renew.log，不会占住调用方的管道。
+# 换句话说：不 wait 不是因为信号会被延迟，而是因为「等它」没有收益。
 stop_lease_renewer() {
   [[ -n "${RENEWER_PID}" ]] || return 0
   : > "${LOCK_STATE_DIR}/stop"
@@ -969,6 +1163,10 @@ report_lock_lost() {
 # 与 require_lock_owned_server_side 的区别：那个在「发出前」，失败时请求还没发；
 # 这个在「发出后」，失败说明请求可能已经在别人持有锁期间生效 —— 只能如实报告，
 # 不能撤销，也不能据此认为「资源没有变」。
+#
+# T2-06.1.4 / B-10：只比 holder **不够**。租约过期后 holder 字段仍是自己，但其他
+# Runner 此刻已经可以合法接管 —— 「还是自己持有」不等于「本次请求期间没有别人能接管」。
+# 因此这里必须同时看 renewTime + leaseDurationSeconds。
 observe_lock_after_request() {
   if [[ -f "${LOCK_STATE_DIR}/lost" ]]; then
     return 1
@@ -985,6 +1183,14 @@ observe_lock_after_request() {
   if [[ -n "${LOCK_UID}" && -n "${LEASE_UID}" && "${LOCK_UID}" != "${LEASE_UID}" ]]; then
     : > "${LOCK_STATE_DIR}/lost"
     log_error "请求发出后 Lease uid 已变化（记录=${LOCK_UID}，实际=${LEASE_UID}）：锁对象被删除重建"
+    return 1
+  fi
+  if lease_expired; then
+    : > "${LOCK_STATE_DIR}/lost"
+    lease_window_evidence "observe-after-request" >&2 || true
+    log_error "请求发出后本 Runner 的租约已过期（renewTime=${LEASE_RENEW:-<空>}，leaseDurationSeconds=${LEASE_DURATION:-<空>}）："
+    log_error "  holder 仍写着本 Runner，但其他 Runner 此刻已经可以合法接管 —— 归属不等于互斥。"
+    log_error "  已发出的请求无法撤销，只能如实报告结果未核实（APPLICATION_OUTCOME_UNKNOWN）。"
     return 1
   fi
   LOCK_UID="${LEASE_UID}"
@@ -1519,6 +1725,44 @@ lock_is_free() {
   [[ -z "${LEASE_HOLDER}" ]]
 }
 
+# 创建/接管成功之后**立刻**执行（T2-06.1.4 / B-2），三步缺一不可：
+#   1) 读回服务器状态，断言 renewTime + duration > now（不满足 → die 3 并打印 epoch 证据）。
+#      Create/PUT 的耗时（以及 preflight，如果 renewTime 取错时刻）都会吃掉窗口；
+#      一旦窗口为负，其他 Runner 此刻就能合法接管，继续发布就是在接管窗口里写入。
+#   2) **立即续租一次**，把 renewTime 推到本次写入完成之后（t_resp 之后）的时刻。
+#      这样「创建完成 → 首次过期」至少有完整的 leaseDurationSeconds 可用窗口。
+#   3) 再读一次并断言窗口，确认第 2 步真的把锚点推进了（而不是原地不动）。
+#
+# 注意：这里不延长 leaseDurationSeconds，也不做"续租时间校准"——那两种做法都会
+# 让「服务器上的 renewTime」比真实写入时刻更晚，从而掩盖失锁窗口。
+finalize_lock_acquisition() {
+  local mode="$1"
+  LOCK_WRITE_CONFIRMED_AT="$(timestamp_utc)"
+
+  if ! lease_read; then
+    log_error "已${mode}发布锁，但无法读回服务器状态（${LEASE_READ_ERROR:-未知错误}）：无法证明持有的锁在有效窗口内（fail-closed）"
+    die 3 "发布锁${mode}后无法读回状态（fail-closed）"
+  fi
+  LOCK_UID="${LEASE_UID}"
+  LOCK_ACQUIRED_AT="${LEASE_ACQUIRE:-${LOCK_REQUEST_ISSUED_AT}}"
+  log_info "锁时间锚点：t_req=${LOCK_REQUEST_ISSUED_AT} t_resp=${LOCK_WRITE_CONFIRMED_AT} 服务器 renewTime=${LEASE_RENEW} acquireTime=${LEASE_ACQUIRE}"
+  lease_require_window "${mode}-created"
+
+  # 立即续租：把 renewTime 从「请求发出时刻」推到「请求完成之后」。
+  if ! lease_renew; then
+    log_error "发布锁${mode}后的即时续租失败：无法把 renewTime 推进到本次写入之后（fail-closed）"
+    log_error "  不复用一把 renewTime 可能仍停留在 t_req 的锁继续发布：窗口已被请求耗时侵蚀。"
+    die 3 "发布锁${mode}后即时续租失败（fail-closed）"
+  fi
+  if ! lease_read; then
+    log_error "即时续租后无法读回服务器状态（${LEASE_READ_ERROR:-未知错误}）：fail-closed"
+    die 3 "发布锁${mode}后即时续租无法核验（fail-closed）"
+  fi
+  LOCK_UID="${LEASE_UID}"
+  lease_require_window "${mode}-anchor-renewed"
+  log_info "发布锁窗口已锚定在写入完成之后：renewTime=${LEASE_RENEW}（leaseDurationSeconds=${LOCK_LEASE_DURATION}）"
+}
+
 acquire_release_lock() {
   local deadline=$(( SECONDS + LOCK_WAIT_TIMEOUT )) remaining
   log_info "获取发布锁 ${NAMESPACE}/${LOCK_NAME}（holder=${HOLDER_IDENTITY}，租期 ${LOCK_LEASE_DURATION}s，续租间隔 ${LOCK_RENEW_INTERVAL}s，续租请求超时 ${LOCK_RENEW_REQUEST_TIMEOUT}s）"
@@ -1526,12 +1770,8 @@ acquire_release_lock() {
   while :; do
     if lease_create 2> "${LOCK_STATE_DIR}/lease-create.err"; then
       LOCK_HELD=1
-      if lease_read; then
-        LOCK_UID="${LEASE_UID}"
-      else
-        log_warn "已创建发布锁，但暂时读不到 uid（${LEASE_READ_ERROR:-未知错误}）：后续只做 holder 复核"
-      fi
       log_info "已获取发布锁（新建 Lease，holder=${HOLDER_IDENTITY}）"
+      finalize_lock_acquisition "创建"
       return 0
     fi
     if ! grep -q 'AlreadyExists' "${LOCK_STATE_DIR}/lease-create.err" 2>/dev/null; then
@@ -1559,10 +1799,10 @@ acquire_release_lock() {
 
         if lease_takeover; then
           LOCK_HELD=1
-          if lease_read; then
-            LOCK_UID="${LEASE_UID}"
-          fi
           log_info "已获取发布锁（接管，holder=${HOLDER_IDENTITY}，leaseTransitions=$(( $(to_int "${LEASE_TRANSITIONS:-0}") + 1 ))）"
+          # 接管的 renewTime 同样锚定在写入完成之后（B-2）：先断言窗口、再立即续租，
+          # 之后才允许写迁移记录（否则会用一把窗口已被侵蚀的锁去写记录）。
+          finalize_lock_acquisition "接管"
           # 接管保留了上一轮记录；若记录停在 PENDING/RUNNING 而 Job 已终结（或已用
           # 数据库证据恢复），在这里收敛为可核验的终态，避免后续归档一条含糊的记录。
           if ! finalize_previous_migration; then
@@ -1884,6 +2124,14 @@ recovery_resolve_record() {
 
 # 写迁移记录：CAS 写入 Lease 注解。失败返回非零（调用方必须 fail-closed）。
 #
+# T2-06.1.4 / B-3：**所有**写 Lease 的路径（create / takeover / renew / record /
+# release）都必须先验证「自己仍持有**且**未过期」。旧实现只有续租路径验证过期，
+# 记录写入只比 holder，于是失锁（过期）后仍能写入并给过期锁续命一个租期。
+#
+# 边界（不得夸大）：本函数只能阻止**新的**写入。调用方在进入本函数之前可能已经发出
+# 不可撤销的 kubectl 请求（apply / create job），那些请求是否生效只能事后核验。
+# AUD-02 = NOT_CLOSED、AUD-05 = NOT_CLOSED —— 这里不是 fencing，也不是在途写入的解决方案。
+#
 #   $1 state  $2 job  $3 uid  $4 detail
 #   $5 archive（1 = 把服务器上的当前记录归档到 previous-*，用于「开始新一轮迁移」）
 #   $6 terminal（auto = 终态记录写 terminal-at；unconfirmed = 状态来自 Job 但 Pod 未确认终止）
@@ -1907,6 +2155,18 @@ migration_record_write() {
     if [[ "${LEASE_HOLDER}" != "${HOLDER_IDENTITY}" ]]; then
       : > "${LOCK_STATE_DIR}/lost"
       log_error "写迁移记录失败：发布锁已不属于本 Runner（holder=${LEASE_HOLDER:-<空>}）"
+      return 3
+    fi
+    if lease_expired; then
+      # T2-06.1.4 / B-3：这是审计点名的缺陷 —— 旧实现只比 holder，于是「已经过期、
+      # 别人随时可以接管」的锁仍然能被写入迁移记录，而那次写入把 renewTime 推到 now，
+      # 等于给一把过期锁续命一个租期：接管方随后会读到"刚刚续过"的假象。
+      # 写记录的路径必须与续租路径用**同一条**过期判据（服务器返回的 renewTime）。
+      : > "${LOCK_STATE_DIR}/lost"
+      lease_window_evidence "record-write-${attempt}" >&2 || true
+      log_error "拒绝写迁移记录：本 Runner 的租约已过期（renewTime=${LEASE_RENEW:-<空>}，leaseDurationSeconds=${LEASE_DURATION:-<空>}）"
+      log_error "  其他 Runner 此刻已可合法接管；写入会给过期锁续命一个租期（B-3），因此 fail-closed。"
+      log_error "  这不会撤销已经发生的迁移/应用请求，只会阻止本 Runner 继续制造新的写入。"
       return 3
     fi
     now="$(timestamp_utc)"
@@ -2312,15 +2572,34 @@ begin_migration() {
     log_warn "Migration apply 返回非零（${apply_rc}）：不能据此断定 Job 未创建（API Server 可能已接受请求）"
   fi
 
+  # D-1/D-2/B-13：迁移 apply 之后必须做一次「请求返回后的归属观察」。
+  # 已经发出的 apply 不可撤销；若这期间失去锁（含租约过期），Job 是否被创建、
+  # DDL 是否已开始都只能标记为未知，不能靠客户端返回码推断。
+  if ! observe_lock_after_request; then
+    MIGRATION_OUTCOME_UNKNOWN=1
+    printf 'MIGRATION_OUTCOME_UNKNOWN\n'
+    log_error "MIGRATION_OUTCOME_UNKNOWN: 迁移 apply 之后本 Runner 已失去发布锁（客户端返回码 ${apply_rc}）。"
+    log_error "  Job/${JOB_NAME} 是否被创建、DDL 是否已经开始执行都无法由此确认；请求不可撤销。"
+    log_error "  不做任何补偿动作（不删除 Job、不复位迁移记录），保留证据供人工核实。"
+    report_lock_lost
+    exit 3
+  fi
+
   if ! await_job_object; then
     if (( apply_rc == 0 )); then
       die 7 "apply 返回成功，但 Job/${JOB_NAME} 在 ${MIGRATION_APPLY_VISIBILITY_TIMEOUT}s 内不可见：状态不一致（fail-closed）。锁与迁移记录保留，人工核实后再发布"
     fi
-    log_error "Migration 清单应用失败，且 Job/${JOB_NAME} 确实不存在（应用未更新）"
+    # 旧实现会在这里断言「应用未更新」。这是错的：Job 不存在只证明**这个 Job**
+    # 没被创建；同一份清单里的 Namespace / ConfigMap 等对象可能已经生效。
+    # 也不存在「已发出请求 → 一定没生效」的推论（客户端超时不等于服务端未接受）。
+    MIGRATION_OUTCOME_UNKNOWN=1
+    printf 'MIGRATION_OUTCOME_UNKNOWN\n'
+    log_error "Migration 清单应用失败，且 Job/${JOB_NAME} 确实不存在（${JOB_PROBE_ERROR:-kubectl apply 返回非零}）"
+    log_error "  **不得**据此断言「应用未更新」：这只证明该 Job 对象未被创建，清单中的其他对象可能已生效。"
     MIG_APPLY_ISSUED=0
     migration_record_write "${MIG_STATE_NONE}" "" "" "" || true
     MIG_RECORD_WRITTEN=0
-    die 1 "Migration 清单应用失败（Job 未创建）：${JOB_PROBE_ERROR:-kubectl apply 返回非零}"
+    die 1 "Migration 清单应用失败（Job 未创建，其余对象是否生效未知）：${JOB_PROBE_ERROR:-kubectl apply 返回非零}"
   fi
 
   MIG_JOB_UID="${JOB_UID}"
@@ -2929,6 +3208,9 @@ APPLICATION_INFLIGHT=1
 application_apply_rc=0
 "${KUBECTL[@]}" apply -f "${APPLICATION_MANIFEST}" || application_apply_rc=$?
 APPLICATION_INFLIGHT=0
+# B-11：apply 已返回（无论退出码），但**结果尚未核实**。从此到 verify_release 通过
+# 之间收到信号，结论必须是 APPLICATION_OUTCOME_UNKNOWN，不能是"成功"或"未应用"。
+APPLICATION_APPLY_RETURNED=1
 
 # 「请求在途时失锁」：无论客户端返回什么，都不能假装这次写没有发生。
 # 已经发出的请求无法撤销；这里只能停止后续动作并如实报告。
@@ -3106,6 +3388,9 @@ if (( DOWNGRADE_AUTHORIZED )); then
   log_warn "[AUDIT] 本次发布经由 --allow-downgrade 授权降级到 ${TARGET_VERSION}"
 fi
 
+# B-11：到这里 apply 的结果已经用**集群事实**核实过（verify_release 通过），
+# 信号路径才可以打印「已核实生效」而不是「结果未知」。
+APPLICATION_OUTCOME_VERIFIED=1
 log_info "发布验证通过：镜像 ${IMAGE_TAG}，版本标记 ${TARGET_VERSION}，副本与 Pod 全部就绪"
 
 # 锁必须在「验证通过」之后才释放：迁移完成不等于发布完成。

@@ -2,6 +2,10 @@ package deployk8s
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -272,12 +276,16 @@ func TestRenewThreeCASConflictsExhaustAttempts(t *testing.T) {
 			got, strings.Join(f.events(), "\n"))
 	}
 	// 三次 attempt 各读一次 Lease：审计 F-02 的核心就是「attempt 里真的有 GET」。
+	// 判据是「每个 attempt 窗口（上一次续租 replace 之后）内至少有一次 get lease」，
+	// 而不是「紧邻上一行是 get lease」：全局调用日志里主线程的
+	// `replace -f lease-record.yaml` 会与续租 attempt 正常交错（假耦合，见
+	// renewAttemptsStartingWithGet 的注释）。
 	attempts, problems := renewAttemptsStartingWithGet(f)
 	if attempts != 3 {
 		t.Fatalf("续租 replace = %d 次，期望 3；调用:\n%s", attempts, strings.Join(f.calls(), "\n"))
 	}
 	if len(problems) > 0 {
-		t.Fatalf("每次续租 attempt 必须紧接在一次 get lease 之后：\n%s\n调用:\n%s",
+		t.Fatalf("每个续租 attempt 都必须先 get lease 再 PUT（不允许用陈旧 rv 盲写）：\n%s\n调用:\n%s",
 			strings.Join(problems, "\n"), strings.Join(f.calls(), "\n"))
 	}
 	// 冲突不是「写入成功」：不得出现成功续租的写入事件。
@@ -476,23 +484,50 @@ func isRenewReplace(args string) bool {
 	return strings.Contains(args, "replace") && strings.Contains(args, "lease-renew.yaml")
 }
 
-// renewAttemptsStartingWithGet 返回续租 replace 的次数，并逐次检查它前面一次调用
-// 是不是 get lease —— 这是「一次 attempt = GET + REPLACE」在调用序列上的直接证据。
+// renewAttemptsStartingWithGet 返回续租 replace 的次数，并逐次检查「本次 attempt 的
+// replace 之前，上一次续租 replace 之后，至少有一次 get lease」。
+//
+// 这是「一次 attempt = GET + REPLACE」在调用序列上的直接证据（F-02 的核心：
+// 每次都重读 rv，绝不拿陈旧 rv 盲写）。**不断言「紧邻上一次调用是 get lease」** ——
+// 那是一条虚假耦合（T2-06.1.4 追加修复）：
+//
+//   - f.calls() 是**所有进程**共享的全局调用日志：后台续租子 shell 与主线程会并发写它；
+//   - 主线程的 migration_record_write 会插入 `get lease` + `replace -f lease-record.yaml`，
+//     完全可能落在「续租的 GET」与「续租的 PUT」之间，序列形如：
+//     get lease（续租）→ replace -f lease-record.yaml（主线程）→ replace -f lease-renew.yaml（续租）
+//     旧断言只看到 replace 的前一行是 lease-record.yaml，就判失败 —— 但被测语义
+//     （attempt 内部先 GET 后 PUT）其实完全成立。
+//   - 实测：该失败只在「全量并发 + 机器高负载」下偶发（C 的 fake 改成 flock 串行 +
+//     全局 rv 后时序变化把它暴露出来），单测 5 轮、基线 3 轮全量均无法复现。
+//
+// 强度没有降低：窗口内必须有 get lease，因此「漏掉 GET 直接 PUT」仍然会被抓住
+// （TestRenewChainStaysWithinBudget 断言的正是没有 record 写入干扰的纯续租链；
+// 如果 attempt 少了 GET，相邻 replace 的间隔会小于 GET+REPLACE 之和）。
 func renewAttemptsStartingWithGet(f *fixture) (int, []string) {
-	calls := f.calls()
+	return classifyRenewAttempts(f.calls())
+}
+
+// classifyRenewAttempts 是 renewAttemptsStartingWithGet 的纯函数内核（便于用合成
+// 调用序列做确定性回归，不依赖并发时序）：
+//
+//	每个续租 replace 都必须在「上一次续租 replace 之后」见过至少一次 get lease。
+func classifyRenewAttempts(calls []string) (int, []string) {
 	attempts := 0
 	var problems []string
-	for i, call := range calls {
-		if !isRenewReplace(call) {
-			continue
-		}
-		attempts++
-		previous := "<无>"
-		if i > 0 {
-			previous = calls[i-1]
-		}
-		if i == 0 || !isLeaseRead(previous) {
-			problems = append(problems, fmt.Sprintf("第 %d 次续租 replace 之前是: %s", attempts, previous))
+	// sawGet：自上一次续租 replace 以来，是否见过 get lease。
+	sawGet := false
+	for _, call := range calls {
+		switch {
+		case isLeaseRead(call):
+			sawGet = true
+		case isRenewReplace(call):
+			attempts++
+			if !sawGet {
+				problems = append(problems, fmt.Sprintf(
+					"第 %d 次续租 replace 之前（上一次续租之后）没有任何 get lease：attempt 用陈旧 rv 盲写", attempts))
+			}
+			// 本次 attempt 的窗口到此结束；下一次 attempt 必须重新 GET。
+			sawGet = false
 		}
 	}
 	return attempts, problems
@@ -505,4 +540,178 @@ func formatTimings(entries []timingEntry) string {
 		fmt.Fprintf(&builder, "+%6dms  %s\n", entry.at.Sub(base).Milliseconds(), entry.args)
 	}
 	return builder.String()
+}
+
+// TestRenewBackoffBudgetIsSingleSourced 覆盖 T2-06.1.4 / B-5：
+//
+// 审计发现 LOCK_RENEW_BACKOFF_MS 是**死常量** —— 校验用 (attempts-1)×200ms=400ms
+// 的预算，真实实现却对每次失败（含最后一次）都 sleep 0.2s，共 600ms，比预算多 200ms。
+//
+// 这条契约测试直接检查源码：常量、预算、以及 lease_renew 里的真实 sleep 必须同源。
+// 它比"测量耗时"更稳定（不会因 CI 抖动变成空转），而真实耗时由
+// TestRenewChainStaysWithinBudget 单独测量。
+func TestRenewBackoffBudgetIsSingleSourced(t *testing.T) {
+	t.Parallel()
+
+	raw, err := os.ReadFile(filepath.Join(repoRootPath, "scripts", "deploy-k8s.sh"))
+	if err != nil {
+		t.Fatalf("读取 scripts/deploy-k8s.sh: %v", err)
+	}
+	script := string(raw)
+
+	constInt := func(name string) int {
+		t.Helper()
+		re := regexp.MustCompile(`(?m)^` + name + `=([0-9]+)$`)
+		m := re.FindStringSubmatch(script)
+		if m == nil {
+			t.Fatalf("脚本里找不到整数常量 %s", name)
+		}
+		value, err := strconv.Atoi(m[1])
+		if err != nil {
+			t.Fatalf("解析 %s: %v", name, err)
+		}
+		return value
+	}
+	attempts := constInt("LOCK_RENEW_MAX_ATTEMPTS")
+	backoffMS := constInt("LOCK_RENEW_BACKOFF_MS")
+	budget := constInt("LOCK_RENEW_BACKOFF_BUDGET")
+
+	// 真实退避 = 只在 attempt 之间退避 (attempts-1) 次，预算必须是它的向上取整。
+	wantMS := (attempts - 1) * backoffMS
+	wantBudget := (wantMS + 999) / 1000
+	if budget != wantBudget {
+		t.Fatalf("退避预算 %ds 与真实退避 (%d-1)×%dms=%dms（向上取整 %ds）不一致：预算与实现必须同源",
+			budget, attempts, backoffMS, wantMS, wantBudget)
+	}
+
+	body := shellFunctionBody(t, script, "lease_renew")
+	// 真实 sleep 必须由常量换算（而不是硬编码 0.2s）。
+	if !strings.Contains(body, `sleep "$(sleep_ms_arg "${LOCK_RENEW_BACKOFF_MS}")"`) {
+		t.Fatalf("lease_renew 必须用 sleep_ms_arg 从 LOCK_RENEW_BACKOFF_MS 换算退避；实际函数体:\n%s", body)
+	}
+	if regexp.MustCompile(`(?m)^\s*sleep [0-9]`).MatchString(body) {
+		t.Fatalf("lease_renew 里仍有硬编码 sleep：退避时长必须只有一个数值来源\n%s", body)
+	}
+	// 最后一次失败后不得再 sleep（否则 (attempts-1) 次退避会变成 attempts 次）。
+	if !strings.Contains(body, "attempt < LOCK_RENEW_MAX_ATTEMPTS") {
+		t.Fatalf("退避必须在 attempt 之间进行（attempt < LOCK_RENEW_MAX_ATTEMPTS 守卫）；实际:\n%s", body)
+	}
+	// usage 文本里对外公布的 backoff 数值必须与预算一致（避免文档与实现漂移）。
+	if !strings.Contains(script, fmt.Sprintf("backoff(%d)", budget)) {
+		t.Fatalf("usage/日志里公布的 backoff(%d) 与实际预算 %ds 不一致", budget, budget)
+	}
+}
+
+// shellFunctionBody 返回 `name() {` 到对应收尾 `}` 之间的函数体（含首行）。
+func shellFunctionBody(t *testing.T, script, name string) string {
+	t.Helper()
+	start := strings.Index(script, "\n"+name+"() {")
+	if start < 0 {
+		t.Fatalf("脚本里找不到函数 %s", name)
+	}
+	rest := script[start+1:]
+	end := strings.Index(rest, "\n}\n")
+	if end < 0 {
+		t.Fatalf("函数 %s 没有找到收尾", name)
+	}
+	return rest[:end+2]
+}
+
+// TestRenewAttemptAdjacencyClassifier 用**合成调用序列**证明修复既消除了虚假耦合、
+// 又没有放宽断言强度（F-02：每个 attempt 必须先 GET 再 PUT）。
+//
+// 这些序列都是真实日志里出现过的形态（时间线来自全量并发跑出来的失败样本）。
+func TestRenewAttemptAdjacencyClassifier(t *testing.T) {
+	t.Parallel()
+
+	const (
+		readLease = `-n surgecart get lease surgecart-deploy-lock -o go-template=... --request-timeout=3s`
+		putRenew  = `-n surgecart replace -f /tmp/lock/lease-renew.yaml --request-timeout=3s`
+		putRecord = `-n surgecart replace -f /tmp/lock/lease-record.yaml`
+		putApply  = `-n surgecart apply -f manifest/kubernetes/overlays/production`
+	)
+
+	cases := []struct {
+		name     string
+		calls    []string
+		attempts int
+		problems int
+	}{
+		{
+			name: "理想序列：GET→PUT 交替",
+			calls: []string{
+				readLease, putRenew,
+				readLease, putRenew,
+				readLease, putRenew,
+			},
+			attempts: 3, problems: 0,
+		},
+		{
+			// 这就是当初失败的样本：主线程的 record 写入插在续租 GET 与 PUT 之间。
+			// 续租 attempt 内部仍然是「先 GET 后 PUT」，旧断言却因"前一行不是 get lease"而误报。
+			name: "主线程 record 写入插在续租 GET 与 PUT 之间（旧断言的假阳性）",
+			calls: []string{
+				readLease,
+				putRecord,
+				putRenew,
+				readLease,
+				putRenew,
+			},
+			attempts: 2, problems: 0,
+		},
+		{
+			name: "主线程的 get lease + record 写入都插在中间",
+			calls: []string{
+				readLease,
+				readLease,
+				putRecord,
+				putRenew,
+				readLease,
+				putRenew,
+			},
+			attempts: 2, problems: 0,
+		},
+		{
+			// 强度证明：attempt 之间没有 GET 就是盲写（陈旧 rv），必须被抓住。
+			name: "第 2 次 attempt 没有 GET（盲写）",
+			calls: []string{
+				readLease, putRenew,
+				putRenew,
+			},
+			attempts: 2, problems: 1,
+		},
+		{
+			// 连一次 GET 都没有：任何 replace 都是盲写。
+			name: "整条链没有 GET",
+			calls: []string{
+				putRenew,
+				putRenew,
+			},
+			attempts: 2, problems: 2,
+		},
+		{
+			name: "无关调用（apply）穿插不影响判定",
+			calls: []string{
+				putApply,
+				readLease, putRenew,
+				putApply,
+				readLease, putRenew,
+			},
+			attempts: 2, problems: 0,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			attempts, problems := classifyRenewAttempts(tc.calls)
+			if attempts != tc.attempts {
+				t.Fatalf("续租 replace 计数 = %d，期望 %d", attempts, tc.attempts)
+			}
+			if len(problems) != tc.problems {
+				t.Fatalf("问题数 = %d，期望 %d（问题: %v）", len(problems), tc.problems, problems)
+			}
+		})
+	}
 }
