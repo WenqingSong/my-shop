@@ -369,13 +369,18 @@ Job 名称后缀与两个入口的镜像 tag 必须完全一致，`test/manifest
 ```text
 1  预检：kubectl / 集群可达 / 构建两个清单 / REPLACE_WITH_* / 镜像与版本标记一致性 /
    迁移等待上限与 Job activeDeadlineSeconds 的时间关系
-2  命名空间引导：缺失时按 shared/namespace.yaml 创建（幂等，锁的前置条件）
-3  权限预检：auth can-i get|create|update leases + get|list jobs + get|list pods -n surgecart
-   （区分「明确被拒绝（Forbidden）」与「无法确认（5xx/超时）」，两者都退出 3；
-   权限表见 scripts/deploy-k8s.sh 的 LEASE_PERMISSION_CHECKS，由 test/manifest 与 RBAC 示例比对）
+2  权限预检（T2-06.1.4：比命名空间引导更早，且全部早于任何写请求）
+   阶段 1 集群级：namespaces get/create + selfsubjectaccessreviews create（不带 -n，必须 ClusterRole）
+   阶段 2 严格判断命名空间是否存在（只有 `<资源> "<名字>" not found` 才算「不存在」）
+   阶段 3 命名空间级：leases / jobs / pods / pods-log / secrets / deployments /
+           configmaps / services / pvc（逐项 auth can-i，见 §13.1）
+   denied（明确 no）与 unknown（SSAR 5xx/超时）都退出 3，且此时尚未发出任何工作负载写请求
+3  命名空间引导：权限齐备且命名空间确实缺失时，按 shared/namespace.yaml 创建（幂等）
 4  获取发布锁：Lease/surgecart-deploy-lock（原子 create；已释放/已过期则先核验上一轮
    Migration Job 与该 Job 的 Pod，再用 resourceVersion CAS 接管；必要时按数据库证据恢复）
-5  启动后台续租（默认每 10s，单次续租 = GET + REPLACE 各受 3s 超时约束，最多 3 次尝试；
+5  锚定 renewTime 并启动后台续租（renewTime = 写入请求发出时刻 t_req；create/takeover
+   返回后立即做窗口断言 LEASE_WINDOW + 立即续租一次，把锚点推到写入完成之后；
+   之后每 10s 续租，单次 = GET + REPLACE 各受 3s 超时约束、最多 3 次尝试；
    每次 attempt 先确认服务器上的租约未过期，过期即按失锁停止）
 6  锁内复检：Secret 就绪 + 版本降级保护（当前 Deployment 版本 vs 本次目标版本）
 7  Migration：①归档上一轮记录 + 记录预期 Job 名 → ②apply 迁移清单 → ③读真实 Job UID
@@ -472,17 +477,26 @@ GET Lease（≤ get_timeout）→ 校验 holder / uid / 是否已过期 → PUT 
 
 - 旧默认值 `10 + 30 > 30`：续租请求本身比租期还长，锁会在请求返回之前过期；
 - **AUD-D7**：只计「单次请求超时」仍然低估最坏耗时（漏掉了每次 attempt 的 GET）。
-  续租失败会重试 3 次，真实最坏耗时是 `10 + 3×6 + 1 = 29s`；
+  一次 attempt = GET + PUT，最坏 6s；续租链（3 次 attempt）最坏 18s，加 1s 退避预算 = **19s**；
+  从上次成功续租算起的**检测上界** = 间隔 10s + 链 19s = **29s**；
   T2-06.1.2 的公式 `10 + 3×3 + 1 + 5 = 25 < 30` 看似安全，真实值 `34 > 30` —— 一次
   API 抖动就可能让续租链在锁过期之后才结束（审计 F-02）；
 - **T2-06.1.3 的默认值重估**：把租期从 30s 提到 45s，保持 `--lease-renew-timeout 3`
   （in-cluster 的 Lease GET/PUT 通常 <100ms，3s 已是 30 倍抖动余量）与 `attempts 3`
   （主进程写迁移记录会推进 resourceVersion，409 重试是常态）。结果是
-  `34 < 45`（余量 11s），续租链最坏 29s 完成，早于服务端过期 16s。
+  `34 < 45`（余量 11s），检测上界 29s，早于服务端最早可接管的 42s。
   代价：崩溃后接管延迟由 ≤30s 变为 ≤45s；
 - 非法组合在**任何资源变更之前**拒绝（退出码 1，连 kubectl 都不会调用，也不会创建 Lease）；
 - **续租不得复活已过期的锁**：每次 attempt 都检查服务器返回的 `renewTime +
   leaseDurationSeconds`，一旦过期就按失锁处理（退出码 3），不再 PUT。理由见 §9.7；
+- **`renewTime` 锚点是「请求发出时刻」（t_req，T2-06.1.4 / B-1）**：不能用脚本启动时刻
+  （预检越长写得越旧，审计复现中预检 51s 导致 Lease 创建即过期），也不能写未来时刻
+  （等于人为延长租期）。create/takeover 返回后立即做窗口断言并**再续租一次**把锚点推到
+  写入完成之后；窗口为负则打印 `LEASE_WINDOW … verdict=expired` 与
+  `LEASE_ANCHOR_INVALID`，退出码 3，且不 apply 任何资源；
+- **退避只有一个来源**：`LOCK_RENEW_BACKOFF_MS`（默认 200ms）换算成实际 sleep，
+  预算 `LOCK_RENEW_BACKOFF_BUDGET`（1s）必须等于 `ceil((attempts-1)×200ms)`；
+  且只在 attempt **之间**退避（最后一次失败后不再 sleep）；
 - 该不变量只降低「正常网络延迟下锁提前过期」的概率，不能消除 Runner 暂停、
   网络分区与缺少 fencing 的问题（见 §9.7 与 `docs/design/deploy-lock.md` §7/§10）。
 
@@ -533,16 +547,16 @@ DEPLOY_K8S_SUCCESS
 | 退出码 | 含义 | 本次是否发出过变更请求 | 应用是否已更新 |
 |---|---|---|---|
 | `0` | 发布成功且已验证（打印 `DEPLOY_K8S_SUCCESS`） | 是（已确认成功） | 是，且已验证为目标版本 |
-| `1` | ① 参数 / 预检 / 清单构建失败；② Migration 或 Application **apply 失败** | ① **否**；② **是，但结果未知** | ① 否；② **不确定** |
+| `1` | ① 参数 / 预检 / 清单构建失败；② Migration 或 Application **apply 失败**；③ **无法确认前置事实**（Secret 读取 5xx/超时/无法分类、Deployment 读取失败） | ① **否**；② **是，但结果未知**；③ **否**（读到失败即停，未发出写请求） | ① 否；② **不确定**；③ 否 |
 | `2` | 迁移失败（Job `Failed=True` 且其 Pod 已终止） | 是（迁移请求），应用请求**未发出** | 否 |
-| `3` | 发布锁失败（权限不足 / 获取超时 / 续租失败 / **租约已过期** / 服务端复核发现失锁） | 未发出；若在途中失锁则**已发出、结果未知** | 否，或不确定（见 `APPLICATION_OUTCOME_UNKNOWN`） |
+| `3` | **权限/发布锁失败**（`REQUIRED_PERMISSIONS` 任一项 denied 或 unknown；命名空间/Secret 读取被 Forbidden；获取锁超时；续租失败；**租约已过期**；服务端复核发现失锁） | 权限类：**未发出**；锁类：未发出，若在途中失锁则**已发出、结果未知** | 否，或不确定（见 `APPLICATION_OUTCOME_UNKNOWN`） |
 | `4` | 版本降级保护拒绝（降级 / 分叉 / 无法验证版本顺序） | 否（锁内、写请求之前） | 否 |
 | `5` | 发布后验证失败（镜像/版本/副本不一致，或未在超时内收敛） | 是 | **已更新，但不符合目标**（需按输出排查） |
 | `6` | 迁移等待超时（Job 未确认终态，Pod 可能仍在执行 DDL；**锁与关联记录保留**） | 是（迁移请求），应用请求**未发出** | 否 |
 | `7` | 迁移生命周期未确认/未终结（拒绝接管、拒绝开始新一轮迁移、Job 与记录不一致、**Job 已 Failed 但 Pod 仍在执行/终止中**、**Pod 状态无法确认（403/5xx/超时）**、缺少可校验的数据库证据） | 否（拒绝接管时） | 否 |
-| `143` | 收到 SIGTERM（迁移已终态则释放锁；否则保留锁与记录） | 可能已发出 | 否，或不确定 |
+| `143` | 收到 SIGTERM（迁移已终态则释放锁；否则保留锁与记录）。信号路径必须落到三种结论之一，不允许含糊：`APPLICATION_OUTCOME_UNKNOWN`（在途或已返回但未核实）/ `APPLICATION_OUTCOME_VERIFIED`（已通过 `verify_release`，结论来自集群事实）/ `APPLICATION_NOT_STARTED`（从未发出 apply） | 可能已发出 | 否，或不确定 |
 
-退出码 `1` 的两种子情况必须区分（这是 F-04 修正的核心）：
+退出码 `1` 的三种子情况必须区分（①/② 是 F-04 修正的核心，③ 是 T2-06.1.4 审计 A-3）：
 
 ```text
 ① 参数/预检/清单构建失败：
@@ -551,6 +565,9 @@ DEPLOY_K8S_SUCCESS
      API Server 可能已经接受并生效，客户端只是没等到响应
      → 脚本打印 APPLICATION_OUTCOME_UNKNOWN，并读回 Deployment 如实报告观察到的事实
      → 不能因为退出码是 1 就断言「资源没有被修改」
+③ 无法确认前置事实（Secret 5xx/超时/无法分类、Deployment 读取失败）：
+     读到失败就停 → 没有发出写请求，但「对象不存在」这个结论同样不成立
+     → 错误信息里带 classify_api_error 的分类标签，不能改写成「缺少 Secret/Deployment」
 ```
 
 因此本文不再写「`1` = 应用未更新」。判断线上状态的唯一方法是**只读核对**：
@@ -671,8 +688,9 @@ kubectl -n surgecart get pods -l app.kubernetes.io/name=surgecart -o wide
 
 | 问题 | 推导 | 默认值 |
 |---|---|---|
-| 服务端最早何时允许接管 | 上次成功续租的 `renewTime + leaseDurationSeconds`；写入 `renewTime` 用的是 renew 请求**发出时刻**，因此真实过期时刻 ∈ `[t0+D-G, t0+D]` | `t0+42s … t0+45s` |
-| 存活 Runner 最晚何时发现失锁 | 续租链最坏完成时刻 = `t0 + I + A×(G+R) + 退避` | `t0+29s`（< `t0+42s`，先于过期） |
+| 服务端最早何时允许接管 | 上次成功写入的 `renewTime + leaseDurationSeconds`。`renewTime` 是写入请求的**发出时刻** `t_req`（T2-06.1.4 / B-1），服务端过期**精确等于** `t0+D`；扣掉一次请求耗时（`t_acc-t_req ≤ G`）后仍 `≥ t0+D-G` | `t0+42s … t0+45s` |
+| 存活 Runner 最晚何时发现失锁 | 检测上界 = 间隔 + 续租链 = `t0 + I + [A×(G+R) + 退避]`（链 19s，间隔 10s） | `t0+29s`（< `t0+42s`，先于过期） |
+| create/takeover 的锚点是否可信 | 写入后立即 `lease_require_window`（`LEASE_WINDOW` 证据行）：窗口为负则 `LEASE_ANCHOR_INVALID`、退出码 3、且不 apply 任何资源 | fail-closed |
 | 崩溃/被 SIGKILL 的 Runner | 不再续租，锁在 `t0+D` 后被接管；它自己不会再写入 | 接管延迟 ≤ `D + 轮询 2s` |
 | 被挂起（SIGSTOP / VM 冻结 / 网络分区）的 Runner | 恢复后**先 GET**：若 `renewTime+D ≤ now` 则立即按失锁停止（F-02.4），不 PUT | 恢复后 ≤ `G` 发现 |
 | 恢复时恰好还没过期（`t_r + G < t0+D`） | REPLACE 使用旧 `resourceVersion`：若别人已接管则 409，重试时读到 `holder ≠ 自己` 即停止 | 写入被 CAS 拒绝 |
@@ -683,10 +701,24 @@ kubectl -n surgecart get pods -l app.kubernetes.io/name=surgecart -o wide
 1. **锁对象层面**：旧持有者用陈旧 `resourceVersion` 的 PUT 一定会被 409 拒绝
    （`lease_renew` 每次 attempt 都重新 GET 并校验 holder/uid/是否过期）；
    过期之后的续租会被直接放弃，不再「复活」一把别人可以抢走的锁。
-2. **非锁资源层面**：失锁未察觉窗口 = 从「服务端允许接管」到「旧 Runner 停止发起新请求」
-   之间的时间。存活 Runner 的检测（≤29s）先于过期（≥42s），因此正常参数下该窗口为 0；
-   只有**进程被暂停**时才会出现重叠，其长度由暂停时长决定（无法用参数消除），
-   并且在恢复后由 `require_lock_alive` / `require_lock_owned_server_side` 立即截断。
+2. **请求侧**：只对「**还没发出**的请求」成立。失锁未察觉窗口 = 从「脚本检测到失锁」
+   到「服务端允许别人接管」的时间差；存活 Runner 的检测（≤29s）先于过期（≥42s），
+   所以脚本**停止发起新请求**是有界的。进程被暂停时该边界由暂停时长决定（参数无法消除），
+   恢复后由 `require_lock_alive` / `require_lock_owned_server_side` 立即截断。
+
+对**已经发出**的请求，上面两条都不适用：
+
+- 客户端超时 **不等于** 请求未生效。`kubectl apply` 一旦发出，`t_req`（发出）、
+  `t_acc`（API Server 接受并提交）、`t_resp`（客户端收到响应）是三个不同时刻，
+  超时只说明 `t_resp` 没等到，不能推出 `t_acc` 没有发生；
+- 锁丢失后，已发出的 `kubectl apply` 仍可能被服务端执行 —— 「旧 Runner 的写在途、
+  新 Runner 已接管」的跨接管写入**仍然可能发生**（AUD-05 = NOT_CLOSED）。
+  直接反例：`test/deployk8s/application_inflight_test.go` 的
+  `TestLockLostDuringApplicationApplyReportsUnknown`（apply 延迟 1500ms，在途时接管，
+  断言请求仍被接受并生效）。这是 **fake kubectl 构造的窗口**，不是真实集群实验
+  （详见 `docs/design/deploy-lock.md` §10.4）；
+- 因此不能把本机制描述成「不会并发发布」，也不能用退出码判断线上状态 ——
+  只能 `kubectl get -o yaml` 只读核对。
 
 `APPLICATION_OUTCOME_UNKNOWN` 只是把「不知道」如实说出来；真正的 fencing 需要写入侧
 校验令牌（Admission Webhook 或专用发布控制器），属于后续架构决策，
@@ -794,20 +826,28 @@ kubectl -n surgecart wait --for=condition=complete job/surgecart-migrate-<短SHA
 > 不要为了让流程「立刻重跑」而手工清空 Lease 上的迁移记录：记录一旦被清空，
 > 下一个 Runner 就只能看到「没有上一轮迁移」，会在旧 DDL 仍在执行时开始新一轮发布。
 
-### 10.3 发布锁相关失败（退出码 3）
+### 10.3 权限与发布锁相关失败（退出码 3）
+
+权限预检（`REQUIRED_PERMISSIONS`，29 项）跑在**任何写请求之前**。先看错误分类，再改配置：
 
 | 现象 | 原因 | 处理 |
 |---|---|---|
-| `缺少 leases.coordination.k8s.io 的 get/create/update 权限（Forbidden…）` | 发布身份没有 RBAC | 按 `manifest/kubernetes/examples/deploy-lock/rbac.yaml` 授权后重跑 |
-| `缺少 jobs.batch 的 get/list 权限` | 迁移生命周期核验需要的只读权限缺失 | 同上（RBAC 示例已包含 `batch/jobs get,list`） |
-| `缺少 pods 的 get/list 权限` | Pod 生命周期门禁需要的只读权限缺失（T2-06.1.3 / F-01） | 同上（RBAC 示例已包含 core `pods get,list`；旧示例漏了这一项） |
-| `无法确认…是否有 … 的 … 权限（查询失败，**不是**「被拒绝」）` | SubjectAccessReview 本身失败（API 5xx/超时/RBAC 不可用） | 先修 API Server / 网络；不要改 RoleBinding（问题不在绑定） |
+| `当前身份缺少 <resource> 的 <verb> 权限（Forbidden：auth can-i 明确返回 no）` | 明确被拒绝：清单没授权 | 按 §13.1 检查三个权限组是否都 apply；`namespaces`/`selfsubjectaccessreviews` 只能由 `ClusterRole` 授予 |
+| `无法确认…是否有…权限（查询失败，**不是**「被拒绝」）` | SubjectAccessReview 本身失败（API 5xx / 超时 / RBAC 不可用） | 先修 API Server / 网络；**不要**改 RoleBinding（问题不在绑定） |
+| `无权读取命名空间 surgecart（Forbidden）…**这不是「命名空间不存在」**` | 缺集群级 `namespaces get` | 补 `ClusterRole`（`Role` 无法授予集群级资源） |
+| `创建命名空间 surgecart 被拒绝（Forbidden…）` | 缺集群级 `namespaces create` | 同上 |
+| `无权读取 Secret surgecart/…（Forbidden）…**这不是「Secret 不存在」**` | 缺命名空间级 `secrets get` | 补 `Role` 的 `secrets get`；不要改成「去创建 Secret」 |
+| `无法确认 Secret surgecart/… 是否存在（网络超时/不可达…）**这不等于「缺少 Secret」**` | API 5xx / 超时，**状态未知** | 只读核对 Secret；不要重建 Secret |
+| `缺少 Secret surgecart/…（NotFound）` | 对象确实不存在 | 按 `examples/secrets` 创建 |
 | `另一个发布正在持有锁（holder=…）` 直到超时 | 另一个流水线正在发布 | 等它结束；不要提高 `--lock-wait-timeout` 去「抢」 |
 | `发布锁续租失败` / 突然中止 | 锁被接管、API Server 抖动、网络分区 | 查看 `get lease` 记录；确认没有并行发布后重跑 |
 | `续租中止：服务器上的租约已过期…其他 Runner 已可合法接管` | 续租链比租期还长，或进程被长时间挂起 | **不要**把租期改小；按 §10.4 确认无人持有后重跑，并检查 Runner 是否被 CPU/IO 饿死 |
 | `服务端复核发现本 Runner 的租约已过期` | 同上，发生在写迁移记录/apply 之前 | 本次未发出新的写请求；确认锁状态后重跑 |
 | `发布锁已过期…尝试接管` | 上一个 Runner 崩溃 | 若上一轮迁移已终态则自动接管；否则退出码 7（§10.8） |
 | `拒绝接管发布锁：上一轮迁移的生命周期不允许接管` | 上一轮迁移未终态/状态未知 | **等待**迁移进入终态后重跑，不要手工清记录（§10.8） |
+
+> 记法：`Forbidden` = 权限问题，`NotFound` = 对象真的不存在，`API 故障`/`网络超时` = **状态未知**。
+> 脚本的 `classify_api_error` 会把分类标签写进错误信息；没有标签的「不存在」结论一律不可信。
 
 ### 10.4 Lease 卡住时的人工处理
 
@@ -1087,29 +1127,94 @@ bash scripts/test-k8s-manifest.sh
 - 集群内可达外部 MySQL 与 Redis（NetworkPolicy / 安全组需放通）；
 - 发布 Runner 的时钟与集群一致（NTP），否则锁的过期判定会失真。
 
-### 13.1 授予发布锁权限
+### 13.1 授予发布权限（T2-06.1.4：一份文件、三个权限组）
+
+交付示例只有一份文件：`manifest/kubernetes/examples/deploy-lock/rbac.yaml`。
+里面是**三个权限组**（`Role`/`RoleBinding` 两组 + `ClusterRole`/`ClusterRoleBinding` 一组），
+必须**一起** apply —— 少任何一组都会在权限预检阶段失败（退出码 3）：
+
+| # | 权限组 | Kind | 作用域 | 适用主体 |
+|---|---|---|---|---|
+| 1 | `surgecart-deploy-lock` | `Role` + `RoleBinding` | 命名空间 `surgecart` | 执行发布的身份 |
+| 2 | `surgecart-deploy-workload` | `Role` + `RoleBinding` | 命名空间 `surgecart` | 同一个发布身份 |
+| 3 | `surgecart-deploy-cluster` | `ClusterRole` + `ClusterRoleBinding` | 集群级 | 同一个发布身份 |
+
+适用主体统一是「执行发布的身份」：文件里有 **3 处** `subjects`（两个 RoleBinding +
+一个 ClusterRoleBinding），必须替换成同一个值的占位符
+`REPLACE_WITH_DEPLOYER_SERVICE_ACCOUNT`（配合 `REPLACE_WITH_DEPLOYER_NAMESPACE`）。
+可选 `ServiceAccount`（集群内 Runner，需要 `namespace`）、`User`（外部 kubeconfig）、
+`Group`（团队共享身份）三者之一。三处不一致会制造「预检通过、写入被拒」的撕裂状态
+（契约测试会断言三者一致）。**不要**绑到应用自己的 ServiceAccount：
+应用 Pod 的 `automountServiceAccountToken=false`，不需要也不应该具备发布权限。
+
+**apply 顺序**（`Role`/`RoleBinding` 是命名空间对象，命名空间不存在时 apply 会失败）：
 
 ```bash
-# 1) 把 subjects 改成真实的发布身份（ServiceAccount / User / Group）
+# 1) 替换 3 处 subjects 占位符，改成同一个发布身份（三处必须一致）
+#    REPLACE_WITH_DEPLOYER_SERVICE_ACCOUNT / REPLACE_WITH_DEPLOYER_NAMESPACE
 vi manifest/kubernetes/examples/deploy-lock/rbac.yaml
 
-# 2) 首次部署时命名空间可能还不存在：先建命名空间，再授权
+# 2) 命名空间必须已存在（Role/RoleBinding 的作用域）
 kubectl apply -f manifest/kubernetes/shared/namespace.yaml
-kubectl apply -f manifest/kubernetes/examples/deploy-lock/rbac.yaml
 
-# 3) 自检（七条都必须是 yes；与脚本的 LEASE_PERMISSION_CHECKS 一一对应）
-kubectl auth can-i get leases.coordination.k8s.io -n surgecart
-kubectl auth can-i create leases.coordination.k8s.io -n surgecart
-kubectl auth can-i update leases.coordination.k8s.io -n surgecart
-kubectl auth can-i get jobs.batch -n surgecart
-kubectl auth can-i list jobs.batch -n surgecart
-kubectl auth can-i get pods -n surgecart      # T2-06.1.3 / F-01：旧示例漏了这一项
-kubectl auth can-i list pods -n surgecart
+# 3) 一次 apply 覆盖三个权限组（文件内顺序：lock Role → workload Role → cluster ClusterRole）
+kubectl apply -f manifest/kubernetes/examples/deploy-lock/rbac.yaml
 ```
 
-`test/manifest` 的 `TestRBACGrantsEveryPermissionTheScriptNeeds` 会自动比对
-「脚本实际使用的资源操作 ⊇ 脚本声明的权限 ⊆ RBAC 示例授权的权限」，
-本文件不再作为权限完整性的证据（手工检查 YAML 无法证明脚本还需要什么）。
+> 例外：`leases` 的 `patch` 在 Role 里保留，但标注为 `operator-only`
+> （`deploy-lock.surgecart.io/operator-only-verbs: "leases:patch"`），只供人工
+> `kubectl annotate` 恢复；脚本自己从不调用。所以「只授予脚本用到的权限」有这一个例外。
+
+**为什么 `namespaces` 必须走 ClusterRole**：`namespaces` 是集群级资源，`Role` 的作用域是
+单个命名空间，无法授予它。把 `namespaces get/create` 写进 `Role` 不会生效，
+`kubectl auth can-i get namespaces` 仍然返回 `no`，而脚本在首次部署时确实需要
+`namespaces get`（严格判断是否存在）与 `namespaces create`（引导命名空间）——
+T2-06.1.3 及更早的示例没有这两项，这是审计 A-1/A-2 的根因。
+`selfsubjectaccessreviews create` 同理（`kubectl auth can-i` 本身就是一次 SSAR）。
+
+自检（全部必须是 `yes`；与脚本 `REQUIRED_PERMISSIONS` 的 29 项一一对应）：
+
+```bash
+# 命名空间级（29 项中除集群级 4 项外的 25 项）
+kubectl auth can-i get    leases.coordination.k8s.io -n surgecart
+kubectl auth can-i create leases.coordination.k8s.io -n surgecart
+kubectl auth can-i update leases.coordination.k8s.io -n surgecart
+kubectl auth can-i get    jobs.batch -n surgecart
+kubectl auth can-i list   jobs.batch -n surgecart
+kubectl auth can-i create jobs.batch -n surgecart
+kubectl auth can-i patch  jobs.batch -n surgecart
+kubectl auth can-i get    pods -n surgecart
+kubectl auth can-i list   pods -n surgecart
+kubectl auth can-i get    pods/log -n surgecart
+kubectl auth can-i get    secrets -n surgecart
+kubectl auth can-i get    deployments.apps -n surgecart
+kubectl auth can-i list   deployments.apps -n surgecart
+kubectl auth can-i create deployments.apps -n surgecart
+kubectl auth can-i patch  deployments.apps -n surgecart
+kubectl auth can-i get    configmaps -n surgecart
+kubectl auth can-i create configmaps -n surgecart
+kubectl auth can-i patch  configmaps -n surgecart
+kubectl auth can-i get    services -n surgecart
+kubectl auth can-i list   services -n surgecart
+kubectl auth can-i create services -n surgecart
+kubectl auth can-i patch  services -n surgecart
+kubectl auth can-i get    persistentvolumeclaims -n surgecart
+kubectl auth can-i create persistentvolumeclaims -n surgecart
+kubectl auth can-i patch  persistentvolumeclaims -n surgecart
+
+# 集群级（不带 -n；Role 无法授予）
+kubectl auth can-i get    namespaces      # 严格判断命名空间是否存在
+kubectl auth can-i create namespaces      # 首次部署引导命名空间
+kubectl auth can-i patch  namespaces      # apply namespace.yaml 时对象已存在走 PATCH
+kubectl auth can-i create selfsubjectaccessreviews.authorization.k8s.io
+```
+
+权威列表是脚本里的 `REQUIRED_PERMISSIONS`（每条都带使用它的函数与行号），
+也可以用 `bash scripts/deploy-k8s.sh --help` 的「所需 RBAC」段对照。
+`test/manifest` 的 `TestDeliveredRBACMatchesRequiredPermissions` 与
+`TestDocRBACManifestsAndPermissions` 会自动比对
+「脚本声明的权限 ⊆ RBAC 示例的授权（按 namespace / cluster 作用域分组）」，
+本文件不作为权限完整性的证据（手工检查 YAML 无法证明脚本还需要什么）。
 
 首次部署的顺序与后续发布一致（先迁移、后应用），额外只需要「命名空间 + RBAC」这两步：
 
@@ -1130,7 +1235,11 @@ kubectl -n surgecart get lease surgecart-deploy-lock -o yaml  # holderIdentity �
 ```
 
 脚本会在命名空间缺失时自动创建它（`shared/namespace.yaml`，幂等），但**不会**自动创建 RBAC：
-授权属于集群管理动作，不应由发布流程自我扩权。权限缺失时脚本在迁移之前失败（退出码 3）。
+授权属于集群管理动作，不应由发布流程自我扩权。T2-06.1.4 起顺序是
+「权限预检（集群级 → 命名空间存在性 → 命名空间级）→ 命名空间引导 → 取锁 → 迁移」：
+权限缺失时脚本在任何写请求之前失败（退出码 3），不会先建命名空间再报错。
+命名空间级的 `unknown`（SSAR 无法判定）还有一个例外路径：命名空间确实不存在时，
+脚本会先创建空命名空间再**复检**这些条目，复检仍失败才退出 3。
 
 ## 14. 验证分级
 
@@ -1143,6 +1252,11 @@ kubectl -n surgecart get lease surgecart-deploy-lock -o yaml  # holderIdentity �
 | 两 Runner 并发（脚本层） | 两个真实 bash 进程竞争同一 fake 状态目录 | 已验证（脚本互斥逻辑） |
 | 迁移超时后「Job 仍在跑 → 拒绝接管」 | fake 状态 + 真实脚本进程 | 已验证（脚本语义） |
 | 续租参数不变量（合法/临界/非法） | 真实脚本退出码 + 调用记录（非法组合零 kubectl 调用） | 已验证 |
+| `renewTime` 锚点（B-1/B-2） | `TestMultiprocessPreflightDelayKeepsRenewTimeFresh`（预检 16s > 租期 15s）、`TestMultiprocessStaleRenewTimeAtCreateFailsClosed`（`LEASE_ANCHOR_INVALID`，零 apply） | 已验证（脚本语义 + `LEASE_WINDOW` 证据行） |
+| 过期锁不被「续命」（B-3/B-4） | `TestRecordWriteRefusedWhenLeaseExpired`：过期后写 COMPLETE 记录被拒、不改 `renewTime` | 已验证（脚本语义） |
+| 退避预算与实现同源（B-5） | `TestRenewBackoffBudgetIsSingleSourced`：常量 → 实际 sleep → 预算一致 | 已验证（源码契约） |
+| 权限/错误分类（T2-06.1.4 / A-3） | `test/deployk8s/rbac_test.go`：28+ 条权限矩阵、四类错误分类矩阵、首次发布、unknown 复检 | 已验证（脚本语义） |
+| 文档契约（T2-06.1.4） | `test/manifest/doc_contract_test.go`：CLI 默认值 / 退出码 / 预算 / 权限集合 / AUD 结论 | 已验证（静态契约） |
 | preStop 命令在运行镜像可用 | `docker run --entrypoint /bin/sh my-shop-app:t204 -c '... sleep ...'`（`test-container-runtime` PASS[4]） | 已验证（本地构建镜像） |
 | server-side dry-run | `kubectl apply --dry-run=server` | 无集群，NOT_VERIFIED |
 | 真实集群部署 | 迁移 Job、Deployment Available、Service、探针 | 无集群，NOT_VERIFIED |
@@ -1165,8 +1279,11 @@ kubectl -n surgecart get lease surgecart-deploy-lock -o yaml  # holderIdentity �
 - **续租链的真实耗时**（外部包装记录的毫秒时间戳）：GET/REPLACE 各 0.9s、超时 1s 时，
   三次 attempt 的实测耗时不超过 `attempts×(get+replace)+backoff`（F-02）；
 - **重试期间租约过期** → 不再写入 Lease，直接按失锁退出（F-02.4）；
-- **权限预检**：leases/jobs/pods 的每个 (verb, resource) 单独拒绝 → 退出码 3、零资源变更；
-  `auth can-i` 自身失败时输出「无法确认」而不是「缺少权限」（F-01）；
+- **权限预检**：`REQUIRED_PERMISSIONS` 的 29 项逐项拒绝 → 退出码 3、零资源变更；
+  `auth can-i` 自身失败时输出「无法确认」而不是「缺少权限」（F-01 / T2-06.1.4 A-1/A-2）；
+  集群级项（`namespaces`、`selfsubjectaccessreviews`）按 `ClusterRole` 判定；
+- **错误分类**：Secret / Namespace / Job / Pod 的 403（Forbidden）、NotFound、5xx、超时
+  四种 stderr 各自映射到正确的措辞与退出码，不允许把「查询失败」说成「不存在」（A-3）；
 - **Pod 查询分类**：空列表 / 全部终态 / 活动 Pod / 403 / 500 / 超时 / 归属不一致，
   在 pod gate、全命名空间扫描、接管核验三处措辞一致（F-07）；
 - Job 状态序列（不存在 / 运行中 / 删除中 / Complete / Failed）、Job UID 变化、
