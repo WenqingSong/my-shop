@@ -391,34 +391,79 @@ func docLoadRBACDir(t *testing.T) ([]string, []docRBACDocument) {
 	return names, docs
 }
 
-// docScriptRequiredPermissions 解析脚本声明的权限表。
+// docPermission 是脚本声明的单条权限。
 //
-// T2-06.1.4 起脚本用统一的 REQUIRED_PERMISSIONS；基线仍是 LEASE_PERMISSION_CHECKS。
-// 两者都是 `"<verb> <resource.group>"` 形式，因此解析逻辑共用，但**优先**取新名字：
-// 如果 A 已经改名而文档/测试仍读旧表，契约会悄悄失效。
-func docScriptRequiredPermissions(t *testing.T, script string) []string {
+// T2-06.1.4 的格式是 `"verb|group|resource|scope|callers@Lline"`：
+//   - group 为 `core` 表示 core/v1（RBAC 里写 `""`）；
+//   - scope 为 `namespace` / `cluster`：决定它只能被 Role 还是 ClusterRole 授予；
+//   - callers 是使用该权限的函数名（`@L<line>` 是脚本里的行号）。
+//
+// 基线（T2-06.1.3）的格式是 `"<verb> <resource.group>"`，没有 scope/行号。
+// 两种都支持：不允许因为脚本改了声明格式就让文档契约静默失效。
+type docPermission struct {
+	verb     string
+	group    string
+	resource string
+	scope    string
+	callers  string
+	line     int
+}
+
+func (p docPermission) key() string {
+	return p.verb + " " + p.group + "/" + p.resource
+}
+
+func (p docPermission) String() string {
+	scope := p.scope
+	if scope == "" {
+		scope = "unspecified"
+	}
+	return fmt.Sprintf("%s %s/%s (%s)", p.verb, p.group, p.resource, scope)
+}
+
+// docScriptRequiredPermissions 解析脚本声明的权限表，优先使用 REQUIRED_PERMISSIONS。
+func docScriptRequiredPermissions(t *testing.T, script string) []docPermission {
 	t.Helper()
 	for _, name := range []string{"REQUIRED_PERMISSIONS", "LEASE_PERMISSION_CHECKS"} {
 		block := regexp.MustCompile(`(?s)` + name + `=\((.*?)\n\)`).FindStringSubmatch(script)
 		if block == nil {
 			continue
 		}
-		var entries []string
+		var out []docPermission
+		legacy := regexp.MustCompile(`^"([a-z]+) ([^"|]+)"$`)
+		structured := regexp.MustCompile(`^"([a-z]+)\|([^"|]*)\|([^"|]+)\|([a-z]*)\|?([^"|]*)"$`)
 		for _, line := range strings.Split(block[1], "\n") {
 			trimmed := strings.TrimSpace(line)
 			if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 				continue
 			}
-			match := regexp.MustCompile(`^"([a-z]+) ([^"]+)"$`).FindStringSubmatch(trimmed)
-			if match == nil {
-				t.Fatalf("%s 里的条目无法解析: %q（期望 \"<verb> <resource.group>\"）", name, trimmed)
+			if match := legacy.FindStringSubmatch(trimmed); match != nil {
+				group, resource := docNormalizeResource(match[2])
+				out = append(out, docPermission{verb: match[1], group: group, resource: resource})
+				continue
 			}
-			entries = append(entries, match[1]+" "+match[2])
+			match := structured.FindStringSubmatch(trimmed)
+			if match == nil {
+				t.Fatalf("%s 里的条目无法解析: %q", name, trimmed)
+			}
+			group := match[2]
+			if group == "core" {
+				group = ""
+			}
+			entry := docPermission{verb: match[1], group: group, resource: match[3], scope: match[4]}
+			entry.callers = match[5]
+			if idx := strings.LastIndex(entry.callers, "@L"); idx >= 0 {
+				if number, err := strconv.Atoi(entry.callers[idx+2:]); err == nil {
+					entry.line = number
+				}
+				entry.callers = entry.callers[:idx]
+			}
+			out = append(out, entry)
 		}
-		if len(entries) == 0 {
+		if len(out) == 0 {
 			t.Fatalf("%s 解析为空：权限声明的唯一事实来源不能为空", name)
 		}
-		return entries
+		return out
 	}
 	t.Fatal("scripts/deploy-k8s.sh 既没有 REQUIRED_PERMISSIONS 也没有 LEASE_PERMISSION_CHECKS")
 	return nil
@@ -436,13 +481,13 @@ func docNormalizeResource(ref string) (group, resource string) {
 // TestDocRBACManifestsAndPermissions 断言：
 //
 //	磁盘上的清单集合  ==  文档 §13.1 列出的文件
-//	脚本声明的权限    ⊆   清单授权的权限（并集）
+//	脚本声明的权限    ⊆   清单授权的权限（按 scope 分别由 Role / ClusterRole 授予）
 //	namespaces        ⇒  必须是 ClusterRole（namespaced Role 无法授权集群级资源）
 func TestDocRBACManifestsAndPermissions(t *testing.T) {
 	files, docs := docLoadRBACDir(t)
 	script := docRead(t, "scripts/deploy-k8s.sh")
 	manual := docRead(t, "docs/development/kubernetes.md")
-	section := docSection(t, manual, "### 13.1 授予发布锁权限", "## 14. 验证分级")
+	section := docSection(t, manual, "### 13.1 授予发布权限", "## 14. 验证分级")
 	design := docRead(t, "docs/design/deploy-lock.md")
 
 	// 1) 文档必须点名每一个清单文件：多一份没写 = 运维漏 apply；写了一份不存在的 = 文档撒谎。
@@ -466,11 +511,23 @@ func TestDocRBACManifestsAndPermissions(t *testing.T) {
 		}
 	}
 
-	// 2) 脚本声明的每一项权限都必须被清单覆盖（否则按示例授权后会在预检失败）。
-	granted := map[string]bool{}
+	// 2) 按 scope 收集授权：namespaced 权限只能由 Role 授予，cluster 权限只能由 ClusterRole 授予。
+	roleGranted := map[string]bool{}
+	clusterGranted := map[string]bool{}
+	roleNamespaces := map[string]bool{}
 	hasNamespaceRule := false
 	clusterRoleGrantsNamespaces := false
 	for _, doc := range docs {
+		target := clusterGranted
+		if doc.Kind == "Role" {
+			target = roleGranted
+			if doc.Metadata.Namespace == "" {
+				t.Errorf("%s 中的 Role/%s 没有 metadata.namespace：Role 必须在命名空间内生效",
+					docRBACDir, doc.Metadata.Name)
+			} else {
+				roleNamespaces[doc.Metadata.Namespace] = true
+			}
+		}
 		for _, rule := range doc.Rules {
 			for _, group := range rule.APIGroups {
 				for _, resource := range rule.Resources {
@@ -481,28 +538,54 @@ func TestDocRBACManifestsAndPermissions(t *testing.T) {
 						}
 					}
 					for _, verb := range rule.Verbs {
-						granted[verb+" "+group+"/"+resource] = true
+						target[verb+" "+group+"/"+resource] = true
 					}
 				}
 			}
 		}
 	}
+	if len(roleNamespaces) == 0 {
+		t.Fatal("RBAC 清单里没有任何带命名空间的 Role：namespaced 权限（leases/jobs/pods…）必须有 Role")
+	}
+
+	// 3) 脚本声明的每一项权限都必须被对应作用域的清单覆盖。
+	lines := strings.Split(script, "\n")
 	required := docScriptRequiredPermissions(t, script)
 	for _, entry := range required {
-		parts := strings.SplitN(entry, " ", 2)
-		group, resource := docNormalizeResource(parts[1])
-		key := parts[0] + " " + group + "/" + resource
-		if !granted[key] {
-			t.Errorf("脚本声明需要 %q（%s），但 %s 下的清单没有授权：按示例配置的身份会在权限预检阶段失败（退出码 3）",
-				entry, key, docRBACDir)
+		switch entry.scope {
+		case "cluster":
+			if !clusterGranted[entry.key()] {
+				t.Errorf("脚本声明需要 %s，但清单里的 ClusterRole 没有授予：集群级权限无法由 Role 授予", entry)
+			}
+		case "namespace":
+			if !roleGranted[entry.key()] {
+				t.Errorf("脚本声明需要 %s，但清单里的 Role 没有授予：按示例配置的身份会在权限预检阶段失败（退出码 3）", entry)
+			}
+		default:
+			if !roleGranted[entry.key()] && !clusterGranted[entry.key()] {
+				t.Errorf("脚本声明需要 %s，但清单没有授予", entry)
+			}
+		}
+		// 行号引用必须真实存在：文档/脚本引用的行号失效会让人查到错误的位置。
+		if entry.line > 0 && entry.line > len(lines) {
+			t.Errorf("%s 引用的脚本行号 L%d 超出文件范围（共 %d 行）", entry, entry.line, len(lines))
+		}
+		for _, caller := range strings.Split(entry.callers, ",") {
+			caller = strings.TrimSpace(caller)
+			if caller == "" {
+				continue
+			}
+			if !strings.Contains(script, caller+"()") && !strings.Contains(script, caller) {
+				t.Errorf("%s 声明的调用者 %q 在脚本里不存在：权限表的可追溯性被破坏", entry, caller)
+			}
 		}
 	}
 
-	// 3) namespaces 只能由 ClusterRole 授予（Role 的作用域是单个命名空间）。
+	// 4) namespaces 只能由 ClusterRole 授予（Role 的作用域是单个命名空间）。
 	if hasNamespaceRule && !clusterRoleGrantsNamespaces {
 		t.Error("清单里出现 namespaces 但没有任何 ClusterRole 授权它：Role 无法授予集群级资源")
 	}
-	if hasNamespaceRule || clusterRoleGrantsNamespaces {
+	if clusterRoleGrantsNamespaces {
 		for _, fragment := range []string{"ClusterRole", "namespaces"} {
 			if !strings.Contains(design, fragment) && !strings.Contains(section, fragment) {
 				t.Errorf("文档没有解释 %q：namespaces 为什么必须走 ClusterRole 是运维必须知道的事实", fragment)
@@ -510,39 +593,43 @@ func TestDocRBACManifestsAndPermissions(t *testing.T) {
 		}
 	}
 
-	// 4) 拆分后的清单必须给出适用主体与 apply 顺序（否则三份文件的先后无法复现）。
+	// 5) 拆分后的清单必须给出适用主体与 apply 顺序（否则多份文件的先后无法复现）。
 	if len(files) > 1 {
-		if !regexp.MustCompile(`(?s)顺序`).MatchString(section) {
+		if !strings.Contains(section, "顺序") {
 			t.Error("docs/development/kubernetes.md §13.1 没有说明多份清单的 apply 顺序")
 		}
-		for _, doc := range docs {
-			if doc.Kind == "RoleBinding" || doc.Kind == "ClusterRoleBinding" {
-				if len(doc.Subjects) == 0 {
-					t.Errorf("清单 %s/%s 的 %s 没有 subjects：无法确认它绑给谁",
-						docRBACDir, doc.Metadata.Name, doc.Kind)
-				}
+	}
+	for _, doc := range docs {
+		if doc.Kind == "RoleBinding" || doc.Kind == "ClusterRoleBinding" {
+			if len(doc.Subjects) == 0 {
+				t.Errorf("清单 %s/%s 的 %s 没有 subjects：无法确认它绑给谁",
+					docRBACDir, doc.Metadata.Name, doc.Kind)
 			}
 		}
-		if !strings.Contains(section, "ServiceAccount") {
-			t.Error("docs/development/kubernetes.md §13.1 没有说明适用主体（ServiceAccount/User/Group）")
-		}
+	}
+	if !strings.Contains(section, "ServiceAccount") {
+		t.Error("docs/development/kubernetes.md §13.1 没有说明适用主体（ServiceAccount/User/Group）")
 	}
 
-	// 5) 交付示例不得授予集群级通配或删除权限。
+	// 6) 交付示例不得授予集群级通配或删除权限。
 	for _, doc := range docs {
 		for _, rule := range doc.Rules {
 			for _, verb := range rule.Verbs {
 				if verb == "*" || verb == "delete" || verb == "deletecollection" {
-					t.Errorf("%s 中的 %s 授予了 %q：发布脚本永不删除资源", docRBACDir, doc.Kind, verb)
+					t.Errorf("%s 中的 %s/%s 授予了 %q：发布脚本永不删除资源",
+						docRBACDir, doc.Kind, doc.Metadata.Name, verb)
 				}
 			}
 			for _, group := range rule.APIGroups {
 				if group == "*" {
-					t.Errorf("%s 中的 %s 出现通配 apiGroups: *", docRBACDir, doc.Kind)
+					t.Errorf("%s 中的 %s/%s 出现通配 apiGroups: *", docRBACDir, doc.Kind, doc.Metadata.Name)
 				}
 			}
 		}
 	}
+
+	namespaces := sortedKeys(roleNamespaces)
+	t.Logf("RBAC 清单 %v；Role 命名空间 %v；脚本声明 %d 项权限", files, namespaces, len(required))
 }
 
 // ---------------------------------------------------------------------------

@@ -235,8 +235,12 @@ Nginx 是面向外部的唯一 HTTP 入口，职责为纯反向代理（无 Lua/
 ```text
 构建并推送镜像（短 SHA）
     → 更新三处版本（镜像 tag / 版本标记 / 迁移 Job 后缀，三者同值）
-    → 权限预检（leases get/create/update；jobs get/list；pods get/list；
-      区分「Forbidden」与「无法确认」，两者都退出 3）
+    → 权限预检（T2-06.1.4：全部发生在第一个写请求之前）
+        集群级（ClusterRole）：namespaces get/create + selfsubjectaccessreviews create
+        命名空间级（Role）：leases / jobs / pods / pods-log / secrets / deployments /
+                            configmaps / services / pvc —— 逐项 auth can-i
+        区分「Forbidden（明确拒绝）」与「无法确认（SSAR 失败）」，两者都退出 3
+    → 命名空间引导（仅在确认不存在且集群级权限齐备时；幂等）
     → 获取发布锁 Lease/surgecart-deploy-lock（原子 create + resourceVersion CAS；
       租期 45s，续租 = GET + REPLACE 各受 3s 超时约束、最多 3 次尝试，
       预算 10 + 3×(3+3) + 1 + 5 = 34 < 45；

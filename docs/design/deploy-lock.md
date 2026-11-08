@@ -682,43 +682,121 @@ CI 环境下必须额外设置 `DEPLOY_K8S_ALLOW_DOWNGRADE_IN_CI=1`。
 
 版本检查在**锁内**执行：否则「检查 → 应用」之间会被另一个流水线插入。
 
-## 12. RBAC 最小权限
+## 12. RBAC 最小权限（T2-06.1.4：三类权限 + 预检前移）
 
-| 资源 | 动词 | 用途 | 说明 |
-|---|---|---|---|
-| `leases`（`resourceNames: surgecart-deploy-lock`） | `get` | 读取锁记录与迁移记录注解 | — |
-| `leases` | `create` | 首次获取锁 | 无法用 `resourceNames` 限制（RBAC 固有限制） |
-| `leases` | `update` | 续租 / 接管 / 释放 / 写迁移记录（PUT + rv 的 CAS） | `kubectl replace` 需要 `update` |
-| `leases` | `patch`（可选） | 人工恢复 runbook | 脚本不调用 |
-| `jobs`（namespace 内） | `get` | 按名称核验上一轮迁移 Job（uid/终态） | T2-06.1.1 新增 |
-| `jobs` | `list` | 扫描「是否存在未终结的迁移 Job」 | T2-06.1.1 新增 |
-| `pods`（namespace 内） | `get`/`list` | 按 `job-name` 读取该 Job 的 Pod；按 component 标签扫描残留迁移 Pod | T2-06.1.2 引入，**T2-06.1.3 才补进交付示例**（F-01） |
+权限的**唯一事实来源**是 `scripts/deploy-k8s.sh` 的 `REQUIRED_PERMISSIONS`
+（每条都记录使用它的函数与脚本行号）。交付示例只有一份文件
+`manifest/kubernetes/examples/deploy-lock/rbac.yaml`，但里面是**三个权限组**，
+作用域与绑定对象不同，必须一起 apply：
 
-为什么脚本检查的是 `get/create/update` 而不是 `patch`：脚本用 `replace`（PUT）实现 CAS。
-权限预检发生在**迁移之前**；缺少 `jobs`/`pods` 的 `get/list` 时脚本在迁移之前失败
-（退出码 3），而不是带着未知的迁移状态继续发布。
+| # | 权限组 | Kind | 作用域 | 适用主体 |
+|---|---|---|---|---|
+| 1 | `surgecart-deploy-lock` | `Role` + `RoleBinding` | 命名空间 `surgecart` | 发布身份（ServiceAccount / User / Group） |
+| 2 | `surgecart-deploy-workload` | `Role` + `RoleBinding` | 命名空间 `surgecart` | 同一个发布身份 |
+| 3 | `surgecart-deploy-cluster` | `ClusterRole` + `ClusterRoleBinding` | 集群级 | 同一个发布身份 |
 
-**F-01 的教训**：T2-06.1.2 的 RBAC 示例漏了 `pods`。示例本身看起来「已经授权」，
-但按它配置的身份首次发布就会在 Pod 门禁处失败（退出码 7）—— 而开发者没有任何线索
-指向 RBAC。因此 T2-06.1.3 做了三件事：
+`kubectl apply -f manifest/kubernetes/examples/deploy-lock/rbac.yaml` 会按文件顺序
+创建这三组对象；**前提是 `surgecart` 命名空间已存在**（`Role`/`RoleBinding` 是命名空间
+对象，命名空间不存在时 apply 会失败）。所以顺序是：
 
-1. 示例补齐 core `pods get/list`（`apiGroups: [""]`）；
-2. `check_lease_permissions` 逐项 `auth can-i`，并把顶层权限需求收敛成脚本里的
-   `LEASE_PERMISSION_CHECKS`（唯一事实来源）；
-3. `test/manifest` 的 `TestRBACGrantsEveryPermissionTheScriptNeeds` 自动比对
-   「脚本实际使用的资源操作 == 脚本声明的权限 ⊆ 交付 RBAC 的授权」——
-   **不允许只靠手工检查 YAML 证明权限完整**。
+```bash
+kubectl apply -f manifest/kubernetes/shared/namespace.yaml        # 1) 命名空间先存在
+kubectl apply -f manifest/kubernetes/examples/deploy-lock/rbac.yaml  # 2) 三个权限组
+kubectl auth can-i update leases.coordination.k8s.io -n surgecart    # 3) 自检（§13.1 有完整列表）
+```
 
-权限预检还会区分两种失败（F-01）：
+### 12.1 命名空间级权限（Role + RoleBinding）
+
+| 资源（group/resource） | 动词 | 用途 |
+|---|---|---|
+| `coordination.k8s.io/leases`（`resourceNames: surgecart-deploy-lock`） | `get` | 读取 holder / `renewTime` / rv / 迁移记录注解 |
+| `coordination.k8s.io/leases` | `create` | 首次原子获取锁（`resourceNames` 无法约束 create） |
+| `coordination.k8s.io/leases` | `update` | 续租 / 接管 / 释放 / 写迁移记录（`replace` = PUT + rv CAS） |
+| `batch/jobs` | `get`/`list` | 核验上一轮迁移 Job、扫描未终结迁移 |
+| `batch/jobs` | `create`/`patch` | `kubectl apply -f migration.yaml` 的两个分支（新建 / 已存在则 PATCH） |
+| `core/pods` | `get`/`list` | Pod 生命周期门禁（`job-name` 归属 + component 标签扫描） |
+| `core/pods/log` | `get` | 迁移失败时读取 Job 日志（诊断能力） |
+| `core/secrets` | `get` | 锁内复检 Secret 是否存在 |
+| `apps/deployments` | `get`/`list` | 降级保护读取线上版本；发布后只读汇总 |
+| `apps/deployments` | `create`/`patch` | apply Application 清单 |
+| `core/configmaps` | `get`/`create`/`patch` | apply Application 清单 |
+| `core/services` | `get`/`list`/`create`/`patch` | apply Application 清单 + 汇总 |
+| `core/persistentvolumeclaims` | `get`/`create`/`patch` | apply Application 清单 |
+
+### 12.2 集群级权限（ClusterRole + ClusterRoleBinding）
+
+| 资源 | 动词 | 用途 |
+|---|---|---|
+| `core/namespaces` | `get` | 严格判断命名空间是否存在（只有 NotFound 才算「不存在」） |
+| `core/namespaces` | `create` | 首次部署引导命名空间 |
+| `authorization.k8s.io/selfsubjectaccessreviews` | `create` | `kubectl auth can-i` 本身就是一次 SSAR |
+
+**`namespaces` 为什么必须走 ClusterRole**：`namespaces` 是**集群级资源**，`Role` 的作用域是
+单个命名空间，无法授予集群级资源 —— 把 `namespaces get/create` 写进 `Role` 不会生效，
+`kubectl auth can-i get namespaces` 仍然返回 `no`。`selfsubjectaccessreviews` 同理。
+T2-06.1.3 及更早的示例完全没有这两项，因此「按示例授权 → 首次部署创建命名空间」必然 403
+（T2-06.1.4 审计 A-1/A-2）。
+
+### 12.3 预检顺序（全部发生在第一个写请求之前）
+
+```text
+阶段 1  集群级权限（不含 -n）：namespaces get/create、selfsubjectaccessreviews create
+阶段 2  严格判断命名空间是否存在：只有 `<资源> "<名字>" not found` 才是「不存在」
+阶段 3  命名空间级权限： leases / jobs / pods / pods-log / secrets / deployments /
+                          configmaps / services / pvc（按 REQUIRED_PERMISSIONS 逐项）
+阶段 4  命名空间引导（仅在确认不存在且权限齐备时；幂等）
+```
+
+任何一项 `denied`（`auth can-i` 明确返回 `no`）或 `unknown`（SSAR 本身 5xx/超时）
+都在阶段 1/3 直接退出 **3**，不会发起锁/迁移/Deployment 的任何写请求。
+阶段 3 的 `unknown` 有一个例外：命名空间尚不存在时 SSAR 可能无法判定，脚本会先创建
+空命名空间再**复检**这些条目，复检仍失败则退出 3。
+
+### 12.4 退出码与错误分类（T2-06.1.4）
+
+`auth can-i` 的三种结果必须分开表述：
 
 | `auth can-i` 结果 | 含义 | 输出 | 退出码 |
 |---|---|---|---|
 | `yes` | 有权限 | — | — |
-| `no`（Forbidden） | **明确被拒绝** | `缺少 <resource> 的 <verb> 权限（Forbidden…）` | 3 |
-| 其他错误（5xx/超时） | **无法确认**（不是被拒绝） | `无法确认当前身份…（查询失败，不是「被拒绝」）` | 3 |
+| `no`（rc≠0 且输出 `no`） | **明确被拒绝** | `当前身份缺少 <resource> 的 <verb> 权限（Forbidden：auth can-i 明确返回 no）` | 3 |
+| 其他（5xx / 超时 / kubectl 报错） | **无法确认**（不是被拒绝） | `无法确认…是否有…权限（查询失败，**不是**「被拒绝」）` | 3 |
 
-> 说明：`pods` 的读取权限在多数发布身份上本来就有；若被移除，即使绕过预检，Pod 门禁
-> 也会 fail-closed（退出码 7），表现为「发布被拒绝」，不会退化成「放行」。
+运行期对业务资源（Secret / Deployment / Job / Pod）的读失败不能用「不存在」概括。
+脚本的 `classify_api_error` 把 stderr 分成五类，**分类标签必须出现在错误信息里**：
+
+| 分类 | 判据 | 含义 | 典型处置 |
+|---|---|---|---|
+| `forbidden` | `(Forbidden)` / `forbidden:` | API Server 明确拒绝（403） | 权限问题；**不等于对象不存在** |
+| `notfound` | 严格匹配 `<resource> "<name>" not found` | 对象确实不存在 | 需要创建/接受首次部署 |
+| `api` | 5xx / InternalError / ServiceUnavailable | 服务端故障，状态未知 | fail-closed，先修 API |
+| `timeout` | Client.Timeout / 连接拒绝 / i/o timeout / no such host | 客户端没等到响应，**请求可能已生效** | 只读核对，不能当作没发生 |
+| `unknown` | 其余（例如读 Job 时收到 `namespaces "x" not found`） | 无法判定 | fail-closed |
+
+对应到具体对象的退出码：
+
+| 场景 | 分类 | 退出码 | 措辞要求 |
+|---|---|---|---|
+| Secret 读取 | `notfound` | 1 | 「缺少 Secret …（NotFound）」 |
+| Secret 读取 | `forbidden` | **3** | 「无权读取 Secret…**这不是「Secret 不存在」**」 |
+| Secret 读取 | `api`/`timeout`/`unknown` | 1 | 「无法确认是否存在…**不等于「缺少 Secret」**」 |
+| 命名空间读取 | `forbidden` | **3** | 「无权读取命名空间…**这不是「命名空间不存在」**」 |
+| 命名空间创建 | `forbidden` | 3 | 提示必须用 ClusterRole（Role 无法授予） |
+| Deployment 读取（锁内版本判定） | 任意 | 1 | 「无法确认线上 Deployment 状态（fail-closed）」 |
+| 迁移 Job 列表（迁移前门禁） | 任意 | **7** | 「无法确认迁移 Job 状态…不要当作「没有 Job」」 |
+| 迁移 Pod 查询（Pod 门禁） | `forbidden`/`api`/`timeout` | **7** | 「无法确认 Pod 状态」≠「Pod 还在跑」 |
+| 读取 Job 日志（诊断） | 任意 | 不改变退出码 | 必须打印分类，不得 `|| true` 静默吞掉 |
+
+> 业务资源 403（例如 `deployments`/`configmaps`/`services` 的 `create`/`patch`）在预检阶段
+> 就会被拦住并退出 3；如果预检通过后运行期仍收到 403（RBAC 在发布过程中被改动），
+> 应用清单 apply 走「apply 失败」路径（退出码 1 + `APPLICATION_OUTCOME_UNKNOWN`），
+> 不会被误报成「资源不存在」。
+
+`test/manifest` 的 `TestDeliveredRBACMatchesRequiredPermissions`、
+`TestRequiredPermissionsCoversAuditFindings`、`TestScriptKubectlUsageIsDeclared` 与
+`TestDocRBACManifestsAndPermissions`（T2-06.1.4）自动比对
+「脚本实际使用的资源操作 ⊆ 脚本声明的权限 ⊆ 交付 RBAC 的授权（按 namespace / cluster 作用域分组）」——
+**不允许只靠手工检查 YAML 证明权限完整**。
 
 ## 13. 验证方式与边界
 
@@ -727,8 +805,10 @@ CI 环境下必须额外设置 `DEPLOY_K8S_ALLOW_DOWNGRADE_IN_CI=1`。
 | 脚本行为（锁/迁移生命周期/版本/判定/故障/续租参数/Pod 门禁/证据恢复/在途请求） | `go test ./test/deployk8s/`：真实执行脚本 + fake kubectl（真实进程、真实并发、真实 SIGTERM/SIGKILL/SIGSTOP、外部延迟包装） | 已验证（本仓库环境） |
 | 续租预算与实际耗时（F-02） | `TestRenewChainStaysWithinBudget`：GET/REPLACE 各延迟 0.9s（超时上限 1s），用外部包装的毫秒时间戳测量 3 次 attempt 的真实耗时并与公式上界比对 | 已验证（脚本语义 + 实测耗时） |
 | 租约过期后的续租（F-02.4） | `TestRenewAbortsWhenLeaseExpiresDuringRetries`：重试期间把服务端 `renewTime` 推过期，断言不再写 Lease | 已验证（脚本语义） |
-| 权限契约（F-01） | `test/manifest/TestRBACGrantsEveryPermissionTheScriptNeeds`：脚本声明 == 脚本实际使用 ⊆ RBAC 示例；`test/deployk8s/rbac_test.go`：逐项拒绝 + Forbidden/unknown 区分 | 已验证（静态契约 + 脚本行为） |
+| 权限契约（F-01 / T2-06.1.4 A-1/A-2） | `test/manifest`：`TestDeliveredRBACMatchesRequiredPermissions`（脚本声明 ⊆ 交付 RBAC，按作用域）、`TestRequiredPermissionsCoversAuditFindings`、`TestRequiredPermissionsCoverBuiltManifests`、`TestScriptKubectlUsageIsDeclared`；`test/deployk8s/rbac_test.go`：`TestEveryRequiredPermissionIsEnforced` 等逐项拒绝 + Forbidden/unknown 区分 | 已验证（静态契约 + 脚本行为） |
 | Pod 查询错误分类（F-07） | `test/deployk8s/podquery_test.go`：空列表/全终态/活动 Pod/403/500/超时/归属不一致 | 已验证（脚本语义） |
+| 权限/业务资源错误分类（T2-06.1.4 / A-3 / AUD-09） | `test/deployk8s/rbac_test.go`：`TestSecretReadForbiddenIsNotMissingSecret`、`TestSecretReadFailureIsNotMissingSecret`、`TestSecretNotFoundIsReportedAsMissing`、`TestNamespaceReadFailureIsNotReportedAsAbsent`、`TestJobsListForbiddenIsNotUnfinishedJob`、`TestJobsListServerErrorIsNotUnfinishedJob`、`TestJobLogsForbiddenIsReported` | 已验证（脚本语义） |
+| 文档契约（T2-06.1.4） | `test/manifest/doc_contract_test.go`：从脚本常量 / `usage()` / RBAC 清单反推事实，断言 6 个 CLI 默认值、退出码枚举、续租预算算式与失锁窗口数值、权限集合（按作用域）、`AUD-02`/`AUD-05` 结论、NOT_VERIFIED 项 | 已验证（静态契约，改任一侧都会失败） |
 | 接管语义（F-06） | 替身推进 `resourceVersion`；`TestStaleResourceVersionCannotOverwriteTakeover` 断言旧 rv 的 PUT 得到 409 且不覆盖新 holder | 已验证（**替身语义**，不等于真实 API Server） |
 | 清单契约（版本标签、RBAC 名称与授权范围、超时与租期预算、help/文档默认值） | `test/manifest` 从 Kustomize 构建产物与源文件断言 | 已验证 |
 | 真实 API Server 的 Lease 竞争 | 需要在真实集群并发跑两个 Runner | **NOT_VERIFIED** |
@@ -738,7 +818,7 @@ CI 环境下必须额外设置 `DEPLOY_K8S_ALLOW_DOWNGRADE_IN_CI=1`。
 | Job 被 kubelet 以 `DeadlineExceeded` 终止后的条件传播时延 | 需要真实集群与真实 DDL 负载 | **NOT_VERIFIED** |
 | 「Failed 但 Pod 仍在 Running」的真实时序 | 需要真实集群 + 真实的 MySQL 长 DDL | **NOT_VERIFIED**（仅在 fake 中构造） |
 
-fake kubectl 能证明什么（T2-06.1.1 / T2-06.1.2 / T2-06.1.3 补齐）：
+fake kubectl 能证明什么（T2-06.1.1 / T2-06.1.2 / T2-06.1.3 补齐，T2-06.1.4 扩展）：
 
 - Lease 的 `create` 原子性、`replace` 的 resourceVersion / UID 校验、确定性 409；
 - API 500 与客户端请求超时对续租判定的影响；**续租链的真实耗时**（外部包装的毫秒时间戳）；
@@ -748,14 +828,19 @@ fake kubectl 能证明什么（T2-06.1.1 / T2-06.1.2 / T2-06.1.3 补齐）：
 - Pod 查询的 403 / 500 / 超时 / 空列表 / 活动 Pod 的五种结果与对应措辞；
 - 「apply 返回错误但对象已创建」「迁移后 Job 消失」「Application apply 在途失锁」这类窗口；
 - 每次 Lease 写入**携带了什么记录**（`lease.write` 事件），因此可以逐次断言记录未被清空；
-- 两个真实 bash 进程共享同一状态目录时的互斥与接管。
+- 两个真实 bash 进程共享同一状态目录时的互斥与接管；
+- T2-06.1.4：**按调用语义注入故障**（verb / group / resource / namespace / name / selector /
+  intent，可带序号），以及**按交付的 RBAC 清单判定授权**（`Authorize`，未授权 403）。
+  这两个能力让「403 被误报成不存在」「权限缺失漏检」这类问题可以被测试直接证伪。
 
 fake kubectl **不能**证明什么：
 
 - etcd 事务与多 apiserver 下的真实乐观并发；
 - 真实 watch 缓存的可见性延迟（本脚本用 `get` 直读，仍是缓存读）；
-- RBAC、Admission、网络分区、时钟偏移、真实 DDL 时序；
+- **真实** RBAC / Admission / 网络分区 / 时钟偏移 / 真实 DDL 时序
+  （fake 只按交付清单做授权判定，不执行真实 SubjectAccessReview，也没有真实 Admission 链）；
 - 真实 kubelet 在 Job `Failed` 之后何时真正停掉 Pod；
-- 已经发出的请求能否被撤销（**不能**，这是架构限制）。
+- 已经发出的请求能否被撤销（**不能**，这是架构限制）；
+- 「按调用语义注入」仍是替身行为：它能构造窗口，但窗口在真实集群上的长度是 NOT_VERIFIED。
 
 两者证明的是不同的事情，报告里不能混为一谈。
