@@ -276,12 +276,16 @@ func TestRenewThreeCASConflictsExhaustAttempts(t *testing.T) {
 			got, strings.Join(f.events(), "\n"))
 	}
 	// 三次 attempt 各读一次 Lease：审计 F-02 的核心就是「attempt 里真的有 GET」。
+	// 判据是「每个 attempt 窗口（上一次续租 replace 之后）内至少有一次 get lease」，
+	// 而不是「紧邻上一行是 get lease」：全局调用日志里主线程的
+	// `replace -f lease-record.yaml` 会与续租 attempt 正常交错（假耦合，见
+	// renewAttemptsStartingWithGet 的注释）。
 	attempts, problems := renewAttemptsStartingWithGet(f)
 	if attempts != 3 {
 		t.Fatalf("续租 replace = %d 次，期望 3；调用:\n%s", attempts, strings.Join(f.calls(), "\n"))
 	}
 	if len(problems) > 0 {
-		t.Fatalf("每次续租 attempt 必须紧接在一次 get lease 之后：\n%s\n调用:\n%s",
+		t.Fatalf("每个续租 attempt 都必须先 get lease 再 PUT（不允许用陈旧 rv 盲写）：\n%s\n调用:\n%s",
 			strings.Join(problems, "\n"), strings.Join(f.calls(), "\n"))
 	}
 	// 冲突不是「写入成功」：不得出现成功续租的写入事件。
@@ -480,23 +484,50 @@ func isRenewReplace(args string) bool {
 	return strings.Contains(args, "replace") && strings.Contains(args, "lease-renew.yaml")
 }
 
-// renewAttemptsStartingWithGet 返回续租 replace 的次数，并逐次检查它前面一次调用
-// 是不是 get lease —— 这是「一次 attempt = GET + REPLACE」在调用序列上的直接证据。
+// renewAttemptsStartingWithGet 返回续租 replace 的次数，并逐次检查「本次 attempt 的
+// replace 之前，上一次续租 replace 之后，至少有一次 get lease」。
+//
+// 这是「一次 attempt = GET + REPLACE」在调用序列上的直接证据（F-02 的核心：
+// 每次都重读 rv，绝不拿陈旧 rv 盲写）。**不断言「紧邻上一次调用是 get lease」** ——
+// 那是一条虚假耦合（T2-06.1.4 追加修复）：
+//
+//   - f.calls() 是**所有进程**共享的全局调用日志：后台续租子 shell 与主线程会并发写它；
+//   - 主线程的 migration_record_write 会插入 `get lease` + `replace -f lease-record.yaml`，
+//     完全可能落在「续租的 GET」与「续租的 PUT」之间，序列形如：
+//     get lease（续租）→ replace -f lease-record.yaml（主线程）→ replace -f lease-renew.yaml（续租）
+//     旧断言只看到 replace 的前一行是 lease-record.yaml，就判失败 —— 但被测语义
+//     （attempt 内部先 GET 后 PUT）其实完全成立。
+//   - 实测：该失败只在「全量并发 + 机器高负载」下偶发（C 的 fake 改成 flock 串行 +
+//     全局 rv 后时序变化把它暴露出来），单测 5 轮、基线 3 轮全量均无法复现。
+//
+// 强度没有降低：窗口内必须有 get lease，因此「漏掉 GET 直接 PUT」仍然会被抓住
+// （TestRenewChainStaysWithinBudget 断言的正是没有 record 写入干扰的纯续租链；
+// 如果 attempt 少了 GET，相邻 replace 的间隔会小于 GET+REPLACE 之和）。
 func renewAttemptsStartingWithGet(f *fixture) (int, []string) {
-	calls := f.calls()
+	return classifyRenewAttempts(f.calls())
+}
+
+// classifyRenewAttempts 是 renewAttemptsStartingWithGet 的纯函数内核（便于用合成
+// 调用序列做确定性回归，不依赖并发时序）：
+//
+//	每个续租 replace 都必须在「上一次续租 replace 之后」见过至少一次 get lease。
+func classifyRenewAttempts(calls []string) (int, []string) {
 	attempts := 0
 	var problems []string
-	for i, call := range calls {
-		if !isRenewReplace(call) {
-			continue
-		}
-		attempts++
-		previous := "<无>"
-		if i > 0 {
-			previous = calls[i-1]
-		}
-		if i == 0 || !isLeaseRead(previous) {
-			problems = append(problems, fmt.Sprintf("第 %d 次续租 replace 之前是: %s", attempts, previous))
+	// sawGet：自上一次续租 replace 以来，是否见过 get lease。
+	sawGet := false
+	for _, call := range calls {
+		switch {
+		case isLeaseRead(call):
+			sawGet = true
+		case isRenewReplace(call):
+			attempts++
+			if !sawGet {
+				problems = append(problems, fmt.Sprintf(
+					"第 %d 次续租 replace 之前（上一次续租之后）没有任何 get lease：attempt 用陈旧 rv 盲写", attempts))
+			}
+			// 本次 attempt 的窗口到此结束；下一次 attempt 必须重新 GET。
+			sawGet = false
 		}
 	}
 	return attempts, problems
@@ -584,4 +615,103 @@ func shellFunctionBody(t *testing.T, script, name string) string {
 		t.Fatalf("函数 %s 没有找到收尾", name)
 	}
 	return rest[:end+2]
+}
+
+// TestRenewAttemptAdjacencyClassifier 用**合成调用序列**证明修复既消除了虚假耦合、
+// 又没有放宽断言强度（F-02：每个 attempt 必须先 GET 再 PUT）。
+//
+// 这些序列都是真实日志里出现过的形态（时间线来自全量并发跑出来的失败样本）。
+func TestRenewAttemptAdjacencyClassifier(t *testing.T) {
+	t.Parallel()
+
+	const (
+		readLease = `-n surgecart get lease surgecart-deploy-lock -o go-template=... --request-timeout=3s`
+		putRenew  = `-n surgecart replace -f /tmp/lock/lease-renew.yaml --request-timeout=3s`
+		putRecord = `-n surgecart replace -f /tmp/lock/lease-record.yaml`
+		putApply  = `-n surgecart apply -f manifest/kubernetes/overlays/production`
+	)
+
+	cases := []struct {
+		name     string
+		calls    []string
+		attempts int
+		problems int
+	}{
+		{
+			name: "理想序列：GET→PUT 交替",
+			calls: []string{
+				readLease, putRenew,
+				readLease, putRenew,
+				readLease, putRenew,
+			},
+			attempts: 3, problems: 0,
+		},
+		{
+			// 这就是当初失败的样本：主线程的 record 写入插在续租 GET 与 PUT 之间。
+			// 续租 attempt 内部仍然是「先 GET 后 PUT」，旧断言却因"前一行不是 get lease"而误报。
+			name: "主线程 record 写入插在续租 GET 与 PUT 之间（旧断言的假阳性）",
+			calls: []string{
+				readLease,
+				putRecord,
+				putRenew,
+				readLease,
+				putRenew,
+			},
+			attempts: 2, problems: 0,
+		},
+		{
+			name: "主线程的 get lease + record 写入都插在中间",
+			calls: []string{
+				readLease,
+				readLease,
+				putRecord,
+				putRenew,
+				readLease,
+				putRenew,
+			},
+			attempts: 2, problems: 0,
+		},
+		{
+			// 强度证明：attempt 之间没有 GET 就是盲写（陈旧 rv），必须被抓住。
+			name: "第 2 次 attempt 没有 GET（盲写）",
+			calls: []string{
+				readLease, putRenew,
+				putRenew,
+			},
+			attempts: 2, problems: 1,
+		},
+		{
+			// 连一次 GET 都没有：任何 replace 都是盲写。
+			name: "整条链没有 GET",
+			calls: []string{
+				putRenew,
+				putRenew,
+			},
+			attempts: 2, problems: 2,
+		},
+		{
+			name: "无关调用（apply）穿插不影响判定",
+			calls: []string{
+				putApply,
+				readLease, putRenew,
+				putApply,
+				readLease, putRenew,
+			},
+			attempts: 2, problems: 0,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			attempts, problems := classifyRenewAttempts(tc.calls)
+			if attempts != tc.attempts {
+				t.Fatalf("续租 replace 计数 = %d，期望 %d", attempts, tc.attempts)
+			}
+			if len(problems) != tc.problems {
+				t.Fatalf("问题数 = %d，期望 %d（问题: %v）", len(problems), tc.problems, problems)
+			}
+		})
+	}
 }
