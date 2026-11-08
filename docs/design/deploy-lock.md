@@ -400,12 +400,15 @@ T2-06.1.2 的公式把每次 attempt 里的 **GET** 忘掉了，相当于把最�
 
 取舍被明确记录：
 
-1. **正常抖动下的续租成功率**：单次 attempt 最坏 6s，三次 18s，仍远小于 45s；
-2. **网络故障下的失锁检测速度**：续租链失败后立即写 `lost` 并 SIGTERM，最坏 29s
-   （< 45s），即旧 Runner 在别人可接管之前就已经停止；
+1. **正常抖动下的续租成功率**：单次 attempt 最坏 6s（GET 3s + PUT 3s），三次 18s，
+   仍远小于 45s；
+2. **网络故障下的失锁检测速度**：续租链（3 次 attempt）最坏 18 + 1 = **19s**；
+   加上最近一次成功续租到本次续租间隔的 **10s**，从上次成功续租算起的检测上界是
+   **29s**（< 42s 的最早可接管时刻），即旧 Runner 在别人可接管之前就已经写 `lost` 并 SIGTERM；
 3. **其他 Runner 的接管延迟**：崩溃后 ≤ 45s（+ 轮询 2s）。代价是比原来多 15s，
    但发布锁本来就是分钟级操作，而「两个发布并行」是不可接受的；
-4. **续租操作的最大耗时**：29s（含退避），有明确上界；
+4. **续租链的最大耗时**：19s（含 1s 退避预算，真实退避 400ms），有明确上界；
+   检测上界 29s = 间隔 10s + 链 19s；
 5. **安全余量**：11s（≈ 预算的 32%）。
 
 明确**不接受**的做法：把 `--lease-renew-timeout` 压到 1s 以保住 30s 租期
@@ -579,7 +582,10 @@ GET Lease → 检查 holder → kubectl apply        # 仍然是 TOCTOU，不能
 也就是说，所谓「窗口」只是「旧 Runner 不再**发起**新写」与「新 Runner **开始**写」之间的
 时间关系；一旦旧 Runner 已经发出 `kubectl apply`，该请求可能在锁被接管之后仍被服务端
 执行 —— 这与参数怎么调无关，也无法通过缩短租期或提高续租频率消除。
-T2-06.1.4 的故障注入实验直接观察到了这一类跨接管的在途写入（见 §10.4）。
+实证见 §10.4：T2-06.1.2 就有的 harness 用例（在途接管后 `Applied == true`）在
+T2-06.1.4 更严格的 fake 语义下仍然通过；T2-06.1.4 **新增**的多进程用例
+`TestMultiprocessPausedRunnerWriteLandsAfterTakeover` 进一步构造了「接管方甚至已经
+释放锁、旧 Runner 恢复后其在途 apply 仍落地」的场景。
 
 `APPLICATION_OUTCOME_UNKNOWN` 只是把「我不知道结果」说出来，不构成 fencing。
 
@@ -655,9 +661,10 @@ T2-06.1.4 的故障注入实验直接观察到了这一类跨接管的在途写�
 上一轮审计给出的「约 58s」不作为结论：它把 `D + A×(G+R) + B + 轮询` 直接相加，
 既没有区分「检测失锁」与「允许接管」两个不同的时钟，也没有考虑 §7.4 的过期即停。
 上面每一项都从**实际时间戳**（`renewTime`、请求发出时刻）与脚本的真实执行路径推导；
-「在途请求」一行不是推导出来的结论，而是 T2-06.1.4 故障注入实验观测到的事实（§10.4）。
+「在途请求」一行**不是推导结论**，而是有测试实证的风险（§10.4），且**永不关闭**：
+`AUD-05 = NOT_CLOSED`。
 
-### 10.4 在途请求不可撤销（T2-06.1.4 实测反例）
+### 10.4 在途请求不可撤销（有测试实证，但只在 fake 上）
 
 三个必须分开的时刻（这也是 `renewTime` 锚点争议的来源，见 §7.5）：
 
@@ -683,13 +690,17 @@ t_resp  客户端收到响应（可能超时、连接断开，永远收不到）
 - 客户端超时 **≠** 请求未生效。`kubectl apply` 返回非零、进程收到 SIGTERM、租约已过期，
   都不能证明 Deployment / Job 没被修改；
 - 失锁之后仍然**可能**发生「旧 Runner 的写在途、新 Runner 已接管」的跨接管写入。
-  这不是理论风险：`test/deployk8s/application_inflight_test.go` 的
-  `TestLockLostDuringApplicationApplyReportsUnknown` 让 Application apply 延迟 1500ms，
-  在请求确实在途时用 `stealLease` 完成一次并发接管，随后断言
-  `state.Applied == true`（请求已被接受并生效）、退出码 3、输出
-  `APPLICATION_OUTCOME_UNKNOWN`，且失锁后不再发出新的写请求；
-  `TestApplicationApplyAcceptedButClientTimesOut` 则覆盖「服务端已接受、客户端超时」；
-  **边界**：这是 fake kubectl 构造的窗口，真实集群上同类窗口的长度是 NOT_VERIFIED；
+  这不是理论风险，有两条测试实证（都在 fake kubectl 上，**不是**真实集群）：
+
+  | 测试 | 构造方式 | 断言的事实 | 归属 |
+  |---|---|---|---|
+  | `test/deployk8s/application_inflight_test.go` 的 `TestLockLostDuringApplicationApplyReportsUnknown` | harness 在 fake **之外**套延迟包装，`applyDelay: 1500ms`；marker 出现后用 `stealLease` 在途接管 | `state.Applied == true`、退出码 3、`APPLICATION_OUTCOME_UNKNOWN`、`apply.application` 恰好 1 次 | **T2-06.1.2** 引入；T2-06.1.4 收紧 fake 接管语义后仍通过 |
+  | `test/deployk8s/multiprocess_test.go` 的 `TestMultiprocessPausedRunnerWriteLandsAfterTakeover` | 真实多进程：A 的 apply 延迟 6s，A 被 SIGSTOP；B 合法接管并**完成发布、释放锁**；A 恢复 | A 的**在途** apply 在接管之后仍然落地（`apply.application` 计数 +1、`state.Applied == true`），A 以退出码 3 + `APPLICATION_OUTCOME_UNKNOWN` 结束 | **T2-06.1.4 新增**（实测 6.37s PASS） |
+
+  同族的 `TestPausedRunnerResumesAfterLockLoss`（SIGSTOP/SIGCONT）与
+  `TestApplicationApplyAcceptedButClientTimesOut`（服务端已接受、客户端超时）覆盖相邻场景；
+  **边界**：1500ms / 6s 都是**测试注入的延迟**，不是真实网络在途时长的测量值；
+  真实集群上同类窗口的长度是 NOT_VERIFIED；
 - 判断线上状态只能靠**只读核对**（`kubectl get -o yaml` / `get pods`），不能靠退出码；
 - 真正的修复是写入侧 fencing（令牌校验），本任务不做（§10.1）。
 
@@ -750,6 +761,7 @@ kubectl auth can-i update leases.coordination.k8s.io -n surgecart    # 3) 自检
 | `coordination.k8s.io/leases`（`resourceNames: surgecart-deploy-lock`） | `get` | 读取 holder / `renewTime` / rv / 迁移记录注解 |
 | `coordination.k8s.io/leases` | `create` | 首次原子获取锁（`resourceNames` 无法约束 create） |
 | `coordination.k8s.io/leases` | `update` | 续租 / 接管 / 释放 / 写迁移记录（`replace` = PUT + rv CAS） |
+| `coordination.k8s.io/leases` | `patch`（**operator-only**） | 脚本**不用**；只供人工恢复（`kubectl annotate lease surgecart-deploy-lock ...`，脚本的恢复提示里给出的正是这条命令）。清单用注解 `deploy-lock.surgecart.io/operator-only-verbs: "leases:patch"` 显式声明，契约测试把它作为唯一允许的「脚本不用的授权」并打印警告 |
 | `batch/jobs` | `get`/`list` | 核验上一轮迁移 Job、扫描未终结迁移 |
 | `batch/jobs` | `create`/`patch` | `kubectl apply -f migration.yaml` 的两个分支（新建 / 已存在则 PATCH） |
 | `core/pods` | `get`/`list` | Pod 生命周期门禁（`job-name` 归属 + component 标签扫描） |
@@ -772,6 +784,9 @@ kubectl auth can-i update leases.coordination.k8s.io -n surgecart    # 3) 自检
 
 `REQUIRED_PERMISSIONS` 共 **29** 条：命名空间级 25 条 + 集群级 4 条。没有
 `delete`/`deletecollection` —— 脚本永不删除 Job / Pod / Lease / Deployment / Namespace。
+**唯一例外**是 `leases` 的 `patch`：它只出现在 Role 里、被清单显式标为
+`operator-only`，供值班用 `kubectl annotate` 修记录，脚本自己从不调用。
+因此「发布身份只有脚本用到的权限」这句话必须带上这个例外及其原因。
 
 **`namespaces` 为什么必须走 ClusterRole**：`namespaces` 是**集群级资源**，`Role` 的作用域是
 单个命名空间，无法授予集群级资源 —— 把 `namespaces get/create` 写进 `Role` 不会生效，
@@ -854,7 +869,7 @@ T2-06.1.3 及更早的示例完全没有这两项，因此「按示例授权 →
 | Pod 查询错误分类（F-07） | `test/deployk8s/podquery_test.go`：空列表/全终态/活动 Pod/403/500/超时/归属不一致 | 已验证（脚本语义） |
 | 权限/业务资源错误分类（T2-06.1.4 / A-3 / AUD-09） | `test/deployk8s/rbac_test.go`：`TestSecretReadForbiddenIsNotMissingSecret`、`TestSecretReadFailureIsNotMissingSecret`、`TestSecretNotFoundIsReportedAsMissing`、`TestNamespaceReadFailureIsNotReportedAsAbsent`、`TestJobsListForbiddenIsNotUnfinishedJob`、`TestJobsListServerErrorIsNotUnfinishedJob`、`TestJobLogsForbiddenIsReported` | 已验证（脚本语义） |
 | 文档契约（T2-06.1.4） | `test/manifest/doc_contract_test.go`：从脚本常量 / `usage()` / RBAC 清单反推事实，断言 6 个 CLI 默认值、退出码枚举、续租预算算式与失锁窗口数值、权限集合（按作用域）、`AUD-02`/`AUD-05` 结论、NOT_VERIFIED 项 | 已验证（静态契约，改任一侧都会失败） |
-| 在途写跨接管生效（AUD-05） | `test/deployk8s/application_inflight_test.go`：`TestLockLostDuringApplicationApplyReportsUnknown`（apply 延迟 1500ms + 在途接管 → `Applied == true`、退出码 3、`APPLICATION_OUTCOME_UNKNOWN`）；`TestApplicationApplyAcceptedButClientTimesOut` | 已验证（**fake 构造的窗口**，真实集群长度 NOT_VERIFIED） |
+| 在途写跨接管生效（AUD-05） | ① `test/deployk8s/application_inflight_test.go`：`TestLockLostDuringApplicationApplyReportsUnknown`（T2-06.1.2 引入；注入 1500ms 延迟 + 在途接管 → `Applied == true`、退出码 3、`APPLICATION_OUTCOME_UNKNOWN`）、`TestPausedRunnerResumesAfterLockLoss`、`TestApplicationApplyAcceptedButClientTimesOut`；② `test/deployk8s/multiprocess_test.go`：`TestMultiprocessPausedRunnerWriteLandsAfterTakeover`（**T2-06.1.4 新增**，真实多进程；A 在途 apply 在 B 接管并释放锁之后仍落地，实测 6.37s PASS） | 已验证（**fake kubectl + 注入延迟**；真实集群的窗口长度 NOT_VERIFIED） |
 | 接管语义（F-06） | 替身推进 `resourceVersion`；`TestStaleResourceVersionCannotOverwriteTakeover` 断言旧 rv 的 PUT 得到 409 且不覆盖新 holder | 已验证（**替身语义**，不等于真实 API Server） |
 | 清单契约（版本标签、RBAC 名称与授权范围、超时与租期预算、help/文档默认值） | `test/manifest` 从 Kustomize 构建产物与源文件断言 | 已验证 |
 | 真实 API Server 的 Lease 竞争 | 需要在真实集群并发跑两个 Runner | **NOT_VERIFIED** |
@@ -876,8 +891,14 @@ fake kubectl 能证明什么（T2-06.1.1 / T2-06.1.2 / T2-06.1.3 补齐，T2-06.
 - 每次 Lease 写入**携带了什么记录**（`lease.write` 事件），因此可以逐次断言记录未被清空；
 - 两个真实 bash 进程共享同一状态目录时的互斥与接管；
 - T2-06.1.4：**按调用语义注入故障**（verb / group / resource / namespace / name / selector /
-  intent，可带序号），以及**按交付的 RBAC 清单判定授权**（`Authorize`，未授权 403）。
-  这两个能力让「403 被误报成不存在」「权限缺失漏检」这类问题可以被测试直接证伪。
+  intent，可带序号），以及**按交付的 RBAC 清单判定授权**（唯一入口 `Authorize`，默认拒绝）。
+  **写路径**（create / replace / apply / delete）未授权即 403；`apply` 按真实 kubectl 语义
+  区分动词：对象不存在用 `create`、已存在用 `patch`（被拒再退回 `update`）。
+  **读路径**（get/list）的授权不由此判定，而是由脚本的 `auth can-i` 预检覆盖 ——
+  不要把它读成「所有请求都强制鉴权」。
+  交付的 deploy-lock RBAC 清单**自给自足**：只喂这份清单即可跑通一次完整发布
+  （实测 `test-deploy-k8s.sh` PASS）；清单未覆盖的对象（如 `apps/statefulsets`）仍然 403。
+  这些能力让「403 被误报成不存在」「权限缺失漏检」这类问题可以被测试直接证伪。
 
 fake kubectl **不能**证明什么：
 

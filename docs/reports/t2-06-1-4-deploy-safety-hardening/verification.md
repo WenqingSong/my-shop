@@ -23,8 +23,8 @@
 
 | 文件 | 变更 |
 |---|---|
-| `docs/design/deploy-lock.md` | 删除 §10.1/§10.3 的「零重叠」结论，改为「未发出请求有界 + 在途请求不可撤销」；新增 §10.4 在途请求不可撤销（三个时刻 t_req/t_acc/t_resp）；新增 §7.5 `renewTime` 锚点语义；重写 §12 RBAC（三类权限组、29 项 `REQUIRED_PERMISSIONS`、预检四阶段、`classify_api_error` 五类分类与各场景退出码）；§13 增加权限分类、文档契约、在途写、renewTime 锚点、退避同源的验证条目 |
-| `docs/development/kubernetes.md` | §9.1 发布步骤改为「权限预检 → 命名空间引导 → 取锁 → 迁移」并加入锚点步骤；§9.2 增加 `renewTime` 锚点与退避单一来源；§9.4 退出码 1/3/143 语义补齐（信号三结论）；§9.7 请求侧边界与在途请求不可撤销；§10.3 权限/锁失败表按错误分类重写；§13.1 改为「一份文件、三个权限组」+ 29 条 `auth can-i` 自检 + ClusterRole 必要性；§14 验证分级补充条目 |
+| `docs/design/deploy-lock.md` | 删除 §10.1/§10.3 的「零重叠」结论，改为「未发出请求有界 + 在途请求不可撤销」；新增 §10.4 在途请求不可撤销（三个时刻 t_req/t_acc/t_resp）；新增 §7.5 `renewTime` 锚点语义；重写 §12 RBAC（三类权限组、29 项 `REQUIRED_PERMISSIONS`、预检四阶段、`classify_api_error` 五类分类与各场景退出码、`leases` patch 的 operator-only 例外）；§13 增加权限分类、文档契约、在途写（含 T2-06.1.2 / T2-06.1.4 两条证据的归属）、renewTime 锚点、退避同源的验证条目 |
+| `docs/development/kubernetes.md` | §9.1 发布步骤改为「权限预检 → 命名空间引导 → 取锁 → 迁移」并加入锚点步骤；§9.2 增加 `renewTime` 锚点与退避单一来源；§9.4 退出码 1/3/143 语义补齐（信号三结论）；§9.7 请求侧边界与在途请求不可撤销；§10.3 权限/锁失败表按错误分类重写；§13.1 改为「一份文件、三个权限组」+ 3 处 `REPLACE_WITH_DEPLOYER_*` 占位符 + 29 条 `auth can-i` 自检 + ClusterRole 必要性 + operator-only 例外；§14 验证分级补充条目 |
 | `docs/design/deployment.md` | §12 发布顺序中的权限预检改为集群级 / 命名空间级两段，并注明命名空间引导在其后 |
 | `docs/development/migrations.md` | §6 补充 T2-06.1.4 的两处收紧：`renewTime` 锚点 + 过期锁不得写迁移记录续命 |
 | `test/manifest/doc_contract_test.go` | 新增（本工作包独占） |
@@ -35,7 +35,7 @@
 |---|---|---|
 | `TestDocCLIDefaultsMatchScript` | 6 个带数值选项（`--migration-timeout` 1080、`--rollout-timeout` 600、`--lock-wait-timeout` 60、`--lease-duration` 45、`--lease-renew-interval` 10、`--lease-renew-timeout` 3）在「脚本常量 = `usage()` = 文档 §9.2 = deploy-lock §7.3」四处一致；选项集合完全一致（不多写不存在的参数） | 脚本 `^NAME=<int>$` 常量 + `usage()` 文本 |
 | `TestDocExitCodesMatchScript` | `usage()` 退出码块 == 文档 §9.4 表格（+ 信号码 143）；脚本里 `die`/`exit` 用到的每个码都被 `usage()` 声明；`1` 的多义语义（`APPLICATION_OUTCOME_UNKNOWN` / 不等于 / 可能已发出）不得被简化 | `usage()` 文本 + 文档 + 脚本 `die/exit` |
-| `TestDocLeaseBudgetMatchesScript` | 从 `LOCK_*` 常量重算 `interval + attempts×(get+replace) + backoff + margin < duration`（当前 34 < 45）、续租链 29s、最早可接管 42s，并断言三份文档写的是同一组数（含 `deploy-lock.md` §10.3 的 `t0+29s` / `t0+42s`） | `LOCK_*` 常量 |
+| `TestDocLeaseBudgetMatchesScript` | 从 `LOCK_*` 常量重算 `interval + attempts×(get+replace) + backoff + margin < duration`（当前 34 < 45）、续租链 19s（3×6+1）、检测上界 29s（间隔 10s + 链 19s）、最早可接管 42s；并禁止把「检测上界 29s」写成「续租链最坏 29s」 | `LOCK_*` 常量 |
 | `TestDocRBACManifestsAndPermissions` | 磁盘上的清单文件名集合 == 文档 §13.1 提到的集合；`REQUIRED_PERMISSIONS`（29 项，`verb\|group\|resource\|scope\|callers@Lline`）逐项被对应作用域的清单覆盖（`cluster` → `ClusterRole`，`namespace` → `Role`）；`@L` 行号不超出文件；调用者函数名在脚本中存在；出现 `namespaces` 时文档必须解释 `ClusterRole`；清单不得出现 `*` / `delete` / `deletecollection` | 脚本 `REQUIRED_PERMISSIONS` + `manifest/kubernetes/examples/deploy-lock/*.yaml` |
 | `TestDocDoesNotClaimZeroOverlap` | 四份文档中不得出现 `零重叠` / `无重叠` / `不会重叠` / `重叠 0s` / `重叠为 0` | 纯文本断言 |
 | `TestDocKeepsInFlightIrreversibility` | 两份主文档都必须写明「已发出的请求无法撤销」与「客户端超时 ≠ 请求未生效」 | 纯文本断言 |
@@ -81,7 +81,8 @@ bash scripts/test-deploy-k8s.sh   exit=0   ok test/deployk8s 49.295s
 | `renewTime` = 写入请求发出时刻（t_req）；create/takeover 后 `lease_require_window` + 立即续租 | 脚本 `lease_create` / `lease_takeover` / `lease_renew` / `lease_require_window`；Agent B 的 `TestMultiprocessPreflightDelayKeepsRenewTimeFresh`、`TestMultiprocessStaleRenewTimeAtCreateFailsClosed` |
 | 过期锁不得写迁移记录续命 | Agent B 的 `TestRecordWriteRefusedWhenLeaseExpired` |
 | 退避预算与实现同源 | Agent B 的 `TestRenewBackoffBudgetIsSingleSourced` |
-| 在途写跨接管仍生效 | `test/deployk8s/application_inflight_test.go` 的 `TestLockLostDuringApplicationApplyReportsUnknown`（apply 延迟 1500ms + 在途接管 → `Applied == true`） |
+| 在途写跨接管仍生效（T2-06.1.2 的 harness 用例） | `test/deployk8s/application_inflight_test.go` 的 `TestLockLostDuringApplicationApplyReportsUnknown`（注入 1500ms 延迟 + 在途接管 → `Applied == true`） |
+| 在途写跨接管仍生效（T2-06.1.4 新增的多进程实证） | `test/deployk8s/multiprocess_test.go` 的 `TestMultiprocessPausedRunnerWriteLandsAfterTakeover`（A 在途 apply 在 B 接管并释放锁后仍落地；集成树上实测 `--- PASS (6.37s)`） |
 | fake 按调用语义注入、按真实 RBAC 清单判定 | Agent C 的 `INTERFACE_CONTRACT.md`（FROZEN，v1.2）与 `concurrency_test.go` |
 
 ## 6. NOT_VERIFIED（本工作包相关）
@@ -95,9 +96,11 @@ bash scripts/test-deploy-k8s.sh   exit=0   ok test/deployk8s 49.295s
   （本机时钟偏快 → 服务器认为租约更久 → 不安全方向）。
 - **`scripts/test.sh` / `test-race.sh` / `test-migration.sh`**：环境无 MySQL(3306)/Redis(6379)，
   按公共规则不运行、不伪造 PASS。
-- **Agent D 未复现「0.7s 级在途写」这个数字**：交付物（C 的 `concurrency_test.go`、
-  `application_inflight_test.go`）里没有该数值。文档因此只引用可核对的
-  `TestLockLostDuringApplicationApplyReportsUnknown`（1500ms 延迟），不写未核对的毫秒数。
+- **「0.7s 级在途写」未在仓库中找到**：`application_inflight_test.go` 用的是注入
+  1500ms 延迟（`fixtureOptions{applyDelay: 1500 * time.Millisecond}`），
+  `TestPausedRunnerResumesAfterLockLoss` 同样不是 0.7s。任务书提到的 0.7s 级反例无法核对，
+  文档因此**不写**任何 0.7s 数值；契约测试直接禁止 `0.7s` 出现在 `deploy-lock.md`。
+- **在途写窗口的真实长度**：1500ms / 6s 都是测试注入的延迟，不是网络在途时长的测量值。
 
 ## 7. 审计结论状态
 

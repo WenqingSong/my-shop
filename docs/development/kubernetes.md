@@ -477,13 +477,14 @@ GET Lease（≤ get_timeout）→ 校验 holder / uid / 是否已过期 → PUT 
 
 - 旧默认值 `10 + 30 > 30`：续租请求本身比租期还长，锁会在请求返回之前过期；
 - **AUD-D7**：只计「单次请求超时」仍然低估最坏耗时（漏掉了每次 attempt 的 GET）。
-  续租失败会重试 3 次，真实最坏耗时是 `10 + 3×6 + 1 = 29s`；
+  一次 attempt = GET + PUT，最坏 6s；续租链（3 次 attempt）最坏 18s，加 1s 退避预算 = **19s**；
+  从上次成功续租算起的**检测上界** = 间隔 10s + 链 19s = **29s**；
   T2-06.1.2 的公式 `10 + 3×3 + 1 + 5 = 25 < 30` 看似安全，真实值 `34 > 30` —— 一次
   API 抖动就可能让续租链在锁过期之后才结束（审计 F-02）；
 - **T2-06.1.3 的默认值重估**：把租期从 30s 提到 45s，保持 `--lease-renew-timeout 3`
   （in-cluster 的 Lease GET/PUT 通常 <100ms，3s 已是 30 倍抖动余量）与 `attempts 3`
   （主进程写迁移记录会推进 resourceVersion，409 重试是常态）。结果是
-  `34 < 45`（余量 11s），续租链最坏 29s 完成，早于服务端过期 16s。
+  `34 < 45`（余量 11s），检测上界 29s，早于服务端最早可接管的 42s。
   代价：崩溃后接管延迟由 ≤30s 变为 ≤45s；
 - 非法组合在**任何资源变更之前**拒绝（退出码 1，连 kubectl 都不会调用，也不会创建 Lease）；
 - **续租不得复活已过期的锁**：每次 attempt 都检查服务器返回的 `renewTime +
@@ -688,7 +689,7 @@ kubectl -n surgecart get pods -l app.kubernetes.io/name=surgecart -o wide
 | 问题 | 推导 | 默认值 |
 |---|---|---|
 | 服务端最早何时允许接管 | 上次成功写入的 `renewTime + leaseDurationSeconds`。`renewTime` 是写入请求的**发出时刻** `t_req`（T2-06.1.4 / B-1），服务端过期**精确等于** `t0+D`；扣掉一次请求耗时（`t_acc-t_req ≤ G`）后仍 `≥ t0+D-G` | `t0+42s … t0+45s` |
-| 存活 Runner 最晚何时发现失锁 | 续租链最坏完成时刻 = `t0 + I + A×(G+R) + 退避` | `t0+29s`（< `t0+42s`，先于过期） |
+| 存活 Runner 最晚何时发现失锁 | 检测上界 = 间隔 + 续租链 = `t0 + I + [A×(G+R) + 退避]`（链 19s，间隔 10s） | `t0+29s`（< `t0+42s`，先于过期） |
 | create/takeover 的锚点是否可信 | 写入后立即 `lease_require_window`（`LEASE_WINDOW` 证据行）：窗口为负则 `LEASE_ANCHOR_INVALID`、退出码 3、且不 apply 任何资源 | fail-closed |
 | 崩溃/被 SIGKILL 的 Runner | 不再续租，锁在 `t0+D` 后被接管；它自己不会再写入 | 接管延迟 ≤ `D + 轮询 2s` |
 | 被挂起（SIGSTOP / VM 冻结 / 网络分区）的 Runner | 恢复后**先 GET**：若 `renewTime+D ≤ now` 则立即按失锁停止（F-02.4），不 PUT | 恢复后 ≤ `G` 发现 |
@@ -1138,15 +1139,19 @@ bash scripts/test-k8s-manifest.sh
 | 2 | `surgecart-deploy-workload` | `Role` + `RoleBinding` | 命名空间 `surgecart` | 同一个发布身份 |
 | 3 | `surgecart-deploy-cluster` | `ClusterRole` + `ClusterRoleBinding` | 集群级 | 同一个发布身份 |
 
-适用主体统一是「执行发布的身份」，在三个清单的 `subjects` 里都改成同一个值：
-`ServiceAccount`（集群内 Runner，需要 `namespace`）、`User`（外部 kubeconfig）、
-`Group`（团队共享身份）三者之一。**不要**绑到应用自己的 ServiceAccount：
+适用主体统一是「执行发布的身份」：文件里有 **3 处** `subjects`（两个 RoleBinding +
+一个 ClusterRoleBinding），必须替换成同一个值的占位符
+`REPLACE_WITH_DEPLOYER_SERVICE_ACCOUNT`（配合 `REPLACE_WITH_DEPLOYER_NAMESPACE`）。
+可选 `ServiceAccount`（集群内 Runner，需要 `namespace`）、`User`（外部 kubeconfig）、
+`Group`（团队共享身份）三者之一。三处不一致会制造「预检通过、写入被拒」的撕裂状态
+（契约测试会断言三者一致）。**不要**绑到应用自己的 ServiceAccount：
 应用 Pod 的 `automountServiceAccountToken=false`，不需要也不应该具备发布权限。
 
 **apply 顺序**（`Role`/`RoleBinding` 是命名空间对象，命名空间不存在时 apply 会失败）：
 
 ```bash
-# 1) 把三个清单里的 subjects 改成真实的发布身份（三处必须一致）
+# 1) 替换 3 处 subjects 占位符，改成同一个发布身份（三处必须一致）
+#    REPLACE_WITH_DEPLOYER_SERVICE_ACCOUNT / REPLACE_WITH_DEPLOYER_NAMESPACE
 vi manifest/kubernetes/examples/deploy-lock/rbac.yaml
 
 # 2) 命名空间必须已存在（Role/RoleBinding 的作用域）
@@ -1155,6 +1160,10 @@ kubectl apply -f manifest/kubernetes/shared/namespace.yaml
 # 3) 一次 apply 覆盖三个权限组（文件内顺序：lock Role → workload Role → cluster ClusterRole）
 kubectl apply -f manifest/kubernetes/examples/deploy-lock/rbac.yaml
 ```
+
+> 例外：`leases` 的 `patch` 在 Role 里保留，但标注为 `operator-only`
+> （`deploy-lock.surgecart.io/operator-only-verbs: "leases:patch"`），只供人工
+> `kubectl annotate` 恢复；脚本自己从不调用。所以「只授予脚本用到的权限」有这一个例外。
 
 **为什么 `namespaces` 必须走 ClusterRole**：`namespaces` 是集群级资源，`Role` 的作用域是
 单个命名空间，无法授予它。把 `namespaces get/create` 写进 `Role` 不会生效，

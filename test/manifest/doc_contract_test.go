@@ -318,8 +318,24 @@ func TestDocLeaseBudgetMatchesScript(t *testing.T) {
 			t.Errorf("docs/design/deploy-lock.md §10.3 缺少 %q：失锁窗口推导没有随脚本常量更新", fragment)
 		}
 	}
-	if !strings.Contains(design, fmt.Sprintf("最坏 %ds", detect)) {
-		t.Errorf("docs/design/deploy-lock.md §7.3 缺少续租链最坏耗时 %ds", detect)
+	// 续租链与检测上界必须分开写：链 = attempts×(G+R)+退避（19s），检测 = 间隔 + 链（29s）。
+	// 旧文档把两者混成「续租链最坏 29s」，正是 B 的事实表要求修正的表述。
+	for name, text := range map[string]string{
+		"docs/design/deploy-lock.md":     design,
+		"docs/development/kubernetes.md": manual,
+	} {
+		for _, fragment := range []string{
+			fmt.Sprintf("**%ds**", chain),
+			fmt.Sprintf("**%ds**", detect),
+		} {
+			if !strings.Contains(text, fragment) {
+				t.Errorf("%s 缺少 %q：续租链（%ds）与检测上界（%ds）必须分别写清", name, fragment, chain, detect)
+			}
+		}
+		if strings.Contains(text, fmt.Sprintf("续租链最坏 %ds", detect)) {
+			t.Errorf("%s 把检测上界 %ds 写成了「续租链最坏」：链是 %ds，检测上界才是 %ds",
+				name, detect, chain, detect)
+		}
 	}
 }
 
@@ -670,6 +686,29 @@ func TestDocKeepsInFlightIrreversibility(t *testing.T) {
 		}
 		if !regexp.MustCompile(`超时[\s\S]{0,40}不等于|不等于[\s\S]{0,40}未生效|≠`).MatchString(text) {
 			t.Errorf("%s 没有写明「客户端超时 ≠ 请求未生效」", rel)
+		}
+	}
+	design := docRead(t, "docs/design/deploy-lock.md")
+
+	// 证据归属：不得把上一阶段的用例说成「T2-06.1.4 的故障注入实验」，
+	// 也不得引用未经核对的毫秒数（审计抽查要求「不得出现指向尚未发生的实验的断言」）。
+	if regexp.MustCompile(`T2-06\.1\.4[^。\n]{0,20}故障注入实验`).MatchString(design) {
+		t.Error("docs/design/deploy-lock.md 把在途写实证笼统归给「T2-06.1.4 故障注入实验」：必须点名具体测试与归属阶段")
+	}
+	if regexp.MustCompile(`0\.7\s*s|0\.7\s*秒`).MatchString(design) {
+		t.Error("docs/design/deploy-lock.md 出现 0.7s：仓库里没有该实测值，文档不得引用未核对的数字")
+	}
+	// T2-06.1.2 的 harness 用例是既有事实，必须点名（它才是 1500ms 注入的来源）。
+	if !strings.Contains(design, "TestLockLostDuringApplicationApplyReportsUnknown") {
+		t.Error("docs/design/deploy-lock.md §10.4 必须点名 TestLockLostDuringApplicationApplyReportsUnknown（T2-06.1.2 引入）")
+	}
+	if !strings.Contains(design, "1500ms") {
+		t.Error("docs/design/deploy-lock.md §10.4 必须写清在途窗口是测试注入的 1500ms 延迟，而不是实测的在途时长")
+	}
+	// T2-06.1.4 新增的多进程实证：文件存在时文档必须点名它（不存在时没有可引用的事实）。
+	if _, err := os.Stat(filepath.Join(repoRoot(t), "test", "deployk8s", "multiprocess_test.go")); err == nil {
+		if !strings.Contains(design, "TestMultiprocessPausedRunnerWriteLandsAfterTakeover") {
+			t.Error("test/deployk8s/multiprocess_test.go 已存在：文档必须点名 TestMultiprocessPausedRunnerWriteLandsAfterTakeover 作为 T2-06.1.4 的在途写实证")
 		}
 	}
 }
