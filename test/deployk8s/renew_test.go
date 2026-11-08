@@ -2,6 +2,10 @@ package deployk8s
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -505,4 +509,79 @@ func formatTimings(entries []timingEntry) string {
 		fmt.Fprintf(&builder, "+%6dms  %s\n", entry.at.Sub(base).Milliseconds(), entry.args)
 	}
 	return builder.String()
+}
+
+// TestRenewBackoffBudgetIsSingleSourced 覆盖 T2-06.1.4 / B-5：
+//
+// 审计发现 LOCK_RENEW_BACKOFF_MS 是**死常量** —— 校验用 (attempts-1)×200ms=400ms
+// 的预算，真实实现却对每次失败（含最后一次）都 sleep 0.2s，共 600ms，比预算多 200ms。
+//
+// 这条契约测试直接检查源码：常量、预算、以及 lease_renew 里的真实 sleep 必须同源。
+// 它比"测量耗时"更稳定（不会因 CI 抖动变成空转），而真实耗时由
+// TestRenewChainStaysWithinBudget 单独测量。
+func TestRenewBackoffBudgetIsSingleSourced(t *testing.T) {
+	t.Parallel()
+
+	raw, err := os.ReadFile(filepath.Join(repoRootPath, "scripts", "deploy-k8s.sh"))
+	if err != nil {
+		t.Fatalf("读取 scripts/deploy-k8s.sh: %v", err)
+	}
+	script := string(raw)
+
+	constInt := func(name string) int {
+		t.Helper()
+		re := regexp.MustCompile(`(?m)^` + name + `=([0-9]+)$`)
+		m := re.FindStringSubmatch(script)
+		if m == nil {
+			t.Fatalf("脚本里找不到整数常量 %s", name)
+		}
+		value, err := strconv.Atoi(m[1])
+		if err != nil {
+			t.Fatalf("解析 %s: %v", name, err)
+		}
+		return value
+	}
+	attempts := constInt("LOCK_RENEW_MAX_ATTEMPTS")
+	backoffMS := constInt("LOCK_RENEW_BACKOFF_MS")
+	budget := constInt("LOCK_RENEW_BACKOFF_BUDGET")
+
+	// 真实退避 = 只在 attempt 之间退避 (attempts-1) 次，预算必须是它的向上取整。
+	wantMS := (attempts - 1) * backoffMS
+	wantBudget := (wantMS + 999) / 1000
+	if budget != wantBudget {
+		t.Fatalf("退避预算 %ds 与真实退避 (%d-1)×%dms=%dms（向上取整 %ds）不一致：预算与实现必须同源",
+			budget, attempts, backoffMS, wantMS, wantBudget)
+	}
+
+	body := shellFunctionBody(t, script, "lease_renew")
+	// 真实 sleep 必须由常量换算（而不是硬编码 0.2s）。
+	if !strings.Contains(body, `sleep "$(sleep_ms_arg "${LOCK_RENEW_BACKOFF_MS}")"`) {
+		t.Fatalf("lease_renew 必须用 sleep_ms_arg 从 LOCK_RENEW_BACKOFF_MS 换算退避；实际函数体:\n%s", body)
+	}
+	if regexp.MustCompile(`(?m)^\s*sleep [0-9]`).MatchString(body) {
+		t.Fatalf("lease_renew 里仍有硬编码 sleep：退避时长必须只有一个数值来源\n%s", body)
+	}
+	// 最后一次失败后不得再 sleep（否则 (attempts-1) 次退避会变成 attempts 次）。
+	if !strings.Contains(body, "attempt < LOCK_RENEW_MAX_ATTEMPTS") {
+		t.Fatalf("退避必须在 attempt 之间进行（attempt < LOCK_RENEW_MAX_ATTEMPTS 守卫）；实际:\n%s", body)
+	}
+	// usage 文本里对外公布的 backoff 数值必须与预算一致（避免文档与实现漂移）。
+	if !strings.Contains(script, fmt.Sprintf("backoff(%d)", budget)) {
+		t.Fatalf("usage/日志里公布的 backoff(%d) 与实际预算 %ds 不一致", budget, budget)
+	}
+}
+
+// shellFunctionBody 返回 `name() {` 到对应收尾 `}` 之间的函数体（含首行）。
+func shellFunctionBody(t *testing.T, script, name string) string {
+	t.Helper()
+	start := strings.Index(script, "\n"+name+"() {")
+	if start < 0 {
+		t.Fatalf("脚本里找不到函数 %s", name)
+	}
+	rest := script[start+1:]
+	end := strings.Index(rest, "\n}\n")
+	if end < 0 {
+		t.Fatalf("函数 %s 没有找到收尾", name)
+	}
+	return rest[:end+2]
 }

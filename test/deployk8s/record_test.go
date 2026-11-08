@@ -417,3 +417,52 @@ func TestNewMigrationArchivesPreviousRecordOnce(t *testing.T) {
 		t.Fatalf("重试时把本轮记录归档成了上一轮: %s", line)
 	}
 }
+
+// TestRecordWriteRefusedWhenLeaseExpired 覆盖 T2-06.1.4 / B-3（审计点名的缺陷）：
+//
+//	Runner 持锁 → 租约在服务端过期（续租链还没跑到）→ 主进程要写 COMPLETE 记录
+//
+// 旧实现只比 holderIdentity：holder 仍是自己，于是照写，并把 renewTime 推到 now ——
+// 等于给一把「别的 Runner 此刻就能合法接管」的锁续命一个租期。
+// 修复后：写记录路径必须先判定过期，过期即 fail-closed（exit 3），且**不写** Lease。
+func TestRecordWriteRefusedWhenLeaseExpired(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, fixtureOptions{})
+	longMigration(f)
+
+	// 续租间隔取 40s：保证「注入过期」之后不会有续租抢先改写 renewTime，
+	// 从而把「记录写入路径自己的过期判定」隔离出来（预算 40+3×2+1+5=52 < 60）。
+	args := []string{
+		"--lease-duration", "60", "--lease-renew-interval", "40", "--lease-renew-timeout", "1",
+		"--migration-timeout", "30", "--rollout-timeout", "20",
+	}
+	p := f.start(args...)
+	// MIGRATION_RUNNING 写入之后，主进程在等待循环里不再读/写 Lease，
+	// 下一处 Lease 写入是终态（COMPLETE）记录。
+	f.waitForEvent(t, "lease.write kind=lease-record.yaml state=MIGRATION_RUNNING", 60*time.Second)
+	f.expireLease(2 * time.Minute)
+	expired := f.state().Lease.RenewTime
+
+	res := p.wait(t, 120*time.Second)
+
+	res.requireCode(t, 3)
+	res.requireNoSuccess(t)
+	res.requireContains(t, "拒绝写迁移记录", "租约已过期", "leaseDurationSeconds=", "fail-closed")
+	// COMPLETE 记录必须没有写出去（事件层面证明，而不是只看最终注解）。
+	for _, line := range f.findEvents("lease.write", "state=MIGRATION_COMPLETE") {
+		t.Fatalf("租约过期后不得写入 COMPLETE 记录: %s", line)
+	}
+	res.requireContains(t, "LEASE_WINDOW stage=record-write-", "verdict=expired")
+	// 过期锁不得被续命/释放：renewTime 保持注入值，holder 仍是本 Runner（等自然过期）。
+	lease := f.state().Lease
+	if lease == nil {
+		t.Fatal("Lease 不应被删除")
+	}
+	if lease.RenewTime != expired {
+		t.Fatalf("过期锁的 renewTime 被改写了（等于给过期锁续命）：期望 %q，实际 %q",
+			expired, lease.RenewTime)
+	}
+	if lease.HolderIdentity == "" {
+		t.Fatal("过期锁不得被释放路径清空 holder（B-4：不为过期锁续命、也不写他人的锁）")
+	}
+}

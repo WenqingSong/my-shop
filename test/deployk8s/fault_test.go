@@ -58,6 +58,10 @@ func TestApplyFailureDuringMigrationReleasesLock(t *testing.T) {
 	res.requireCode(t, 1)
 	res.requireNoSuccess(t)
 	res.requireContains(t, "Migration 清单应用失败", "确实不存在")
+	// D-1/D-2/B-13：Job 不存在只证明**这个 Job** 没创建，不能据此断言整份清单未生效
+	// （Namespace / ConfigMap 等可能已经应用），也不能假设客户端失败=服务端未接受。
+	res.requireContains(t, "MIGRATION_OUTCOME_UNKNOWN", "这只证明该 Job 对象未被创建")
+	res.requireNotContains(t, "（应用未更新）")
 	f.requireEvent(t, "lease.release")
 	if lease := f.state().Lease; lease == nil || lease.HolderIdentity != "" {
 		t.Fatalf("确认 Job 未创建后必须释放锁，实际: %+v", lease)
