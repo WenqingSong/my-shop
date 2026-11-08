@@ -1,21 +1,28 @@
-// fake kubectl —— T2-06.1 / T2-06.1.1 发布脚本行为测试的执行替身。
+// fake kubectl —— T2-06.1 / T2-06.1.1 / T2-06.1.4 发布脚本行为测试的执行替身。
 //
 // 它不是 kubectl 的完整实现，只忠实实现 scripts/deploy-k8s.sh 真正依赖的语义：
 //
 //	version                               集群可达性
 //	kustomize <path>                      输出预置清单（migration.yaml / application.yaml）
-//	auth can-i <verb> <resource>          权限预检
+//	auth can-i <verb> <resource>          权限预检（走唯一的 fakestate.Authorize）
 //	create -f <Lease>                     原子创建（同名只能成功一次），持久化注解
 //	replace -f <Lease>                    PUT + resourceVersion/UID 校验的 CAS，持久化注解
-//	apply -f <manifest>                   记录 apply，并按清单 kind 推进阶段
+//	delete lease <name>                   删除 Lease（--ignore-not-found / -o name）
+//	apply -f <manifest>                   按解析出的 Kind 走 CREATE/UPDATE 语义
 //	get namespace|secret|lease|job|jobs|deployment|pods
 //	logs | describe | wait                只输出文本，供失败 runbook 使用
 //
-// 故障注入（T2-06.1.1 / AUD-03、AUD-04）：
-//   - API 500 / 客户端请求超时 / 确定性 409 / UID 冲突；
-//   - Job 不存在、Job 状态按脚本序列推进、Job 删除中；
-//   - 「apply 返回错误但对象已创建」；
-//   - 迁移之后第一次 get lease 时锁被接管（检查-写入竞态窗口）。
+// T2-06.1.4 的语义变化（审计 C-1/C-3/C-9/C-10/C-13/C-14、A-5）：
+//   - 操作类型**不再按 YAML 文件名判断**：apply 解析每个文档的 Kind，Lease 写入按
+//     清单内容推导 intent（acquire/renew/release/record）；文件名只出现在事件日志里；
+//   - 故障注入匹配**调用语义**（verb/group/resource/namespace/name/selector/intent），
+//     由 fakestate.Injection 统一执行；旧的扁平字段是它的薄封装；
+//   - 所有写路径先做 RBAC 授权（无规则即 403），并且都经同一个 CAS helper
+//     （fakestate.CommitLeaseUpdate）比较 resourceVersion / uid；
+//   - resourceVersion 全局单调（fakestate.State.NextResourceVersion）；
+//   - 注入型 409 一定先推进对象版本（模拟「别人先写了」），因此用同一个 rv 立即重试
+//     必然继续失败 —— 否则 CAS 冲突不可证伪（C-1）；
+//   - 先落盘提交、后返回成功（C-10）：ack 输出发生在状态落盘之后。
 //
 // 关键点：并发 Runner 的 create/replace 用 flock 串行化，因此「两个 Runner 同时申请锁
 // 只有一个成功」在**脚本行为**层面是真实竞争出来的，不是预设结论。
@@ -25,7 +32,9 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,7 +50,9 @@ const (
 	lockName  = "surgecart-deploy-lock"
 	namespace = "surgecart"
 	// 迁移生命周期记录的状态注解键（与 scripts/deploy-k8s.sh 的数据契约一致）。
-	annMigrationState = "deploy-lock.surgecart.io/migration-state"
+	annMigrationState = fakestate.AnnotationMigrationState
+	// 迁移记录注解的公共前缀：用于区分「续租」与「写记录」两种写意图。
+	recordAnnotationPrefix = "deploy-lock.surgecart.io/"
 )
 
 func main() {
@@ -77,8 +88,12 @@ func event(dir, name string) {
 	fakestate.Append(dir, fakestate.EventsFileName, name)
 }
 
-// mutate 在文件锁内读取-修改-写回状态；fn 返回进程退出码。
-func mutate(dir string, fn func(*fakestate.State) int) int {
+// mutateAck 在文件锁内读取-修改-写回状态，然后才执行 ack（打印成功输出）。
+//
+// C-10（ACK-before-commit）：成功输出必须在**落盘之后**。旧的 mutate 在 fn 内部
+// fmt.Printf("... created")，随后 Save 才执行；如果进程在 Save 之前崩溃，调用方已经
+// 看到了「成功」，但集群里没有对象 —— 这正是要消除的「已 ack 未生效」。
+func mutateAck(dir string, fn func(*fakestate.State) (int, func() int)) int {
 	unlock, err := fakestate.Lock(dir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fake kubectl: 获取状态锁失败: %v\n", err)
@@ -91,10 +106,13 @@ func mutate(dir string, fn func(*fakestate.State) int) int {
 		fmt.Fprintf(os.Stderr, "fake kubectl: 读取状态失败: %v\n", err)
 		return 97
 	}
-	code := fn(st)
+	code, ack := fn(st)
 	if err := fakestate.Save(dir, st); err != nil {
 		fmt.Fprintf(os.Stderr, "fake kubectl: 写回状态失败: %v\n", err)
 		return 97
+	}
+	if code == 0 && ack != nil {
+		return ack()
 	}
 	return code
 }
@@ -104,11 +122,14 @@ func mutate(dir string, fn func(*fakestate.State) int) int {
 // ---------------------------------------------------------------------------
 
 type invocation struct {
-	Namespace  string
-	Output     string
-	Selector   string
-	Filename   string
-	Positional []string
+	Namespace      string
+	Output         string
+	Selector       string
+	Filename       string
+	Subresource    string
+	AllNamespaces  bool
+	IgnoreNotFound bool
+	Positional     []string
 }
 
 func parseInvocation(args []string) invocation {
@@ -135,6 +156,14 @@ func parseInvocation(args []string) invocation {
 			inv.Namespace = next()
 		case strings.HasPrefix(arg, "--namespace="):
 			inv.Namespace = strings.TrimPrefix(arg, "--namespace=")
+		case arg == "-A" || arg == "--all-namespaces" || arg == "--all-namespaces=true":
+			inv.AllNamespaces = true
+		case arg == "--ignore-not-found" || arg == "--ignore-not-found=true":
+			inv.IgnoreNotFound = true
+		case arg == "--subresource":
+			inv.Subresource = next()
+		case strings.HasPrefix(arg, "--subresource="):
+			inv.Subresource = strings.TrimPrefix(arg, "--subresource=")
 		case arg == "-o" || arg == "--output":
 			inv.Output = next()
 		case strings.HasPrefix(arg, "--output="):
@@ -177,6 +206,8 @@ func run(dir string, args []string) int {
 		return cmdCreate(dir, inv)
 	case "replace":
 		return cmdReplace(dir, inv)
+	case "delete":
+		return cmdDelete(dir, inv)
 	case "apply":
 		return cmdApply(dir, inv)
 	case "get":
@@ -216,6 +247,8 @@ func cmdKustomize(dir string, inv invocation) int {
 		fmt.Fprintln(os.Stderr, "fake kubectl: kustomize 缺少路径")
 		return 1
 	}
+	// kustomize 的路径决定**清单来源**（migration 还是 application），这是构建输入，
+	// 不是「操作类型判断」：真正的操作类型由 apply 解析出的 Kind 决定。
 	name := fakestate.ApplicationManifest
 	if strings.Contains(inv.Positional[1], "migration") {
 		name = fakestate.MigrationManifest
@@ -229,59 +262,186 @@ func cmdKustomize(dir string, inv invocation) int {
 	return 0
 }
 
+// cmdAuth 实现 `kubectl auth can-i <verb> <resource> [-n ns] [name]`，判定一律走
+// fakestate.Authorize（唯一入口）。这保证「删除 RBAC 任一 (verb,resource) →
+// 预检失败 → 行为测试失败」这条链真的成立（审计 A-5 / C-8）。
 func cmdAuth(dir string, inv invocation) int {
 	if len(inv.Positional) < 3 {
 		fmt.Fprintln(os.Stderr, "fake kubectl: auth can-i 参数不足")
 		return 1
 	}
 	verb := inv.Positional[2]
-	// `auth can-i <verb> <resource> -n <ns>`：resource 允许带 group（pods / jobs.batch /
-	// leases.coordination.k8s.io）。fake 按 **资源短名** 归一，以便 Denied 可以用
-	// "get pods" 这种直观写法精确拒绝某一个资源（T2-06.1.3 / F-01）。
-	resource := ""
+	resourceArg := ""
+	name := ""
 	if len(inv.Positional) >= 4 {
-		resource = inv.Positional[3]
-		if index := strings.Index(resource, "."); index > 0 {
-			resource = resource[:index]
-		}
+		resourceArg = inv.Positional[3]
 	}
-	return mutate(dir, func(st *fakestate.State) int {
-		if st.AuthCanIError != "" {
+	if len(inv.Positional) >= 5 {
+		name = inv.Positional[4]
+	}
+	if inv.Subresource != "" {
+		resourceArg = strings.TrimSuffix(resourceArg, "/"+inv.Subresource) + "/" + inv.Subresource
+	}
+	group, resource := fakestate.SplitResource(resourceArg)
+	if inv.Namespace == "" && !inv.AllNamespaces {
+		inv.Namespace = namespace
+	}
+	if inv.AllNamespaces {
+		inv.Namespace = ""
+	}
+	return mutateAck(dir, func(st *fakestate.State) (int, func() int) {
+		decision, err := fakestate.Authorize(st, verb, group, resource, inv.Namespace, name)
+		switch decision {
+		case fakestate.DecisionAllowed:
+			fakestate.Append(dir, fakestate.EventsFileName, "auth.allowed "+verb+" "+resource)
+			return 0, func() int { fmt.Println("yes"); return 0 }
+		case fakestate.DecisionUnknown:
 			fakestate.Append(dir, fakestate.EventsFileName, "auth.error "+verb+" "+resource)
-			fmt.Fprintln(os.Stderr, st.AuthCanIError)
-			return 1
-		}
-		for _, denied := range st.Permissions.Denied {
-			if denied == verb+" "+resource || (resource == "" && denied == verb) {
-				fakestate.Append(dir, fakestate.EventsFileName, "auth.denied "+verb+" "+resource)
-				fmt.Println("no")
-				return 1
-			}
-		}
-		var allowed bool
-		switch verb {
-		case "get":
-			allowed = st.Permissions.Get
-		case "create":
-			allowed = st.Permissions.Create
-		case "update":
-			allowed = st.Permissions.Update
-		case "patch":
-			allowed = st.Permissions.Patch
-		case "list":
-			// 迁移生命周期核验需要 jobs/pods 的 list 权限，沿用 get 的授权开关。
-			allowed = st.Permissions.Get
+			fmt.Fprintln(os.Stderr, err)
+			return 1, nil
 		default:
-			allowed = false
+			fakestate.Append(dir, fakestate.EventsFileName, "auth.denied "+verb+" "+resource)
+			fmt.Println("no")
+			return 1, nil
 		}
-		if allowed {
-			fmt.Println("yes")
-			return 0
-		}
-		fmt.Println("no")
-		return 1
 	})
 }
+
+// ---------------------------------------------------------------------------
+// 授权与错误渲染
+// ---------------------------------------------------------------------------
+
+// resourceLabel 返回与真实 kubectl 一致的资源全名（错误信息用）。
+func resourceLabel(call fakestate.Invocation) string {
+	switch call.Resource {
+	case "leases":
+		return "leases.coordination.k8s.io"
+	case "jobs":
+		return "jobs.batch"
+	case "deployments":
+		return "deployments.apps"
+	case "namespaces":
+		return "namespaces"
+	case "pods":
+		return "pods"
+	case "secrets":
+		return "secrets"
+	case "configmaps":
+		return "configmaps"
+	case "services":
+		return "services"
+	default:
+		return call.Resource
+	}
+}
+
+// authorizeWrite 是**所有写路径**的统一授权检查（create / update / patch / delete / apply）。
+//
+// verbs 按顺序尝试：真实 kubectl apply 对已存在的对象发 **PATCH**（不是 PUT/update），
+// 但历史上也允许用 update 授权；因此 apply 的已存在分支传 ("patch", "update")，
+// 任一允许即放行 —— 既贴近真实动词，又不逼着调用方过度授权。
+//
+// 返回 0 表示允许；非 0 表示已经打印错误，调用方必须放弃写入（不得有任何状态变更）。
+func authorizeWrite(dir string, st *fakestate.State, call fakestate.Invocation, verbs ...string) int {
+	var decision fakestate.Decision
+	var err error
+	for _, verb := range verbs {
+		decision, err = fakestate.Authorize(st, verb, call.Group, call.Resource, call.Namespace, call.Name)
+		if decision == fakestate.DecisionAllowed {
+			return 0
+		}
+	}
+	if len(verbs) == 0 {
+		return 0
+	}
+	primary := verbs[0]
+	switch decision {
+	case fakestate.DecisionUnknown:
+		fakestate.Append(dir, fakestate.EventsFileName, "auth.error "+primary+" "+call.Resource)
+		fmt.Fprintf(os.Stderr, "Error from server: %v\n", err)
+		return 1
+	default:
+		fakestate.Append(dir, fakestate.EventsFileName, "auth.forbidden "+primary+" "+call.Resource)
+		fmt.Fprintf(os.Stderr,
+			"Error from server (Forbidden): %s is forbidden: User \"ci-deployer\" cannot %s resource %q in API group %q in the namespace %q\n",
+			resourceLabel(call), primary, call.Resource, call.Group, call.Namespace)
+		return 1
+	}
+}
+
+// executeInjection 是**唯一**的注入动作执行点（延迟 / 错误 / 并发接管 / 删除）。
+//
+// 返回非 0 表示请求应当以该退出码失败（错误已经打印）。
+func executeInjection(dir string, st *fakestate.State, inj *fakestate.Injection, call fakestate.Invocation) int {
+	if inj.DelayMS > 0 {
+		time.Sleep(time.Duration(inj.DelayMS) * time.Millisecond)
+	}
+	if inj.Event != "" && inj.Takeover == "" && !inj.Delete {
+		fakestate.Append(dir, fakestate.EventsFileName, inj.Event)
+	}
+	if inj.Takeover != "" {
+		previous := ""
+		if st.Lease != nil {
+			previous = st.Lease.HolderIdentity
+		}
+		if err := fakestate.TakeoverLease(st, inj.Takeover); err == nil {
+			if inj.Event == "lease.stolen-after-state" {
+				fakestate.Append(dir, fakestate.EventsFileName,
+					"lease.stolen-after-state state="+call.Annotations[annMigrationState]+" previous="+previous)
+			} else {
+				fakestate.Append(dir, fakestate.EventsFileName,
+					"lease.stolen holder="+inj.Takeover+" rv="+st.Lease.ResourceVersion)
+			}
+		}
+	}
+	if inj.Delete {
+		if fakestate.DeleteLease(st) {
+			fakestate.Append(dir, fakestate.EventsFileName, "lease.deleted-injected")
+		}
+	}
+	if inj.Status != 0 {
+		// C-1：注入型 409 必须体现「其他写者已经推进了版本」。否则调用方用同一个
+		// resourceVersion 立即重试就会成功，「CAS 冲突」永远不可证伪。
+		if inj.Status == 409 && inj.Takeover == "" && st.Lease != nil && call.Verb != "get" && call.Verb != "list" {
+			st.Lease.ResourceVersion = st.NextResourceVersion()
+			fakestate.Append(dir, fakestate.EventsFileName, "lease.version-advanced rv="+st.Lease.ResourceVersion)
+		}
+		return printInjectionError(dir, inj, call)
+	}
+	return 0
+}
+
+// printInjectionError 把注入的 HTTP 状态码渲染成与真实 kubectl 同形的错误。
+func printInjectionError(dir string, inj *fakestate.Injection, call fakestate.Invocation) int {
+	label := resourceLabel(call)
+	switch inj.Status {
+	case 409:
+		message := inj.Message
+		if message == "" {
+			message = "the object has been modified; please apply your changes to the latest version and try again"
+		}
+		fmt.Fprintf(os.Stderr, "Error from server (Conflict): Operation cannot be fulfilled on %s %q: %s\n", label, call.Name, message)
+	case 403:
+		fmt.Fprintf(os.Stderr,
+			"Error from server (Forbidden): %s is forbidden: User \"ci-deployer\" cannot %s resource %q in API group %q in the namespace %q\n",
+			label, call.Verb, call.Resource, call.Group, call.Namespace)
+	case 404:
+		fmt.Fprintf(os.Stderr, "Error from server (NotFound): %s %q not found\n", label, call.Name)
+	case 504:
+		fmt.Fprintln(os.Stderr, "Unable to connect to the server: net/http: request canceled (Client.Timeout exceeded while awaiting headers)")
+	default:
+		message := inj.Message
+		if message == "" {
+			message = "injected failure"
+		}
+		fmt.Fprintf(os.Stderr, "Error from server (InternalError): an error on the server (%q) has prevented the request from succeeding\n", message)
+	}
+	return 1
+}
+
+// ---------------------------------------------------------------------------
+// Lease 清单
+// ---------------------------------------------------------------------------
 
 // leaseManifest 是 create/replace 传入的 Lease 清单。
 type leaseManifest struct {
@@ -317,6 +477,58 @@ func readLeaseManifest(path string) (*leaseManifest, error) {
 	return &manifest, nil
 }
 
+// leaseIntent 从清单**内容**与服务端现存对象推导写意图（不看文件名）。
+func leaseIntent(st *fakestate.State, manifest *leaseManifest) string {
+	if st.Lease == nil {
+		return fakestate.IntentAcquire
+	}
+	if manifest.Spec.HolderIdentity == "" {
+		return fakestate.IntentRelease
+	}
+	if manifest.Spec.HolderIdentity != st.Lease.HolderIdentity {
+		return fakestate.IntentAcquire
+	}
+	if recordChanged(st.Lease.Annotations, manifest.Metadata.Annotations) {
+		return fakestate.IntentRecord
+	}
+	return fakestate.IntentRenew
+}
+
+// recordChanged 判断迁移记录注解是否被改写（只比较 deploy-lock.surgecart.io/ 前缀的键）。
+func recordChanged(current, next map[string]string) bool {
+	for key, value := range next {
+		if !strings.HasPrefix(key, recordAnnotationPrefix) {
+			continue
+		}
+		if current[key] != value {
+			return true
+		}
+	}
+	for key := range current {
+		if !strings.HasPrefix(key, recordAnnotationPrefix) {
+			continue
+		}
+		if _, ok := next[key]; !ok {
+			return true
+		}
+	}
+	return false
+}
+
+func leaseCall(verb string, manifest *leaseManifest) fakestate.Invocation {
+	call := fakestate.Invocation{
+		Verb:      verb,
+		Group:     "coordination.k8s.io",
+		Resource:  "leases",
+		Namespace: namespace,
+		Name:      lockName,
+	}
+	if manifest != nil {
+		call.Annotations = manifest.Metadata.Annotations
+	}
+	return call
+}
+
 func cmdCreate(dir string, inv invocation) int {
 	path := fileFlag(inv)
 	if path == "" {
@@ -328,14 +540,24 @@ func cmdCreate(dir string, inv invocation) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
-	return mutate(dir, func(st *fakestate.State) int {
+	call := leaseCall("create", manifest)
+	call.Intent = fakestate.IntentAcquire
+	return mutateAck(dir, func(st *fakestate.State) (int, func() int) {
+		if code := authorizeWrite(dir, st, call, "create"); code != 0 {
+			return code, nil
+		}
+		if inj := st.ConsumeInjection(call, "before"); inj != nil {
+			if code := executeInjection(dir, st, inj, call); code != 0 {
+				return code, nil
+			}
+		}
 		if st.Lease != nil {
 			fmt.Fprintf(os.Stderr, "Error from server (AlreadyExists): error when creating %q: leases.coordination.k8s.io %q already exists\n", path, lockName)
-			return 1
+			return 1, nil
 		}
 		st.Lease = &fakestate.Lease{
-			ResourceVersion: "1",
-			UID:             fmt.Sprintf("lease-uid-%d", st.LeaseAcquisitions+1),
+			ResourceVersion: st.NextResourceVersion(),
+			UID:             st.NextLeaseUID(),
 			HolderIdentity:  manifest.Spec.HolderIdentity,
 			AcquireTime:     manifest.Spec.AcquireTime,
 			RenewTime:       manifest.Spec.RenewTime,
@@ -345,8 +567,7 @@ func cmdCreate(dir string, inv invocation) int {
 		}
 		st.LeaseAcquisitions++
 		fakestate.Append(dir, fakestate.EventsFileName, "lease.acquire holder="+manifest.Spec.HolderIdentity)
-		fmt.Printf("lease.coordination.k8s.io/%s created\n", lockName)
-		return 0
+		return 0, func() int { fmt.Printf("lease.coordination.k8s.io/%s created\n", lockName); return 0 }
 	})
 }
 
@@ -367,140 +588,115 @@ func cmdReplace(dir string, inv invocation) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
-	return mutate(dir, func(st *fakestate.State) int {
+	return mutateAck(dir, func(st *fakestate.State) (int, func() int) {
+		call := leaseCall("update", manifest)
+		call.Intent = leaseIntent(st, manifest)
+
+		// A-5：写之前必须授权（deploy-lock 的 Role 给 update；没有规则就是 403）。
+		if code := authorizeWrite(dir, st, call, "update"); code != 0 {
+			return code, nil
+		}
+		// 「校验/写入之前」的注入：错误、延迟、并发接管（接管后 CAS 必然失败）。
+		if inj := st.ConsumeInjection(call, "before"); inj != nil {
+			if code := executeInjection(dir, st, inj, call); code != 0 {
+				return code, nil
+			}
+		}
 		if st.Lease == nil {
 			fmt.Fprintf(os.Stderr, "Error from server (NotFound): leases.coordination.k8s.io %q not found\n", lockName)
-			return 1
+			return 1, nil
 		}
-		// 续租故障是「持续性」的：脚本会对 409 做有限重试，单次失败不足以判定失锁，
-		// 因此这几个计数器不递减（模拟 API 持续不可用 / 锁持续被抢占）。
-		isRenew := filepath.Base(path) == "lease-renew.yaml"
-		// T2-06.1.3 / F-06：「旧持有者读到 rv，然后别人接管」的确定性注入。
-		// 必须发生在 CAS 校验**之前**：否则无法证明「旧 rv 的 PUT 会被服务端拒绝」。
-		if isRenew && st.LeaseStealBeforeRenewReplace > 0 {
-			st.LeaseStealBeforeRenewReplace--
-			st.Lease.HolderIdentity = st.LeaseStealHolder
-			st.Lease.RenewTime = time.Now().UTC().Format(time.RFC3339)
-			st.Lease.ResourceVersion = nextResourceVersion(st.Lease.ResourceVersion)
-			st.Lease.Transitions++
-			fakestate.Append(dir, fakestate.EventsFileName,
-				"lease.stolen holder="+st.LeaseStealHolder+" rv="+st.Lease.ResourceVersion)
-		}
-		if isRenew && st.LeaseRenewTimeouts > 0 {
-			fakestate.Append(dir, fakestate.EventsFileName, "lease.renew-timeout")
-			fmt.Fprintln(os.Stderr, "Unable to connect to the server: net/http: request canceled (Client.Timeout exceeded while awaiting headers)")
-			return 1
-		}
-		if isRenew && st.LeaseRenewFailures > 0 {
-			fakestate.Append(dir, fakestate.EventsFileName, "lease.renew-error")
-			fmt.Fprintln(os.Stderr, `Error from server (InternalError): an error on the server ("injected renew failure") has prevented the request from succeeding`)
-			return 1
-		}
-		if isRenew && st.LeaseRenewConflicts > 0 {
-			fakestate.Append(dir, fakestate.EventsFileName, "lease.renew-conflict")
-			// T2-06.1.3 / F-02.4：重试链耗尽租期 —— 第 N 次冲突之后租约在服务端已过期。
-			if st.LeaseExpireAfterRenewConflicts > 0 {
-				st.LeaseExpireAfterRenewConflicts--
-				if st.LeaseExpireAfterRenewConflicts == 0 {
-					st.Lease.RenewTime = time.Now().
-						Add(-time.Duration(st.Lease.DurationSeconds+10) * time.Second).
-						UTC().Format(time.RFC3339)
-					st.Lease.ResourceVersion = nextResourceVersion(st.Lease.ResourceVersion)
-					fakestate.Append(dir, fakestate.EventsFileName, "lease.expired holder="+st.Lease.HolderIdentity)
-				}
-			}
-			conflictMessage("the object has been modified; please apply your changes to the latest version and try again")
-			return 1
-		}
-		if isRenew && st.LeaseRenewUIDConflicts > 0 {
-			fakestate.Append(dir, fakestate.EventsFileName, "lease.renew-uid-conflict")
-			conflictMessage("the UID in the precondition does not match the UID in record")
-			return 1
-		}
-		if st.LeaseReplaceTimeouts > 0 {
-			st.LeaseReplaceTimeouts--
-			fakestate.Append(dir, fakestate.EventsFileName, "lease.replace-timeout")
-			fmt.Fprintln(os.Stderr, "Unable to connect to the server: net/http: request canceled (Client.Timeout exceeded while awaiting headers)")
-			return 1
-		}
-		if st.LeaseReplaceFailures > 0 {
-			st.LeaseReplaceFailures--
-			fakestate.Append(dir, fakestate.EventsFileName, "lease.replace-error")
-			fmt.Fprintln(os.Stderr, `Error from server (InternalError): an error on the server ("injected lease failure") has prevented the request from succeeding`)
-			return 1
-		}
-		if st.LeaseReplaceConflicts > 0 {
-			st.LeaseReplaceConflicts--
-			fakestate.Append(dir, fakestate.EventsFileName, "lease.conflict")
-			conflictMessage("the object has been modified; please apply your changes to the latest version and try again")
-			return 1
-		}
-		if st.LeaseReplaceUIDConflicts > 0 {
-			st.LeaseReplaceUIDConflicts--
+		// 所有写路径统一走同一个 CAS helper（C-1/C-2/C-3）。
+		previous, err := fakestate.CommitLeaseUpdate(st, fakestate.LeaseUpdate{
+			ExpectResourceVersion: manifest.Metadata.ResourceVersion,
+			ExpectUID:             manifest.Metadata.UID,
+			HolderIdentity:        manifest.Spec.HolderIdentity,
+			AcquireTime:           manifest.Spec.AcquireTime,
+			RenewTime:             manifest.Spec.RenewTime,
+			DurationSeconds:       manifest.Spec.LeaseDurationSeconds,
+			Transitions:           manifest.Spec.LeaseTransitions,
+			Annotations:           manifest.Metadata.Annotations,
+		})
+		switch {
+		case err == fakestate.ErrLeaseNotFound:
+			fmt.Fprintf(os.Stderr, "Error from server (NotFound): leases.coordination.k8s.io %q not found\n", lockName)
+			return 1, nil
+		case err == fakestate.ErrUIDConflict:
 			fakestate.Append(dir, fakestate.EventsFileName, "lease.uid-conflict")
 			conflictMessage("the UID in the precondition does not match the UID in record")
-			return 1
-		}
-		// 只作用于迁移记录写入：确定性验证「重试时重读并保留最新记录」（AUD-D2）。
-		if filepath.Base(path) == "lease-record.yaml" && st.LeaseRecordConflicts > 0 {
-			st.LeaseRecordConflicts--
-			fakestate.Append(dir, fakestate.EventsFileName, "lease.record-conflict")
-			conflictMessage("the object has been modified; please apply your changes to the latest version and try again")
-			return 1
-		}
-		// UID 校验（T2-06.1.1）：真实 API Server 会拒绝 uid 与现存对象不一致的 PUT，
-		// 这正是「同名 Lease 被删除重建」时旧持有者不能写入的原因。
-		if manifest.Metadata.UID != "" && manifest.Metadata.UID != st.Lease.UID {
-			fakestate.Append(dir, fakestate.EventsFileName, "lease.uid-conflict")
-			conflictMessage("the UID in the precondition does not match the UID in record")
-			return 1
-		}
-		if manifest.Metadata.ResourceVersion != st.Lease.ResourceVersion {
+			return 1, nil
+		case err != nil:
 			fakestate.Append(dir, fakestate.EventsFileName, "lease.conflict")
 			conflictMessage("the object has been modified; please apply your changes to the latest version and try again")
-			return 1
+			return 1, nil
 		}
 
-		previous := st.Lease.HolderIdentity
-		st.Lease.HolderIdentity = manifest.Spec.HolderIdentity
-		st.Lease.AcquireTime = manifest.Spec.AcquireTime
-		st.Lease.RenewTime = manifest.Spec.RenewTime
-		st.Lease.DurationSeconds = manifest.Spec.LeaseDurationSeconds
-		st.Lease.Transitions = manifest.Spec.LeaseTransitions
-		// PUT 覆盖整个对象：注解必须整体回写，否则记录丢失。
-		st.Lease.Annotations = manifest.Metadata.Annotations
-		st.Lease.ResourceVersion = nextResourceVersion(st.Lease.ResourceVersion)
-
-		// 确定性注入：记录写入成功后锁立刻被别的 Runner 接管。
-		if state := manifest.Metadata.Annotations[annMigrationState]; state != "" && st.LeaseStealAfterState == state {
-			st.LeaseStealAfterState = ""
-			holder := st.Lease.HolderIdentity
-			st.Lease.HolderIdentity = st.LeaseStealHolder
-			st.Lease.ResourceVersion = nextResourceVersion(st.Lease.ResourceVersion)
-			fakestate.Append(dir, fakestate.EventsFileName, "lease.stolen-after-state state="+state+" previous="+holder)
+		// 写入成功之后的注入：模拟「刚写完就被别的 Runner 接管」。
+		if inj := st.ConsumeInjection(call, "after"); inj != nil {
+			executeInjection(dir, st, inj, call)
 		}
 
-		recordWriteEvent(dir, path, manifest.Metadata.Annotations, previous)
+		recordWriteEvent(dir, path, manifest.Metadata.Annotations, previous.HolderIdentity, call.Intent)
 		switch {
 		case manifest.Spec.HolderIdentity == "":
-			fakestate.Append(dir, fakestate.EventsFileName, "lease.release holder="+previous)
-		case manifest.Spec.HolderIdentity == previous:
-			fakestate.Append(dir, fakestate.EventsFileName, "lease.renew holder="+previous)
+			fakestate.Append(dir, fakestate.EventsFileName, "lease.release holder="+previous.HolderIdentity)
+		case manifest.Spec.HolderIdentity == previous.HolderIdentity:
+			fakestate.Append(dir, fakestate.EventsFileName, "lease.renew holder="+previous.HolderIdentity)
 		default:
 			st.LeaseAcquisitions++
-			fakestate.Append(dir, fakestate.EventsFileName, "lease.acquire holder="+manifest.Spec.HolderIdentity+" previous="+previous)
+			fakestate.Append(dir, fakestate.EventsFileName,
+				"lease.acquire holder="+manifest.Spec.HolderIdentity+" previous="+previous.HolderIdentity)
 		}
-		fmt.Printf("lease.coordination.k8s.io/%s replaced\n", lockName)
-		return 0
+		return 0, func() int { fmt.Printf("lease.coordination.k8s.io/%s replaced\n", lockName); return 0 }
 	})
 }
 
-func nextResourceVersion(current string) string {
-	var value int
-	if _, err := fmt.Sscanf(current, "%d", &value); err != nil {
-		return current + "1"
+// cmdDelete 实现 `kubectl delete lease <name>`（C-4：让「删除-重建」路径可达）。
+func cmdDelete(dir string, inv invocation) int {
+	if len(inv.Positional) < 2 {
+		fmt.Fprintln(os.Stderr, "fake kubectl: delete 缺少资源类型")
+		return 1
 	}
-	return fmt.Sprintf("%d", value+1)
+	resource := inv.Positional[1]
+	if resource != "lease" && resource != "leases" && resource != "leases.coordination.k8s.io" {
+		fmt.Fprintf(os.Stderr, "fake kubectl: 未实现的 delete %q\n", resource)
+		return 1
+	}
+	name := lockName
+	if len(inv.Positional) >= 3 {
+		name = inv.Positional[2]
+	}
+	call := fakestate.Invocation{
+		Verb: "delete", Group: "coordination.k8s.io", Resource: "leases",
+		Namespace: namespace, Name: name,
+	}
+	return mutateAck(dir, func(st *fakestate.State) (int, func() int) {
+		if code := authorizeWrite(dir, st, call, "delete"); code != 0 {
+			return code, nil
+		}
+		if inj := st.ConsumeInjection(call, "before"); inj != nil {
+			if code := executeInjection(dir, st, inj, call); code != 0 {
+				return code, nil
+			}
+		}
+		existed := name == lockName && fakestate.DeleteLease(st)
+		if !existed {
+			if inv.IgnoreNotFound {
+				return 0, nil
+			}
+			fmt.Fprintf(os.Stderr, "Error from server (NotFound): leases.coordination.k8s.io %q not found\n", name)
+			return 1, nil
+		}
+		fakestate.Append(dir, fakestate.EventsFileName, "lease.delete name="+name)
+		return 0, func() int {
+			if inv.Output == "name" {
+				fmt.Printf("lease.coordination.k8s.io/%s\n", name)
+				return 0
+			}
+			fmt.Printf("lease.coordination.k8s.io/%s deleted\n", name)
+			return 0
+		}
+	})
 }
 
 // recordWriteEvent 记录每次 Lease 写入「携带了什么迁移记录」。
@@ -508,17 +704,92 @@ func nextResourceVersion(current string) string {
 // 这是 AUD-D2 的可观测性来源：测试可以逐次断言 renew/release/takeover 没有把记录
 // 写成默认值（例如 NO_MIGRATION + 空 job），而不是只看最终状态 —— 最终状态可能被
 // 后续一次正确的写入掩盖掉中间的丢失。
-func recordWriteEvent(dir, path string, ann map[string]string, previousHolder string) {
-	const prefix = "deploy-lock.surgecart.io/"
+//
+// kind=（清单文件名）与 intent=（由内容推导的写意图）都记录下来：**判定**只看 intent，
+// 文件名仅用于兼容既有断言的观测字段。
+func recordWriteEvent(dir, path string, ann map[string]string, previousHolder, intent string) {
 	fakestate.Append(dir, fakestate.EventsFileName, fmt.Sprintf(
-		"lease.write kind=%s state=%s job=%s uid=%s prev=%s previous=%s",
+		"lease.write kind=%s state=%s job=%s uid=%s prev=%s previous=%s intent=%s",
 		filepath.Base(path),
-		ann[prefix+"migration-state"],
-		ann[prefix+"migration-job"],
-		ann[prefix+"migration-job-uid"],
-		ann[prefix+"migration-previous-state"],
+		ann[recordAnnotationPrefix+"migration-state"],
+		ann[recordAnnotationPrefix+"migration-job"],
+		ann[recordAnnotationPrefix+"migration-job-uid"],
+		ann[recordAnnotationPrefix+"migration-previous-state"],
 		previousHolder,
+		intent,
 	))
+}
+
+// ---------------------------------------------------------------------------
+// apply（按解析出的 Kind，不看文件名）
+// ---------------------------------------------------------------------------
+
+// manifestObject 是清单里的一个文档中本实现关心的字段。
+type manifestObject struct {
+	APIVersion string `yaml:"apiVersion"`
+	Kind       string `yaml:"kind"`
+	Metadata   struct {
+		Name            string            `yaml:"name"`
+		Namespace       string            `yaml:"namespace"`
+		UID             string            `yaml:"uid"`
+		ResourceVersion string            `yaml:"resourceVersion"`
+		Labels          map[string]string `yaml:"labels"`
+		Annotations     map[string]string `yaml:"annotations"`
+	} `yaml:"metadata"`
+	Spec struct {
+		HolderIdentity       string `yaml:"holderIdentity"`
+		LeaseDurationSeconds int    `yaml:"leaseDurationSeconds"`
+		AcquireTime          string `yaml:"acquireTime"`
+		RenewTime            string `yaml:"renewTime"`
+		LeaseTransitions     int    `yaml:"leaseTransitions"`
+	} `yaml:"spec"`
+}
+
+// parseManifest 解析多文档 YAML 清单（服务端会逐个对象处理）。
+func parseManifest(raw []byte) ([]manifestObject, error) {
+	var objects []manifestObject
+	decoder := yaml.NewDecoder(bytes.NewReader(raw))
+	for {
+		var object manifestObject
+		err := decoder.Decode(&object)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, err
+		}
+		if object.Kind == "" && len(object.Metadata.Name) == 0 {
+			continue
+		}
+		objects = append(objects, object)
+	}
+	return objects, nil
+}
+
+// kindTarget 把 Kind 映射成 (group, resource) —— apply 的授权与注入都按它判定（C-14）。
+func kindTarget(kind string) (group, resource string, ok bool) {
+	switch kind {
+	case "Namespace":
+		return "", "namespaces", true
+	case "ConfigMap":
+		return "", "configmaps", true
+	case "Secret":
+		return "", "secrets", true
+	case "Service":
+		return "", "services", true
+	case "Pod":
+		return "", "pods", true
+	case "Deployment":
+		return "apps", "deployments", true
+	case "StatefulSet":
+		return "apps", "statefulsets", true
+	case "Job":
+		return "batch", "jobs", true
+	case "Lease":
+		return "coordination.k8s.io", "leases", true
+	default:
+		return "", "", false
+	}
 }
 
 func cmdApply(dir string, inv invocation) int {
@@ -532,35 +803,121 @@ func cmdApply(dir string, inv invocation) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
-	kind := classifyManifest(string(raw))
-	return mutate(dir, func(st *fakestate.State) int {
-		if st.ApplyFailures[kind] {
-			fakestate.Append(dir, fakestate.EventsFileName, "apply.error "+kind)
-			fmt.Fprintf(os.Stderr, `Error from server (InternalError): an error on the server ("injected apply failure for %s") has prevented the request from succeeding`+"\n", kind)
+	objects, err := parseManifest(raw)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error from server (BadRequest): error parsing %q: %v\n", path, err)
+		return 1
+	}
+	if len(objects) == 0 {
+		fmt.Fprintf(os.Stderr, "Error from server (BadRequest): no objects passed to apply\n")
+		return 1
+	}
+	// 未知 Kind 必须在写入任何对象之前失败（C-14）：服务端校验，不靠文件名猜。
+	for _, object := range objects {
+		if _, _, ok := kindTarget(object.Kind); !ok {
+			fmt.Fprintf(os.Stderr, "Error from server (BadRequest): unable to recognize %q: no matches for kind %q\n", path, object.Kind)
 			return 1
 		}
-		// 「API 返回错误但对象已创建」：脚本不能靠 apply 的退出码判断是否创建。
-		if st.ApplyErrorsApplied[kind] {
-			fakestate.Append(dir, fakestate.EventsFileName, "apply.error-but-created "+kind)
-			applyKind(st, kind)
-			fmt.Fprintf(os.Stderr, `Error from server (Timeout): the server was unable to return a response in the time allotted, but the request may have been processed`+"\n")
-			return 1
+	}
+	// 事件名沿用历史的 migration/application/namespace 三分法（仅为观测兼容），
+	// 但它是从**解析出的 Kind** 推导的，不是从文件名。
+	legacyKind := legacyApplyKind(objects)
+	return mutateAck(dir, func(st *fakestate.State) (int, func() int) {
+		for _, object := range objects {
+			group, resource, _ := kindTarget(object.Kind)
+			call := fakestate.Invocation{
+				Verb: "apply", Group: group, Resource: resource,
+				Namespace: firstNonEmpty(object.Metadata.Namespace, namespace),
+				Name:      object.Metadata.Name,
+			}
+			// 真实 kubectl apply = GET → 不存在 POST(create) / 存在 PATCH(patch)。
+			// 「已存在 → update」是不对的：按交付 RBAC 授权的身份只有 patch，
+			// 会被 fake 误判成 403（而在真实集群上是 200）。这里先 patch，兼容
+			// 只授予 update 的历史授权写法。
+			verbs := []string{"create"}
+			if objectExists(st, group, resource, object.Metadata.Name) {
+				verbs = []string{"patch", "update"}
+			}
+			if code := authorizeWrite(dir, st, call, verbs...); code != 0 {
+				return code, nil
+			}
+			if inj := st.ConsumeInjection(call, "before"); inj != nil {
+				if inj.Applied {
+					// 「服务端已接受但客户端看到超时」：写入生效，然后返回错误。
+					// 对象已被创建这件事必须落到状态里 —— 客户端非零 ≠ 没有变更。
+					if err := applyObject(st, object); err != nil {
+						conflictMessage(err.Error())
+						return 1, nil
+					}
+					if inj.Event != "" {
+						fakestate.Append(dir, fakestate.EventsFileName, inj.Event)
+					}
+					fmt.Fprintln(os.Stderr, "Error from server (Timeout): the server was unable to return a response in the time allotted, but the request may have been processed")
+					return 1, nil
+				}
+				if code := executeInjection(dir, st, inj, call); code != 0 {
+					return code, nil
+				}
+			}
+			// apply 的 UPDATE 语义同样不允许跳过 CAS（C-3）：冲突必须变成 409。
+			if err := applyObject(st, object); err != nil {
+				fakestate.Append(dir, fakestate.EventsFileName, "apply.conflict "+resource)
+				conflictMessage(err.Error())
+				return 1, nil
+			}
 		}
-		fakestate.Append(dir, fakestate.EventsFileName, "apply."+kind)
-		applyKind(st, kind)
-		fmt.Printf("%s applied\n", kind)
-		return 0
+		fakestate.Append(dir, fakestate.EventsFileName, "apply."+legacyKind)
+		return 0, func() int { fmt.Printf("%s applied\n", legacyKind); return 0 }
 	})
 }
 
-func applyKind(st *fakestate.State, kind string) {
-	switch kind {
-	case "application":
+// legacyApplyKind 从解析出的 Kind 推导历史事件名（migration / application / namespace）。
+func legacyApplyKind(objects []manifestObject) string {
+	for _, object := range objects {
+		if object.Kind == "Job" {
+			return "migration"
+		}
+	}
+	for _, object := range objects {
+		if object.Kind == "Deployment" {
+			return "application"
+		}
+	}
+	return "namespace"
+}
+
+// objectExists 判断 apply 的目标对象是否已存在（决定 create 还是 update 语义）。
+func objectExists(st *fakestate.State, group, resource, name string) bool {
+	switch {
+	case resource == "namespaces":
+		return st.NamespaceExists
+	case resource == "deployments":
+		return st.Applied || st.Deployment.Exists
+	case resource == "jobs":
+		for _, job := range st.Jobs {
+			if jobNameFor(job.Name, "") == jobNameFor(name, "") {
+				return true
+			}
+		}
+		return false
+	case resource == "leases":
+		return st.Lease != nil
+	default:
+		return false
+	}
+}
+
+// applyObject 按对象 Kind 执行 CREATE/UPDATE 语义（不再按清单文件名判断）。
+// 返回非 nil 表示服务端拒绝了这次写入（Lease 的 UPDATE 同样走 CAS，不允许跳过版本校验）。
+func applyObject(st *fakestate.State, object manifestObject) error {
+	_, resource, _ := kindTarget(object.Kind)
+	switch resource {
+	case "namespaces":
+		st.NamespaceExists = true
+	case "deployments":
 		st.Applied = true
 		st.DeploymentGets = 0
-	case "namespace":
-		st.NamespaceExists = true
-	case "migration":
+	case "jobs":
 		// 迁移已发起：后续第一次 get lease 可能触发「检查后被接管」的注入。
 		st.MigrationApplied = true
 		// 迁移 Job 进入命名空间：后续 Runner 的「是否存在未终结迁移」扫描必须能看到它。
@@ -574,29 +931,44 @@ func applyKind(st *fakestate.State, kind string) {
 			snapshot.Name = "surgecart-migrate"
 		}
 		st.Jobs = append(st.Jobs, snapshot)
-	}
-}
-
-// classifyManifest 按清单内容判断类型：发布脚本用「先迁移后应用」的顺序，
-// fake 必须能区分两者才能验证「迁移失败时应用清单没有被 apply」。
-func classifyManifest(raw string) string {
-	hasJob, hasDeployment := false, false
-	for _, line := range strings.Split(raw, "\n") {
-		switch strings.TrimSpace(line) {
-		case "kind: Job":
-			hasJob = true
-		case "kind: Deployment":
-			hasDeployment = true
+	case "leases":
+		if st.Lease == nil {
+			st.Lease = &fakestate.Lease{
+				ResourceVersion: st.NextResourceVersion(),
+				UID:             st.NextLeaseUID(),
+				HolderIdentity:  object.Spec.HolderIdentity,
+				AcquireTime:     object.Spec.AcquireTime,
+				RenewTime:       object.Spec.RenewTime,
+				DurationSeconds: object.Spec.LeaseDurationSeconds,
+				Transitions:     object.Spec.LeaseTransitions,
+				Annotations:     object.Metadata.Annotations,
+			}
+			return nil
+		}
+		// 已存在 → UPDATE 语义，仍然走 CAS（apply 不允许跳过版本校验）。
+		if _, err := fakestate.CommitLeaseUpdate(st, fakestate.LeaseUpdate{
+			ExpectResourceVersion: object.Metadata.ResourceVersion,
+			ExpectUID:             object.Metadata.UID,
+			HolderIdentity:        object.Spec.HolderIdentity,
+			AcquireTime:           object.Spec.AcquireTime,
+			RenewTime:             object.Spec.RenewTime,
+			DurationSeconds:       object.Spec.LeaseDurationSeconds,
+			Transitions:           object.Spec.LeaseTransitions,
+			Annotations:           object.Metadata.Annotations,
+		}); err != nil {
+			return err
 		}
 	}
-	switch {
-	case hasJob:
-		return "migration"
-	case hasDeployment:
-		return "application"
-	default:
-		return "namespace"
+	return nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
 	}
+	return ""
 }
 
 func fileFlag(inv invocation) string { return inv.Filename }
@@ -670,37 +1042,35 @@ func cmdGetSecret(dir string, inv invocation) int {
 	return 1
 }
 
+// cmdGetLease 读取 Lease。
+//
+// C-6/C-12：并发接管注入必须发生在「GET 返回的快照被调用方使用之后」——
+// 调用方拿到的是**接管前**的快照，接管在返回之后才落到状态里。
 func cmdGetLease(dir string, inv invocation) int {
-	return mutate(dir, func(st *fakestate.State) int {
+	call := fakestate.Invocation{
+		Verb: "get", Group: "coordination.k8s.io", Resource: "leases",
+		Namespace: namespace, Name: lockName,
+	}
+	return mutateAck(dir, func(st *fakestate.State) (int, func() int) {
 		st.LeaseGets++
-		if st.LeaseGetTimeouts > 0 {
-			st.LeaseGetTimeouts--
-			fakestate.Append(dir, fakestate.EventsFileName, "lease.get-timeout")
-			fmt.Fprintln(os.Stderr, "Unable to connect to the server: net/http: request canceled (Client.Timeout exceeded while awaiting headers)")
-			return 1
-		}
-		if st.LeaseGetFailures > 0 {
-			st.LeaseGetFailures--
-			fakestate.Append(dir, fakestate.EventsFileName, "lease.get-error")
-			fmt.Fprintln(os.Stderr, `Error from server (InternalError): an error on the server ("injected lease read failure") has prevented the request from succeeding`)
-			return 1
+		if inj := st.ConsumeInjection(call, "before"); inj != nil {
+			if code := executeInjection(dir, st, inj, call); code != 0 {
+				return code, nil
+			}
 		}
 		if st.Lease == nil {
 			fmt.Fprintf(os.Stderr, "Error from server (NotFound): leases.coordination.k8s.io %q not found\n", lockName)
-			return 1
+			return 1, nil
 		}
-		if st.LeaseStealAfterGets > 0 && st.LeaseGets >= st.LeaseStealAfterGets {
-			st.LeaseStealAfterGets = 0
-			stealLease(st)
+		snapshot := st.Lease.Clone()
+		// 返回之后才接管/删除：快照是接管前的状态。
+		if inj := st.ConsumeInjection(call, "after"); inj != nil {
+			executeInjection(dir, st, inj, call)
 		}
-		return render(inv.Output, leaseObject(st.Lease), leaseTable(st.Lease))
+		return 0, func() int {
+			return render(inv.Output, leaseObject(snapshot), leaseTable(snapshot))
+		}
 	})
-}
-
-func stealLease(st *fakestate.State) {
-	st.Lease.HolderIdentity = st.LeaseStealHolder
-	st.Lease.ResourceVersion = nextResourceVersion(st.Lease.ResourceVersion)
-	fakestate.Append(fakestate.Dir(), fakestate.EventsFileName, "lease.stolen holder="+st.LeaseStealHolder)
 }
 
 func jobNameFor(explicit, requested string) string {
@@ -731,24 +1101,15 @@ func cmdGetJob(dir string, inv invocation) int {
 	if len(inv.Positional) >= 3 {
 		requested = inv.Positional[2]
 	}
-	return mutate(dir, func(st *fakestate.State) int {
-		if st.JobGetFailAt > 0 && st.JobGets+1 == st.JobGetFailAt {
-			st.JobGetFailAt = 0
-			fakestate.Append(dir, fakestate.EventsFileName, "job.get-error")
-			fmt.Fprintln(os.Stderr, `Error from server (InternalError): an error on the server ("injected job read failure") has prevented the request from succeeding`)
-			return 1
-		}
-		if st.JobGetTimeouts > 0 {
-			st.JobGetTimeouts--
-			fakestate.Append(dir, fakestate.EventsFileName, "job.get-timeout")
-			fmt.Fprintln(os.Stderr, "Unable to connect to the server: net/http: request canceled (Client.Timeout exceeded while awaiting headers)")
-			return 1
-		}
-		if st.JobGetFailures > 0 {
-			st.JobGetFailures--
-			fakestate.Append(dir, fakestate.EventsFileName, "job.get-error")
-			fmt.Fprintln(os.Stderr, `Error from server (InternalError): an error on the server ("injected job read failure") has prevented the request from succeeding`)
-			return 1
+	call := fakestate.Invocation{
+		Verb: "get", Group: "batch", Resource: "jobs",
+		Namespace: namespace, Name: requested,
+	}
+	return mutateAck(dir, func(st *fakestate.State) (int, func() int) {
+		if inj := st.ConsumeInjection(call, "before"); inj != nil {
+			if code := executeInjection(dir, st, inj, call); code != 0 {
+				return code, nil
+			}
 		}
 		job := st.Job
 		if len(st.JobScript) > 0 {
@@ -761,25 +1122,23 @@ func cmdGetJob(dir string, inv invocation) int {
 		st.JobGets++
 		if !job.Exists {
 			fmt.Fprintf(os.Stderr, "Error from server (NotFound): jobs.batch %q not found\n", requested)
-			return 1
+			return 1, nil
 		}
-		return render(inv.Output, jobObject(job, requested, st.Job.UID), jobTable(job))
+		return 0, func() int {
+			return render(inv.Output, jobObject(job, requested, st.Job.UID), jobTable(job))
+		}
 	})
 }
 
 func cmdGetJobs(dir string, inv invocation) int {
-	return mutate(dir, func(st *fakestate.State) int {
-		if st.JobsListTimeouts > 0 {
-			st.JobsListTimeouts--
-			fakestate.Append(dir, fakestate.EventsFileName, "jobs.list-timeout")
-			fmt.Fprintln(os.Stderr, "Unable to connect to the server: net/http: request canceled (Client.Timeout exceeded while awaiting headers)")
-			return 1
-		}
-		if st.JobsListFailures > 0 {
-			st.JobsListFailures--
-			fakestate.Append(dir, fakestate.EventsFileName, "jobs.list-error")
-			fmt.Fprintln(os.Stderr, `Error from server (InternalError): an error on the server ("injected job list failure") has prevented the request from succeeding`)
-			return 1
+	call := fakestate.Invocation{
+		Verb: "list", Group: "batch", Resource: "jobs", Namespace: namespace, Selector: inv.Selector,
+	}
+	return mutateAck(dir, func(st *fakestate.State) (int, func() int) {
+		if inj := st.ConsumeInjection(call, "before"); inj != nil {
+			if code := executeInjection(dir, st, inj, call); code != 0 {
+				return code, nil
+			}
 		}
 		// 只返回「集群里真实存在的 Job」：st.Job / JobScript 是脚本按名称读取的
 		// 状态序列，不代表对象已经存在（apply 之前它必须不在列表里）。
@@ -788,21 +1147,23 @@ func cmdGetJobs(dir string, inv invocation) int {
 		for _, job := range jobs {
 			items = append(items, jobObject(job, job.Name, st.Job.UID))
 		}
-		return render(inv.Output, map[string]any{
-			"apiVersion": "batch/v1",
-			"kind":       "JobList",
-			"items":      items,
-		}, jobsTable(jobs))
+		return 0, func() int {
+			return render(inv.Output, map[string]any{
+				"apiVersion": "batch/v1",
+				"kind":       "JobList",
+				"items":      items,
+			}, jobsTable(jobs))
+		}
 	})
 }
 
 func cmdGetDeployment(dir string, inv invocation) int {
-	return mutate(dir, func(st *fakestate.State) int {
+	return mutateAck(dir, func(st *fakestate.State) (int, func() int) {
 		// AUD-09：命名空间/鉴权类错误必须原样暴露，不能被脚本当成「Deployment 不存在」。
 		if st.DeploymentGetError != "" {
 			fakestate.Append(dir, fakestate.EventsFileName, "deployment.get-error")
 			fmt.Fprintln(os.Stderr, st.DeploymentGetError)
-			return 1
+			return 1, nil
 		}
 		deployment := st.Deployment
 		if st.Applied && len(st.DeploymentAfterApply) > 0 {
@@ -815,56 +1176,26 @@ func cmdGetDeployment(dir string, inv invocation) int {
 		}
 		if !deployment.Exists {
 			fmt.Fprintf(os.Stderr, "Error from server (NotFound): deployments.apps %q not found\n", "surgecart")
-			return 1
+			return 1, nil
 		}
-		return render(inv.Output, deploymentObject(deployment), deploymentTable(deployment))
+		return 0, func() int {
+			return render(inv.Output, deploymentObject(deployment), deploymentTable(deployment))
+		}
 	})
 }
 
 func cmdGetPods(dir string, inv invocation) int {
-	return mutate(dir, func(st *fakestate.State) int {
+	call := fakestate.Invocation{
+		Verb: "list", Resource: "pods", Namespace: namespace, Selector: inv.Selector,
+	}
+	return mutateAck(dir, func(st *fakestate.State) (int, func() int) {
+		if inj := st.ConsumeInjection(call, "before"); inj != nil {
+			if code := executeInjection(dir, st, inj, call); code != 0 {
+				return code, nil
+			}
+		}
 		isJobPods := strings.Contains(inv.Selector, "job-name=")
 		isMigrationPods := strings.Contains(inv.Selector, "database-migration")
-		if isMigrationPods && !isJobPods {
-			if st.MigrationPodsGetTimeouts > 0 {
-				st.MigrationPodsGetTimeouts--
-				fakestate.Append(dir, fakestate.EventsFileName, "migration-pods.get-timeout")
-				fmt.Fprintln(os.Stderr, "Unable to connect to the server: net/http: request canceled (Client.Timeout exceeded while awaiting headers)")
-				return 1
-			}
-			if st.MigrationPodsGetForbidden > 0 {
-				st.MigrationPodsGetForbidden--
-				fakestate.Append(dir, fakestate.EventsFileName, "migration-pods.get-forbidden")
-				fmt.Fprintln(os.Stderr, `Error from server (Forbidden): pods is forbidden: User "ci-deployer" cannot list resource "pods" in API group "" in the namespace "surgecart"`)
-				return 1
-			}
-			if st.MigrationPodsGetFailures > 0 {
-				st.MigrationPodsGetFailures--
-				fakestate.Append(dir, fakestate.EventsFileName, "migration-pods.get-error")
-				fmt.Fprintln(os.Stderr, `Error from server (InternalError): an error on the server ("injected migration pod list failure") has prevented the request from succeeding`)
-				return 1
-			}
-		}
-		if isJobPods {
-			if st.PodsGetTimeouts > 0 {
-				st.PodsGetTimeouts--
-				fakestate.Append(dir, fakestate.EventsFileName, "pods.get-timeout")
-				fmt.Fprintln(os.Stderr, "Unable to connect to the server: net/http: request canceled (Client.Timeout exceeded while awaiting headers)")
-				return 1
-			}
-			if st.PodsGetForbidden > 0 {
-				st.PodsGetForbidden--
-				fakestate.Append(dir, fakestate.EventsFileName, "pods.get-forbidden")
-				fmt.Fprintln(os.Stderr, `Error from server (Forbidden): pods is forbidden: User "ci-deployer" cannot list resource "pods" in API group "" in the namespace "surgecart"`)
-				return 1
-			}
-			if st.PodsGetFailures > 0 {
-				st.PodsGetFailures--
-				fakestate.Append(dir, fakestate.EventsFileName, "pods.get-error")
-				fmt.Fprintln(os.Stderr, `Error from server (InternalError): an error on the server ("injected pod list failure") has prevented the request from succeeding`)
-				return 1
-			}
-		}
 		var pods []fakestate.Pod
 		ownerUID := ""
 		switch {
@@ -887,7 +1218,9 @@ func cmdGetPods(dir string, inv invocation) int {
 		default:
 			pods = st.Deployment.Pods
 		}
-		return render(inv.Output, podsListObject(pods, ownerUID), podsTable(pods))
+		return 0, func() int {
+			return render(inv.Output, podsListObject(pods, ownerUID), podsTable(pods))
+		}
 	})
 }
 
