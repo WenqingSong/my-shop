@@ -335,22 +335,36 @@ func resourceLabel(call fakestate.Invocation) string {
 	}
 }
 
-// authorizeWrite 是**所有写路径**的统一授权检查（create / update / delete / apply）。
+// authorizeWrite 是**所有写路径**的统一授权检查（create / update / patch / delete / apply）。
+//
+// verbs 按顺序尝试：真实 kubectl apply 对已存在的对象发 **PATCH**（不是 PUT/update），
+// 但历史上也允许用 update 授权；因此 apply 的已存在分支传 ("patch", "update")，
+// 任一允许即放行 —— 既贴近真实动词，又不逼着调用方过度授权。
+//
 // 返回 0 表示允许；非 0 表示已经打印错误，调用方必须放弃写入（不得有任何状态变更）。
-func authorizeWrite(dir string, st *fakestate.State, verb string, call fakestate.Invocation) int {
-	decision, err := fakestate.Authorize(st, verb, call.Group, call.Resource, call.Namespace, call.Name)
-	switch decision {
-	case fakestate.DecisionAllowed:
+func authorizeWrite(dir string, st *fakestate.State, call fakestate.Invocation, verbs ...string) int {
+	var decision fakestate.Decision
+	var err error
+	for _, verb := range verbs {
+		decision, err = fakestate.Authorize(st, verb, call.Group, call.Resource, call.Namespace, call.Name)
+		if decision == fakestate.DecisionAllowed {
+			return 0
+		}
+	}
+	if len(verbs) == 0 {
 		return 0
+	}
+	primary := verbs[0]
+	switch decision {
 	case fakestate.DecisionUnknown:
-		fakestate.Append(dir, fakestate.EventsFileName, "auth.error "+verb+" "+call.Resource)
+		fakestate.Append(dir, fakestate.EventsFileName, "auth.error "+primary+" "+call.Resource)
 		fmt.Fprintf(os.Stderr, "Error from server: %v\n", err)
 		return 1
 	default:
-		fakestate.Append(dir, fakestate.EventsFileName, "auth.forbidden "+verb+" "+call.Resource)
+		fakestate.Append(dir, fakestate.EventsFileName, "auth.forbidden "+primary+" "+call.Resource)
 		fmt.Fprintf(os.Stderr,
 			"Error from server (Forbidden): %s is forbidden: User \"ci-deployer\" cannot %s resource %q in API group %q in the namespace %q\n",
-			resourceLabel(call), verb, call.Resource, call.Group, call.Namespace)
+			resourceLabel(call), primary, call.Resource, call.Group, call.Namespace)
 		return 1
 	}
 }
@@ -529,7 +543,7 @@ func cmdCreate(dir string, inv invocation) int {
 	call := leaseCall("create", manifest)
 	call.Intent = fakestate.IntentAcquire
 	return mutateAck(dir, func(st *fakestate.State) (int, func() int) {
-		if code := authorizeWrite(dir, st, "create", call); code != 0 {
+		if code := authorizeWrite(dir, st, call, "create"); code != 0 {
 			return code, nil
 		}
 		if inj := st.ConsumeInjection(call, "before"); inj != nil {
@@ -579,7 +593,7 @@ func cmdReplace(dir string, inv invocation) int {
 		call.Intent = leaseIntent(st, manifest)
 
 		// A-5：写之前必须授权（deploy-lock 的 Role 给 update；没有规则就是 403）。
-		if code := authorizeWrite(dir, st, "update", call); code != 0 {
+		if code := authorizeWrite(dir, st, call, "update"); code != 0 {
 			return code, nil
 		}
 		// 「校验/写入之前」的注入：错误、延迟、并发接管（接管后 CAS 必然失败）。
@@ -657,7 +671,7 @@ func cmdDelete(dir string, inv invocation) int {
 		Namespace: namespace, Name: name,
 	}
 	return mutateAck(dir, func(st *fakestate.State) (int, func() int) {
-		if code := authorizeWrite(dir, st, "delete", call); code != 0 {
+		if code := authorizeWrite(dir, st, call, "delete"); code != 0 {
 			return code, nil
 		}
 		if inj := st.ConsumeInjection(call, "before"); inj != nil {
@@ -816,11 +830,15 @@ func cmdApply(dir string, inv invocation) int {
 				Namespace: firstNonEmpty(object.Metadata.Namespace, namespace),
 				Name:      object.Metadata.Name,
 			}
-			verb := "create"
+			// 真实 kubectl apply = GET → 不存在 POST(create) / 存在 PATCH(patch)。
+			// 「已存在 → update」是不对的：按交付 RBAC 授权的身份只有 patch，
+			// 会被 fake 误判成 403（而在真实集群上是 200）。这里先 patch，兼容
+			// 只授予 update 的历史授权写法。
+			verbs := []string{"create"}
 			if objectExists(st, group, resource, object.Metadata.Name) {
-				verb = "update"
+				verbs = []string{"patch", "update"}
 			}
-			if code := authorizeWrite(dir, st, verb, call); code != 0 {
+			if code := authorizeWrite(dir, st, call, verbs...); code != 0 {
 				return code, nil
 			}
 			if inj := st.ConsumeInjection(call, "before"); inj != nil {

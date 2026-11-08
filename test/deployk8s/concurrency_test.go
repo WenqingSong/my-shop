@@ -745,6 +745,155 @@ func TestAuthCanISupportsNamespaceAndSubresource(t *testing.T) {
 	}
 }
 
+// TestLoadRBACRulesFromMultipleFiles 覆盖「RBAC 拆成多份物理文件」的载入：
+// 并集生效，删掉任一文件里的任一条规则都会让对应 (verb, resource) 变成 no。
+func TestLoadRBACRulesFromMultipleFiles(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "01-lock.yaml")
+	clusterPath := filepath.Join(dir, "02-cluster.yaml")
+	writeManifest(t, dir, "01-lock.yaml", `apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: surgecart-deploy-lock
+  namespace: surgecart
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    resourceNames: ["surgecart-deploy-lock"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["create"]
+`)
+	writeManifest(t, dir, "02-cluster.yaml", `apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: surgecart-deploy-cluster
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "create"]
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["selfsubjectaccessreviews"]
+    verbs: ["create"]
+`)
+
+	rules, err := fakestate.LoadRBACRulesFromPaths([]string{lockPath, clusterPath})
+	if err != nil {
+		t.Fatalf("LoadRBACRulesFromPaths: %v", err)
+	}
+	fromDir, err := fakestate.LoadRBACRulesFromDir(dir)
+	if err != nil {
+		t.Fatalf("LoadRBACRulesFromDir: %v", err)
+	}
+	if len(rules) == 0 || len(fromDir) != len(rules) {
+		t.Fatalf("多文件载入结果不一致：paths=%d dir=%d", len(rules), len(fromDir))
+	}
+
+	state := &fakestate.State{Permissions: fakestate.Permissions{Rules: rules}}
+	check := func(verb, group, resource, namespace, name string, want fakestate.Decision) {
+		t.Helper()
+		decision, _ := fakestate.Authorize(state, verb, group, resource, namespace, name)
+		if decision != want {
+			t.Fatalf("Authorize(%s %s/%s ns=%q name=%q) = %s，期望 %s",
+				verb, group, resource, namespace, name, decision, want)
+		}
+	}
+	check("get", "coordination.k8s.io", "leases", "surgecart", knownLeaseName, fakestate.DecisionAllowed)
+	check("update", "coordination.k8s.io", "leases", "surgecart", knownLeaseName, fakestate.DecisionAllowed)
+	// resourceNames 严格生效：换一个 Lease 名字必须被拒。
+	check("get", "coordination.k8s.io", "leases", "surgecart", "other-lock", fakestate.DecisionForbidden)
+	// 集群权限来自另一个文件（ClusterRole）。
+	check("create", "", "namespaces", "surgecart", "", fakestate.DecisionAllowed)
+	check("create", "authorization.k8s.io", "selfsubjectaccessreviews", "", "", fakestate.DecisionAllowed)
+	// 未授予的动词默认拒绝。
+	check("delete", "coordination.k8s.io", "leases", "surgecart", knownLeaseName, fakestate.DecisionForbidden)
+
+	// 删掉锁文件里的 update 授权 → 必须变成 Forbidden。
+	writeManifest(t, dir, "01-lock.yaml", `apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: surgecart-deploy-lock
+  namespace: surgecart
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    resourceNames: ["surgecart-deploy-lock"]
+    verbs: ["get", "patch"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["create"]
+`)
+	trimmed, err := fakestate.LoadRBACRulesFromDir(dir)
+	if err != nil {
+		t.Fatalf("删除规则后重新载入: %v", err)
+	}
+	state = &fakestate.State{Permissions: fakestate.Permissions{Rules: trimmed}}
+	if decision, _ := fakestate.Authorize(state, "update", "coordination.k8s.io", "leases", "surgecart", knownLeaseName); decision != fakestate.DecisionForbidden {
+		t.Fatalf("删掉 update 授权后仍判定为 %s（多文件链路失效）", decision)
+	}
+	// 其它文件授予的权限不受影响。
+	if decision, _ := fakestate.Authorize(state, "create", "", "namespaces", "surgecart", ""); decision != fakestate.DecisionAllowed {
+		t.Fatalf("删除锁文件的一条规则不得影响集群权限，实际 %s", decision)
+	}
+}
+
+const knownLeaseName = "surgecart-deploy-lock"
+
+// TestApplyAuthorizationUsesPatchForExistingObjects 覆盖 A 指出的语义差异：
+// 真实 kubectl apply 对**已存在**的对象发 PATCH（不是 PUT/update）。
+//
+//   - 只授予 get+create+patch 的身份必须能 apply 已存在的对象（否则会把
+//     「按交付 RBAC 授权」误判成 403，逼调用方过度授权 update）；
+//   - 只授予 update 的历史写法仍然可用（兼容）；
+//   - 两者都没有 → 403，且错误里报的是 patch（真实的动词）。
+func TestApplyAuthorizationUsesPatchForExistingObjects(t *testing.T) {
+	t.Parallel()
+	deploymentManifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: surgecart
+  namespace: surgecart
+spec:
+  replicas: 1
+`
+	newDeploymentState := func(verbs ...string) string {
+		return newFakeStateDir(t, func(st *fakestate.State) {
+			st.Deployment = readyDeployment("c3", 1)
+			st.Permissions = fakestate.Permissions{Rules: []fakestate.Rule{{
+				APIGroups:  []string{"apps"},
+				Resources:  []string{"deployments"},
+				Verbs:      verbs,
+				Namespaces: []string{"surgecart"},
+			}}}
+		})
+	}
+
+	// 1) get + create + patch（kubectl apply 的真实动词组合）
+	dir := newDeploymentState("get", "create", "patch")
+	path := writeManifest(t, dir, "deployment.yaml", deploymentManifest)
+	runFake(t, dir, "apply", "-f", path).requireCode(t, 0)
+
+	// 2) 只授予 update：历史写法仍然可用
+	dirUpdate := newDeploymentState("get", "create", "update")
+	updatePath := writeManifest(t, dirUpdate, "deployment.yaml", deploymentManifest)
+	runFake(t, dirUpdate, "apply", "-f", updatePath).requireCode(t, 0)
+
+	// 3) 只有 get：必须 403，且报 patch（不是 update）
+	dirDenied := newDeploymentState("get")
+	deniedPath := writeManifest(t, dirDenied, "deployment.yaml", deploymentManifest)
+	denied := runFake(t, dirDenied, "apply", "-f", deniedPath)
+	denied.requireCode(t, 1)
+	denied.requireContains(t, "Forbidden", "cannot patch")
+
+	// can-i apply 的判定：create/patch/update 任一允许即 yes（apply 不是 RBAC 动词）。
+	canI := runFake(t, dir, "auth", "can-i", "apply", "deployments.apps", "-n", "surgecart")
+	canI.requireCode(t, 0)
+	deniedCanI := runFake(t, dirDenied, "auth", "can-i", "apply", "deployments.apps", "-n", "surgecart")
+	deniedCanI.requireCode(t, 1)
+}
+
 func contains(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {

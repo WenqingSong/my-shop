@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -109,7 +111,11 @@ func (r Rule) ruleMatches(verb, group, resource, namespace, name string) bool {
 	if !matchResourceToken(r.Resources, resource) {
 		return false
 	}
-	// 命名空间：规则为空 = 全部；集群级资源（namespace==""）不会被 namespaced 规则覆盖。
+	// 命名空间：规则为空 = 全部。Role 级规则（Namespaces 非空）**不能**授予集群级资源
+	// （namespaces/nodes/selfsubjectaccessreviews…）：那需要 ClusterRole。
+	if len(r.Namespaces) > 0 && isClusterScoped(resource) {
+		return false
+	}
 	if len(r.Namespaces) > 0 {
 		ok := false
 		for _, ns := range r.Namespaces {
@@ -140,6 +146,20 @@ func (r Rule) ruleMatches(verb, group, resource, namespace, name string) bool {
 		}
 	}
 	return true
+}
+
+// isClusterScoped 判断资源是否集群级（只有 ClusterRole 能授权）。
+//
+// 只列本仓库用到的子集；未知资源按 namespaced 处理（保守：Role 规则仍然有效）。
+func isClusterScoped(resource string) bool {
+	switch resource {
+	case "namespaces", "nodes", "persistentvolumes", "clusterroles", "clusterrolebindings",
+		"selfsubjectaccessreviews", "selfsubjectrulesreviews", "subjectaccessreviews",
+		"customresourcedefinitions", "storageclasses":
+		return true
+	default:
+		return false
+	}
 }
 
 func containsToken(tokens []string, want string) bool {
@@ -178,6 +198,17 @@ func Authorize(state *State, verb, group, resource, namespace, name string) (Dec
 	if state.AuthCanIError != "" {
 		return DecisionUnknown, fmt.Errorf("%s", state.AuthCanIError)
 	}
+	// apply 不是 RBAC 动词：真实 kubectl apply = GET → 不存在 POST(create) /
+	// 存在 PATCH(patch)。所以「能不能 apply」= create 或 patch 或 update 任一允许；
+	// 真正的写权限在 apply 落盘时按对象是否存在用 create/patch 精确判定。
+	if verb == "apply" {
+		for _, candidate := range []string{"create", "patch", "update"} {
+			if decision, _ := Authorize(state, candidate, group, resource, namespace, name); decision == DecisionAllowed {
+				return DecisionAllowed, nil
+			}
+		}
+		return DecisionForbidden, nil
+	}
 	permissions := state.Permissions
 	permissions.Normalize()
 
@@ -201,9 +232,6 @@ func Authorize(state *State, verb, group, resource, namespace, name string) (Dec
 // normalizeVerb 把 kubectl 的动词写成 RBAC 的动词。
 func normalizeVerb(verb string) string {
 	switch verb {
-	case "apply":
-		// apply 的授权在 fake 里按对象是否存在展开成 create/update，见 fakekubectl。
-		return "update"
 	case "get", "list", "create", "update", "patch", "delete", "deletecollection", "watch":
 		return verb
 	default:
@@ -350,6 +378,46 @@ func LoadRBACRules(path string) ([]Rule, error) {
 		return nil, err
 	}
 	return RBACRulesFromYAML(raw)
+}
+
+// LoadRBACRulesFromPaths 合并多个 RBAC 文件（例如把授权拆成
+// 「锁权限 / 工作负载权限 / 集群权限」三份物理文件）。
+//
+// 合并是**并集**：任一文件里删掉一条规则都会让对应 (verb, resource) 变成 no，
+// 因此「删掉清单里任一条规则 → 行为测试失败」这条链路对多文件同样成立。
+func LoadRBACRulesFromPaths(paths []string) ([]Rule, error) {
+	var rules []Rule
+	for _, path := range paths {
+		loaded, err := LoadRBACRules(path)
+		if err != nil {
+			return nil, fmt.Errorf("读取 RBAC 清单 %s: %w", path, err)
+		}
+		rules = append(rules, loaded...)
+	}
+	return rules, nil
+}
+
+// LoadRBACRulesFromDir 读取目录下全部 *.yaml / *.yml（按文件名排序）并合并。
+func LoadRBACRulesFromDir(dir string) ([]Rule, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		switch {
+		case strings.HasSuffix(entry.Name(), ".yaml"), strings.HasSuffix(entry.Name(), ".yml"):
+			paths = append(paths, filepath.Join(dir, entry.Name()))
+		}
+	}
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("%s 下没有 *.yaml/*.yml", dir)
+	}
+	sort.Strings(paths)
+	return LoadRBACRulesFromPaths(paths)
 }
 
 // ManifestWriteRules 是「发布身份另外还需要 apply 部署清单」的显式授权。
