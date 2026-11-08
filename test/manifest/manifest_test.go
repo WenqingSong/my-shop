@@ -1021,7 +1021,9 @@ func TestMigrationTimeoutTracksJobDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("解析 MIGRATION_TIMEOUT: %v", err)
 	}
-	const minMargin = 60
+	// D8：这里的余量必须与脚本自己的建议余量（MIGRATION_TIMEOUT_MARGIN）一致。
+	// 旧值 60 小于脚本告警阈值 180，形成「门禁放行、运行时告警」的自相矛盾。
+	const minMargin = 180
 	if timeout < deadline+minMargin {
 		t.Fatalf("MIGRATION_TIMEOUT=%ds 与 Job activeDeadlineSeconds=%ds 的余量不足 %ds：脚本可能先于 Job 自己的截止时间超时",
 			timeout, deadline, minMargin)
@@ -1029,11 +1031,13 @@ func TestMigrationTimeoutTracksJobDeadline(t *testing.T) {
 	t.Logf("迁移等待上限 %ds > Job activeDeadlineSeconds %ds（余量 %ds）", timeout, deadline, timeout-deadline)
 }
 
-// TestLeaseRenewBudgetContract 断言发布脚本的默认租期参数满足 AUD-03 不变量：
+// TestLeaseRenewBudgetContract 断言发布脚本的默认租期参数满足 AUD-03 / AUD-D7 不变量：
 //
-//	renew_interval + renew_request_timeout + safety_margin < lease_duration
+//	renew_interval + attempts × renew_request_timeout + backoff + safety_margin
+//	  < lease_duration
 //
-// 旧默认值（10 + 30 > 30）会让锁在续租请求返回之前就过期。
+// 旧默认值（10 + 30 > 30）会让锁在续租请求返回之前就过期；只计一次请求超时则会
+// 忽略「失败重试链」的最坏耗时（AUD-D7）。
 func TestLeaseRenewBudgetContract(t *testing.T) {
 	path := filepath.Join(repoRoot(t), "scripts", "deploy-k8s.sh")
 	raw, err := os.ReadFile(path)
@@ -1056,11 +1060,14 @@ func TestLeaseRenewBudgetContract(t *testing.T) {
 	duration := value("LOCK_LEASE_DURATION")
 	interval := value("LOCK_RENEW_INTERVAL")
 	requestTimeout := value("LOCK_RENEW_REQUEST_TIMEOUT")
+	attempts := value("LOCK_RENEW_MAX_ATTEMPTS")
+	backoff := value("LOCK_RENEW_BACKOFF_BUDGET")
 	margin := value("LOCK_SAFETY_MARGIN")
-	budget := interval + requestTimeout + margin
+	budget := interval + attempts*requestTimeout + backoff + margin
 	if budget >= duration {
-		t.Fatalf("租期预算 %d + %d + %d = %d 必须小于 lease_duration=%d：否则锁会在续租返回前过期",
-			interval, requestTimeout, margin, budget, duration)
+		t.Fatalf("租期预算 %d + %d×%d + %d + %d = %d 必须小于 lease_duration=%d：否则一次续租失败后的重试链会让锁先过期",
+			interval, attempts, requestTimeout, backoff, margin, budget, duration)
 	}
-	t.Logf("租期预算 %d + %d + %d = %d < %d", interval, requestTimeout, margin, budget, duration)
+	t.Logf("租期预算 %d + %d×%d + %d + %d = %d < %d",
+		interval, attempts, requestTimeout, backoff, margin, budget, duration)
 }

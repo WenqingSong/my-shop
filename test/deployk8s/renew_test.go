@@ -7,11 +7,13 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/test/deployk8s/fakestate"
 )
 
-// 本文件验证 T2-06.1.1 / AUD-03：Lease 续租参数安全。
+// 本文件验证 T2-06.1.1 / AUD-03 与 T2-06.1.2 / AUD-D7：Lease 续租参数安全。
 //
-// 不变量：renew_interval + renew_request_timeout + safety_margin(5) < lease_duration。
-// 旧默认值 10 + 30 > 30 会让「续租请求还没返回，锁已经过期」，因此必须在任何资源
-// 变更之前拒绝，而不是只调大默认租期。
+// 不变量（重试链的最坏耗时也计入预算，AUD-D7）：
+//   renew_interval + attempts(3) × renew_request_timeout + backoff(1) + safety_margin(5)
+//     < lease_duration
+// 旧实现只计一次请求超时：10 + 5 + 5 = 20 < 30 看似安全，但一次失败后的重试链最坏
+// 需要 3×5=15s，加上间隔后足以跨过租期 —— 那时续租成功也已经太晚。
 
 // TestLeaseParameterInvariantRejectsIllegalCombinations 覆盖非法组合：
 // 退出码 1，且**不产生任何 kubectl 调用**（连锁都没碰过）。
@@ -27,20 +29,24 @@ func TestLeaseParameterInvariantRejectsIllegalCombinations(t *testing.T) {
 			args: []string{"--lease-duration", "30", "--lease-renew-interval", "10", "--lease-renew-timeout", "30"},
 		},
 		{
+			name: "只算单次请求（旧公式 10+5+5=20，重试链 10+15+1+5=31 > 30）",
+			args: []string{"--lease-duration", "30", "--lease-renew-interval", "10", "--lease-renew-timeout", "5"},
+		},
+		{
 			name: "恰好相等（没有余量）",
-			args: []string{"--lease-duration", "20", "--lease-renew-interval", "10", "--lease-renew-timeout", "5"},
+			args: []string{"--lease-duration", "25", "--lease-renew-interval", "10", "--lease-renew-timeout", "3"},
 		},
 		{
 			name: "续租间隔过大",
-			args: []string{"--lease-duration", "30", "--lease-renew-interval", "20", "--lease-renew-timeout", "5"},
+			args: []string{"--lease-duration", "30", "--lease-renew-interval", "20", "--lease-renew-timeout", "3"},
 		},
 		{
 			name: "续租请求超时过大",
-			args: []string{"--lease-duration", "30", "--lease-renew-interval", "1", "--lease-renew-timeout", "25"},
+			args: []string{"--lease-duration", "30", "--lease-renew-interval", "1", "--lease-renew-timeout", "10"},
 		},
 		{
 			name: "租期过短",
-			args: []string{"--lease-duration", "10", "--lease-renew-interval", "5", "--lease-renew-timeout", "5"},
+			args: []string{"--lease-duration", "10", "--lease-renew-interval", "1", "--lease-renew-timeout", "3"},
 		},
 	}
 	for _, tc := range cases {
@@ -61,21 +67,21 @@ func TestLeaseParameterInvariantRejectsIllegalCombinations(t *testing.T) {
 }
 
 // TestLeaseParameterInvariantAcceptsBoundary 覆盖临界合法组合：
-// 10 + 5 + 5 = 20 < 21 是「刚好留出 1s 余量」的最小合法配置。
+// 10 + 3×3 + 1 + 5 = 25 < 26 是「刚好留出 1s 余量」的最小合法配置。
 func TestLeaseParameterInvariantAcceptsBoundary(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, fixtureOptions{})
 
 	res := runDeploy(t, f,
-		"--lease-duration", "21",
+		"--lease-duration", "26",
 		"--lease-renew-interval", "10",
-		"--lease-renew-timeout", "5",
+		"--lease-renew-timeout", "3",
 		"--migration-timeout", "10",
 		"--rollout-timeout", "10",
 	)
 
 	res.requireSuccess(t)
-	res.requireContains(t, "10 + 5 + 5 = 20 < 21")
+	res.requireContains(t, "10 + 3×3 + 1 + 5 = 25 < 26")
 }
 
 // TestRenewUsesDedicatedRequestTimeout 覆盖「续租专用请求超时可控」：
@@ -88,7 +94,7 @@ func TestRenewUsesDedicatedRequestTimeout(t *testing.T) {
 	res := runDeploy(t, f,
 		"--migration-timeout", "60",
 		"--rollout-timeout", "30",
-		"--lease-duration", "20",
+		"--lease-duration", "30",
 		"--lease-renew-interval", "1",
 		"--lease-renew-timeout", "7",
 	)

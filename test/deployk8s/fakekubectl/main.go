@@ -396,6 +396,13 @@ func cmdReplace(dir string, inv invocation) int {
 			conflictMessage("the UID in the precondition does not match the UID in record")
 			return 1
 		}
+		// 只作用于迁移记录写入：确定性验证「重试时重读并保留最新记录」（AUD-D2）。
+		if filepath.Base(path) == "lease-record.yaml" && st.LeaseRecordConflicts > 0 {
+			st.LeaseRecordConflicts--
+			fakestate.Append(dir, fakestate.EventsFileName, "lease.record-conflict")
+			conflictMessage("the object has been modified; please apply your changes to the latest version and try again")
+			return 1
+		}
 		// UID 校验（T2-06.1.1）：真实 API Server 会拒绝 uid 与现存对象不一致的 PUT，
 		// 这正是「同名 Lease 被删除重建」时旧持有者不能写入的原因。
 		if manifest.Metadata.UID != "" && manifest.Metadata.UID != st.Lease.UID {
@@ -428,6 +435,7 @@ func cmdReplace(dir string, inv invocation) int {
 			fakestate.Append(dir, fakestate.EventsFileName, "lease.stolen-after-state state="+state+" previous="+holder)
 		}
 
+		recordWriteEvent(dir, path, manifest.Metadata.Annotations, previous)
 		switch {
 		case manifest.Spec.HolderIdentity == "":
 			fakestate.Append(dir, fakestate.EventsFileName, "lease.release holder="+previous)
@@ -448,6 +456,24 @@ func nextResourceVersion(current string) string {
 		return current + "1"
 	}
 	return fmt.Sprintf("%d", value+1)
+}
+
+// recordWriteEvent 记录每次 Lease 写入「携带了什么迁移记录」。
+//
+// 这是 AUD-D2 的可观测性来源：测试可以逐次断言 renew/release/takeover 没有把记录
+// 写成默认值（例如 NO_MIGRATION + 空 job），而不是只看最终状态 —— 最终状态可能被
+// 后续一次正确的写入掩盖掉中间的丢失。
+func recordWriteEvent(dir, path string, ann map[string]string, previousHolder string) {
+	const prefix = "deploy-lock.surgecart.io/"
+	fakestate.Append(dir, fakestate.EventsFileName, fmt.Sprintf(
+		"lease.write kind=%s state=%s job=%s uid=%s prev=%s previous=%s",
+		filepath.Base(path),
+		ann[prefix+"migration-state"],
+		ann[prefix+"migration-job"],
+		ann[prefix+"migration-job-uid"],
+		ann[prefix+"migration-previous-state"],
+		previousHolder,
+	))
 }
 
 func cmdApply(dir string, inv invocation) int {
@@ -752,7 +778,23 @@ func cmdGetDeployment(dir string, inv invocation) int {
 
 func cmdGetPods(dir string, inv invocation) int {
 	return mutate(dir, func(st *fakestate.State) int {
-		if strings.Contains(inv.Selector, "job-name=") {
+		isJobPods := strings.Contains(inv.Selector, "job-name=")
+		isMigrationPods := strings.Contains(inv.Selector, "database-migration")
+		if isMigrationPods && !isJobPods {
+			if st.MigrationPodsGetTimeouts > 0 {
+				st.MigrationPodsGetTimeouts--
+				fakestate.Append(dir, fakestate.EventsFileName, "migration-pods.get-timeout")
+				fmt.Fprintln(os.Stderr, "Unable to connect to the server: net/http: request canceled (Client.Timeout exceeded while awaiting headers)")
+				return 1
+			}
+			if st.MigrationPodsGetFailures > 0 {
+				st.MigrationPodsGetFailures--
+				fakestate.Append(dir, fakestate.EventsFileName, "migration-pods.get-error")
+				fmt.Fprintln(os.Stderr, `Error from server (InternalError): an error on the server ("injected migration pod list failure") has prevented the request from succeeding`)
+				return 1
+			}
+		}
+		if isJobPods {
 			if st.PodsGetTimeouts > 0 {
 				st.PodsGetTimeouts--
 				fakestate.Append(dir, fakestate.EventsFileName, "pods.get-timeout")
@@ -767,19 +809,53 @@ func cmdGetPods(dir string, inv invocation) int {
 			}
 		}
 		var pods []fakestate.Pod
-		if strings.Contains(inv.Selector, "job-name=") {
-			pods = st.Job.Pods
-		} else if st.Applied && len(st.DeploymentAfterApply) > 0 {
+		ownerUID := ""
+		switch {
+		case isJobPods:
+			jobName := selectorValue(inv.Selector, "job-name")
+			if explicit, ok := st.JobPods[jobName]; ok {
+				pods = explicit
+			} else {
+				pods = st.Job.Pods
+			}
+			ownerUID = jobUIDForSelector(st, jobName)
+		case isMigrationPods:
+			pods = st.MigrationPods
+		case st.Applied && len(st.DeploymentAfterApply) > 0:
 			index := st.DeploymentGets
 			if index >= len(st.DeploymentAfterApply) {
 				index = len(st.DeploymentAfterApply) - 1
 			}
 			pods = st.DeploymentAfterApply[index].Pods
-		} else {
+		default:
 			pods = st.Deployment.Pods
 		}
-		return render(inv.Output, podsListObject(pods), podsTable(pods))
+		return render(inv.Output, podsListObject(pods, ownerUID), podsTable(pods))
 	})
+}
+
+// selectorValue 取 `k=v,k2=v2` 中指定 key 的值。
+func selectorValue(selector, key string) string {
+	for _, part := range strings.Split(selector, ",") {
+		if strings.HasPrefix(part, key+"=") {
+			return strings.TrimPrefix(part, key+"=")
+		}
+	}
+	return ""
+}
+
+// jobUIDForSelector 返回「按名称读取 Pod 时该 Job 应有的 uid」：
+// 优先在已存在的 Job 列表里查找，其次用按名称读取的 Job 快照，最后按名称派生。
+func jobUIDForSelector(st *fakestate.State, name string) string {
+	for _, job := range st.Jobs {
+		if jobNameFor(job.Name, "") == name {
+			return jobUIDFor(job.UID, "", name)
+		}
+	}
+	if jobNameFor(st.Job.Name, "") == name || st.Job.Name == "" {
+		return jobUIDFor(st.Job.UID, "", name)
+	}
+	return "uid-" + name
 }
 
 func cmdLogs(dir string) int {
@@ -985,7 +1061,7 @@ func podContainers(pod fakestate.Pod) []fakestate.Container {
 	return []fakestate.Container{{Name: "app", Image: pod.Image, Ready: pod.Ready}}
 }
 
-func podsListObject(pods []fakestate.Pod) map[string]any {
+func podsListObject(pods []fakestate.Pod, ownerJobUID string) map[string]any {
 	items := make([]any, 0, len(pods))
 	for _, pod := range pods {
 		metadata := map[string]any{
@@ -994,6 +1070,23 @@ func podsListObject(pods []fakestate.Pod) map[string]any {
 		}
 		if pod.Deleting {
 			metadata["deletionTimestamp"] = "2026-11-07T00:00:00Z"
+		}
+		// AUD-D3：迁移 Pod 必须带 Job ownerReferences，脚本据此判断归属；
+		// Orphan / OwnerJobUID 用于构造「无法归属」和「属于另一个 Job」的干扰。
+		if !pod.Orphan {
+			uid := ownerJobUID
+			if pod.OwnerJobUID != "" {
+				uid = pod.OwnerJobUID
+			}
+			if uid != "" {
+				metadata["ownerReferences"] = []any{map[string]any{
+					"apiVersion": "batch/v1",
+					"kind":       "Job",
+					"name":       "surgecart-migrate",
+					"uid":        uid,
+					"controller": true,
+				}}
+			}
 		}
 		status := map[string]any{"phase": pod.Phase}
 		specContainers := make([]any, 0, 2)

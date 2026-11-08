@@ -69,6 +69,12 @@ type Pod struct {
 	// Containers 非空时按它渲染（可构造 sidecar / 多容器场景）；
 	// 为空时 fake 使用默认的单个 app 容器。
 	Containers []Container `json:"containers"`
+	// OwnerJobUID 覆盖 Pod 的 ownerReferences Job uid（T2-06.1.2 / AUD-D3）：
+	// 默认为「该 Job 的 uid」，用于构造「同标签但属于另一个 Job」的干扰 Pod。
+	OwnerJobUID string `json:"ownerJobUID"`
+	// Orphan 为 true 时不渲染任何 ownerReferences：用于构造「无法归属」的孤儿 Pod，
+	// 脚本必须据此 fail-closed（不能仅凭 job-name 标签就认定归属）。
+	Orphan bool `json:"orphan"`
 }
 
 // Deployment 是 Deployment 的结构化快照（只含脚本读取的字段）。
@@ -122,6 +128,9 @@ type State struct {
 	LeaseGetFailures int `json:"leaseGetFailures"`
 	// LeaseReplaceConflicts 让接下来 N 次 replace 返回确定性 409（resourceVersion 冲突）。
 	LeaseReplaceConflicts int `json:"leaseReplaceConflicts"`
+	// LeaseRecordConflicts 只让接下来 N 次「迁移记录写入」（lease-record.yaml）返回 409：
+	// 用于确定性地验证「重试时必须重读并保留最新记录」（AUD-D2 / AUD-D5-B6）。
+	LeaseRecordConflicts int `json:"leaseRecordConflicts"`
 	// LeaseReplaceUIDConflicts 让接下来 N 次 replace 返回「UID 不匹配」的 409。
 	LeaseReplaceUIDConflicts int `json:"leaseReplaceUIDConflicts"`
 	// LeaseReplaceTimeouts 让接下来 N 次 replace 以客户端请求超时失败。
@@ -151,16 +160,28 @@ type State struct {
 	JobScript []Job `json:"jobScript"`
 	JobGets   int   `json:"jobGets"`
 	// Jobs 是命名空间内全部迁移 Job（生命周期扫描用）；为空时退化为 []Job{st.Job}。
-	Jobs           []Job `json:"jobs"`
-	JobGetFailures int   `json:"jobGetFailures"`
-	JobGetTimeouts int   `json:"jobGetTimeouts"`
+	Jobs []Job `json:"jobs"`
+	// MigrationPods 是 `get pods -l app.kubernetes.io/component=database-migration` 的
+	// 结果（T2-06.1.2）：用于构造「Job 已被删除但 Pod 仍存活」的孤儿/残留场景。
+	MigrationPods []Pod `json:"migrationPods"`
+	// JobPods 按 job-name 标签索引 Pod：`get pods -l job-name=<name>` 优先取这里，
+	// 未命中时回退到 Job.Pods。Pod 的生命周期独立于 Job 对象是否存在 ——
+	// Job 被 TTL 清理后，残留 Pod 仍然会被这个标签查询命中。
+	JobPods        map[string][]Pod `json:"jobPods"`
+	JobGetFailures int              `json:"jobGetFailures"`
+	JobGetTimeouts int              `json:"jobGetTimeouts"`
 	// JobGetFailAt > 0 时，第 N 次 get job 返回 API 500（只触发一次）。
 	// 用于「等待循环读得到、二次判定读失败」这类确定性时序。
 	JobGetFailAt     int `json:"jobGetFailAt"`
 	JobsListFailures int `json:"jobsListFailures"`
 	JobsListTimeouts int `json:"jobsListTimeouts"`
-	PodsGetFailures  int `json:"podsGetFailures"`
-	PodsGetTimeouts  int `json:"podsGetTimeouts"`
+	// PodsGetFailures / PodsGetTimeouts 只作用于「按 job-name 读取 Pod」。
+	PodsGetFailures int `json:"podsGetFailures"`
+	PodsGetTimeouts int `json:"podsGetTimeouts"`
+	// MigrationPodsGetFailures / Timeouts 只作用于「按 component 标签扫描迁移 Pod」
+	// （全局残留扫描，AUD-D3/D4）。分开注入是为了让两处 fail-closed 行为可独立验证。
+	MigrationPodsGetFailures int `json:"migrationPodsGetFailures"`
+	MigrationPodsGetTimeouts int `json:"migrationPodsGetTimeouts"`
 
 	Deployment           Deployment   `json:"deployment"`
 	DeploymentAfterApply []Deployment `json:"deploymentAfterApply"`

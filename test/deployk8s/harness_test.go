@@ -88,6 +88,14 @@ type fixtureOptions struct {
 	firstDeploy bool
 	// currentVersion 是「线上正在运行的版本」；默认 c2 短 SHA。
 	currentVersion string
+	// applyDelay > 0 时，在 bin/kubectl 前面套一层**外部延迟包装**：
+	// 命中 application.yaml 的 apply 会先写 marker 再 sleep，用于制造「请求在途」的真实窗口
+	// （T2-06.1.2 / AUD-02·AUD-05：在途失锁、服务端已接受但客户端超时）。
+	// 延迟发生在 fake kubectl 之外，因此不改变 fake 的语义。
+	applyDelay time.Duration
+	// secretDelay > 0 时同样延迟 `get secret`（锁内复检）：用于构造「接管成功、
+	// 尚未开始新迁移」的确定窗口（SIGKILL 后记录必须仍在）。
+	secretDelay time.Duration
 }
 
 type fixture struct {
@@ -148,7 +156,10 @@ func newFixture(t *testing.T, opt fixtureOptions) *fixture {
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		t.Fatalf("创建 bin 目录: %v", err)
 	}
-	if err := os.Symlink(fakeKubectlPath, filepath.Join(binDir, "kubectl")); err != nil {
+	kubectlInPath := filepath.Join(binDir, "kubectl")
+	if opt.applyDelay > 0 || opt.secretDelay > 0 {
+		writeDelayWrapper(t, kubectlInPath, opt.applyDelay, opt.secretDelay)
+	} else if err := os.Symlink(fakeKubectlPath, kubectlInPath); err != nil {
 		t.Fatalf("链接 fake kubectl: %v", err)
 	}
 
@@ -162,12 +173,51 @@ func newFixture(t *testing.T, opt fixtureOptions) *fixture {
 		"HOME=" + root,
 		"TMPDIR=" + tmpDir,
 		"FAKE_KUBECTL_STATE=" + f.stateDir,
+		"FAKE_KUBECTL_REAL=" + fakeKubectlPath,
 		"CI=",
 		"DEPLOY_K8S_ALLOW_DOWNGRADE_IN_CI=",
 		"GIT_CONFIG_NOSYSTEM=1",
 		"GIT_CONFIG_GLOBAL=" + filepath.Join(root, "gitconfig"),
 	}
 	return f
+}
+
+// writeDelayWrapper 写出「外部延迟包装」：它只是把调用转发给 fake kubectl，
+// 但在指定调用上先落 marker 再延迟 —— 用来构造真实的在途窗口。
+//
+// 边界：延迟发生在 fake 之外，因此 fake 仍然按自己的语义记录 apply/replace；
+// 测试不能通过这层包装制造「请求被撤销」的假象（那正是本任务要如实否认的能力）。
+func writeDelayWrapper(t *testing.T, path string, applyDelay, secretDelay time.Duration) {
+	t.Helper()
+	applySleep, secretSleep := "0", "0"
+	if applyDelay > 0 {
+		applySleep = fmt.Sprintf("%.3f", applyDelay.Seconds())
+	}
+	if secretDelay > 0 {
+		secretSleep = fmt.Sprintf("%.3f", secretDelay.Seconds())
+	}
+	script := fmt.Sprintf(`#!/usr/bin/env bash
+for arg in "$@"; do
+  case "${arg}" in
+    *application.yaml)
+      if [ "%[1]s" != "0" ]; then
+        : > "${FAKE_KUBECTL_STATE}/inflight-application-apply"
+        sleep %[1]s
+      fi
+      ;;
+    secret)
+      if [ "%[2]s" != "0" ]; then
+        : > "${FAKE_KUBECTL_STATE}/inflight-secret-check"
+        sleep %[2]s
+      fi
+      ;;
+  esac
+done
+exec "${FAKE_KUBECTL_REAL}" "$@"
+`, applySleep, secretSleep)
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("写延迟包装: %v", err)
+	}
 }
 
 func copyFixtureFile(t *testing.T, from, to string, mode os.FileMode) {
@@ -406,13 +456,30 @@ func (f *fixture) updateState(fn func(*fakestate.State)) {
 	}
 }
 
-// 迁移生命周期注解的键（与 scripts/deploy-k8s.sh 的数据契约一致）。
+// 迁移生命周期注解的键（与 scripts/deploy-k8s.sh 的数据契约一致，T2-06.1.2）。
 const (
-	annMigrationState  = "deploy-lock.surgecart.io/migration-state"
-	annMigrationJob    = "deploy-lock.surgecart.io/migration-job"
-	annMigrationUID    = "deploy-lock.surgecart.io/migration-job-uid"
-	annMigrationDetail = "deploy-lock.surgecart.io/migration-detail"
+	annMigrationState      = "deploy-lock.surgecart.io/migration-state"
+	annMigrationJob        = "deploy-lock.surgecart.io/migration-job"
+	annMigrationUID        = "deploy-lock.surgecart.io/migration-job-uid"
+	annMigrationDetail     = "deploy-lock.surgecart.io/migration-detail"
+	annMigrationUpdatedAt  = "deploy-lock.surgecart.io/migration-updated-at"
+	annMigrationTerminalAt = "deploy-lock.surgecart.io/migration-terminal-at"
+	annRecoveryMethod      = "deploy-lock.surgecart.io/migration-recovery-method"
+	annRecoveryEvidence    = "deploy-lock.surgecart.io/migration-recovery-evidence"
+	annPrevState           = "deploy-lock.surgecart.io/migration-previous-state"
+	annPrevJob             = "deploy-lock.surgecart.io/migration-previous-job"
+	annPrevUID             = "deploy-lock.surgecart.io/migration-previous-job-uid"
+	annPrevDetail          = "deploy-lock.surgecart.io/migration-previous-detail"
+	annPrevTerminalAt      = "deploy-lock.surgecart.io/migration-previous-terminal-at"
 )
+
+// allRecordAnnotations 是「记录完整性」断言涉及的键集合：任何一次 Lease 写入都不得
+// 意外清空未计划修改的键（AUD-D2）。
+var allRecordAnnotations = []string{
+	annMigrationState, annMigrationJob, annMigrationUID, annMigrationDetail,
+	annMigrationUpdatedAt, annMigrationTerminalAt, annRecoveryMethod, annRecoveryEvidence,
+	annPrevState, annPrevJob, annPrevUID, annPrevDetail, annPrevTerminalAt,
+}
 
 // leaseRecord 返回锁上记录的迁移生命周期（state, job, uid）。
 func (f *fixture) leaseRecord() (string, string, string) {
@@ -425,8 +492,43 @@ func (f *fixture) leaseRecord() (string, string, string) {
 		lease.Annotations[annMigrationUID]
 }
 
+// leaseAnnotations 返回锁上的全部注解（副本）。
+func (f *fixture) leaseAnnotations() map[string]string {
+	f.t.Helper()
+	lease := f.state().Lease
+	if lease == nil {
+		f.t.Fatal("Lease 不存在：无法读取迁移记录注解")
+	}
+	out := make(map[string]string, len(lease.Annotations))
+	for key, value := range lease.Annotations {
+		out[key] = value
+	}
+	return out
+}
+
+// requireAnnotationsPreserved 断言 expect 中的每个键在锁上仍然存在且取值不变。
+func (f *fixture) requireAnnotationsPreserved(t *testing.T, expect map[string]string) {
+	t.Helper()
+	actual := f.leaseAnnotations()
+	for key, want := range expect {
+		if got := actual[key]; got != want {
+			t.Fatalf("注解 %s 被意外改写：期望 %q，实际 %q\n全部注解: %#v", key, want, got, actual)
+		}
+	}
+}
+
 // setLeaseRecord 直接改写锁上的迁移记录，用于构造「上一轮 Runner 的遗留状态」。
 func (f *fixture) setLeaseRecord(state, job, uid string) {
+	f.t.Helper()
+	f.setLeaseAnnotations(map[string]string{
+		annMigrationState: state,
+		annMigrationJob:   job,
+		annMigrationUID:   uid,
+	})
+}
+
+// setLeaseAnnotations 合并写入注解（用于构造数据库证据恢复等人工操作）。
+func (f *fixture) setLeaseAnnotations(kv map[string]string) {
 	f.t.Helper()
 	f.updateState(func(st *fakestate.State) {
 		if st.Lease == nil {
@@ -435,9 +537,69 @@ func (f *fixture) setLeaseRecord(state, job, uid string) {
 		if st.Lease.Annotations == nil {
 			st.Lease.Annotations = map[string]string{}
 		}
-		st.Lease.Annotations[annMigrationState] = state
-		st.Lease.Annotations[annMigrationJob] = job
-		st.Lease.Annotations[annMigrationUID] = uid
+		for key, value := range kv {
+			st.Lease.Annotations[key] = value
+		}
+	})
+}
+
+// seedExpiredLease 构造「上一轮 Runner 崩溃后锁已过期」的现场：
+// 记录 = 指定的迁移状态，holder 非空但 renewTime 早已过期。
+func (f *fixture) seedExpiredLease(state, job, uid string) {
+	f.t.Helper()
+	recordedAt := rfc3339(time.Now().Add(-40 * time.Minute))
+	annotations := map[string]string{
+		annMigrationState:     state,
+		annMigrationJob:       job,
+		annMigrationUID:       uid,
+		annMigrationUpdatedAt: recordedAt,
+		annMigrationDetail:    "上一轮失败证据：BackoffLimitExceeded",
+	}
+	// 终态记录必须带 terminal-at：脚本写入终态时会落这个字段（T2-06.1.2）。
+	if state == "MIGRATION_COMPLETE" || state == "MIGRATION_FAILED" {
+		annotations[annMigrationTerminalAt] = recordedAt
+	}
+	f.updateState(func(st *fakestate.State) {
+		st.Lease = &fakestate.Lease{
+			ResourceVersion: "5",
+			UID:             "lease-uid-previous",
+			HolderIdentity:  "deploy-previous-runner-7777",
+			AcquireTime:     rfc3339(time.Now().Add(-40 * time.Minute)),
+			RenewTime:       rfc3339(time.Now().Add(-30 * time.Minute)),
+			DurationSeconds: 30,
+			Transitions:     1,
+			Annotations:     annotations,
+		}
+	})
+}
+
+// waitForFile 等待某个文件出现（用于「包装层已经进入 sleep，请求确实在途」）。
+func (f *fixture) waitForFile(t *testing.T, path string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("等待文件 %s 出现超时（%s）", path, timeout)
+}
+
+// inflightMarker 返回外部延迟包装写下的 marker 路径。
+func (f *fixture) inflightMarker() string {
+	return filepath.Join(f.stateDir, "inflight-application-apply")
+}
+
+// stealLease 把锁的持有者改成另一个 Runner（模拟租期过期后被接管）。
+func (f *fixture) stealLease(holder string) {
+	f.t.Helper()
+	f.updateState(func(st *fakestate.State) {
+		if st.Lease == nil {
+			f.t.Fatal("stealLease: Lease 不存在")
+		}
+		st.Lease.HolderIdentity = holder
+		st.Lease.RenewTime = rfc3339(time.Now())
 	})
 }
 
@@ -488,6 +650,40 @@ func (f *fixture) countEvents(prefix string) int {
 		}
 	}
 	return count
+}
+
+// findEvents 返回同时包含全部 substrings 的事件行。
+func (f *fixture) findEvents(substrings ...string) []string {
+	var hits []string
+	for _, line := range f.events() {
+		matched := true
+		for _, sub := range substrings {
+			if !strings.Contains(line, sub) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			hits = append(hits, line)
+		}
+	}
+	return hits
+}
+
+// requireEventContaining 断言存在一条同时包含全部 substrings 的事件。
+func (f *fixture) requireEventContaining(t *testing.T, substrings ...string) {
+	t.Helper()
+	if hits := f.findEvents(substrings...); len(hits) == 0 {
+		t.Fatalf("缺少包含 %v 的事件；实际事件序列:\n%s", substrings, strings.Join(f.events(), "\n"))
+	}
+}
+
+// requireNoEventContaining 断言不存在同时包含全部 substrings 的事件。
+func (f *fixture) requireNoEventContaining(t *testing.T, substrings ...string) {
+	t.Helper()
+	if hits := f.findEvents(substrings...); len(hits) > 0 {
+		t.Fatalf("不应出现包含 %v 的事件；实际:\n%s", substrings, strings.Join(hits, "\n"))
+	}
 }
 
 // waitForEvent 等待某个事件出现（用于「进程还在运行时」的时序断言）。

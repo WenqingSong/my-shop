@@ -41,10 +41,10 @@ func longMigration(f *fixture) {
 	})
 }
 
-// leaseArgs 返回满足 AUD-03 参数不变量的租期组合：
-// renew_interval(1) + renew_request_timeout(5) + safety_margin(5) = 11 < 15。
+// leaseArgs 返回满足 AUD-03 / AUD-D7 参数不变量的租期组合：
+// interval(1) + attempts(3)×timeout(3) + backoff(1) + safety_margin(5) = 16 < 17。
 func leaseArgs() []string {
-	return []string{"--lease-duration", "15", "--lease-renew-interval", "1"}
+	return []string{"--lease-duration", "17", "--lease-renew-interval", "1"}
 }
 
 // TestLeaseFirstDeployment 覆盖「首次部署」：Deployment 不存在也必须有锁，

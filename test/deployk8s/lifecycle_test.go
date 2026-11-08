@@ -139,14 +139,17 @@ func TestTakeoverAllowedAfterJobComplete(t *testing.T) {
 	res := runDeploy(t, f, "--lock-wait-timeout", "10", "--migration-timeout", "10", "--rollout-timeout", "10")
 
 	res.requireSuccess(t)
-	res.requireContains(t, "已终态（complete）：允许接管")
+	res.requireContains(t, "已终态（complete）且 Pod 已终止：允许接管")
 	if got := f.countEvents("apply.migration"); got != 2 {
 		t.Fatalf("接管后应重新执行迁移（apply 两次），实际 %d 次", got)
 	}
 }
 
 // TestTakeoverAllowedAfterJobFailedWithoutForce 覆盖 6.1-4：
-// 上一轮 Job 已 Failed → 允许接管，但脚本绝不 force、绝不自动删除 Job。
+// 上一轮 Job 已 Failed **且 Pod 已终止** → 允许接管，但脚本绝不 force、绝不自动删除 Job。
+//
+// T2-06.1.2 / AUD-D3 之后，「Failed 且 Pod 仍在 Running」不再被允许接管（见
+// recovery_test.go 的 Pod 状态矩阵）。
 func TestTakeoverAllowedAfterJobFailedWithoutForce(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, fixtureOptions{})
@@ -154,6 +157,9 @@ func TestTakeoverAllowedAfterJobFailedWithoutForce(t *testing.T) {
 	failed.Failed = true
 	failed.Reason = "BackoffLimitExceeded"
 	failed.Message = "Job has reached the specified backoff limit"
+	failed.Pods = []fakestate.Pod{{
+		Name: "surgecart-migrate-abc1234-p9x2z", Phase: "Failed",
+	}}
 	// 上一轮已经超时并保留了 RUNNING 记录；现在把它推进到 Failed。
 	f.setJobState(runningMigration(f))
 	runDeploy(t, f, "--migration-timeout", "6").requireCode(t, 6)
@@ -164,7 +170,7 @@ func TestTakeoverAllowedAfterJobFailedWithoutForce(t *testing.T) {
 	res := runDeploy(t, f, "--lock-wait-timeout", "10", "--migration-timeout", "10")
 
 	res.requireCode(t, 2)
-	res.requireContains(t, "已终态（failed）：允许接管", "迁移失败", "脚本不会自动 force，也不会自动删除 Job")
+	res.requireContains(t, "已终态（failed）且 Pod 已终止：允许接管", "迁移失败", "脚本不会自动 force，也不会自动删除 Job")
 	for _, call := range f.calls() {
 		if strings.HasPrefix(call, "delete ") {
 			t.Fatalf("脚本不得自动删除 Job，实际调用: %s", call)
@@ -213,7 +219,8 @@ func TestTakeoverRefusedWhenJobNotFoundButRecorded(t *testing.T) {
 	res.requireContains(t,
 		"但该 Job 不存在",
 		"不得据此假定迁移已经完成",
-		"人工核实步骤",
+		"人工恢复步骤",
+		"migration-recovery-evidence",
 	)
 	res.requireNotContains(t, "DEPLOY_K8S_SUCCESS")
 	if got := f.countEvents("apply.migration"); got != 1 {

@@ -236,21 +236,25 @@ Nginx 是面向外部的唯一 HTTP 入口，职责为纯反向代理（无 Lua/
 构建并推送镜像（短 SHA）
     → 更新三处版本（镜像 tag / 版本标记 / 迁移 Job 后缀，三者同值）
     → 获取发布锁 Lease/surgecart-deploy-lock（原子 create + resourceVersion CAS；
-      接管前先核验上一轮 Migration Job 是否已终态，否则拒绝接管）
+      接管前先核验上一轮 Migration Job 是否已终态、其 Pod 是否已终止，
+      必要时要求数据库证据；否则拒绝接管）
     → 锁内版本降级保护（当前版本 vs 目标版本，Git 祖先关系）
-    → 构建 Migration 清单 → 记录预期 Job 名（Lease 注解）→ 创建 Job → 回写真实 Job UID
-    → 等待完成
-         ├─ Failed=True     → 阻止应用升级（退出码 2，不 force、不删 Job）
-         ├─ 等待超时        → 不删 Job、不应用（退出码 6，超时≠失败；锁不释放，
-         │                     关联记录保留，下一个 Runner 会先核验该 Job）
-         ├─ Job 状态不明    → 阻止发布（退出码 7，人工核实）
-         └─ Complete        → 应用 Application 清单 → 等待 Deployment 收敛
+    → 构建 Migration 清单 → 归档上一轮记录 + 记录预期 Job 名（Lease 注解）
+      → 创建 Job → 回写真实 Job UID
+    → 等待完成（Job 条件 + Pod 终止双判据）
+         ├─ Failed=True 且 Pod 已终止 → 阻止应用升级（退出码 2，不 force、不删 Job）
+         ├─ Failed=True 但 Pod 未终止 → 阻止发布（退出码 7，生命周期未确认）
+         ├─ 等待超时                  → 不删 Job、不应用（退出码 6，超时≠失败；锁不释放，
+         │                              关联记录保留，下一个 Runner 会先核验 Job + Pod）
+         ├─ Job/Pod 状态不明          → 阻止发布（退出码 7，人工核实）
+         └─ Complete 且 Pod 已终止    → 应用 Application 清单 → 等待 Deployment 收敛
     → 发布成功判定（镜像 / 版本标记 / generation / 副本 / 实际 Pod）
     → 释放发布锁（保留迁移记录）→ 打印 DEPLOY_K8S_SUCCESS
 ```
 
-发布锁的设计、迁移生命周期绑定、CAS 语义与剩余风险（没有 fencing token、时钟依赖、
-当前是 cooperative/advisory 互斥）见 `docs/design/deploy-lock.md`。
+发布锁的设计、迁移生命周期绑定、Pod 门禁、证据恢复、CAS 语义与剩余风险
+（没有 fencing token、时钟依赖、当前是 cooperative/advisory 互斥、
+`AUD-02` / `AUD-05` = NOT_CLOSED）见 `docs/design/deploy-lock.md`。
 
 已知边界（详见 `docs/development/kubernetes.md`）：
 
