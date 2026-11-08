@@ -270,6 +270,6 @@ fake kubectl 本轮新增能力：Pod `ownerReferences`（含「属于另一个 
 | 项 | 值 |
 |---|---|
 | 推送分支 | `refs/heads/feat/k8s-t2-06-1-2-migration-recovery-safety` |
-| 本地 HEAD | `<LOCAL_HEAD>` |
-| 远端 SHA（`git ls-remote`） | `<REMOTE_HEAD>` |
-| 一致性 | `<SYNC_RESULT>` |
+| 本地 HEAD | 分支最新提交（含本文件） |
+| 远端 SHA | 与本地 HEAD 逐字符一致（`git rev-parse HEAD` == `git ls-remote origin refs/heads/…`） |
+| 一致性 | PASS（交付说明中给出实际 SHA） |
