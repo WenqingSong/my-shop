@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -28,20 +29,25 @@ const (
 	ApplicationManifest = "application.yaml"
 )
 
-// Permissions 模拟 `kubectl auth can-i <verb> <resource>`。
+// Permissions 模拟发布身份的授权范围。
 //
-// Get/Create/Update/Patch 是「全局」开关（历史用例使用）；Denied 提供按
-// **资源** 精确拒绝的能力（T2-06.1.3 / F-01），元素形如 "<verb> <resource短名>"，
-// 例如 "get pods"、"list pods"、"get leases"、"list jobs"。
-// 资源名用短名：fake 会把 `leases.coordination.k8s.io` 归一为 `leases`，
-// 因此 Denied 里写带 group 的全名不会命中。
-// Denied 优先于上面的布尔开关：脚本对 leases/jobs 有权限但对 pods 没有权限时，
-// 只有 Denied 能表达出来（否则「pods 权限不足」会被 leases 的授权掩盖）。
+// 权威字段是 Rules（见 rbac.go）：结构化规则 + 唯一的 Authorize 判定入口，
+// 可以整体替换成「从真实 RBAC 清单解析出来的规则」（RBACRulesFromYAML）。
+//
+// Get/Create/Update/Patch/Denied 是 T2-06.1.3 及更早的写法，**已废弃**：
+// Load() 会把它们翻译成 Rules（Get→get/list、Create→create/delete、Update→update、
+// Patch→patch 的一条 allow 规则；Denied 的每个 "<verb> <resource>" → 一条 deny 规则）。
+// 翻译出的规则带 Source="legacy" 标记，每次 Normalize 重新生成，因此不存在两套并存的
+// 判定逻辑 —— 判定永远只看 Rules。
 type Permissions struct {
-	Get    bool     `json:"get"`
-	Create bool     `json:"create"`
-	Update bool     `json:"update"`
-	Patch  bool     `json:"patch"`
+	// Rules 是授权规则（默认拒绝：没有匹配的 allow 规则即 Forbidden）。
+	Rules []Rule `json:"rules,omitempty"`
+
+	// Deprecated: 历史布尔开关，Load() 时翻译为 Rules。
+	Get    bool     `json:"get,omitempty"`
+	Create bool     `json:"create,omitempty"`
+	Update bool     `json:"update,omitempty"`
+	Patch  bool     `json:"patch,omitempty"`
 	Denied []string `json:"denied,omitempty"`
 }
 
@@ -134,14 +140,30 @@ type State struct {
 	AuthCanIError string   `json:"authCanIError"`
 	Secrets       []string `json:"secrets"`
 
+	// ResourceVersionSeq / LeaseUIDSeq 是**全局**单调计数器（T2-06.1.4 / C-9）：
+	// 任何写都推进 ResourceVersionSeq，因此不会出现「两个对象版本号相同」或版本回退。
+	ResourceVersionSeq int64 `json:"resourceVersionSeq"`
+	// LeaseUIDSeq 保证「删除后重建」产生新 uid（对象 uid 不复用）。
+	LeaseUIDSeq int `json:"leaseUIDSeq"`
+	// Injections 是显式故障注入（按调用语义匹配，见 injection.go）。
+	// 旧的扁平注入字段仍然有效，但它们只是 Injection 的薄封装。
+	Injections []Injection `json:"injections,omitempty"`
+
 	Lease *Lease `json:"lease"`
+
+	// 下面的 Lease* 注入字段**全部是 Injection 的薄封装**（见 injection.go 的
+	// legacyInjections）：匹配条件一律是「调用语义」（verb=update/get，
+	// group=coordination.k8s.io，resource=leases，以及由清单内容推导的写意图），
+	// **不再按 YAML 文件名判断**。新测试请直接用 State.Injections。
+
 	// LeaseReplaceFailures 让接下来 N 次 replace（续租/接管/释放）返回 API 500。
 	LeaseReplaceFailures int `json:"leaseReplaceFailures"`
 	// LeaseGetFailures 让接下来 N 次 get lease 返回 API 500。
 	LeaseGetFailures int `json:"leaseGetFailures"`
 	// LeaseReplaceConflicts 让接下来 N 次 replace 返回确定性 409（resourceVersion 冲突）。
 	LeaseReplaceConflicts int `json:"leaseReplaceConflicts"`
-	// LeaseRecordConflicts 只让接下来 N 次「迁移记录写入」（lease-record.yaml）返回 409：
+	// LeaseRecordConflicts 只让接下来 N 次「写迁移记录」的 update 返回 409
+	// （写意图 intent=record：holder 不变但迁移记录注解被改写）：
 	// 用于确定性地验证「重试时必须重读并保留最新记录」（AUD-D2 / AUD-D5-B6）。
 	LeaseRecordConflicts int `json:"leaseRecordConflicts"`
 	// LeaseReplaceUIDConflicts 让接下来 N 次 replace 返回「UID 不匹配」的 409。
@@ -150,8 +172,8 @@ type State struct {
 	LeaseReplaceTimeouts int `json:"leaseReplaceTimeouts"`
 	// LeaseGetTimeouts 让接下来 N 次 get lease 以客户端请求超时失败。
 	LeaseGetTimeouts int `json:"leaseGetTimeouts"`
-	// 续租专用故障（只作用于 lease-renew.yaml 的 replace）：
-	// 续租是最不能慢/最不能失败的请求，需要与「迁移记录写入」区分开的确定性注入。
+	// 续租专用故障（只作用于 intent=renew 的 update：holder 不变且记录未变）：
+	// 续租是最不能慢/最不能失败的请求，需要与「写迁移记录」区分开的确定性注入。
 	LeaseRenewFailures     int `json:"leaseRenewFailures"`
 	LeaseRenewConflicts    int `json:"leaseRenewConflicts"`
 	LeaseRenewTimeouts     int `json:"leaseRenewTimeouts"`
@@ -226,7 +248,7 @@ type State struct {
 // Dir 返回状态目录（由测试通过环境变量注入）。
 func Dir() string { return os.Getenv("FAKE_KUBECTL_STATE") }
 
-// Load 读取状态文件。
+// Load 读取状态文件，并把历史写法归一为新模型（幂等）。
 func Load(dir string) (*State, error) {
 	raw, err := os.ReadFile(filepath.Join(dir, StateFileName))
 	if err != nil {
@@ -236,7 +258,28 @@ func Load(dir string) (*State, error) {
 	if err := json.Unmarshal(raw, &st); err != nil {
 		return nil, fmt.Errorf("解析 %s: %w", StateFileName, err)
 	}
+	st.Normalize()
 	return &st, nil
+}
+
+// Normalize 把「旧的扁平写法」翻译成新模型，使判定与注入都只有一条路径：
+//   - Permissions.Get/Create/Update/Patch/Denied → Permissions.Rules（rbac.go）；
+//   - 全局 resourceVersion 计数器以现存对象的版本号为下界（不回退）。
+//
+// 幂等：可以重复调用。
+func (st *State) Normalize() {
+	st.Permissions.Normalize()
+	if st.ApplyFailures == nil {
+		st.ApplyFailures = map[string]bool{}
+	}
+	if st.ApplyErrorsApplied == nil {
+		st.ApplyErrorsApplied = map[string]bool{}
+	}
+	if st.Lease != nil {
+		if value, err := strconv.ParseInt(st.Lease.ResourceVersion, 10, 64); err == nil && value > st.ResourceVersionSeq {
+			st.ResourceVersionSeq = value
+		}
+	}
 }
 
 // Save 原子写回状态文件（临时文件 + rename）。
