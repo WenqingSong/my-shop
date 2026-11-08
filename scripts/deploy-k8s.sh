@@ -1134,6 +1134,10 @@ REQUIRED_PERMISSIONS=(
   "get|core|namespaces|cluster|namespace_status@L1390"
   # ensure_namespace：首次部署时 `kubectl apply -f shared/namespace.yaml`
   "create|core|namespaces|cluster|ensure_namespace@L1414"
+  # **apply 部署清单也会写 Namespace**：migration 与 application 两个构建产物都包含
+  # `shared/namespace.yaml`（kind: Namespace），命名空间已存在时 kubectl apply 走
+  # PATCH —— 缺这一条会让「命名空间已存在」的每一次发布在第一次 apply 就 403。
+  "patch|core|namespaces|cluster|begin_migration/apply,apply_application@L2306,L2926"
   # 权限预检自身：`kubectl auth can-i` 就是对 selfsubjectaccessreviews 的 create。
   # 内置 system:basic-user 通常已授予，但交付的清单必须显式声明，否则审计 A-9
   # 无法闭环：身份缺少它时预检只能报「无法确认」，原因却指向不到 SSAR。

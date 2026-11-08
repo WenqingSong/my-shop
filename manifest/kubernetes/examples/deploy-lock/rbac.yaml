@@ -200,7 +200,8 @@ subjects:
 # 审计 A-1/A-2/D-9 的根因就是缺这一段——首次部署必须先 create 命名空间。
 #
 # 权限严格限制在两个集群级资源上，不包含 nodes / clusterroles / crd 等任何其他资源：
-#   namespaces get / create                     （命名空间存在性判定 + 首次部署引导）
+#   namespaces get / create / patch              （命名空间存在性判定 + 首次部署引导 +
+#                                                  apply 部署清单时对已存在命名空间的 PATCH）
 #   selfsubjectaccessreviews create             （`kubectl auth can-i` 自身，审计 A-9）
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -211,9 +212,12 @@ metadata:
     app.kubernetes.io/component: deploy-cluster
     app.kubernetes.io/part-of: surgecart
 rules:
+  # patch 不是「人工操作」：migration 与 application 两个构建产物都包含
+  # `shared/namespace.yaml`（kind: Namespace），命名空间已存在时 kubectl apply 会走
+  # PATCH。缺它会让每一次「命名空间已存在」的发布在第一次 apply 就 403。
   - apiGroups: [""]
     resources: ["namespaces"]
-    verbs: ["get", "create"]
+    verbs: ["get", "create", "patch"]
   - apiGroups: ["authorization.k8s.io"]
     resources: ["selfsubjectaccessreviews"]
     verbs: ["create"]

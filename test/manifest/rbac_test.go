@@ -446,6 +446,7 @@ func TestRequiredPermissionsCoversAuditFindings(t *testing.T) {
 		// 集群级（审计 A-1 / A-9）
 		{verb: "get", group: "", resource: "namespaces", scope: "cluster"},
 		{verb: "create", group: "", resource: "namespaces", scope: "cluster"},
+		{verb: "patch", group: "", resource: "namespaces", scope: "cluster"}, // apply 部署清单里的 Namespace
 		{verb: "create", group: "authorization.k8s.io", resource: "selfsubjectaccessreviews", scope: "cluster"},
 	}
 	for _, want := range required {
@@ -529,13 +530,9 @@ func TestRequiredPermissionsCoverBuiltManifests(t *testing.T) {
 		scope := scopeOf(kind)
 		// `kubectl apply` = GET 读现状 + CREATE 或 PATCH。
 		//
-		// Namespace 是例外：脚本只在「命名空间确实不存在」时才 apply 它
-		// （ensure_namespace 的调用条件是 NAMESPACE_EXISTS == 0），因此永远不会走
-		// PATCH 分支 —— 授予 patch namespaces 属于过度授权。
+		// Namespace 也算：migration 与 application 两个构建产物都包含
+		// `shared/namespace.yaml`，命名空间已存在时 apply 会走 PATCH。
 		verbs := []string{"get", "create", "patch"}
-		if kind == "Namespace" {
-			verbs = []string{"get", "create"}
-		}
 		for _, verb := range verbs {
 			key := permission{verb: verb, group: mapped[0], resource: mapped[1], scope: scope}.key()
 			if _, ok := declared[key]; !ok {
