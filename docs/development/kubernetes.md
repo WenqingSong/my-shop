@@ -683,10 +683,21 @@ kubectl -n surgecart get pods -l app.kubernetes.io/name=surgecart -o wide
 1. **锁对象层面**：旧持有者用陈旧 `resourceVersion` 的 PUT 一定会被 409 拒绝
    （`lease_renew` 每次 attempt 都重新 GET 并校验 holder/uid/是否过期）；
    过期之后的续租会被直接放弃，不再「复活」一把别人可以抢走的锁。
-2. **非锁资源层面**：失锁未察觉窗口 = 从「服务端允许接管」到「旧 Runner 停止发起新请求」
-   之间的时间。存活 Runner 的检测（≤29s）先于过期（≥42s），因此正常参数下该窗口为 0；
-   只有**进程被暂停**时才会出现重叠，其长度由暂停时长决定（无法用参数消除），
-   并且在恢复后由 `require_lock_alive` / `require_lock_owned_server_side` 立即截断。
+2. **请求侧**：只对「**还没发出**的请求」成立。失锁未察觉窗口 = 从「脚本检测到失锁」
+   到「服务端允许别人接管」的时间差；存活 Runner 的检测（≤29s）先于过期（≥42s），
+   所以脚本**停止发起新请求**是有界的。进程被暂停时该边界由暂停时长决定（参数无法消除），
+   恢复后由 `require_lock_alive` / `require_lock_owned_server_side` 立即截断。
+
+对**已经发出**的请求，上面两条都不适用：
+
+- 客户端超时 **不等于** 请求未生效。`kubectl apply` 一旦发出，`t_req`（发出）、
+  `t_acc`（API Server 接受并提交）、`t_resp`（客户端收到响应）是三个不同时刻，
+  超时只说明 `t_resp` 没等到，不能推出 `t_acc` 没有发生；
+- 锁丢失后，已发出的 `kubectl apply` 仍可能被服务端执行 —— 「旧 Runner 的写在途、
+  新 Runner 已接管」的跨接管写入**仍然可能发生**（AUD-05 = NOT_CLOSED）。
+  T2-06.1.4 的故障注入实验提供了这一现象的直接反例（`docs/design/deploy-lock.md` §10.4）；
+- 因此不能把本机制描述成「不会并发发布」，也不能用退出码判断线上状态 ——
+  只能 `kubectl get -o yaml` 只读核对。
 
 `APPLICATION_OUTCOME_UNKNOWN` 只是把「不知道」如实说出来；真正的 fencing 需要写入侧
 校验令牌（Admission Webhook 或专用发布控制器），属于后续架构决策，
