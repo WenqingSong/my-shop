@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -150,6 +151,27 @@ func injectRules(t *testing.T, f *fixture, rules []map[string]any) bool {
 	return strings.Contains(string(raw), `"rules"`)
 }
 
+// applyVerbMismatch 识别「fake 把 apply 已存在对象判成 update」这一接口分歧的签名。
+//
+// 真实 kubectl apply 对已存在对象发送 PATCH，因此交付 RBAC 里没有 update；
+// fake 若按 update 授权，就会返回 `cannot update resource "<r>"`。这种情况下失败
+// 的原因在接口而不在交付清单，用例必须 Skip 并指名分歧，而不是去加过度的 update 权限。
+func applyVerbMismatch(output string) string {
+	matches := regexp.MustCompile(`cannot update resource "([^"]+)"`).FindAllStringSubmatch(output, -1)
+	if len(matches) == 0 {
+		return ""
+	}
+	seen := map[string]bool{}
+	var names []string
+	for _, match := range matches {
+		if !seen[match[1]] {
+			seen[match[1]] = true
+			names = append(names, match[1])
+		}
+	}
+	return strings.Join(names, ",")
+}
+
 // ---------------------------------------------------------------------------
 // 用例 1：预检通过、写路径被拒（resourceNames 收紧）
 // ---------------------------------------------------------------------------
@@ -224,8 +246,9 @@ func TestDeliveredRBACOnlyUpgradeSucceeds(t *testing.T) {
 		res.requireSuccess(t)
 		return
 	}
-	if strings.Contains(res.output(), `cannot update resource "deployments"`) {
-		t.Skip("TODO(interface): fake 把 apply 已存在对象授权为 update，真实 kubectl apply 用 patch。见 agent-c-fake 的 Interface 契约 §1.3 —— " +
+	if reason := applyVerbMismatch(res.output()); reason != "" {
+		t.Skip("TODO(interface): fake 把 apply 已存在对象授权为 update，真实 kubectl apply 用 patch（GET → create/patch，从不 PUT）。" +
+			"被拒对象：" + reason + "；见 agent-c-fake 的 Interface 契约 §1.3 —— " +
 			"交付 RBAC 只授予 kubectl 真正使用的 get/create/patch，不为迁就 fake 而过度授权。")
 	}
 	t.Fatalf("只载入交付的 RBAC 时发布失败（退出码 %d）：交付的授权不足以支撑真实写路径\n--- stdout ---\n%s\n--- stderr ---\n%s",
@@ -255,8 +278,8 @@ func TestDeliveredRBACOnlyFirstDeploySucceeds(t *testing.T) {
 		}
 		return
 	}
-	if strings.Contains(res.output(), `cannot update resource "deployments"`) {
-		t.Skip("TODO(interface): 同 TestDeliveredRBACOnlyUpgradeSucceeds（apply→update vs apply→patch）。")
+	if reason := applyVerbMismatch(res.output()); reason != "" {
+		t.Skip("TODO(interface): 同 TestDeliveredRBACOnlyUpgradeSucceeds（apply→update vs apply→patch），被拒对象：" + reason)
 	}
 	if strings.Contains(res.output(), "缺少 namespaces 的") {
 		t.Fatalf("交付的 RBAC 仍然缺少集群级 namespaces 权限（审计 A-1 未闭环）：\n%s", res.output())
