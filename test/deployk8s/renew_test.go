@@ -1,19 +1,33 @@
 package deployk8s
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"cnb.cool/go-cloud-devops/my-shop/test/deployk8s/fakestate"
 )
 
-// 本文件验证 T2-06.1.1 / AUD-03 与 T2-06.1.2 / AUD-D7：Lease 续租参数安全。
+// 本文件验证 T2-06.1.1 / AUD-03、T2-06.1.2 / AUD-D7 与 T2-06.1.3 / F-02：Lease 续租参数安全。
 //
-// 不变量（重试链的最坏耗时也计入预算，AUD-D7）：
-//   renew_interval + attempts(3) × renew_request_timeout + backoff(1) + safety_margin(5)
-//     < lease_duration
-// 旧实现只计一次请求超时：10 + 5 + 5 = 20 < 30 看似安全，但一次失败后的重试链最坏
-// 需要 3×5=15s，加上间隔后足以跨过租期 —— 那时续租成功也已经太晚。
+// 一次续租 attempt 的真实执行路径（以 scripts/deploy-k8s.sh 的 lease_renew 为准）：
+//
+//	GET Lease（≤ get_timeout）→ 校验 holder/uid/是否已过期 → PUT Lease（CAS，≤ replace_timeout）
+//
+// 失败后最多重试 attempts 次，期间 (attempts-1) 次退避。因此不变量是：
+//
+//	renewal_budget = renew_interval
+//	               + attempts × (get_timeout + replace_timeout)
+//	               + total_backoff
+//	               + safety_margin
+//	               < lease_duration
+//
+// 默认：10 + 3×(3+3) + 1 + 5 = 34 < 45。
+//
+// 旧公式只计「单次请求超时」（attempts × timeout），漏掉了每次 attempt 的 GET：
+// 默认参数下算出来是 25 < 30，看似安全，真实最坏值却是 34 > 30 —— 一次 API 抖动就能
+// 让续租链在锁过期之后才结束。T2-06.1.3 的审计（F-02）正是基于这一点。
 
 // TestLeaseParameterInvariantRejectsIllegalCombinations 覆盖非法组合：
 // 退出码 1，且**不产生任何 kubectl 调用**（连锁都没碰过）。
@@ -25,24 +39,24 @@ func TestLeaseParameterInvariantRejectsIllegalCombinations(t *testing.T) {
 		args []string
 	}{
 		{
+			name: "预算恰好等于租期（相等也不行：没有留给下一次续租的窗口）",
+			args: []string{"--lease-duration", "34", "--lease-renew-interval", "10", "--lease-renew-timeout", "3"},
+		},
+		{
+			name: "预算超过租期（T2-06.1.2 的默认 30s 租期在新公式下已不合法）",
+			args: []string{"--lease-duration", "30", "--lease-renew-interval", "10", "--lease-renew-timeout", "3"},
+		},
+		{
 			name: "T2-06.1 旧默认值（续租请求比租期还长）",
 			args: []string{"--lease-duration", "30", "--lease-renew-interval", "10", "--lease-renew-timeout", "30"},
 		},
 		{
-			name: "只算单次请求（旧公式 10+5+5=20，重试链 10+15+1+5=31 > 30）",
-			args: []string{"--lease-duration", "30", "--lease-renew-interval", "10", "--lease-renew-timeout", "5"},
-		},
-		{
-			name: "恰好相等（没有余量）",
-			args: []string{"--lease-duration", "25", "--lease-renew-interval", "10", "--lease-renew-timeout", "3"},
-		},
-		{
 			name: "续租间隔过大",
-			args: []string{"--lease-duration", "30", "--lease-renew-interval", "20", "--lease-renew-timeout", "3"},
+			args: []string{"--lease-duration", "45", "--lease-renew-interval", "25", "--lease-renew-timeout", "3"},
 		},
 		{
-			name: "续租请求超时过大",
-			args: []string{"--lease-duration", "30", "--lease-renew-interval", "1", "--lease-renew-timeout", "10"},
+			name: "续租请求超时过大（GET+REPLACE 各一次）",
+			args: []string{"--lease-duration", "45", "--lease-renew-interval", "1", "--lease-renew-timeout", "10"},
 		},
 		{
 			name: "租期过短",
@@ -58,22 +72,45 @@ func TestLeaseParameterInvariantRejectsIllegalCombinations(t *testing.T) {
 
 			res.requireCode(t, 1)
 			res.requireNoSuccess(t)
-			res.requireContains(t, "租期参数不合法", "safety_margin")
+			// 报错必须点名 GET 与 REPLACE 两段预算，避免读者误以为只算一次请求。
+			res.requireContains(t, "租期参数不合法", "get_timeout", "replace_timeout", "safety_margin")
 			if calls := f.calls(); len(calls) != 0 {
 				t.Fatalf("非法参数必须在任何资源变更之前拒绝，实际调用:\n%s", strings.Join(calls, "\n"))
+			}
+			if lease := f.state().Lease; lease != nil {
+				t.Fatalf("非法参数不得创建/修改 Lease，实际: %+v", lease)
 			}
 		})
 	}
 }
 
+// TestLeaseDefaultParametersPassInvariant 覆盖「默认配置通过」：
+// 10 + 3×(3+3) + 1 + 5 = 34 < 45，且日志把两段超时分别列出。
+func TestLeaseDefaultParametersPassInvariant(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, fixtureOptions{})
+
+	res := runDeploy(t, f, "--migration-timeout", "10", "--rollout-timeout", "10")
+
+	res.requireSuccess(t)
+	res.requireContains(t,
+		"10 + 3×(3+3) + 1 + 5 = 34 < 45",
+		"单次 attempt 最坏 6s",
+		"续租链最坏 29s",
+	)
+	if lease := f.state().Lease; lease == nil || lease.DurationSeconds != 45 {
+		t.Fatalf("Lease 的 leaseDurationSeconds 必须是默认租期 45，实际: %+v", lease)
+	}
+}
+
 // TestLeaseParameterInvariantAcceptsBoundary 覆盖临界合法组合：
-// 10 + 3×3 + 1 + 5 = 25 < 26 是「刚好留出 1s 余量」的最小合法配置。
+// 10 + 3×(3+3) + 1 + 5 = 34 < 35 是默认参数下「刚好留出 1s 余量」的最小合法配置。
 func TestLeaseParameterInvariantAcceptsBoundary(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, fixtureOptions{})
 
 	res := runDeploy(t, f,
-		"--lease-duration", "26",
+		"--lease-duration", "35",
 		"--lease-renew-interval", "10",
 		"--lease-renew-timeout", "3",
 		"--migration-timeout", "10",
@@ -81,11 +118,38 @@ func TestLeaseParameterInvariantAcceptsBoundary(t *testing.T) {
 	)
 
 	res.requireSuccess(t)
-	res.requireContains(t, "10 + 3×3 + 1 + 5 = 25 < 26")
+	res.requireContains(t, "10 + 3×(3+3) + 1 + 5 = 34 < 35")
+}
+
+// TestHelpDefaultsMatchCode 覆盖 F-03：`--help` 里的默认值必须与代码默认值一致。
+//
+// 只比对「同一份源码里的两处文字」是不够的（两处可以一起写错），因此这里同时断言
+// 运行时打印的租期/间隔/超时，三者必须完全一致。
+func TestHelpDefaultsMatchCode(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, fixtureOptions{})
+
+	help := f.run("--help")
+	help.requireCode(t, 0)
+	help.requireContains(t,
+		"--lease-duration <sec>        发布锁租期（默认 45",
+		"--lease-renew-interval <sec>  发布锁续租间隔（默认 10）",
+		"--lease-renew-timeout <sec>   单次续租请求的超时（默认 3；GET 与 REPLACE 各算一次）",
+		"默认值：10 + 3×(3+3) + 1 + 5 = 34 < 45",
+	)
+	// --help 不得触发任何集群操作。
+	if calls := f.calls(); len(calls) != 0 {
+		t.Fatalf("--help 不得调用 kubectl，实际调用:\n%s", strings.Join(calls, "\n"))
+	}
+
+	// 运行时日志必须与 help 中的默认值一致（3/10/45）。
+	res := runDeploy(t, f, "--migration-timeout", "10", "--rollout-timeout", "10")
+	res.requireSuccess(t)
+	res.requireContains(t, "租期 45s，续租间隔 10s，续租请求超时 3s")
 }
 
 // TestRenewUsesDedicatedRequestTimeout 覆盖「续租专用请求超时可控」：
-// 只有续租（lease-renew.yaml）使用 --lease-renew-timeout，其他调用仍用默认 30s。
+// 只有续租（lease-renew.yaml）与锁读取使用 --lease-renew-timeout，其他调用仍用默认 30s。
 func TestRenewUsesDedicatedRequestTimeout(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, fixtureOptions{})
@@ -94,7 +158,7 @@ func TestRenewUsesDedicatedRequestTimeout(t *testing.T) {
 	res := runDeploy(t, f,
 		"--migration-timeout", "60",
 		"--rollout-timeout", "30",
-		"--lease-duration", "30",
+		"--lease-duration", "60",
 		"--lease-renew-interval", "1",
 		"--lease-renew-timeout", "7",
 	)
@@ -103,21 +167,22 @@ func TestRenewUsesDedicatedRequestTimeout(t *testing.T) {
 
 	renewCalls := 0
 	for _, call := range f.calls() {
-		if !strings.Contains(call, "lease-renew.yaml") {
+		if !strings.Contains(call, "lease-renew.yaml") &&
+			!strings.Contains(call, " get lease ") {
 			continue
 		}
 		renewCalls++
 		if !strings.Contains(call, "--request-timeout=7s") {
-			t.Fatalf("续租必须使用专用请求超时 7s，实际调用: %s", call)
+			t.Fatalf("锁读取/续租必须使用专用请求超时 7s，实际调用: %s", call)
 		}
 	}
 	if renewCalls < 2 {
-		t.Fatalf("续租调用 = %d 次，期望 >= 2（否则无法证明超时参数被真正使用）", renewCalls)
+		t.Fatalf("续租相关调用 = %d 次，期望 >= 2（否则无法证明超时参数被真正使用）", renewCalls)
 	}
 }
 
-// TestRenewRequestTimeoutAbortsDeployment 覆盖 6.2-11：续租请求超时 → 判定失锁 → 退出码 3。
-func TestRenewRequestTimeoutAbortsDeployment(t *testing.T) {
+// TestRenewReplaceTimeoutAbortsDeployment 覆盖续租 REPLACE 超时 → 判定失锁 → 退出码 3。
+func TestRenewReplaceTimeoutAbortsDeployment(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, fixtureOptions{})
 	longMigration(f)
@@ -135,7 +200,39 @@ func TestRenewRequestTimeoutAbortsDeployment(t *testing.T) {
 	f.requireNoEvent(t, "apply.application")
 }
 
-// TestRenewAPI500AbortsDeployment 覆盖 6.2-12：续租 API 500 → 失锁 → 退出码 3。
+// TestRenewGetTimeoutAbortsDeployment 覆盖续租 GET 超时 → 判定失锁 → 退出码 3。
+//
+// 为什么需要单独一条：GET 与 REPLACE 是两个独立请求，GET 失败时 lease_read 直接返回
+// 非零，不会进入 CAS；旧实现只把「一次请求」计入预算，正是因为默认「GET 不会失败」。
+//
+// 注入时机必须确定：迁移进入 RUNNING 之后，主进程在等待循环里不会读 Lease（下一次读是
+// 终态写入），此后的第一次 get lease 只可能来自后台续租。迁移被设置为永远不会 Complete，
+// 因此不存在「主进程读消耗掉注入」的竞争窗口。
+func TestRenewGetTimeoutAbortsDeployment(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, fixtureOptions{})
+	f.updateState(func(st *fakestate.State) {
+		st.JobScript = []fakestate.Job{{Exists: true}, {Exists: true}, {Exists: true}}
+	})
+
+	p := f.start(append([]string{
+		"--migration-timeout", "12",
+		"--rollout-timeout", "10",
+	}, leaseArgs()...)...)
+	// 记录写入 RUNNING 之后：主进程只剩「等待 Job」，不会再读 Lease。
+	f.waitForEvent(t, "lease.write kind=lease-record.yaml state=MIGRATION_RUNNING", 30*time.Second)
+	f.updateState(func(st *fakestate.State) { st.LeaseGetTimeouts = 1 })
+
+	res := p.wait(t, 120*time.Second)
+
+	res.requireCode(t, 3)
+	res.requireNoSuccess(t)
+	res.requireContains(t, "发布锁续租失败")
+	f.requireEvent(t, "lease.get-timeout")
+	f.requireNoEvent(t, "apply.application")
+}
+
+// TestRenewAPI500AbortsDeployment 覆盖续租 API 500 → 失锁 → 退出码 3。
 func TestRenewAPI500AbortsDeployment(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, fixtureOptions{})
@@ -153,8 +250,9 @@ func TestRenewAPI500AbortsDeployment(t *testing.T) {
 	f.requireNoEvent(t, "apply.application")
 }
 
-// TestRenewCASConflictAbortsDeployment 覆盖 6.2-13：resourceVersion 冲突（409）→ 失锁。
-func TestRenewCASConflictAbortsDeployment(t *testing.T) {
+// TestRenewThreeCASConflictsExhaustAttempts 覆盖「连续三次 CAS 冲突」：
+// attempts 用尽后判定续租失败，且每次冲突都重新读取 Lease（不会用旧 rv 盲写）。
+func TestRenewThreeCASConflictsExhaustAttempts(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, fixtureOptions{})
 	longMigration(f)
@@ -166,17 +264,41 @@ func TestRenewCASConflictAbortsDeployment(t *testing.T) {
 	}, leaseArgs()...)...)
 
 	res.requireCode(t, 3)
+	res.requireNoSuccess(t)
 	res.requireContains(t, "续租失败")
-	f.requireEvent(t, "lease.renew-conflict")
+
+	if got := f.countEvents("lease.renew-conflict"); got != 3 {
+		t.Fatalf("续租冲突 = %d 次，期望 3（attempts=3 用尽才判定失锁）；事件:\n%s",
+			got, strings.Join(f.events(), "\n"))
+	}
+	// 三次 attempt 各读一次 Lease：审计 F-02 的核心就是「attempt 里真的有 GET」。
+	attempts, problems := renewAttemptsStartingWithGet(f)
+	if attempts != 3 {
+		t.Fatalf("续租 replace = %d 次，期望 3；调用:\n%s", attempts, strings.Join(f.calls(), "\n"))
+	}
+	if len(problems) > 0 {
+		t.Fatalf("每次续租 attempt 必须紧接在一次 get lease 之后：\n%s\n调用:\n%s",
+			strings.Join(problems, "\n"), strings.Join(f.calls(), "\n"))
+	}
+	// 冲突不是「写入成功」：不得出现成功续租的写入事件。
+	f.requireNoEvent(t, "lease.write kind=lease-renew.yaml")
 	f.requireNoEvent(t, "apply.application")
 }
 
-// TestRenewUIDMismatchAbortsDeployment 覆盖 6.2-14：Lease uid 不一致（对象被删除重建）→ 失锁。
-func TestRenewUIDMismatchAbortsDeployment(t *testing.T) {
+// TestRenewAbortsWhenLeaseExpiresDuringRetries 覆盖 F-02.4：
+// 重试链比租期还长、服务器上的租约在重试期间过期 → 不得继续盲写，直接判定失锁。
+//
+// 这是审计点名的场景：上一次续租已经失效、新 Runner 已经可以接管，而旧 Runner 仍在
+// 执行 GET/REPLACE。旧实现会「立即续租」把租约复活（等于在接管窗口里继续写入）。
+func TestRenewAbortsWhenLeaseExpiresDuringRetries(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, fixtureOptions{})
 	longMigration(f)
-	f.updateState(func(st *fakestate.State) { st.LeaseRenewUIDConflicts = 1 })
+	f.updateState(func(st *fakestate.State) {
+		st.LeaseRenewConflicts = 1
+		// 第一次冲突之后租约在服务端过期（模拟重试链耗尽租期）。
+		st.LeaseExpireAfterRenewConflicts = 1
+	})
 
 	res := runDeploy(t, f, append([]string{
 		"--migration-timeout", "60",
@@ -184,9 +306,126 @@ func TestRenewUIDMismatchAbortsDeployment(t *testing.T) {
 	}, leaseArgs()...)...)
 
 	res.requireCode(t, 3)
-	res.requireContains(t, "续租失败")
-	f.requireEvent(t, "lease.renew-uid-conflict")
+	res.requireNoSuccess(t)
+	res.requireContains(t,
+		"租约已过期",
+		"其他 Runner 已可合法接管",
+		"不再写入 Lease",
+		"不通过「立即续租」复活",
+	)
+	f.requireEvent(t, "lease.expired")
+	f.requireNoEvent(t, "lease.write kind=lease-renew.yaml")
 	f.requireNoEvent(t, "apply.application")
+
+	// 过期之后不得再有任何 Lease 写入（释放也不行：那不是本 Runner 的锁了）。
+	events := f.events()
+	expiredAt := -1
+	for i, line := range events {
+		if strings.HasPrefix(line, "lease.expired") {
+			expiredAt = i
+		}
+	}
+	if expiredAt < 0 {
+		t.Fatalf("缺少 lease.expired 事件；事件:\n%s", strings.Join(events, "\n"))
+	}
+	for _, line := range events[expiredAt+1:] {
+		if strings.HasPrefix(line, "lease.write") || strings.HasPrefix(line, "lease.release") {
+			t.Fatalf("租约过期后不得再写 Lease，实际事件: %s\n事件序列:\n%s", line, strings.Join(events, "\n"))
+		}
+	}
+}
+
+// TestRenewChainStaysWithinBudget 覆盖「不能只验证参数计算正确，还要验证实际执行耗时」：
+// 让 GET 与 REPLACE 都接近超时上限（各 0.9s / timeout 1s），三次 attempt 全部失败，
+// 用外部包装记录的时间戳测量真实续租链耗时，断言它不超过公式给出的上界。
+//
+// 断言三件事：
+//  1. 链里确实有 3 次 GET + 3 次 REPLACE（attempt 是「两个请求」，不是「一个」）；
+//  2. 实测耗时 ≥ 3×(get+replace)：证明测试真的制造了慢请求，不是空转；
+//  3. 实测耗时 ≤ attempts×(get+replace)+backoff，且 < lease_duration。
+func TestRenewChainStaysWithinBudget(t *testing.T) {
+	t.Parallel()
+
+	const (
+		leaseTimeout = 1 * time.Second
+		requestDelay = 900 * time.Millisecond // 接近超时上限（90%）
+		attempts     = 3
+		backoffBudge = 1 * time.Second
+		leaseLength  = 25 * time.Second
+	)
+
+	f := newFixture(t, fixtureOptions{
+		leaseGetDelay:   requestDelay,
+		leaseRenewDelay: requestDelay,
+	})
+	// 迁移持续时间必须长于续租链，否则主进程先结束会 stop 掉续租进程。
+	f.updateState(func(st *fakestate.State) {
+		st.JobScript = []fakestate.Job{
+			{Exists: true}, {Exists: true}, {Exists: true}, {Exists: true},
+			{Exists: true}, {Exists: true}, {Exists: true, Complete: true},
+		}
+		st.LeaseRenewFailures = 1
+	})
+
+	res := runDeploy(t, f,
+		"--lease-duration", fmt.Sprintf("%d", int(leaseLength.Seconds())),
+		"--lease-renew-interval", "1",
+		"--lease-renew-timeout", fmt.Sprintf("%d", int(leaseTimeout.Seconds())),
+		"--migration-timeout", "60",
+		"--rollout-timeout", "30",
+	)
+
+	res.requireCode(t, 3)
+	res.requireContains(t, "续租失败")
+
+	timings := f.timings()
+	if len(timings) == 0 {
+		t.Fatal("timing.log 为空：外部包装未生效，无法测量实际耗时")
+	}
+
+	var renews []int
+	for i, entry := range timings {
+		if isRenewReplace(entry.args) {
+			renews = append(renews, i)
+		}
+	}
+	if len(renews) != attempts {
+		t.Fatalf("续租 replace = %d 次，期望 %d（attempts 用尽才判定失锁）\n完整时间线:\n%s",
+			len(renews), attempts, formatTimings(timings))
+	}
+
+	// 相邻两次续租 replace 的间隔 = GET 耗时 + REPLACE 耗时 + 退避。
+	// 若 attempt 里没有 GET（例如只重发 PUT），间隔只有 REPLACE 耗时 + 退避，
+	// 因此这条断言直接证明「一次 attempt 真的是两个请求」。
+	minSpacing := requestDelay + requestDelay
+	for i := 1; i < len(renews); i++ {
+		spacing := timings[renews[i]].at.Sub(timings[renews[i-1]].at)
+		if spacing < minSpacing {
+			t.Fatalf("第 %d→%d 次续租间隔 %s < %s（GET+REPLACE）：attempt 里少了 GET？\n完整时间线:\n%s",
+				i, i+1, spacing, minSpacing, formatTimings(timings))
+		}
+	}
+
+	// wrapper 在 sleep **之前**记录时间戳：第一次 attempt 的 GET 时刻 ≈ 首次 replace 时刻 - GET 延迟。
+	chainStart := timings[renews[0]].at.Add(-requestDelay)
+	chainEnd := timings[renews[len(renews)-1]].at.Add(requestDelay)
+	elapsed := chainEnd.Sub(chainStart)
+	// 下界只算注入的请求延迟（不含真实退避），保证断言不会因噪声变成空转。
+	slowFloor := time.Duration(attempts) * 2 * requestDelay
+	budgetChain := time.Duration(attempts)*2*leaseTimeout + backoffBudge
+	t.Logf("续租链实测 %s；公式上界 %s（attempts×(get+replace)+backoff）；租期 %s",
+		elapsed, budgetChain, leaseLength)
+
+	if elapsed < slowFloor {
+		t.Fatalf("续租链实测 %s 小于 %s：测试没有真正制造慢请求（断言会变成空转）", elapsed, slowFloor)
+	}
+	if elapsed > budgetChain {
+		t.Fatalf("续租链实测 %s 超出预算 %s：参数不变量没有覆盖真实执行路径（GET 是否被漏算？）",
+			elapsed, budgetChain)
+	}
+	if elapsed >= leaseLength {
+		t.Fatalf("续租链实测 %s >= 租期 %s：锁会在续租完成之前过期", elapsed, leaseLength)
+	}
 }
 
 // TestReleaseDoesNotRaceWithRenewer 覆盖 6.2-18：后台续租与 cleanup 并发。
@@ -225,4 +464,45 @@ func TestReleaseDoesNotRaceWithRenewer(t *testing.T) {
 			t.Fatalf("第 %d 轮：发布结束后 holder 必须为空，实际: %+v", round, lease)
 		}
 	}
+}
+
+// isLeaseRead 判断一次 kubectl 调用是否是读取锁对象（`get lease <name>`）。
+func isLeaseRead(args string) bool {
+	return strings.Contains(" "+args+" ", " get lease ")
+}
+
+// isRenewReplace 判断一次 kubectl 调用是否是续租写入（`replace -f .../lease-renew.yaml`）。
+func isRenewReplace(args string) bool {
+	return strings.Contains(args, "replace") && strings.Contains(args, "lease-renew.yaml")
+}
+
+// renewAttemptsStartingWithGet 返回续租 replace 的次数，并逐次检查它前面一次调用
+// 是不是 get lease —— 这是「一次 attempt = GET + REPLACE」在调用序列上的直接证据。
+func renewAttemptsStartingWithGet(f *fixture) (int, []string) {
+	calls := f.calls()
+	attempts := 0
+	var problems []string
+	for i, call := range calls {
+		if !isRenewReplace(call) {
+			continue
+		}
+		attempts++
+		previous := "<无>"
+		if i > 0 {
+			previous = calls[i-1]
+		}
+		if i == 0 || !isLeaseRead(previous) {
+			problems = append(problems, fmt.Sprintf("第 %d 次续租 replace 之前是: %s", attempts, previous))
+		}
+	}
+	return attempts, problems
+}
+
+func formatTimings(entries []timingEntry) string {
+	var builder strings.Builder
+	base := entries[0].at
+	for _, entry := range entries {
+		fmt.Fprintf(&builder, "+%6dms  %s\n", entry.at.Sub(base).Milliseconds(), entry.args)
+	}
+	return builder.String()
 }

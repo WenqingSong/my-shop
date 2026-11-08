@@ -358,8 +358,9 @@ func TestReleasePreservesRecordAnnotations(t *testing.T) {
 	f.requireEventContaining(t, "lease.write", "kind=lease-release.yaml", "state=MIGRATION_COMPLETE",
 		"job="+anns[annMigrationJob], "uid="+anns[annMigrationUID])
 	// D6：释放不改变 leaseDurationSeconds 的语义值（旧实现写 1）。
-	if lease := f.state().Lease; lease == nil || lease.DurationSeconds != 30 {
-		t.Fatalf("释放后 leaseDurationSeconds 应保持配置值 30，实际: %+v", lease)
+	// T2-06.1.3：默认租期改为 45s（F-02 预算重估），断言必须跟进默认值。
+	if lease := f.state().Lease; lease == nil || lease.DurationSeconds != 45 {
+		t.Fatalf("释放后 leaseDurationSeconds 应保持配置值 45，实际: %+v", lease)
 	}
 }
 

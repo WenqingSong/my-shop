@@ -1,4 +1,4 @@
-# 发布锁、迁移生命周期绑定与版本降级保护（T2-06.1 / T2-06.1.1 / T2-06.1.2）
+# 发布锁、迁移生命周期绑定与版本降级保护（T2-06.1 / T2-06.1.1 / T2-06.1.2 / T2-06.1.3）
 
 本文是 `scripts/deploy-k8s.sh` 发布期并发控制的**设计文档**：为什么用 Kubernetes Lease、
 锁如何与 Migration Job 的生命周期绑定、迁移生命周期如何核验、它到底保证了什么、
@@ -7,6 +7,15 @@
 > T2-06.1.2 变更摘要：记录写入路径拆成「保留」与「有意识更新」两条（AUD-D2）；
 > 允许开始新一轮迁移的判据从「Job 条件」改为「Job 条件 + Pod 已终止」（AUD-D3）；
 > 新增可校验的数据库证据恢复路径（AUD-D4）；AUD-02 / AUD-05 明确**未关闭**。
+>
+> T2-06.1.3 变更摘要（F-01…F-07）：
+> ① RBAC 示例补齐 core `pods get/list`，并把「脚本声明的权限 == 脚本实际使用的权限 ⊆
+> 交付 RBAC」做成自动化契约测试；② 续租预算补上每次 attempt 的 **GET** 请求
+> （`attempts × (get + replace)`），默认租期 30s → 45s；③ 续租在租约过期后不再写入
+> （不「复活」一把别人可以抢走的锁）；④ 失锁窗口按真实时间戳重新推导（§10.3）；
+> ⑤ 退出码语义区分「未发出 / 已发出但未知 / 已确认成功」；⑥ 测试替身的接管语义推进会
+> `resourceVersion`（否则 CAS 缺陷不可能被测试发现）；⑦ Pod 查询结果区分「确实存在」
+> 与「无法确认」。**AUD-02 / AUD-05 仍然 NOT_CLOSED，本任务不声称实现强 fencing。**
 
 操作手册（怎么发布、怎么排障、怎么人工解锁）见 `docs/development/kubernetes.md`；
 清单与探针语义见 `docs/development/kubernetes.md` §5–§8。
@@ -67,7 +76,7 @@ metadata:
     deploy-lock.surgecart.io/migration-previous-terminal-at: "2026-11-08T09:00:00Z"
 spec:
   holderIdentity: "deploy-<host>-<pid>-<utc>"   # 持有者身份
-  leaseDurationSeconds: 30                       # 租期（释放时也保持该值，见 §5）
+  leaseDurationSeconds: 45                       # 租期（释放时也保持该值，见 §5；T2-06.1.3 由 30 调整，理由见 §7）
   acquireTime: "<RFC3339>"                       # 本次获取时间
   renewTime: "<RFC3339>"                         # 最近续租时间
   leaseTransitions: 2                            # 被接管次数（排查用）
@@ -340,27 +349,85 @@ Job activeDeadlineSeconds = 900s
 
 用户自定义参数同样受约束：`--migration-timeout 900` + Job 900 → 拒绝。
 
-## 7. 续租参数约束（AUD-03 / AUD-D7）
+## 7. 续租参数约束（AUD-03 / AUD-D7 / T2-06.1.3-F02）
+
+### 7.1 一次 attempt 是两个请求
+
+以 `lease_renew` 的真实执行路径为准：
 
 ```text
-renew_interval + attempts × renew_request_timeout + backoff + safety_margin
-  < lease_duration
-默认：10 + 3×3 + 1 + 5 = 25 < 30
+attempt k（k = 1..attempts）
+  ├─ GET Lease         ≤ get_timeout        （读取 rv / holder / renewTime）
+  ├─ 校验 holder / uid / 是否已过期          （不过期才继续）
+  └─ PUT Lease（CAS）  ≤ replace_timeout    （写 renewTime，resourceVersion 前置条件）
+失败 → 退避 backoff_ms → 下一个 attempt
 ```
 
-- 旧默认值 `10 + 30 > 30`：续租请求本身比租期还长，锁会在请求返回之前过期；
-- **AUD-D7**：只计「单次请求超时」仍然低估最坏耗时。续租失败会重试 3 次，
-  最坏耗时是 `interval + 3 × request_timeout ≈ 19s`；旧公式 `10 + 5 + 5 = 20 < 30`
-  看似安全，实际重试链已经吃掉 19s，余量只剩 0 秒。现在把
-  `attempts × request_timeout + backoff` 计入预算，并把默认
-  `--lease-renew-timeout` 从 5 收紧到 3；
-- 续租使用**专用请求超时**（`--lease-renew-timeout`），其他 kubectl 调用仍是 30s；
-- 非法组合在**任何资源变更之前**拒绝（退出码 1，连 kubectl 都不会调用）；
-- 续租冲突（409）会短退避重试：主进程写迁移记录也会推进 `resourceVersion`，
-  把这种「自己造成的冲突」当成失锁会在发布中途误报失败。
+因此预算必须写成：
+
+```text
+renewal_budget = renew_interval
+               + attempts × (get_timeout + replace_timeout)
+               + total_backoff
+               + scheduling_margin
+               < lease_duration
+默认：10 + 3×(3+3) + 1 + 5 = 34 < 45
+```
+
+### 7.2 为什么旧公式是错的（F-02 的审计结论）
+
+| 公式 | 默认值下算出的最坏耗时 | 与 30s 租期的关系 |
+|---|---|---|
+| T2-06.1：`interval + 1×timeout + margin` | 10 + 30 + 5 = 45 | 45 > 30 ✗（续租请求本身比租期长） |
+| T2-06.1.2：`interval + attempts×timeout + backoff + margin` | 10 + 9 + 1 + 5 = 25 | 25 < 30 ✓（**但漏了 GET**） |
+| T2-06.1.3：`interval + attempts×(timeout+timeout) + backoff + margin` | 10 + 18 + 1 + 5 = 34 | 34 > 30 ✗（真实值） |
+
+T2-06.1.2 的公式把每次 attempt 里的 **GET** 忘掉了，相当于把最坏耗时低估了
+`attempts × timeout = 9s`。旧默认参数下续租链最坏要 29s 才结束，而租期只有 30s
+（且 `renewTime` 是「请求发出时刻」，真实过期点在 27…30s 之间）—— 一次 API 抖动
+就可能让续租链跨过过期点，表现为「自己已经被接管，却还在续租」。
+
+### 7.3 默认值重新评估（不是为了让 guard 通过而放大租期）
+
+| 参数 | 旧值 | 新值 | 依据 |
+|---|---|---|---|
+| `--lease-duration` | 30 | **45** | 预算 34 必须严格小于租期；45 留出 11s（24%）余量，吸收进程调度延迟与 `renewTime` 的秒级精度 |
+| `--lease-renew-interval` | 10 | 10 | 45s 租期内有 4 个续租窗口，单次抖动不影响连续性 |
+| `--lease-renew-timeout` | 3 | 3 | in-cluster 的 Lease GET/PUT 通常 <100ms，3s ≈ 30 倍抖动余量；收到 2s 会把正常抖动误判成失锁 |
+| `attempts` | 3 | 3 | 主进程写迁移记录会推进 `resourceVersion`，409 是常态，需要重试 |
+| `backoff` | 2×0.2s（预算 1s） | 不变 | 退避必须远短于续租间隔 |
+| `safety_margin` | 5 | 5 | 吸收一次请求的调度延迟 |
+
+取舍被明确记录：
+
+1. **正常抖动下的续租成功率**：单次 attempt 最坏 6s，三次 18s，仍远小于 45s；
+2. **网络故障下的失锁检测速度**：续租链失败后立即写 `lost` 并 SIGTERM，最坏 29s
+   （< 45s），即旧 Runner 在别人可接管之前就已经停止；
+3. **其他 Runner 的接管延迟**：崩溃后 ≤ 45s（+ 轮询 2s）。代价是比原来多 15s，
+   但发布锁本来就是分钟级操作，而「两个发布并行」是不可接受的；
+4. **续租操作的最大耗时**：29s（含退避），有明确上界；
+5. **安全余量**：11s（≈ 预算的 32%）。
+
+明确**不接受**的做法：把 `--lease-renew-timeout` 压到 1s 以保住 30s 租期
+（正常抖动会被当成失锁，可用性下降且更难排查）；或把 `attempts` 降到 1
+（主进程写记录造成的 409 会直接杀死发布）。
+
+### 7.4 过期之后不得续租（F-02.4）
+
+`lease_renew` 的每个 attempt 在 PUT 之前检查**服务器返回的** `renewTime +
+leaseDurationSeconds`：一旦已过期，立即按失锁返回失败，不再写入。
+
+- 旧实现会在 `require_lock_owned_server_side` 里「立即续租两次」把过期的锁**复活**；
+  那是在接管窗口里继续写入 —— 对方可能已经核验完上一轮 Job、正准备 replace 接管；
+- `resourceVersion` CAS 只能保证「不是我覆盖了别人的写」，不能保证「我没有在别人可以
+  接管的时刻继续操作」；
+- 该判断的依据是服务端时间戳，不是本地 `lost` 标记，也不是本地时钟推算的「我还没超时」。
+
+代价：进程被长时间挂起后，即使锁其实还没被别人接管，本次发布也会失败（退出码 3）。
+这是刻意的 fail-closed：`fail-closed` 的代价是一次重跑，`fail-open` 的代价是并发发布。
 
 **该不变量只降低「正常网络延迟下锁提前过期」的概率**，不能消除 Runner 暂停、网络分区
-与缺少 fencing 带来的问题（§10）。
+与缺少 fencing 带来的问题（§10）。失锁窗口的推导见 §10.3。
 
 ## 8. 正确性论证（脚本实际提供的保证）
 
@@ -466,8 +533,11 @@ Kubernetes API Server 不会为 Lease 之外的写请求校验「谁持有锁」
 GET Lease → 检查 holder → kubectl apply        # 仍然是 TOCTOU，不能声称强 fencing
 ```
 
-残余窗口：`0 ≤ 窗口 ≤ 续租间隔 + 单次 kubectl 调用时长`（默认约 10s + 30s）。
-这个窗口只能缩小，不能消除；`APPLICATION_OUTCOME_UNKNOWN` 只是把「不知道」说出来。
+残余窗口的**具体数值**不再用「约 10s + 30s」这类粗略估计，而是按真实时间戳推导，
+见 §10.3。T2-06.1.3 之后：存活 Runner 的失锁检测（≤29s）先于服务端允许接管（≥42s），
+因此正常参数下「旧 Runner 仍在写、新 Runner 已接管」的重叠为 **0**；
+重叠只可能由进程被暂停造成，长度等于暂停时长（无法用参数消除）。
+`APPLICATION_OUTCOME_UNKNOWN` 只是把「我不知道结果」说出来，不构成 fencing。
 
 真正实现发布级 fencing 需要的架构（本任务**不做**，交给 Owner 决策）：
 
@@ -501,6 +571,38 @@ GET Lease → 检查 holder → kubectl apply        # 仍然是 TOCTOU，不能
    不能证明 schema 与代码期望完全一致；dirty=true 一律要求人工核对。
 8. **锁只能防并发，不能防错误版本**：版本正确性由「版本降级保护」（§11）负责。
 9. **Lease 卡住需要人工介入**：见 `docs/development/kubernetes.md` §10.4。
+10. **Pod 只读权限缺失时的表现是「发布被拒绝」**：`pods get/list` 缺失会让 Pod 门禁
+    以「无法确认」fail-closed（退出码 7），不会退化成「放行」；但它也不会自动修好 ——
+    需要按 RBAC 示例补授权（T2-06.1.3 / F-01）。
+
+### 10.3 失锁窗口推导（T2-06.1.3 / F-05）
+
+符号与默认值：`D` = 45s（租期）、`I` = 10s（续租间隔）、`G` = `R` = 3s（GET / PUT 超时）、
+`A` = 3（attempts）、`B` = 1s（退避预算）。`t0` = 最近一次**成功**续租的 `renewTime`
+（写入值是 renew 请求的**发出时刻**，因此真实过期时刻落在 `[t0+D-G, t0+D]`）。
+
+| # | 问题 | 推导 | 默认值 |
+|---|---|---|---|
+| 1 | 新 Runner 最早何时可以接管 | 服务端过期 = `renewTime + leaseDurationSeconds`；接管方还要轮询到它（`acquire_release_lock` 每 2s 读一次）并核验旧 Job + Pod | ≥ `t0+42s`（+ 2s 轮询 + 核验） |
+| 2 | 存活 Runner 最晚何时 **发现**失锁 | 一次续租链的最坏完成时刻 = `t0 + I + A×(G+R) + B`；链失败后立即写 `lost` 并 SIGTERM | `t0+29s` |
+| 3 | 两者是否重叠 | 29s < 42s ⇒ 检测先于「别人可以接管」 | **重叠 0s** |
+| 4 | 续租重试是否会延长失锁检测 | 会：`A×(G+R)+B` 已经计入（这正是 F-02 的修复点）。旧公式漏掉 `A×G`，最坏值被低估 9s | 29s vs 旧模型 20s |
+| 5 | 崩溃 / SIGKILL 的 Runner | 不再续租，也不再写入；锁在 `t0+D` 后自然可接管 | 接管延迟 ≤ 47s |
+| 6 | 被挂起（SIGSTOP / VM 冻结 / 分区）的 Runner | 恢复后**先 GET**：`renewTime+D ≤ now` ⇒ 立即按失锁停止（§7.4），不 PUT；若尚未过期，PUT 用旧 `resourceVersion`，被别人接管则 409，重试时读到 `holder ≠ 自己` 即停止 | 恢复后 ≤ `G` 发现 |
+| 7 | 对非 Lease 资源（Deployment/Job）的在途写入 | 变更前的服务端复核只能缩小窗口，**已发出的请求无法撤销**（AUD-02/AUD-05 = NOT_CLOSED） | 由挂起时长决定 |
+
+结论（本文档唯一允许的表述）：
+
+```text
+锁对象层面：旧持有者用陈旧 resourceVersion 的 PUT 一定被 409 拒绝；
+            租约过期后的续租会被直接放弃（不复活）。
+非锁资源层面：正常参数下「旧 Runner 仍在写 + 新 Runner 已接管」的重叠为 0；
+            只有进程被暂停时才可能出现重叠，长度 = 暂停时长，恢复后立即截断。
+```
+
+上一轮审计给出的「约 58s」不作为结论：它把 `D + A×(G+R) + B + 轮询` 直接相加，
+既没有区分「检测失锁」与「允许接管」两个不同的时钟，也没有考虑 §7.4 的过期即停。
+上面每一项都从**实际时间戳**（`renewTime`、请求发出时刻）与脚本的真实执行路径推导。
 
 ## 11. 版本降级保护
 
@@ -539,21 +641,45 @@ CI 环境下必须额外设置 `DEPLOY_K8S_ALLOW_DOWNGRADE_IN_CI=1`。
 | `leases` | `patch`（可选） | 人工恢复 runbook | 脚本不调用 |
 | `jobs`（namespace 内） | `get` | 按名称核验上一轮迁移 Job（uid/终态） | T2-06.1.1 新增 |
 | `jobs` | `list` | 扫描「是否存在未终结的迁移 Job」 | T2-06.1.1 新增 |
-| `pods`（namespace 内） | `get`/`list` | 按 `job-name` 读取该 Job 的 Pod；按 component 标签扫描残留迁移 Pod | T2-06.1.2 新增 |
+| `pods`（namespace 内） | `get`/`list` | 按 `job-name` 读取该 Job 的 Pod；按 component 标签扫描残留迁移 Pod | T2-06.1.2 引入，**T2-06.1.3 才补进交付示例**（F-01） |
 
 为什么脚本检查的是 `get/create/update` 而不是 `patch`：脚本用 `replace`（PUT）实现 CAS。
-权限预检发生在**迁移之前**；缺少 `jobs get/list` 时脚本在迁移之前失败（退出码 3），
-而不是带着未知的迁移状态继续发布。
+权限预检发生在**迁移之前**；缺少 `jobs`/`pods` 的 `get/list` 时脚本在迁移之前失败
+（退出码 3），而不是带着未知的迁移状态继续发布。
 
-> 说明：`pods` 的读取权限在多数发布身份上本来就有；若被移除，脚本会在 Pod 门禁处
-> fail-closed（退出码 7），表现为「发布被拒绝」，不会退化成「放行」。
+**F-01 的教训**：T2-06.1.2 的 RBAC 示例漏了 `pods`。示例本身看起来「已经授权」，
+但按它配置的身份首次发布就会在 Pod 门禁处失败（退出码 7）—— 而开发者没有任何线索
+指向 RBAC。因此 T2-06.1.3 做了三件事：
+
+1. 示例补齐 core `pods get/list`（`apiGroups: [""]`）；
+2. `check_lease_permissions` 逐项 `auth can-i`，并把顶层权限需求收敛成脚本里的
+   `LEASE_PERMISSION_CHECKS`（唯一事实来源）；
+3. `test/manifest` 的 `TestRBACGrantsEveryPermissionTheScriptNeeds` 自动比对
+   「脚本实际使用的资源操作 == 脚本声明的权限 ⊆ 交付 RBAC 的授权」——
+   **不允许只靠手工检查 YAML 证明权限完整**。
+
+权限预检还会区分两种失败（F-01）：
+
+| `auth can-i` 结果 | 含义 | 输出 | 退出码 |
+|---|---|---|---|
+| `yes` | 有权限 | — | — |
+| `no`（Forbidden） | **明确被拒绝** | `缺少 <resource> 的 <verb> 权限（Forbidden…）` | 3 |
+| 其他错误（5xx/超时） | **无法确认**（不是被拒绝） | `无法确认当前身份…（查询失败，不是「被拒绝」）` | 3 |
+
+> 说明：`pods` 的读取权限在多数发布身份上本来就有；若被移除，即使绕过预检，Pod 门禁
+> 也会 fail-closed（退出码 7），表现为「发布被拒绝」，不会退化成「放行」。
 
 ## 13. 验证方式与边界
 
 | 层级 | 手段 | 结论 |
 |---|---|---|
 | 脚本行为（锁/迁移生命周期/版本/判定/故障/续租参数/Pod 门禁/证据恢复/在途请求） | `go test ./test/deployk8s/`：真实执行脚本 + fake kubectl（真实进程、真实并发、真实 SIGTERM/SIGKILL/SIGSTOP、外部延迟包装） | 已验证（本仓库环境） |
-| 清单契约（版本标签、RBAC 名称、超时与租期预算） | `test/manifest` 从 Kustomize 构建产物断言 | 已验证 |
+| 续租预算与实际耗时（F-02） | `TestRenewChainStaysWithinBudget`：GET/REPLACE 各延迟 0.9s（超时上限 1s），用外部包装的毫秒时间戳测量 3 次 attempt 的真实耗时并与公式上界比对 | 已验证（脚本语义 + 实测耗时） |
+| 租约过期后的续租（F-02.4） | `TestRenewAbortsWhenLeaseExpiresDuringRetries`：重试期间把服务端 `renewTime` 推过期，断言不再写 Lease | 已验证（脚本语义） |
+| 权限契约（F-01） | `test/manifest/TestRBACGrantsEveryPermissionTheScriptNeeds`：脚本声明 == 脚本实际使用 ⊆ RBAC 示例；`test/deployk8s/rbac_test.go`：逐项拒绝 + Forbidden/unknown 区分 | 已验证（静态契约 + 脚本行为） |
+| Pod 查询错误分类（F-07） | `test/deployk8s/podquery_test.go`：空列表/全终态/活动 Pod/403/500/超时/归属不一致 | 已验证（脚本语义） |
+| 接管语义（F-06） | 替身推进 `resourceVersion`；`TestStaleResourceVersionCannotOverwriteTakeover` 断言旧 rv 的 PUT 得到 409 且不覆盖新 holder | 已验证（**替身语义**，不等于真实 API Server） |
+| 清单契约（版本标签、RBAC 名称与授权范围、超时与租期预算、help/文档默认值） | `test/manifest` 从 Kustomize 构建产物与源文件断言 | 已验证 |
 | 真实 API Server 的 Lease 竞争 | 需要在真实集群并发跑两个 Runner | **NOT_VERIFIED** |
 | RBAC 最小权限的实际效果（含 `jobs`/`pods` 读取） | 需要真实 `auth can-i` 与真实 RoleBinding | **NOT_VERIFIED** |
 | 时钟偏移导致的误接管 | 需要可控时钟的真实集群 | **NOT_VERIFIED** |
@@ -561,12 +687,14 @@ CI 环境下必须额外设置 `DEPLOY_K8S_ALLOW_DOWNGRADE_IN_CI=1`。
 | Job 被 kubelet 以 `DeadlineExceeded` 终止后的条件传播时延 | 需要真实集群与真实 DDL 负载 | **NOT_VERIFIED** |
 | 「Failed 但 Pod 仍在 Running」的真实时序 | 需要真实集群 + 真实的 MySQL 长 DDL | **NOT_VERIFIED**（仅在 fake 中构造） |
 
-fake kubectl 能证明什么（T2-06.1.1 / T2-06.1.2 补齐）：
+fake kubectl 能证明什么（T2-06.1.1 / T2-06.1.2 / T2-06.1.3 补齐）：
 
 - Lease 的 `create` 原子性、`replace` 的 resourceVersion / UID 校验、确定性 409；
-- API 500 与客户端请求超时对续租判定的影响；
+- API 500 与客户端请求超时对续租判定的影响；**续租链的真实耗时**（外部包装的毫秒时间戳）；
+- 接管 = 一次成功写入：推进 `resourceVersion`、保持 UID，旧 rv 的 PUT 得到 409；
 - Job 状态序列（不存在 / 运行中 / 删除中 / Complete / Failed）、Job UID 变化；
 - Pod 的 `ownerReferences`（含「属于另一个 Job」「没有 owner」）、phase、`deletionTimestamp`；
+- Pod 查询的 403 / 500 / 超时 / 空列表 / 活动 Pod 的五种结果与对应措辞；
 - 「apply 返回错误但对象已创建」「迁移后 Job 消失」「Application apply 在途失锁」这类窗口；
 - 每次 Lease 写入**携带了什么记录**（`lease.write` 事件），因此可以逐次断言记录未被清空；
 - 两个真实 bash 进程共享同一状态目录时的互斥与接管。

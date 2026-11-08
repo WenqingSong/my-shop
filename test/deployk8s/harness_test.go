@@ -96,6 +96,11 @@ type fixtureOptions struct {
 	// secretDelay > 0 时同样延迟 `get secret`（锁内复检）：用于构造「接管成功、
 	// 尚未开始新迁移」的确定窗口（SIGKILL 后记录必须仍在）。
 	secretDelay time.Duration
+	// leaseGetDelay > 0 时延迟 `get lease`：用于验证「续租 GET 也消耗预算」（F-02）。
+	leaseGetDelay time.Duration
+	// leaseRenewDelay > 0 时延迟 `replace -f .../lease-renew.yaml`：用于验证
+	// 「一次续租 attempt = GET + REPLACE 两个请求」（F-02）。
+	leaseRenewDelay time.Duration
 }
 
 type fixture struct {
@@ -157,8 +162,8 @@ func newFixture(t *testing.T, opt fixtureOptions) *fixture {
 		t.Fatalf("创建 bin 目录: %v", err)
 	}
 	kubectlInPath := filepath.Join(binDir, "kubectl")
-	if opt.applyDelay > 0 || opt.secretDelay > 0 {
-		writeDelayWrapper(t, kubectlInPath, opt.applyDelay, opt.secretDelay)
+	if opt.applyDelay > 0 || opt.secretDelay > 0 || opt.leaseGetDelay > 0 || opt.leaseRenewDelay > 0 {
+		writeDelayWrapper(t, kubectlInPath, opt)
 	} else if err := os.Symlink(fakeKubectlPath, kubectlInPath); err != nil {
 		t.Fatalf("链接 fake kubectl: %v", err)
 	}
@@ -183,20 +188,25 @@ func newFixture(t *testing.T, opt fixtureOptions) *fixture {
 }
 
 // writeDelayWrapper 写出「外部延迟包装」：它只是把调用转发给 fake kubectl，
-// 但在指定调用上先落 marker 再延迟 —— 用来构造真实的在途窗口。
+// 但在指定调用上先落 marker 再延迟 —— 用来构造真实的在途窗口与「接近超时上限」的请求。
 //
 // 边界：延迟发生在 fake 之外，因此 fake 仍然按自己的语义记录 apply/replace；
 // 测试不能通过这层包装制造「请求被撤销」的假象（那正是本任务要如实否认的能力）。
-func writeDelayWrapper(t *testing.T, path string, applyDelay, secretDelay time.Duration) {
+//
+// 每次调用都会往 timing.log 追加 `<unix_ms>\t<args>`（毫秒时间戳为单调递增的墙钟）：
+// T2-06.1.3 / F-02 要求「不能只验证参数计算正确，还必须验证实际执行耗时没有突破预算」，
+// 时间戳就是那条断言的证据来源（wrapper 在 sleep **之前**记录，因此完成时刻 =
+// 时间戳 + 注入延迟）。
+func writeDelayWrapper(t *testing.T, path string, opt fixtureOptions) {
 	t.Helper()
-	applySleep, secretSleep := "0", "0"
-	if applyDelay > 0 {
-		applySleep = fmt.Sprintf("%.3f", applyDelay.Seconds())
-	}
-	if secretDelay > 0 {
-		secretSleep = fmt.Sprintf("%.3f", secretDelay.Seconds())
+	sleep := func(d time.Duration) string {
+		if d <= 0 {
+			return "0"
+		}
+		return fmt.Sprintf("%.3f", d.Seconds())
 	}
 	script := fmt.Sprintf(`#!/usr/bin/env bash
+printf '%%s\t%%s\n' "$(date +%%s%%3N)" "$*" >> "${FAKE_KUBECTL_STATE}/timing.log"
 for arg in "$@"; do
   case "${arg}" in
     *application.yaml)
@@ -205,16 +215,28 @@ for arg in "$@"; do
         sleep %[1]s
       fi
       ;;
-    secret)
+    *lease-renew.yaml)
       if [ "%[2]s" != "0" ]; then
-        : > "${FAKE_KUBECTL_STATE}/inflight-secret-check"
         sleep %[2]s
+      fi
+      ;;
+    secret)
+      if [ "%[3]s" != "0" ]; then
+        : > "${FAKE_KUBECTL_STATE}/inflight-secret-check"
+        sleep %[3]s
       fi
       ;;
   esac
 done
+case " $* " in
+  *" get lease "*)
+    if [ "%[4]s" != "0" ]; then
+      sleep %[4]s
+    fi
+    ;;
+esac
 exec "${FAKE_KUBECTL_REAL}" "$@"
-`, applySleep, secretSleep)
+`, sleep(opt.applyDelay), sleep(opt.leaseRenewDelay), sleep(opt.secretDelay), sleep(opt.leaseGetDelay))
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("写延迟包装: %v", err)
 	}
@@ -592,20 +614,69 @@ func (f *fixture) inflightMarker() string {
 }
 
 // stealLease 把锁的持有者改成另一个 Runner（模拟租期过期后被接管）。
+//
+// T2-06.1.3 / F-06：接管是**一次成功写入**，必须像真实 API Server 那样推进
+// metadata.resourceVersion；否则测试替身会允许旧持有者用旧 rv 的 PUT 覆盖新 holder，
+// 从而掩盖「CAS 冲突」这条真实行为。UID 保持不变（对象没有被删除重建）。
 func (f *fixture) stealLease(holder string) {
 	f.t.Helper()
 	f.updateState(func(st *fakestate.State) {
 		if st.Lease == nil {
 			f.t.Fatal("stealLease: Lease 不存在")
 		}
+		before := st.Lease.ResourceVersion
 		st.Lease.HolderIdentity = holder
 		st.Lease.RenewTime = rfc3339(time.Now())
+		st.Lease.ResourceVersion = nextResourceVersion(before)
+		st.Lease.Transitions++
 	})
+}
+
+// nextResourceVersion 与 fake kubectl 的推进规则一致（真实集群里只要写入成功，
+// resourceVersion 就会变化，且不保证是「+1」；这里只保证严格递增）。
+func nextResourceVersion(current string) string {
+	var value int
+	if _, err := fmt.Sscanf(current, "%d", &value); err != nil {
+		return current + "1"
+	}
+	return fmt.Sprintf("%d", value+1)
 }
 
 func (f *fixture) events() []string { return fakestate.Read(f.stateDir, fakestate.EventsFileName) }
 
 func (f *fixture) calls() []string { return fakestate.Read(f.stateDir, fakestate.CallsFileName) }
+
+// timingEntry 是「外部延迟包装」记录的一次 kubectl 调用（毫秒时间戳 + 参数）。
+// 只有配置了延迟（fixtureOptions.leaseGetDelay 等）时 wrapper 才存在，因此 timing.log
+// 也只在那些用例里可读；时间戳在 sleep **之前**写入。
+type timingEntry struct {
+	at   time.Time
+	args string
+}
+
+// timings 读取 wrapper 记录的时间线；未使用 wrapper 的用例返回 nil。
+func (f *fixture) timings() []timingEntry {
+	raw, err := os.ReadFile(filepath.Join(f.stateDir, "timing.log"))
+	if err != nil {
+		return nil
+	}
+	var out []timingEntry
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		var ms int64
+		if _, err := fmt.Sscanf(parts[0], "%d", &ms); err != nil {
+			continue
+		}
+		out = append(out, timingEntry{at: time.UnixMilli(ms), args: parts[1]})
+	}
+	return out
+}
 
 func (f *fixture) requireEvent(t *testing.T, prefix string) {
 	t.Helper()

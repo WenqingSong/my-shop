@@ -30,6 +30,7 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -234,7 +235,29 @@ func cmdAuth(dir string, inv invocation) int {
 		return 1
 	}
 	verb := inv.Positional[2]
+	// `auth can-i <verb> <resource> -n <ns>`：resource 允许带 group（pods / jobs.batch /
+	// leases.coordination.k8s.io）。fake 按 **资源短名** 归一，以便 Denied 可以用
+	// "get pods" 这种直观写法精确拒绝某一个资源（T2-06.1.3 / F-01）。
+	resource := ""
+	if len(inv.Positional) >= 4 {
+		resource = inv.Positional[3]
+		if index := strings.Index(resource, "."); index > 0 {
+			resource = resource[:index]
+		}
+	}
 	return mutate(dir, func(st *fakestate.State) int {
+		if st.AuthCanIError != "" {
+			fakestate.Append(dir, fakestate.EventsFileName, "auth.error "+verb+" "+resource)
+			fmt.Fprintln(os.Stderr, st.AuthCanIError)
+			return 1
+		}
+		for _, denied := range st.Permissions.Denied {
+			if denied == verb+" "+resource || (resource == "" && denied == verb) {
+				fakestate.Append(dir, fakestate.EventsFileName, "auth.denied "+verb+" "+resource)
+				fmt.Println("no")
+				return 1
+			}
+		}
 		var allowed bool
 		switch verb {
 		case "get":
@@ -246,7 +269,7 @@ func cmdAuth(dir string, inv invocation) int {
 		case "patch":
 			allowed = st.Permissions.Patch
 		case "list":
-			// 迁移生命周期核验需要 jobs 的 list 权限，沿用 get 的授权开关。
+			// 迁移生命周期核验需要 jobs/pods 的 list 权限，沿用 get 的授权开关。
 			allowed = st.Permissions.Get
 		default:
 			allowed = false
@@ -352,6 +375,17 @@ func cmdReplace(dir string, inv invocation) int {
 		// 续租故障是「持续性」的：脚本会对 409 做有限重试，单次失败不足以判定失锁，
 		// 因此这几个计数器不递减（模拟 API 持续不可用 / 锁持续被抢占）。
 		isRenew := filepath.Base(path) == "lease-renew.yaml"
+		// T2-06.1.3 / F-06：「旧持有者读到 rv，然后别人接管」的确定性注入。
+		// 必须发生在 CAS 校验**之前**：否则无法证明「旧 rv 的 PUT 会被服务端拒绝」。
+		if isRenew && st.LeaseStealBeforeRenewReplace > 0 {
+			st.LeaseStealBeforeRenewReplace--
+			st.Lease.HolderIdentity = st.LeaseStealHolder
+			st.Lease.RenewTime = time.Now().UTC().Format(time.RFC3339)
+			st.Lease.ResourceVersion = nextResourceVersion(st.Lease.ResourceVersion)
+			st.Lease.Transitions++
+			fakestate.Append(dir, fakestate.EventsFileName,
+				"lease.stolen holder="+st.LeaseStealHolder+" rv="+st.Lease.ResourceVersion)
+		}
 		if isRenew && st.LeaseRenewTimeouts > 0 {
 			fakestate.Append(dir, fakestate.EventsFileName, "lease.renew-timeout")
 			fmt.Fprintln(os.Stderr, "Unable to connect to the server: net/http: request canceled (Client.Timeout exceeded while awaiting headers)")
@@ -364,6 +398,17 @@ func cmdReplace(dir string, inv invocation) int {
 		}
 		if isRenew && st.LeaseRenewConflicts > 0 {
 			fakestate.Append(dir, fakestate.EventsFileName, "lease.renew-conflict")
+			// T2-06.1.3 / F-02.4：重试链耗尽租期 —— 第 N 次冲突之后租约在服务端已过期。
+			if st.LeaseExpireAfterRenewConflicts > 0 {
+				st.LeaseExpireAfterRenewConflicts--
+				if st.LeaseExpireAfterRenewConflicts == 0 {
+					st.Lease.RenewTime = time.Now().
+						Add(-time.Duration(st.Lease.DurationSeconds+10) * time.Second).
+						UTC().Format(time.RFC3339)
+					st.Lease.ResourceVersion = nextResourceVersion(st.Lease.ResourceVersion)
+					fakestate.Append(dir, fakestate.EventsFileName, "lease.expired holder="+st.Lease.HolderIdentity)
+				}
+			}
 			conflictMessage("the object has been modified; please apply your changes to the latest version and try again")
 			return 1
 		}
@@ -787,6 +832,12 @@ func cmdGetPods(dir string, inv invocation) int {
 				fmt.Fprintln(os.Stderr, "Unable to connect to the server: net/http: request canceled (Client.Timeout exceeded while awaiting headers)")
 				return 1
 			}
+			if st.MigrationPodsGetForbidden > 0 {
+				st.MigrationPodsGetForbidden--
+				fakestate.Append(dir, fakestate.EventsFileName, "migration-pods.get-forbidden")
+				fmt.Fprintln(os.Stderr, `Error from server (Forbidden): pods is forbidden: User "ci-deployer" cannot list resource "pods" in API group "" in the namespace "surgecart"`)
+				return 1
+			}
 			if st.MigrationPodsGetFailures > 0 {
 				st.MigrationPodsGetFailures--
 				fakestate.Append(dir, fakestate.EventsFileName, "migration-pods.get-error")
@@ -799,6 +850,12 @@ func cmdGetPods(dir string, inv invocation) int {
 				st.PodsGetTimeouts--
 				fakestate.Append(dir, fakestate.EventsFileName, "pods.get-timeout")
 				fmt.Fprintln(os.Stderr, "Unable to connect to the server: net/http: request canceled (Client.Timeout exceeded while awaiting headers)")
+				return 1
+			}
+			if st.PodsGetForbidden > 0 {
+				st.PodsGetForbidden--
+				fakestate.Append(dir, fakestate.EventsFileName, "pods.get-forbidden")
+				fmt.Fprintln(os.Stderr, `Error from server (Forbidden): pods is forbidden: User "ci-deployer" cannot list resource "pods" in API group "" in the namespace "surgecart"`)
 				return 1
 			}
 			if st.PodsGetFailures > 0 {

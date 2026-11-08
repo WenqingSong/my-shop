@@ -41,10 +41,11 @@ func longMigration(f *fixture) {
 	})
 }
 
-// leaseArgs 返回满足 AUD-03 / AUD-D7 参数不变量的租期组合：
-// interval(1) + attempts(3)×timeout(3) + backoff(1) + safety_margin(5) = 16 < 17。
+// leaseArgs 返回满足 AUD-03 / AUD-D7 / F-02 参数不变量的租期组合：
+// interval(1) + attempts(3)×(get(3)+replace(3)) + backoff(1) + safety_margin(5) = 25 < 30。
+// 间隔取 1s 是为了让行为测试能在有限时间内观察到多次续租。
 func leaseArgs() []string {
-	return []string{"--lease-duration", "17", "--lease-renew-interval", "1"}
+	return []string{"--lease-duration", "30", "--lease-renew-interval", "1"}
 }
 
 // TestLeaseFirstDeployment 覆盖「首次部署」：Deployment 不存在也必须有锁，
@@ -283,7 +284,9 @@ func TestLeasePermissionDeniedFailsBeforeMigration(t *testing.T) {
 
 	res.requireCode(t, 3)
 	res.requireNoSuccess(t)
-	res.requireContains(t, "缺少 leases 的 update 权限")
+	// F-01：权限预检必须能区分「明确被拒绝（Forbidden）」与「无法确认」。
+	res.requireContains(t, "缺少 leases.coordination.k8s.io 的 update 权限", "Forbidden")
+	res.requireNotContains(t, "无法确认")
 	f.requireNoEvent(t, "apply.migration")
 	f.requireNoEvent(t, "apply.application")
 	if lease := f.state().Lease; lease != nil {

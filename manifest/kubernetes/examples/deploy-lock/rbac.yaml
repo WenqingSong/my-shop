@@ -18,8 +18,18 @@
 # 迁移 Job。缺少这两个动词时脚本会在权限预检阶段失败（退出码 3），不会带着未知的
 # 迁移状态继续发布。
 #
-# 注意：Lease 是 namespaced 资源，权限必须落在 surgecart 命名空间内，
-# 不要授予集群级 leases 权限（那会让该身份能干扰其他命名空间的协调类资源）。
+# T2-06.1.3（F-01）起额外需要 core API 的 pods get/list：脚本既要按 job-name 读取
+# 「该 Job 的 Pod」（ownerReferences 归属校验 + phase/deletionTimestamp），也要按
+#   app.kubernetes.io/component=database-migration
+# 扫描命名空间里是否还有残留的迁移 Pod（覆盖「Job 已删除、Pod 仍存活」）。
+# 缺少这两个动词时：
+#   - 权限预检阶段直接失败（退出码 3，不会开始迁移）；
+#   - 即使绕过预检，Pod 门禁也会 fail-closed（退出码 7），不会退化成「放行」。
+# 审计发现 T2-06.1.2 的这份示例漏了 pods，导致按示例授权后首次发布就失败，
+# 因此 test/manifest 现在会比对「脚本声明的权限」与「本文件授权的权限」（不允许手工检查）。
+#
+# 注意：Lease / Job / Pod 都是 namespaced 资源，权限必须落在 surgecart 命名空间内，
+# 不要授予集群级 leases/jobs/pods 权限（那会让该身份能读写其他命名空间的资源）。
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -45,6 +55,13 @@ rules:
   # 只读，不含 delete/create：删除 Job 仍然必须由人工执行（脚本永不自动删除）。
   - apiGroups: ["batch"]
     resources: ["jobs"]
+    verbs: ["get", "list"]
+  # 迁移 Pod 生命周期核验（T2-06.1.2 引入、T2-06.1.3 补齐示例）：按 job-name 读取该
+  # Job 的 Pod（phase / deletionTimestamp / ownerReferences），以及按 component 标签
+  # 扫描残留迁移 Pod。只读，不含 delete：脚本永不删除 Pod。
+  # core group 的 apiGroups 必须写成 [""]（空字符串），不是 ["core"]。
+  - apiGroups: [""]
+    resources: ["pods"]
     verbs: ["get", "list"]
 ---
 # 把上面的 Role 绑定到执行发布的身份。

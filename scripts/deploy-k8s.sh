@@ -43,12 +43,15 @@
 #     **AUD-02 = NOT_CLOSED，AUD-05 = NOT_CLOSED**：已发出的请求无法撤销，read-after-write
 #     只能提高可观测性（见 docs/design/deploy-lock.md §10）。
 #
-# 退出码：
+# 退出码（语义必须区分「请求未发出」「已发出但结果未知」「已确认成功」）：
 #   0  发布成功且已验证（stdout 打印 DEPLOY_K8S_SUCCESS）
-#   1  参数 / 预检 / 清单构建 / apply 失败
-#   2  迁移失败（Job Failed=True；应用 Deployment 未更新）
-#   3  发布锁失败（权限不足 / 获取超时 / 续租失败 / 服务端复核发现失锁）
-#   4  版本降级保护拒绝（降级、分叉、当前或目标版本无法在 Git 历史中验证）
+#   1  参数 / 预检 / 清单构建失败（**未发出任何变更请求**）；
+#      或 Migration/Application apply 失败（**请求可能已经发出**，结果未知时额外打印
+#      APPLICATION_OUTCOME_UNKNOWN）—— 不能把 1 统一解释为「资源没有被修改」
+#   2  迁移失败（Job Failed=True 且 Pod 已终止；应用 Deployment 未更新）
+#   3  发布锁失败（权限不足 / 获取超时 / 续租失败 / 租约已过期 / 服务端复核发现失锁）；
+#      变更请求未发出，或在途时已发出但结果未知（此时打印 APPLICATION_OUTCOME_UNKNOWN）
+#   4  版本降级保护拒绝（降级、分叉、当前或目标版本无法在 Git 历史中验证；未发出请求）
 #   5  发布后验证失败（实际镜像/版本/副本与目标不一致，或未在超时内收敛）
 #   6  迁移等待超时（Job 未确认终态，Pod 可能仍在执行 DDL；锁与关联记录保留）
 #   7  迁移生命周期未确认/未终结（fail-closed：拒绝接管、拒绝开始新一轮迁移、Job 与记录不一致、
@@ -71,14 +74,34 @@ PLACEHOLDER_TAG="0000000"
 # 发布锁资源（T2-06.1）。Lease 不写进 Kustomize 入口：把锁放进部署清单意味着每次 apply
 # 都可能把别的 Runner 的 holderIdentity 覆盖成空，等于绕过锁。
 LOCK_NAME="surgecart-deploy-lock"
-LOCK_LEASE_DURATION=30
+# 租期 45s（T2-06.1.3 / F-02 重新评估，不再是 30s）。
+#
+# 一次续租 attempt 实际执行**两个**请求（GET 读 + PUT 写），各受
+# --lease-renew-timeout 约束；失败后退避重试，最多 attempts 次。最坏耗时：
+#
+#   renewal_budget = renew_interval
+#                  + attempts × (get_timeout + replace_timeout)
+#                  + total_backoff
+#                  + scheduling_margin
+#                  = 10 + 3×6 + 1 + 5 = 34s
+#
+# 30s 的租期在这个模型下**必然不成立**（34 > 30）：一次 API 抖动就可能让续租链
+# 在锁过期之后才完成，表现为「自己已经被接管，却还在续租」。把租期放到 45s 后：
+#   - 续租链最坏 29s 完成（10 + 18 + 1），比服务端过期早 16s；
+#   - 留出 11s 余量吸收进程调度延迟与 renewTime 的秒级精度（公式要求 < 45）；
+#   - 代价是「崩溃后接管延迟」由 ≤30s 变为 ≤45s（发布锁是分钟级操作，可接受）。
+# 不通过缩小 --lease-renew-timeout 到 2s 换取 30s 租期：in-cluster 的 Lease GET/PUT
+# 通常 <100ms，3s 已相当于 30 倍抖动余量；再收紧会把正常抖动误判成失锁。
+LOCK_LEASE_DURATION=45
 LOCK_RENEW_INTERVAL=10
 # 续租专用请求超时：续租是最不能慢的一类请求，单独收紧（AUD-03）。
+# GET 与 REPLACE **各自**受该超时约束（不是一个 attempt 只算一次）。
 LOCK_RENEW_REQUEST_TIMEOUT=3
 # 单次续租允许的尝试次数与退避时长（AUD-D7：重试的最坏耗时也必须计入租期预算）。
 LOCK_RENEW_MAX_ATTEMPTS=3
 LOCK_RENEW_BACKOFF_MS=200
-# 退避总耗时的保守上界（秒）：2 次退避 × 0.2s 向上取整为 1s。
+# 退避总耗时的保守上界（秒）：(attempts-1) 次退避 × 0.2s = 0.4s，向上取整为 1s。
+# 下面的参数校验会断言该预算不小于实际退避总和，避免常量各改一处时预算被低估。
 LOCK_RENEW_BACKOFF_BUDGET=1
 # 参数不变量中的安全余量：吸收单次续租请求的网络抖动与进程调度延迟。
 LOCK_SAFETY_MARGIN=5
@@ -291,27 +314,31 @@ usage() {
                                 必须大于 Job 的 activeDeadlineSeconds（默认 900）
   --rollout-timeout <sec>       等待 Deployment 收敛的上限（默认 600）
   --lock-wait-timeout <sec>     等待其他发布释放锁的上限（默认 60）
-  --lease-duration <sec>        发布锁租期（默认 30）
+  --lease-duration <sec>        发布锁租期（默认 45；崩溃后最多这么久即可被接管）
   --lease-renew-interval <sec>  发布锁续租间隔（默认 10）
-  --lease-renew-timeout <sec>   单次续租请求的超时（默认 5）
+  --lease-renew-timeout <sec>   单次续租请求的超时（默认 3；GET 与 REPLACE 各算一次）
   --allow-downgrade             允许把 Deployment 降级到更旧的 commit（默认禁止）
   -h, --help                    显示帮助
 
-租期参数必须满足（AUD-03 / AUD-D7，重试链的最坏耗时也计入预算）：
-  renew_interval + attempts(3) × renew_request_timeout + backoff(1) + safety_margin(5)
+租期参数必须满足（AUD-03 / AUD-D7，续租链的最坏耗时也计入预算）：
+  renew_interval + attempts(3) × (get_timeout + replace_timeout) + backoff(1) + safety_margin(5)
     < lease_duration
-默认值：10 + 3×3 + 1 + 5 = 25 < 30。不满足时脚本在任何资源变更之前拒绝执行。
+默认值：10 + 3×(3+3) + 1 + 5 = 34 < 45。不满足时脚本在任何资源变更之前拒绝执行
+（退出码 1，且不产生任何 kubectl 资源调用）。
 
 退出码：
-  0 成功（打印 DEPLOY_K8S_SUCCESS）；1 参数/预检/apply 失败（Application 结果不确定时
-  额外打印 APPLICATION_OUTCOME_UNKNOWN）；2 迁移失败；3 发布锁失败；4 版本降级保护拒绝；
-  5 发布后验证失败；6 迁移等待超时；7 迁移生命周期未确认/未终结（fail-closed：
-  拒绝接管、Job 与记录不一致、Job 已 Failed 但 Pod 仍在执行）。
+  0 成功（打印 DEPLOY_K8S_SUCCESS）；
+  1 参数/预检/清单构建失败（未发出请求）**或** apply 失败（请求可能已发出、结果未知，
+    此时额外打印 APPLICATION_OUTCOME_UNKNOWN）—— 1 不等于「资源一定没有被修改」；
+  2 迁移失败；3 发布锁失败；4 版本降级保护拒绝；5 发布后验证失败；6 迁移等待超时；
+  7 迁移生命周期未确认/未终结（fail-closed：拒绝接管、Job 与记录不一致、
+    Job 已 Failed 但 Pod 仍在执行、无法确认 Pod 状态）。
 
 前置条件：
   - 已安装 kubectl，且 kubeconfig 指向目标集群；
-  - 执行发布的身份具备 leases 的 get/create/update 权限，以及 jobs 的 get/list 权限
-    （见 manifest/kubernetes/examples/deploy-lock/rbac.yaml）；
+  - 执行发布的身份具备 leases 的 get/create/update、jobs 的 get/list、pods 的 get/list
+    权限（见 manifest/kubernetes/examples/deploy-lock/rbac.yaml；权限预检在迁移之前，
+    缺少任何一项都以退出码 3 失败）；
   - 已按 manifest/kubernetes/examples/secrets/ 创建 Secret；
   - 两个 overlay 的镜像版本 / Job 名称后缀 / app.kubernetes.io/version 已替换为同一个
     真实短 SHA，REPLACE_WITH_* 占位符已全部替换；
@@ -349,24 +376,45 @@ done
 (( LOCK_RENEW_INTERVAL > 0 )) || die 1 "--lease-renew-interval 必须大于 0"
 (( LOCK_RENEW_REQUEST_TIMEOUT > 0 )) || die 1 "--lease-renew-timeout 必须大于 0"
 
-# AUD-03 / AUD-D7：租期预算不变量。
+# AUD-03 / AUD-D7 / T2-06.1.3-F02：租期预算不变量。
 #
-# 续租的最坏耗时不是「一次请求」，而是「一次失败后的重试链」：
-#   interval + attempts × request_timeout + backoff + safety_margin < lease_duration
-# 旧实现只把「单次请求超时」计入预算，重试链的最坏耗时被忽略 —— 一次 API 抖动就可能让
-# 续租在锁过期之后才成功，表现为「自己已经被接管，却还在续租」。
+# 一次续租 attempt 实际执行 **两个** 请求（以 lease_renew 的真实源码路径为准）：
 #
-#   默认 10 + 3×3 + 1 + 5 = 25 < 30  ✅
-#   旧默认 10 + 1×30 + 5 = 45 > 30   ❌（续租请求本身比租期还长）
+#   GET Lease（读 rv / holder / renewTime）→ 校验 holder+uid → PUT Lease（CAS 写 renewTime）
 #
-# 该不变量只能降低「正常网络延迟下锁提前过期」的概率，**不能**消除 Runner 暂停、
-# 网络分区与缺少 fencing 带来的问题（见 docs/design/deploy-lock.md §7）。
-lock_budget=$(( LOCK_RENEW_INTERVAL + LOCK_RENEW_MAX_ATTEMPTS * LOCK_RENEW_REQUEST_TIMEOUT \
-  + LOCK_RENEW_BACKOFF_BUDGET + LOCK_SAFETY_MARGIN ))
-if (( lock_budget >= LOCK_LEASE_DURATION )); then
-  die 1 "租期参数不合法：renew_interval(${LOCK_RENEW_INTERVAL}) + attempts(${LOCK_RENEW_MAX_ATTEMPTS})×renew_request_timeout(${LOCK_RENEW_REQUEST_TIMEOUT}) + backoff(${LOCK_RENEW_BACKOFF_BUDGET}) + safety_margin(${LOCK_SAFETY_MARGIN}) = ${lock_budget} 必须小于 lease_duration(${LOCK_LEASE_DURATION})；否则一次续租失败后的重试链会让锁先过期、被其他 Runner 接管"
+# 两个请求各自受 --lease-renew-timeout 约束，CAS 冲突/API 错误后最多重试
+# attempts 次、期间有 (attempts-1) 次退避。因此最坏耗时是：
+#
+#   renewal_budget = renew_interval
+#                  + attempts × (get_timeout + replace_timeout)
+#                  + total_backoff
+#                  + scheduling_margin
+#
+# 旧公式 attempts × 单次 timeout 漏掉了每次 attempt 的 GET，低估 attempts × timeout
+# （默认 9s）：默认参数下 10 + 3×3 + 1 + 5 = 25 < 30 看似安全，真实最坏值却是
+# 10 + 3×(3+3) + 1 + 5 = 34 > 30 —— 续租链会在锁过期之后才结束。
+#
+# 该不变量表达的是「单条续租链必须在服务端租期到期之前完成」，所以必须严格小于
+# lease_duration（相等也不行：没有留给下一次续租的窗口）。它只能降低「正常网络延迟
+# 下锁提前过期」的概率，**不能**消除 Runner 暂停、网络分区与缺少 fencing 的问题
+# （见 docs/design/deploy-lock.md §7 / §10）。
+if (( LOCK_RENEW_MAX_ATTEMPTS < 1 )); then
+  die 1 "内部参数错误：LOCK_RENEW_MAX_ATTEMPTS(${LOCK_RENEW_MAX_ATTEMPTS}) 必须 >= 1"
 fi
-log_info "租期参数校验通过：${LOCK_RENEW_INTERVAL} + ${LOCK_RENEW_MAX_ATTEMPTS}×${LOCK_RENEW_REQUEST_TIMEOUT} + ${LOCK_RENEW_BACKOFF_BUDGET} + ${LOCK_SAFETY_MARGIN} = ${lock_budget} < ${LOCK_LEASE_DURATION}"
+lock_backoff_actual_ms=$(( (LOCK_RENEW_MAX_ATTEMPTS - 1) * LOCK_RENEW_BACKOFF_MS ))
+if (( lock_backoff_actual_ms > LOCK_RENEW_BACKOFF_BUDGET * 1000 )); then
+  die 1 "内部参数错误：退避预算 ${LOCK_RENEW_BACKOFF_BUDGET}s(${LOCK_RENEW_BACKOFF_BUDGET}000ms) 小于实际退避 ${lock_backoff_actual_ms}ms；预算会低估最坏耗时"
+fi
+# 每个 attempt 的 GET / REPLACE 各自使用同一个 --lease-renew-timeout（LEASE_KUBECTL）。
+lock_get_timeout="${LOCK_RENEW_REQUEST_TIMEOUT}"
+lock_replace_timeout="${LOCK_RENEW_REQUEST_TIMEOUT}"
+lock_attempt_budget=$(( lock_get_timeout + lock_replace_timeout ))
+lock_chain_budget=$(( LOCK_RENEW_MAX_ATTEMPTS * lock_attempt_budget + LOCK_RENEW_BACKOFF_BUDGET ))
+lock_budget=$(( LOCK_RENEW_INTERVAL + lock_chain_budget + LOCK_SAFETY_MARGIN ))
+if (( lock_budget >= LOCK_LEASE_DURATION )); then
+  die 1 "租期参数不合法：renew_interval(${LOCK_RENEW_INTERVAL}) + attempts(${LOCK_RENEW_MAX_ATTEMPTS})×(get_timeout(${lock_get_timeout}) + replace_timeout(${lock_replace_timeout})) + backoff(${LOCK_RENEW_BACKOFF_BUDGET}) + safety_margin(${LOCK_SAFETY_MARGIN}) = ${lock_budget} 必须严格小于 lease_duration(${LOCK_LEASE_DURATION})；否则一次续租失败后的重试链会让锁先过期、被其他 Runner 接管（续租链最坏 ${lock_chain_budget}s，必须在 ${LOCK_LEASE_DURATION}s 内完成）"
+fi
+log_info "租期参数校验通过：${LOCK_RENEW_INTERVAL} + ${LOCK_RENEW_MAX_ATTEMPTS}×(${lock_get_timeout}+${lock_replace_timeout}) + ${LOCK_RENEW_BACKOFF_BUDGET} + ${LOCK_SAFETY_MARGIN} = ${lock_budget} < ${LOCK_LEASE_DURATION}（单次 attempt 最坏 ${lock_attempt_budget}s，续租链最坏 $(( LOCK_RENEW_INTERVAL + lock_chain_budget ))s）"
 
 # CI 不允许「默认携带」降级授权：流水线必须显式再加一层开关，避免回滚开关被写进流水线后长期生效。
 is_ci_env() {
@@ -453,7 +501,12 @@ JOB_FAILED=""
 JOB_REASON=""
 JOB_MESSAGE=""
 MIGRATION_LIST_ERROR=""
+# Pod 读取结果通过全局变量返回（避免命令替换开子 shell 丢掉错误文本）：
+#   JOB_PODS_ROWS / JOB_PODS_ERROR            —— read_job_pods（本轮 Job 的 Pod 快照）
+#   MIGRATION_PODS_ROWS / MIGRATION_PODS_ERROR —— read_migration_pods_for_job / scan_migration_pods
+JOB_PODS_ROWS=""
 JOB_PODS_ERROR=""
+MIGRATION_PODS_ROWS=""
 
 # Pod 生命周期门禁的结果（AUD-D3）：0 = 允许（没有仍在执行的 Pod）。
 POD_GATE_CODE=0
@@ -730,9 +783,21 @@ lease_takeover() {
 
 # 续租：以 resourceVersion 做 CAS；持有者不是自己时立即失败（锁已被接管）。
 #
+# 一次 attempt 的真实执行路径（租期预算就是按这条路径推导的，改这里必须同步 §7）：
+#
+#   GET Lease（≤ --lease-renew-timeout）→ 校验 holder / uid / 是否已过期 → PUT Lease（CAS，≤ 同一超时）
+#
 # 409 重试是必需的：主进程写迁移记录也会推进 resourceVersion，若把这种「自己造成的
 # 冲突」当成失锁，会在发布中途误报失败（AUD-03 的副作用）。重试时重新读取并重新确认
 # holder —— 只有 holder 真的变成别人，才判定失锁。
+#
+# T2-06.1.3 / F-02.4：**每次 attempt 都必须先确认服务器上的租约尚未过期**。
+# 一旦 renewTime + leaseDurationSeconds <= now，其他 Runner 就已经可以合法接管：
+#   - 此时仍然 PUT 等于「复活一把别人已经可以抢走的锁」，会在接管窗口里继续写入；
+#   - resourceVersion CAS 只能保证「不是我覆盖了别人的写」，不能保证「我没有在
+#     别人可以接管的时刻继续操作」，因为对方可能还没写、也可能正在核验 Job。
+# 因此过期即判定失锁（fail-closed），不重试、不续租。这条判断依赖**服务器返回的
+# renewTime**，不是本地 lost 标记，也不是本地时钟推算的「我还没超时」。
 lease_renew() {
   local attempt
   for (( attempt = 1; attempt <= LOCK_RENEW_MAX_ATTEMPTS; attempt++ )); do
@@ -740,6 +805,12 @@ lease_renew() {
     [[ "${LEASE_HOLDER}" == "${HOLDER_IDENTITY}" ]] || return 1
     if [[ -n "${LOCK_UID}" && -n "${LEASE_UID}" && "${LOCK_UID}" != "${LEASE_UID}" ]]; then
       log_warn "续租失败：Lease uid 已变化（记录=${LOCK_UID}，实际=${LEASE_UID}）：锁对象被删除重建"
+      return 1
+    fi
+    if lease_expired; then
+      log_error "续租中止：服务器上的租约已过期（renewTime=${LEASE_RENEW:-<空>}，leaseDurationSeconds=${LEASE_DURATION:-<空>}）"
+      log_error "  其他 Runner 已可合法接管，本 Runner 不再写入 Lease（第 ${attempt}/${LOCK_RENEW_MAX_ATTEMPTS} 次 attempt，fail-closed）。"
+      log_error "  不通过「立即续租」复活一把可能已被抢走的锁：那会在接管窗口里继续写入。"
       return 1
     fi
     # AUD-D2：续租只刷新租期字段，迁移记录必须原样保留（读者可能是任何后续 Runner）。
@@ -935,37 +1006,111 @@ require_lock_owned_server_side() {
     exit 3
   fi
   if lease_expired; then
-    log_warn "服务端复核发现自己的锁已过期（renewTime=${LEASE_RENEW}）：立即续租确认仍持有"
-    if ! lease_renew && ! lease_renew; then
-      : > "${LOCK_STATE_DIR}/lost"
-      log_error "续租失败：锁可能已被接管（fail-closed）"
-      exit 3
-    fi
+    # T2-06.1.3 / F-02.4：租约已过期 ⇒ 其他 Runner **此刻**就可以合法接管。
+    # 旧实现会在这里「立即续租两次」把锁复活，但那是在接管窗口里继续写入：
+    # 对方可能已经通过 verify_previous_migration，正准备 replace 接管，也可能已经接管。
+    # 这里不再尝试复活，直接按失锁处理（尚未发出新的写请求，代价只是本次发布失败）。
+    : > "${LOCK_STATE_DIR}/lost"
+    log_error "服务端复核发现本 Runner 的租约已过期（renewTime=${LEASE_RENEW:-<空>}，leaseDurationSeconds=${LEASE_DURATION:-<空>}）：停止资源变更（fail-closed）"
+    log_error "  过期意味着其他 Runner 已可合法接管；本 Runner 不会通过「立即续租」复活该锁。"
+    log_error "  本次尚未发出新的写请求；已经发出的历史请求无法撤销，只能按输出核对实际状态。"
+    exit 3
   fi
   LOCK_UID="${LEASE_UID}"
 }
 
-# 权限预检必须在迁移之前：没有 leases 权限就无法保证互斥，不能「先迁移再说」。
+# ---------------------------------------------------------------------------
+# 权限契约（T2-06.1.3 / F-01）
+#
+# 这张表是「脚本实际需要的 (verb, resource)」的**唯一事实来源**：
+#   - check_lease_permissions 逐项 auth can-i；
+#   - test/manifest 解析它，并与「脚本里真实出现的资源操作」以及
+#     manifest/kubernetes/examples/deploy-lock/rbac.yaml 的授权范围交叉校验。
+#
+# 为什么必须做成契约测试：T2-06.1.2 的 RBAC 示例漏了 pods，而脚本在发布前要按
+# component 标签扫描残留迁移 Pod、并按 job-name 读取该 Job 的 Pod。缺失时首次发布
+# 就会在 Pod 门禁处失败 —— 示例看起来「已经授权」，实际不可用。手工看 YAML 不能
+# 证明完整性，所以要让测试比对三方。
+#
+# 资源名的写法即 `kubectl auth can-i` 接受的写法（非 core group 需要带 group）。
+# ---------------------------------------------------------------------------
+LEASE_PERMISSION_CHECKS=(
+  # 发布锁：读取（get）/ 首次获取（create）/ 续租·接管·释放·写迁移记录（update=PUT+CAS）
+  "get leases.coordination.k8s.io"
+  "create leases.coordination.k8s.io"
+  "update leases.coordination.k8s.io"
+  # 迁移 Job 生命周期：按名称核验 + 列表扫描「是否存在未终结的迁移」
+  "get jobs.batch"
+  "list jobs.batch"
+  # 迁移 Pod 生命周期（AUD-D3 / F-01）：按 job-name 读取 + 按 component 标签扫描残留 Pod
+  "get pods"
+  "list pods"
+)
+
+# permission_probe <verb> <resource>
+#
+# 结果写入 PERMISSION_STATE：allowed | denied | unknown。
+#   - allowed：`auth can-i` 返回 "yes" + 0
+#   - denied ：`auth can-i` 返回 "no"  + 非 0（明确的 Forbidden / 无绑定）
+#   - unknown：其他情况（SubjectAccessReview 失败、HTTP 5xx、超时、kubectl 报错）
+#
+# 为什么必须区分 denied 与 unknown：两者都要 fail-closed，但把「API 不可用」说成
+# 「权限被拒绝」会把排查方向引到错误的 RBAC 绑定上（审计 F-01 的同类问题）。
+permission_probe() {
+  local verb="$1" resource="$2" out err rc=0
+  err="${TMP_DIR}/auth-can-i.err"
+  PERMISSION_STATE="unknown"
+  PERMISSION_DETAIL=""
+  out="$("${KUBECTL[@]}" auth can-i "${verb}" "${resource}" -n "${NAMESPACE}" 2>"${err}")" || rc=$?
+  out="$(printf '%s' "${out}" | tr -d '\r' | tr '\n' ' ')"
+  out="${out# }"; out="${out% }"
+  if (( rc == 0 )) && [[ "${out}" == yes* ]]; then
+    PERMISSION_STATE="allowed"
+    return 0
+  fi
+  if (( rc != 0 )) && [[ "${out}" == no* ]]; then
+    PERMISSION_STATE="denied"
+    return 0
+  fi
+  PERMISSION_DETAIL="$(tr '\n' ' ' < "${err}" 2>/dev/null || true)"
+  PERMISSION_DETAIL="${PERMISSION_DETAIL:-${out:-kubectl 退出码 ${rc}}}"
+  return 0
+}
+
+# 权限预检必须在迁移之前：没有 leases 权限就无法保证互斥，不能「先迁移再说」；
+# 没有 jobs/pods 读取权限就无法证明「没有迁移在运行」，同样不允许先迁移。
 check_lease_permissions() {
-  local verb
-  for verb in get create update; do
-    if ! "${KUBECTL[@]}" auth can-i "${verb}" leases.coordination.k8s.io -n "${NAMESPACE}" >/dev/null 2>&1; then
-      log_error "当前身份在命名空间 ${NAMESPACE} 缺少 leases 的 ${verb} 权限，无法建立发布互斥。"
-      log_error "授权示例：kubectl apply -f manifest/kubernetes/examples/deploy-lock/rbac.yaml"
-      log_error "自检：${KUBECTL[*]} auth can-i ${verb} leases.coordination.k8s.io -n ${NAMESPACE}"
-      exit 3
-    fi
+  local entry verb resource denied=0 unknown=0
+  for entry in "${LEASE_PERMISSION_CHECKS[@]}"; do
+    verb="${entry%% *}"
+    resource="${entry#* }"
+    permission_probe "${verb}" "${resource}"
+    case "${PERMISSION_STATE}" in
+      allowed)
+        continue
+        ;;
+      denied)
+        denied=1
+        log_error "当前身份在命名空间 ${NAMESPACE} 缺少 ${resource} 的 ${verb} 权限（Forbidden：auth can-i 明确返回 no）。"
+        ;;
+      *)
+        unknown=1
+        log_error "无法确认当前身份在命名空间 ${NAMESPACE} 是否有 ${resource} 的 ${verb} 权限（查询失败，**不是**「被拒绝」）：${PERMISSION_DETAIL}"
+        ;;
+    esac
   done
-  # 迁移生命周期核验需要读取 Job（含列表）：缺少该权限时无法证明「没有迁移在运行」，
-  # 必须在迁移之前失败，而不是在接管时才 fail-closed。
-  for verb in get list; do
-    if ! "${KUBECTL[@]}" auth can-i "${verb}" jobs.batch -n "${NAMESPACE}" >/dev/null 2>&1; then
-      log_error "当前身份在命名空间 ${NAMESPACE} 缺少 jobs 的 ${verb} 权限：无法核验迁移 Job 生命周期。"
-      log_error "自检：${KUBECTL[*]} auth can-i ${verb} jobs.batch -n ${NAMESPACE}"
-      exit 3
-    fi
-  done
-  log_info "发布锁权限就绪（leases: get/create/update；jobs: get/list @ ${NAMESPACE}）"
+  if (( denied )); then
+    log_error "权限不足，无法建立发布互斥或核验迁移生命周期：本次发布不执行任何资源变更。"
+    log_error "授权示例：kubectl apply -f manifest/kubernetes/examples/deploy-lock/rbac.yaml"
+    log_error "自检：${KUBECTL[*]} auth can-i --list -n ${NAMESPACE}"
+    exit 3
+  fi
+  if (( unknown )); then
+    log_error "权限预检无法完成（auth can-i 查询失败）：不能假定「有权限」，按 fail-closed 处理。"
+    log_error "自检：${KUBECTL[*]} auth can-i get leases.coordination.k8s.io -n ${NAMESPACE}"
+    exit 3
+  fi
+  log_info "发布锁权限就绪（leases: get/create/update；jobs: get/list；pods: get/list @ ${NAMESPACE}）"
 }
 
 lock_is_free() {
@@ -1068,13 +1213,19 @@ acquire_release_lock() {
 # ---------------------------------------------------------------------------
 
 # 读某个 Job 的 Pod（job-name 标签 + ownerReferences）。成功输出每行
-# name~phase~deletionTimestamp~ownerKind~ownerUID；读取失败返回非零。
+# name~phase~deletionTimestamp~ownerKind~ownerUID；读取失败返回非零并写入
+# MIGRATION_PODS_ERROR（保留原始错误，消息里必须体现「查询失败 ≠ 没有 Pod」）。
+#
+# 结果通过全局变量 MIGRATION_PODS_ROWS 返回，**不要**写成 `rows="$(f ...)"`：
+# 命令替换会开子 shell，函数里设置的 MIGRATION_PODS_ERROR 会丢失，错误信息退化成
+# 「未知错误」——那样「403 还是 500」就无法体现在输出里（F-07 的可读性要求）。
 read_migration_pods_for_job() {
   local job="$1" err="${TMP_DIR}/get-migration-pods.err" out
+  MIGRATION_PODS_ROWS=""
   MIGRATION_PODS_ERROR=""
   if out="$("${KUBECTL[@]}" -n "${NAMESPACE}" get pods -l "job-name=${job}" \
     -o "go-template=${MIGRATION_PODS_TEMPLATE}" 2>"${err}")"; then
-    strip_template_noise "${out}"
+    MIGRATION_PODS_ROWS="$(strip_template_noise "${out}")"
     return 0
   fi
   MIGRATION_PODS_ERROR="$(tr '\n' ' ' < "${err}" 2>/dev/null || true)"
@@ -1082,13 +1233,24 @@ read_migration_pods_for_job() {
 }
 
 # 全命名空间迁移 Pod 扫描：不依赖 Job 对象是否还存在（覆盖「Job 被删除、Pod 被孤立」）。
+#
+# 返回码（T2-06.1.3 / F-01 / F-07）：结果必须分成**三态**，调用方不得合并前两者以外的情形：
+#   0 = 查询成功，没有活动 Pod（Pod 不存在，或已全部 Succeeded/Failed）
+#   1 = 查询成功，**确实存在**仍在执行/终止中的 Pod（逐条打印名称与 phase）
+#   2 = 查询失败，**无法确认**（≠ 存在活动 Pod，也 ≠ 已终止）
+#
+# 旧实现把第 2 种也返回 1，调用方于是输出「仍有迁移 Pod 未终止」—— 那是在描述一个
+# 并未被观察到的事实。403/网络错误/超时只能说明「不知道」。
 scan_migration_pods() {
   local err="${TMP_DIR}/list-migration-pods.err" out line name phase deleting kind owner active=0
+  MIGRATION_PODS_ERROR=""
   if ! out="$("${KUBECTL[@]}" -n "${NAMESPACE}" get pods -l "${MIGRATION_POD_SELECTOR}" \
     -o "go-template=${MIGRATION_PODS_TEMPLATE}" 2>"${err}")"; then
-    log_error "无法列出迁移 Pod（${MIGRATION_POD_SELECTOR}）：$(tr '\n' ' ' < "${err}" 2>/dev/null || true)"
-    log_error "  不能证明没有迁移 Pod 仍在执行 DDL，按 fail-closed 处理。"
-    return 1
+    MIGRATION_PODS_ERROR="$(tr '\n' ' ' < "${err}" 2>/dev/null || true)"
+    log_error "无法列出迁移 Pod（${MIGRATION_POD_SELECTOR}）：${MIGRATION_PODS_ERROR:-未知错误}"
+    log_error "  这是「无法确认迁移 Pod 状态」，**不是**「Pod 确实还在运行」，也不是「Pod 已终止」。"
+    log_error "  常见原因：pods 的 get/list 权限缺失（403）、API Server 5xx、请求超时。按 fail-closed 处理。"
+    return 2
   fi
   out="$(strip_template_noise "${out}")"
   while IFS= read -r line; do
@@ -1100,32 +1262,56 @@ scan_migration_pods() {
       active=1
     fi
   done <<< "${out}"
-  (( active == 0 ))
+  if (( active == 0 )); then
+    return 0
+  fi
+  return 1
+}
+
+# 报告 Pod 扫描结论（统一措辞，避免把「无法确认」说成「确实存在」）。
+#   $1 = scan_migration_pods 的返回码   $2 = 上下文（拒绝接管 / 拒绝开始新一轮迁移）
+report_migration_pod_scan() {
+  case "${1}" in
+    0)
+      return 0
+      ;;
+    1)
+      log_error "${2}：**确实存在**仍在执行/终止中的迁移 Pod（见上方 Pod 名称与 phase）"
+      ;;
+    *)
+      log_error "${2}：**无法确认**迁移 Pod 状态（查询失败：${MIGRATION_PODS_ERROR:-未知错误}）"
+      log_error "  不得据此认为 Pod 已终止，也不得据此认为 Pod 存在；两种情况都 fail-closed。"
+      ;;
+  esac
 }
 
 # 判断某 Job 的 Pod 是否全部终止；返回 0 = 允许开始新一轮迁移。
 # 设置 POD_GATE_CODE（0 允许 / 1 未终止 / 2 查询失败 / 3 归属不一致 / 4 phase 无法识别）
 # 与 POD_GATE_SUMMARY。
+#
+# 1 是「观察到活动 Pod」；2/3/4 是「无法确认」（查询失败、归属无法证明、phase 不可识别）。
+# 调用方必须用 report_pod_gate 输出，措辞不得互换（F-07）。
 migration_pod_gate() {
   local job="$1" expected_uid="$2" rows line name phase deleting kind owner
   POD_GATE_CODE=0
   POD_GATE_SUMMARY=""
-  if ! rows="$(read_migration_pods_for_job "${job}")"; then
+  if ! read_migration_pods_for_job "${job}"; then
     POD_GATE_CODE=2
-    POD_GATE_SUMMARY="Pod 查询失败（${MIGRATION_PODS_ERROR:-未知错误}）"
+    POD_GATE_SUMMARY="Pod 查询失败，无法确认 Pod 状态（${MIGRATION_PODS_ERROR:-未知错误}）"
     return 2
   fi
+  rows="${MIGRATION_PODS_ROWS}"
   while IFS= read -r line; do
     [[ -n "${line}" ]] || continue
     IFS='~' read -r name phase deleting kind owner <<< "${line}"
     if [[ -z "${kind}" || -z "${owner}" ]]; then
       POD_GATE_CODE=3
-      POD_GATE_SUMMARY="Pod/${name} 没有 Job ownerReferences：无法证明它属于 Job/${job}"
+      POD_GATE_SUMMARY="无法确认 Pod 归属：Pod/${name} 没有 Job ownerReferences，不能证明它属于 Job/${job}"
       return 3
     fi
     if [[ -n "${expected_uid}" && "${owner}" != "${expected_uid}" ]]; then
       POD_GATE_CODE=3
-      POD_GATE_SUMMARY="Pod/${name} 的 ownerReferences Job uid=${owner} 与 Job/${job} 的 uid=${expected_uid} 不一致"
+      POD_GATE_SUMMARY="无法确认 Pod 归属：Pod/${name} 的 ownerReferences Job uid=${owner} 与 Job/${job} 的 uid=${expected_uid} 不一致"
       return 3
     fi
     if [[ -n "${deleting}" ]]; then
@@ -1142,12 +1328,29 @@ migration_pod_gate() {
         ;;
       *)
         POD_GATE_CODE=4
-        POD_GATE_SUMMARY="Pod/${name} 的 phase=${phase} 无法识别"
+        POD_GATE_SUMMARY="Pod/${name} 的 phase=${phase} 无法识别，无法确认其是否已终止"
         return 4
         ;;
     esac
   done <<< "${rows}"
   return 0
+}
+
+# 输出 Pod 门禁结论：必须区分「观察到未终止的 Pod」（1）与「无法确认」（2/3/4）。
+report_pod_gate() {
+  case "${POD_GATE_CODE}" in
+    0)
+      return 0
+      ;;
+    1)
+      log_error "Pod 未确认终止：${POD_GATE_SUMMARY}"
+      ;;
+    *)
+      # 2/3/4 都不代表「Pod 确实还在运行」：它们代表「我们无法证明它已经停了」。
+      # 结论相同（fail-closed），但事实描述必须不同，否则会误导值班人员去杀 Pod。
+      log_error "无法确认 Pod 状态（这是「未知」，不是「Pod 确实还在运行」）：${POD_GATE_SUMMARY}"
+      ;;
+  esac
 }
 
 # ---------------------------------------------------------------------------
@@ -1210,10 +1413,12 @@ print_recovery_instructions() {
 # 用证据收敛记录。返回 0 = 允许接管；1 = 拒绝（fail-closed）。
 # 成功时设置 PREV_FINAL_*（接管后由 finalize_previous_migration 写入）。
 recovery_resolve_record() {
-  local state="$1" job="$2" uid="$3"
+  local state="$1" job="$2" uid="$3" pod_scan_rc=0
   # 先拦住仍在执行的 Pod：Job 不存在 ≠ Pod 已停止。
-  if ! scan_migration_pods; then
-    log_error "上一轮 Job/${job:-<无>} 已不存在，但仍有迁移 Pod 未终止：拒绝接管"
+  # F-07：查询失败与「确实有活动 Pod」必须分开报告，但两者都拒绝接管。
+  scan_migration_pods || pod_scan_rc=$?
+  if (( pod_scan_rc != 0 )); then
+    report_migration_pod_scan "${pod_scan_rc}" "上一轮 Job/${job:-<无>} 已不存在，拒绝接管"
     return 1
   fi
 
@@ -1476,7 +1681,8 @@ verify_terminal_record() {
     absent)
       # 终态 + uid 是「写入记录时用真实对象确认过」的产物，TTL 清理后对象消失不算新证据。
       if ! migration_pod_gate "${job}" "${uid}"; then
-        log_error "上一轮 Job/${job} 已不存在，但其 Pod 状态不允许开始新一轮迁移：${POD_GATE_SUMMARY}"
+        log_error "上一轮 Job/${job} 已不存在，但其 Pod 状态不允许开始新一轮迁移（拒绝接管）："
+        report_pod_gate
         return 1
       fi
       log_warn "上一轮 Job/${job} 已不存在（多为 ttlSecondsAfterFinished 清理）：记录为 ${state} 且 UID 曾核验，允许接管"
@@ -1488,9 +1694,10 @@ verify_terminal_record() {
         return 1
       fi
       # AUD-D3：Job 终态不等于 Pod 已停止执行；必须逐个 Pod 确认。
+      # F-07：门禁结论要区分「确实有 Pod 未终止」与「无法确认」（查询失败/归属不明）。
       if ! migration_pod_gate "${job}" "${uid}"; then
-        log_error "上一轮 Job/${job} 已 ${JOB_PROBE_STATE}，但 Pod 未确认终止：拒绝接管"
-        log_error "  ${POD_GATE_SUMMARY}"
+        log_error "上一轮 Job/${job} 已 ${JOB_PROBE_STATE}，但 Pod 状态不允许开始新一轮迁移（拒绝接管）："
+        report_pod_gate
         log_error "  **Job ${JOB_PROBE_STATE} 不等价于「Pod 已停止执行」**：Job 条件只说明 controller 的判定，"
         log_error "  不得据此假定 DDL 已经停止；此时创建新一轮 Job 会让两个 Pod 的 DDL 重叠。"
         log_error "  处置：等待 Pod 真正终止后重跑；不要删除 Pod/Job 来「让流程过」。"
@@ -1539,8 +1746,8 @@ verify_inflight_record() {
     return 1
   fi
   if ! migration_pod_gate "${job}" "${JOB_UID}"; then
-    log_error "上一轮 Job/${job} 已 ${JOB_PROBE_STATE}，但 Pod 未确认终止：拒绝接管"
-    log_error "  ${POD_GATE_SUMMARY}"
+    log_error "上一轮 Job/${job} 已 ${JOB_PROBE_STATE}，但 Pod 状态不允许开始新一轮迁移（拒绝接管）："
+    report_pod_gate
     return 1
   fi
   # 记录停在 PENDING/RUNNING 但 Job 已经终结：接管后先把记录收敛为终态，
@@ -1560,7 +1767,7 @@ verify_inflight_record() {
 # 顺序很重要：先用真实 Job 对象核验，再（仅在记录无法自证时）接受数据库证据。
 verify_previous_migration() {
   local state="${LEASE_MIG_STATE:-${MIG_STATE_NONE}}"
-  local job="${LEASE_MIG_JOB:-}" uid="${LEASE_MIG_UID:-}"
+  local job="${LEASE_MIG_JOB:-}" uid="${LEASE_MIG_UID:-}" pod_scan_rc=0
   PREV_FINAL_STATE=""; PREV_FINAL_DETAIL=""; PREV_FINAL_METHOD=""; PREV_FINAL_EVIDENCE=""
   log_info "核验上一轮迁移关联：state=${state} job=${job:-<无>} uid=${uid:-<无>}"
 
@@ -1571,8 +1778,10 @@ verify_previous_migration() {
         log_error "上一轮没有迁移记录，但集群里存在未终结的迁移 Job：拒绝接管"
         return 1
       fi
-      if ! scan_migration_pods; then
-        log_error "上一轮没有迁移记录，但仍有迁移 Pod 未终止：拒绝接管"
+      # F-07：Pod 扫描的三种结果必须分开描述（干净 / 确实有活动 Pod / 无法确认）。
+      scan_migration_pods || pod_scan_rc=$?
+      if (( pod_scan_rc != 0 )); then
+        report_migration_pod_scan "${pod_scan_rc}" "上一轮没有迁移记录，拒绝接管"
         return 1
       fi
       return 0
@@ -1640,14 +1849,21 @@ await_job_object() {
 
 # 迁移开始：先记录「预期 Job 名」，再 apply，再用真实 UID 回写（§2.3 的固定顺序）。
 begin_migration() {
+  local pod_scan_rc=0
   require_lock_owned_server_side
 
   log_info "迁移前置检查：确认没有未终结的迁移 Job / Pod"
   if ! scan_active_migrations; then
     die 7 "存在未终结的迁移 Job：拒绝开始新一轮迁移（fail-closed）。排查：${KUBECTL[*]} -n ${NAMESPACE} get jobs -l ${MIGRATION_JOB_SELECTOR} -o wide"
   fi
-  if ! scan_migration_pods; then
-    die 7 "仍有未终止的迁移 Pod：拒绝开始新一轮迁移（fail-closed）。排查：${KUBECTL[*]} -n ${NAMESPACE} get pods -l ${MIGRATION_POD_SELECTOR} -o wide"
+  # F-07：这里同样必须区分「确实有活动 Pod」与「无法确认」——两者的处置不同
+  # （前者等待 Pod 结束，后者先修权限/网络），但都不得开始新一轮迁移。
+  scan_migration_pods || pod_scan_rc=$?
+  if (( pod_scan_rc == 1 )); then
+    die 7 "**确实存在**仍在执行/终止中的迁移 Pod：拒绝开始新一轮迁移（fail-closed）。排查：${KUBECTL[*]} -n ${NAMESPACE} get pods -l ${MIGRATION_POD_SELECTOR} -o wide"
+  fi
+  if (( pod_scan_rc != 0 )); then
+    die 7 "**无法确认**迁移 Pod 状态（查询失败：${MIGRATION_PODS_ERROR:-未知错误}）：拒绝开始新一轮迁移（fail-closed）。先修权限/网络，不要当作「没有 Pod」。排查：${KUBECTL[*]} -n ${NAMESPACE} get pods -l ${MIGRATION_POD_SELECTOR} -o wide"
   fi
 
   MIG_JOB="${JOB_NAME}"
@@ -1706,7 +1922,9 @@ wait_for_migration() {
           # Complete 说明所有 Pod 都已成功退出；仍然显式核验一次，避免「条件与 Pod 不一致」
           # 的脏状态被当成终态（例如同名 Job 被重建后条件残留）。
           if ! migration_pod_gate "${JOB_NAME}" "${MIG_JOB_UID}"; then
-            die 7 "Job/${JOB_NAME} 为 Complete，但 Pod 未确认终止（${POD_GATE_SUMMARY}）：迁移生命周期未确认（fail-closed）"
+            log_error "Job/${JOB_NAME} 为 Complete，但 Pod 状态不允许继续（迁移生命周期未确认，fail-closed）："
+            report_pod_gate
+            exit 7
           fi
           record_migration_state "${MIG_STATE_COMPLETE}" "${MIG_JOB}" "${MIG_JOB_UID}" "" \
             "迁移已完成，但无法把完成状态写回发布锁（fail-closed）"
@@ -1718,8 +1936,8 @@ wait_for_migration() {
           # AUD-D3：Failed=True 不等于 Pod 已停止执行。Pod 仍在 Running/Pending/终止中时，
           # 记录失败条件但**不声称终态**，也不放锁；下一次接管同样会被门禁拦住。
           if ! migration_pod_gate "${JOB_NAME}" "${MIG_JOB_UID}"; then
-            log_error "Job/${JOB_NAME} 为 Failed=True（reason=${JOB_REASON:-<无>}），但 Pod 未确认终止："
-            log_error "  ${POD_GATE_SUMMARY}"
+            log_error "Job/${JOB_NAME} 为 Failed=True（reason=${JOB_REASON:-<无>}），但 Pod 状态不允许继续："
+            report_pod_gate
             log_error "  **不得据此假定 DDL 已经停止**：Pod 可能仍在执行迁移中的语句。"
             log_error "  本次不创建新 Job、不更新 Application、不删除 Job、不执行 migrate force。"
             log_error "  关联记录：job=${MIG_JOB:-<无>} uid=${MIG_JOB_UID:-<未记录>}"
@@ -1905,12 +2123,14 @@ deployment_converged() {
 
 # 迁移 Job 的 Pod 快照：name ~ phase ~ deletionTimestamp ~ version ~ app 容器 ready ~ 镜像
 # AUD-08：查询失败必须与「没有 Pod」区分开（失败返回非零并设置 JOB_PODS_ERROR）。
+# 与 read_migration_pods_for_job 一样通过全局变量返回结果，避免子 shell 丢掉错误文本。
 read_job_pods() {
   local err="${TMP_DIR}/get-job-pods.err" out
+  JOB_PODS_ROWS=""
   JOB_PODS_ERROR=""
   if out="$("${KUBECTL[@]}" -n "${NAMESPACE}" get pods -l "job-name=${JOB_NAME}" \
     -o "go-template=${PODS_STATE_TEMPLATE}" 2>"${err}")"; then
-    strip_template_noise "${out}"
+    JOB_PODS_ROWS="$(strip_template_noise "${out}")"
     return 0
   fi
   JOB_PODS_ERROR="$(tr '\n' ' ' < "${err}" 2>/dev/null || true)"
@@ -2084,7 +2304,9 @@ if (( migration_status == 1 )); then
     case "${JOB_PROBE_STATE}" in
       complete)
         if ! migration_pod_gate "${JOB_NAME}" "${MIG_JOB_UID}"; then
-          die 7 "二次判定：Job/${JOB_NAME} 为 Complete，但 Pod 未确认终止（${POD_GATE_SUMMARY}）：生命周期未确认（fail-closed）"
+          log_error "二次判定：Job/${JOB_NAME} 为 Complete，但 Pod 状态不允许继续（生命周期未确认，fail-closed）："
+          report_pod_gate
+          exit 7
         fi
         record_migration_state "${MIG_STATE_COMPLETE}" "${MIG_JOB}" "${MIG_JOB_UID}" "" \
           "二次判定为 Complete，但无法把完成状态写回发布锁（fail-closed）"
@@ -2095,7 +2317,8 @@ if (( migration_status == 1 )); then
       failed)
         # AUD-D3：与等待循环内同一套判据，避免「超时后二次判定」绕过 Pod 门禁。
         if ! migration_pod_gate "${JOB_NAME}" "${MIG_JOB_UID}"; then
-          log_error "二次判定：Job/${JOB_NAME} 为 Failed=True，但 Pod 未确认终止：${POD_GATE_SUMMARY}"
+          log_error "二次判定：Job/${JOB_NAME} 为 Failed=True，但 Pod 状态不允许继续："
+          report_pod_gate
           log_error "  不得据此假定 DDL 已经停止；本次不创建新 Job、不更新 Application、不删除 Job。"
           migration_record_write "${MIG_STATE_FAILED}" "${MIG_JOB}" "${MIG_JOB_UID}" \
             "Job Failed=True 但 ${POD_GATE_SUMMARY}" 0 unconfirmed || true
@@ -2132,7 +2355,8 @@ if (( migration_status == 7 )); then
   "${KUBECTL[@]}" -n "${NAMESPACE}" get job "${JOB_NAME}" -o wide >&2 || true
   log_error "--- 关联 Pod（name / phase / 是否终止中 / ownerJobUID）---"
   gate_rows=""
-  if gate_rows="$(read_migration_pods_for_job "${JOB_NAME}")"; then
+  if read_migration_pods_for_job "${JOB_NAME}"; then
+    gate_rows="${MIGRATION_PODS_ROWS}"
     if [[ -n "${gate_rows}" ]]; then
       printf '%s\n' "${gate_rows}" >&2
     else
@@ -2196,7 +2420,8 @@ if (( migration_status != 0 )); then
   log_error "--- 迁移 Pod 当前状态 ---"
   pods_still_running=0
   pods_unknown=0
-  if job_pods="$(read_job_pods)"; then
+  if read_job_pods; then
+    job_pods="${JOB_PODS_ROWS}"
     if [[ -n "${job_pods}" ]]; then
       printf '%s\n' "${job_pods}" >&2
       while IFS= read -r line; do

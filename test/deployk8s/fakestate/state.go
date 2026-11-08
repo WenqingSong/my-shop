@@ -28,12 +28,21 @@ const (
 	ApplicationManifest = "application.yaml"
 )
 
-// Permissions 模拟 `kubectl auth can-i <verb> leases.coordination.k8s.io`。
+// Permissions 模拟 `kubectl auth can-i <verb> <resource>`。
+//
+// Get/Create/Update/Patch 是「全局」开关（历史用例使用）；Denied 提供按
+// **资源** 精确拒绝的能力（T2-06.1.3 / F-01），元素形如 "<verb> <resource短名>"，
+// 例如 "get pods"、"list pods"、"get leases"、"list jobs"。
+// 资源名用短名：fake 会把 `leases.coordination.k8s.io` 归一为 `leases`，
+// 因此 Denied 里写带 group 的全名不会命中。
+// Denied 优先于上面的布尔开关：脚本对 leases/jobs 有权限但对 pods 没有权限时，
+// 只有 Denied 能表达出来（否则「pods 权限不足」会被 leases 的授权掩盖）。
 type Permissions struct {
-	Get    bool `json:"get"`
-	Create bool `json:"create"`
-	Update bool `json:"update"`
-	Patch  bool `json:"patch"`
+	Get    bool     `json:"get"`
+	Create bool     `json:"create"`
+	Update bool     `json:"update"`
+	Patch  bool     `json:"patch"`
+	Denied []string `json:"denied,omitempty"`
 }
 
 // Lease 是 coordination.k8s.io/v1 Lease 中脚本实际读写的字段。
@@ -119,7 +128,11 @@ type State struct {
 	ClusterReachable bool        `json:"clusterReachable"`
 	NamespaceExists  bool        `json:"namespaceExists"`
 	Permissions      Permissions `json:"permissions"`
-	Secrets          []string    `json:"secrets"`
+	// AuthCanIError 非空时，`auth can-i` 以该错误文本失败（非 0 且不是 "no"）：
+	// 模拟 SubjectAccessReview 无法完成（HTTP 5xx / 网络 / RBAC 自身不可用）。
+	// 用于验证权限预检能区分「明确被拒绝」与「无法确认」（T2-06.1.3 / F-01）。
+	AuthCanIError string   `json:"authCanIError"`
+	Secrets       []string `json:"secrets"`
 
 	Lease *Lease `json:"lease"`
 	// LeaseReplaceFailures 让接下来 N 次 replace（续租/接管/释放）返回 API 500。
@@ -143,6 +156,14 @@ type State struct {
 	LeaseRenewConflicts    int `json:"leaseRenewConflicts"`
 	LeaseRenewTimeouts     int `json:"leaseRenewTimeouts"`
 	LeaseRenewUIDConflicts int `json:"leaseRenewUIDConflicts"`
+	// LeaseStealBeforeRenewReplace > 0 时，在下一次续租 replace **执行 CAS 之前**
+	// 先模拟「另一个 Runner 已经接管」：推进 resourceVersion 并改写 holder（T2-06.1.3 / F-06）。
+	// 这样旧持有者用旧 resourceVersion 的 PUT 必须得到 409，且不能覆盖新 holder。
+	LeaseStealBeforeRenewReplace int `json:"leaseStealBeforeRenewReplace"`
+	// LeaseExpireAfterRenewConflicts > 0 时，在第 N 次「续租 replace 冲突」之后把
+	// 服务器上的 renewTime 推到已过期：模拟「重试链比租期还长，其他 Runner 已可接管」。
+	// 用于验证续租在过期后不再盲目写入（F-02.4）。
+	LeaseExpireAfterRenewConflicts int `json:"leaseExpireAfterRenewConflicts"`
 	// LeaseStealAfterGets > 0 时，在第 N 次 get lease 之后把持有者替换为 LeaseStealHolder，
 	// 模拟「旧持有者的锁已过期并被其他 Runner 接管」。
 	LeaseStealAfterGets int    `json:"leaseStealAfterGets"`
@@ -178,10 +199,14 @@ type State struct {
 	// PodsGetFailures / PodsGetTimeouts 只作用于「按 job-name 读取 Pod」。
 	PodsGetFailures int `json:"podsGetFailures"`
 	PodsGetTimeouts int `json:"podsGetTimeouts"`
+	// PodsGetForbidden 让接下来 N 次「按 job-name 读取 Pod」返回 403 Forbidden
+	// （与 500/超时区分开：审计 F-01/F-07 要求错误信息不得把 403 说成「Pod 存在」）。
+	PodsGetForbidden int `json:"podsGetForbidden"`
 	// MigrationPodsGetFailures / Timeouts 只作用于「按 component 标签扫描迁移 Pod」
 	// （全局残留扫描，AUD-D3/D4）。分开注入是为了让两处 fail-closed 行为可独立验证。
-	MigrationPodsGetFailures int `json:"migrationPodsGetFailures"`
-	MigrationPodsGetTimeouts int `json:"migrationPodsGetTimeouts"`
+	MigrationPodsGetFailures  int `json:"migrationPodsGetFailures"`
+	MigrationPodsGetTimeouts  int `json:"migrationPodsGetTimeouts"`
+	MigrationPodsGetForbidden int `json:"migrationPodsGetForbidden"`
 
 	Deployment           Deployment   `json:"deployment"`
 	DeploymentAfterApply []Deployment `json:"deploymentAfterApply"`

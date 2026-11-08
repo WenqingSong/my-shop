@@ -370,10 +370,13 @@ Job 名称后缀与两个入口的镜像 tag 必须完全一致，`test/manifest
 1  预检：kubectl / 集群可达 / 构建两个清单 / REPLACE_WITH_* / 镜像与版本标记一致性 /
    迁移等待上限与 Job activeDeadlineSeconds 的时间关系
 2  命名空间引导：缺失时按 shared/namespace.yaml 创建（幂等，锁的前置条件）
-3  权限预检：auth can-i get|create|update leases + get|list jobs -n surgecart
+3  权限预检：auth can-i get|create|update leases + get|list jobs + get|list pods -n surgecart
+   （区分「明确被拒绝（Forbidden）」与「无法确认（5xx/超时）」，两者都退出 3；
+   权限表见 scripts/deploy-k8s.sh 的 LEASE_PERMISSION_CHECKS，由 test/manifest 与 RBAC 示例比对）
 4  获取发布锁：Lease/surgecart-deploy-lock（原子 create；已释放/已过期则先核验上一轮
    Migration Job 与该 Job 的 Pod，再用 resourceVersion CAS 接管；必要时按数据库证据恢复）
-5  启动后台续租（默认每 10s，单次请求超时 3s，最多 3 次尝试）
+5  启动后台续租（默认每 10s，单次续租 = GET + REPLACE 各受 3s 超时约束，最多 3 次尝试；
+   每次 attempt 先确认服务器上的租约未过期，过期即按失锁停止）
 6  锁内复检：Secret 就绪 + 版本降级保护（当前 Deployment 版本 vs 本次目标版本）
 7  Migration：①归档上一轮记录 + 记录预期 Job 名 → ②apply 迁移清单 → ③读真实 Job UID
    回写 → ④轮询（Failed 与 Timeout 分开处理，超时后二次判定；Job 终态后还要确认 Pod
@@ -443,26 +446,43 @@ bash scripts/deploy-k8s.sh [选项]
                                 必须大于 Job 的 activeDeadlineSeconds（默认 900）
   --rollout-timeout <sec>       等待 Deployment 收敛的上限（默认 600）
   --lock-wait-timeout <sec>     等待其他发布释放锁的上限（默认 60）
-  --lease-duration <sec>        发布锁租期（默认 30；崩溃后最多这么久即可被接管）
+  --lease-duration <sec>        发布锁租期（默认 45；崩溃后最多这么久即可被接管）
   --lease-renew-interval <sec>  续租间隔（默认 10）
-  --lease-renew-timeout <sec>   单次续租请求的超时（默认 3）
+  --lease-renew-timeout <sec>   单次续租请求的超时（默认 3；GET 与 REPLACE 各算一次）
   --allow-downgrade             允许降级到更旧的 commit（默认禁止，见 §9.5）
   -h, --help                    显示帮助
 ```
 
-租期参数必须满足（AUD-03 / AUD-D7，重试链也计入预算）：
+租期参数必须满足（AUD-03 / AUD-D7 / T2-06.1.3-F02）：
 
 ```text
-renew_interval + attempts(3) × renew_request_timeout + backoff(1) + safety_margin(5)
-  < lease_duration
-默认：10 + 3×3 + 1 + 5 = 25 < 30
+renewal_budget = renew_interval
+               + attempts × (get_timeout + replace_timeout)
+               + total_backoff
+               + scheduling_margin
+               < lease_duration
+默认：10 + 3×(3+3) + 1 + 5 = 34 < 45
+```
+
+一次续租 attempt 真实执行**两个**请求（以 `scripts/deploy-k8s.sh` 的 `lease_renew` 为准）：
+
+```text
+GET Lease（≤ get_timeout）→ 校验 holder / uid / 是否已过期 → PUT Lease（CAS，≤ replace_timeout）
 ```
 
 - 旧默认值 `10 + 30 > 30`：续租请求本身比租期还长，锁会在请求返回之前过期；
-- **AUD-D7**：只计一次请求超时会低估最坏耗时。续租失败会重试 3 次，最坏耗时约
-  `10 + 9 = 19s`；旧公式 `10 + 5 + 5 = 20 < 30` 看似安全，实际余量只剩 0 秒。
-  现在把 `attempts × timeout + backoff` 计入预算；
-- 非法组合在**任何资源变更之前**拒绝（退出码 1，连 kubectl 都不会调用）；
+- **AUD-D7**：只计「单次请求超时」仍然低估最坏耗时（漏掉了每次 attempt 的 GET）。
+  续租失败会重试 3 次，真实最坏耗时是 `10 + 3×6 + 1 = 29s`；
+  T2-06.1.2 的公式 `10 + 3×3 + 1 + 5 = 25 < 30` 看似安全，真实值 `34 > 30` —— 一次
+  API 抖动就可能让续租链在锁过期之后才结束（审计 F-02）；
+- **T2-06.1.3 的默认值重估**：把租期从 30s 提到 45s，保持 `--lease-renew-timeout 3`
+  （in-cluster 的 Lease GET/PUT 通常 <100ms，3s 已是 30 倍抖动余量）与 `attempts 3`
+  （主进程写迁移记录会推进 resourceVersion，409 重试是常态）。结果是
+  `34 < 45`（余量 11s），续租链最坏 29s 完成，早于服务端过期 16s。
+  代价：崩溃后接管延迟由 ≤30s 变为 ≤45s；
+- 非法组合在**任何资源变更之前**拒绝（退出码 1，连 kubectl 都不会调用，也不会创建 Lease）；
+- **续租不得复活已过期的锁**：每次 attempt 都检查服务器返回的 `renewTime +
+  leaseDurationSeconds`，一旦过期就按失锁处理（退出码 3），不再 PUT。理由见 §9.7；
 - 该不变量只降低「正常网络延迟下锁提前过期」的概率，不能消除 Runner 暂停、
   网络分区与缺少 fencing 的问题（见 §9.7 与 `docs/design/deploy-lock.md` §7/§10）。
 
@@ -507,21 +527,41 @@ DEPLOY_K8S_SUCCESS
 
 ### 9.4 退出码
 
-| 退出码 | 含义 | 应用是否已更新 |
-|---|---|---|
-| `0` | 发布成功且已验证（打印 `DEPLOY_K8S_SUCCESS`） | 是（且已验证为目标版本） |
-| `1` | 参数 / 预检 / 清单构建 / Application apply 失败 | 否 |
-| `2` | 迁移失败（Job `Failed=True`） | 否 |
-| `3` | 发布锁失败（权限不足 / 获取超时 / 续租失败 / 服务端复核发现失锁） | 否（或未完成） |
-| `4` | 版本降级保护拒绝（降级 / 分叉 / 无法验证版本顺序） | 否 |
-| `5` | 发布后验证失败（镜像/版本/副本不一致，或未在超时内收敛） | 不确定，需按输出排查 |
-| `6` | 迁移等待超时（Job 未确认终态，Pod 可能仍在执行 DDL；**锁与关联记录保留**） | 否 |
-| `7` | 迁移生命周期未确认/未终结（拒绝接管、拒绝开始新一轮迁移、Job 与记录不一致、**Job 已 Failed 但 Pod 仍在执行/终止中**、缺少可校验的数据库证据） | 否 |
-| `143` | 收到 SIGTERM（迁移已终态则释放锁；否则保留锁与记录） | 否（或未完成） |
+**退出码只能说明「脚本走到了哪一步」，不能单独说明「资源有没有被改」。** 判断时必须
+先看「变更请求是否已发出」，再看退出码（T2-06.1.3 / F-04）：
 
-`1` 的一个特殊子情况：Application apply 返回非零但结果不确定时，脚本会额外打印
-`APPLICATION_OUTCOME_UNKNOWN`，并明确说明「请求可能已被 API Server 接受并生效」。
-此时**不能**据此认为资源没有变更（见 §9.7）。
+| 退出码 | 含义 | 本次是否发出过变更请求 | 应用是否已更新 |
+|---|---|---|---|
+| `0` | 发布成功且已验证（打印 `DEPLOY_K8S_SUCCESS`） | 是（已确认成功） | 是，且已验证为目标版本 |
+| `1` | ① 参数 / 预检 / 清单构建失败；② Migration 或 Application **apply 失败** | ① **否**；② **是，但结果未知** | ① 否；② **不确定** |
+| `2` | 迁移失败（Job `Failed=True` 且其 Pod 已终止） | 是（迁移请求），应用请求**未发出** | 否 |
+| `3` | 发布锁失败（权限不足 / 获取超时 / 续租失败 / **租约已过期** / 服务端复核发现失锁） | 未发出；若在途中失锁则**已发出、结果未知** | 否，或不确定（见 `APPLICATION_OUTCOME_UNKNOWN`） |
+| `4` | 版本降级保护拒绝（降级 / 分叉 / 无法验证版本顺序） | 否（锁内、写请求之前） | 否 |
+| `5` | 发布后验证失败（镜像/版本/副本不一致，或未在超时内收敛） | 是 | **已更新，但不符合目标**（需按输出排查） |
+| `6` | 迁移等待超时（Job 未确认终态，Pod 可能仍在执行 DDL；**锁与关联记录保留**） | 是（迁移请求），应用请求**未发出** | 否 |
+| `7` | 迁移生命周期未确认/未终结（拒绝接管、拒绝开始新一轮迁移、Job 与记录不一致、**Job 已 Failed 但 Pod 仍在执行/终止中**、**Pod 状态无法确认（403/5xx/超时）**、缺少可校验的数据库证据） | 否（拒绝接管时） | 否 |
+| `143` | 收到 SIGTERM（迁移已终态则释放锁；否则保留锁与记录） | 可能已发出 | 否，或不确定 |
+
+退出码 `1` 的两种子情况必须区分（这是 F-04 修正的核心）：
+
+```text
+① 参数/预检/清单构建失败：
+     请求根本没有发出 → 资源一定没有被修改（只有本脚本的路径而言）
+② apply 失败（kubectl 返回非零）：
+     API Server 可能已经接受并生效，客户端只是没等到响应
+     → 脚本打印 APPLICATION_OUTCOME_UNKNOWN，并读回 Deployment 如实报告观察到的事实
+     → 不能因为退出码是 1 就断言「资源没有被修改」
+```
+
+因此本文不再写「`1` = 应用未更新」。判断线上状态的唯一方法是**只读核对**：
+
+```bash
+kubectl -n surgecart get deployment surgecart -o yaml
+kubectl -n surgecart get pods -l app.kubernetes.io/name=surgecart -o wide
+```
+
+`3` 的同理子情况：失锁发生在**请求发出之前**时资源未变更；失锁发生在**请求在途**时，
+脚本只能输出 `APPLICATION_OUTCOME_UNKNOWN`（见 §9.7）。
 
 `2` 与 `6` 的区别、`6` 与 `7` 的区别见 §10.1–§10.2 与 §10.8：
 
@@ -624,9 +664,33 @@ kubectl -n surgecart get pods -l app.kubernetes.io/name=surgecart -o wide
 | 失锁发生在**请求发出之前** | 直接停止，不发出请求（退出码 3） | 未变更 |
 | 失锁发生在**请求在途/已发出** | 停止后续动作 + 输出 `APPLICATION_OUTCOME_UNKNOWN`（退出码 3） | **可能已变更，无法撤销** |
 
-残余窗口：`0 ≤ 窗口 ≤ 续租间隔 + 单次 kubectl 调用时长`（默认约 10s + 30s）。
-缩小窗口的手段不能消除它；真正的 fencing 需要写入侧校验令牌（Admission Webhook
-或专用发布控制器），属于后续架构决策，见 `docs/design/deploy-lock.md` §10.1。
+**残余窗口（T2-06.1.3 / F-05 重新推导，不再沿用「约 10s + 30s」的粗略估计）**
+
+符号（默认值见 §9.2）：`D` = 租期 45s，`I` = 续租间隔 10s，`G` = GET 超时 3s，
+`R` = REPLACE 超时 3s，`A` = 重试次数 3，`B` = 退避预算 1s。
+
+| 问题 | 推导 | 默认值 |
+|---|---|---|
+| 服务端最早何时允许接管 | 上次成功续租的 `renewTime + leaseDurationSeconds`；写入 `renewTime` 用的是 renew 请求**发出时刻**，因此真实过期时刻 ∈ `[t0+D-G, t0+D]` | `t0+42s … t0+45s` |
+| 存活 Runner 最晚何时发现失锁 | 续租链最坏完成时刻 = `t0 + I + A×(G+R) + 退避` | `t0+29s`（< `t0+42s`，先于过期） |
+| 崩溃/被 SIGKILL 的 Runner | 不再续租，锁在 `t0+D` 后被接管；它自己不会再写入 | 接管延迟 ≤ `D + 轮询 2s` |
+| 被挂起（SIGSTOP / VM 冻结 / 网络分区）的 Runner | 恢复后**先 GET**：若 `renewTime+D ≤ now` 则立即按失锁停止（F-02.4），不 PUT | 恢复后 ≤ `G` 发现 |
+| 恢复时恰好还没过期（`t_r + G < t0+D`） | REPLACE 使用旧 `resourceVersion`：若别人已接管则 409，重试时读到 `holder ≠ 自己` 即停止 | 写入被 CAS 拒绝 |
+| 对**非 Lease 资源**（Deployment/Job）的在途写入 | 变更前的服务端复核只能缩小窗口：`复核 GET` 与 `apply` 之间仍有 TOCTOU；**已发出的请求无法撤销** | 见下一行 |
+
+因此本仓库只声称以下两个上界，并且都不构成 fencing：
+
+1. **锁对象层面**：旧持有者用陈旧 `resourceVersion` 的 PUT 一定会被 409 拒绝
+   （`lease_renew` 每次 attempt 都重新 GET 并校验 holder/uid/是否过期）；
+   过期之后的续租会被直接放弃，不再「复活」一把别人可以抢走的锁。
+2. **非锁资源层面**：失锁未察觉窗口 = 从「服务端允许接管」到「旧 Runner 停止发起新请求」
+   之间的时间。存活 Runner 的检测（≤29s）先于过期（≥42s），因此正常参数下该窗口为 0；
+   只有**进程被暂停**时才会出现重叠，其长度由暂停时长决定（无法用参数消除），
+   并且在恢复后由 `require_lock_alive` / `require_lock_owned_server_side` 立即截断。
+
+`APPLICATION_OUTCOME_UNKNOWN` 只是把「不知道」如实说出来；真正的 fencing 需要写入侧
+校验令牌（Admission Webhook 或专用发布控制器），属于后续架构决策，
+见 `docs/design/deploy-lock.md` §10.1 与 §10.3。
 
 因此：
 
@@ -691,19 +755,20 @@ bash scripts/deploy-k8s.sh
 | 对象 | 状态 |
 |---|---|
 | Migration Job | **保持不变**，脚本不删除、不 patch、不重试 |
-| Lease `surgecart-deploy-lock` | **不释放**：`holderIdentity` 仍是本 Runner，`renewTime` 停止更新，租期（默认 30s）后自然过期 |
+| Lease `surgecart-deploy-lock` | **不释放**：`holderIdentity` 仍是本 Runner，`renewTime` 停止更新，租期（默认 45s）后自然过期 |
 | Lease 注解 | 保留 `migration-state=MIGRATION_RUNNING`、`migration-job`、`migration-job-uid` |
 
 因此超时之后的下一个发布**不会**直接开始新一轮迁移：
 
 ```text
 Runner A 超时退出（锁未释放）
-  → 30s 后锁过期
+  → 45s 后锁过期（接管延迟上界 = 租期 + 轮询 2s，见 §9.7）
   → Runner B 读取记录 + 读取真实 Job + 读取该 Job 的 Pod
       ├─ Job 仍 Running/Pending/Terminating     → 退出码 7（拒绝接管）
       ├─ Job 已 Complete/Failed 且 Pod 已终止   → 允许接管，继续发布
       ├─ Job 已 Complete/Failed 但 Pod 未终止   → 退出码 7（AUD-D3）
       ├─ Job NotFound（PENDING/RUNNING 记录）   → 需要数据库证据，否则退出码 7（§10.8）
+      ├─ Pod 查询失败（403/5xx/超时）           → 退出码 7（**无法确认**，不是「Pod 还在跑」）
       └─ Job / Pod 查询失败                     → 退出码 7（状态未知，人工恢复）
 ```
 
@@ -733,10 +798,14 @@ kubectl -n surgecart wait --for=condition=complete job/surgecart-migrate-<短SHA
 
 | 现象 | 原因 | 处理 |
 |---|---|---|
-| `缺少 leases 的 get/create/update 权限` | 发布身份没有 RBAC | 按 `manifest/kubernetes/examples/deploy-lock/rbac.yaml` 授权后重跑 |
-| `缺少 jobs 的 get/list 权限` | 迁移生命周期核验需要的只读权限缺失 | 同上（RBAC 示例已包含 `batch/jobs get,list`） |
+| `缺少 leases.coordination.k8s.io 的 get/create/update 权限（Forbidden…）` | 发布身份没有 RBAC | 按 `manifest/kubernetes/examples/deploy-lock/rbac.yaml` 授权后重跑 |
+| `缺少 jobs.batch 的 get/list 权限` | 迁移生命周期核验需要的只读权限缺失 | 同上（RBAC 示例已包含 `batch/jobs get,list`） |
+| `缺少 pods 的 get/list 权限` | Pod 生命周期门禁需要的只读权限缺失（T2-06.1.3 / F-01） | 同上（RBAC 示例已包含 core `pods get,list`；旧示例漏了这一项） |
+| `无法确认…是否有 … 的 … 权限（查询失败，**不是**「被拒绝」）` | SubjectAccessReview 本身失败（API 5xx/超时/RBAC 不可用） | 先修 API Server / 网络；不要改 RoleBinding（问题不在绑定） |
 | `另一个发布正在持有锁（holder=…）` 直到超时 | 另一个流水线正在发布 | 等它结束；不要提高 `--lock-wait-timeout` 去「抢」 |
 | `发布锁续租失败` / 突然中止 | 锁被接管、API Server 抖动、网络分区 | 查看 `get lease` 记录；确认没有并行发布后重跑 |
+| `续租中止：服务器上的租约已过期…其他 Runner 已可合法接管` | 续租链比租期还长，或进程被长时间挂起 | **不要**把租期改小；按 §10.4 确认无人持有后重跑，并检查 Runner 是否被 CPU/IO 饿死 |
+| `服务端复核发现本 Runner 的租约已过期` | 同上，发生在写迁移记录/apply 之前 | 本次未发出新的写请求；确认锁状态后重跑 |
 | `发布锁已过期…尝试接管` | 上一个 Runner 崩溃 | 若上一轮迁移已终态则自动接管；否则退出码 7（§10.8） |
 | `拒绝接管发布锁：上一轮迁移的生命周期不允许接管` | 上一轮迁移未终态/状态未知 | **等待**迁移进入终态后重跑，不要手工清记录（§10.8） |
 
@@ -750,7 +819,8 @@ kubectl -n surgecart get lease surgecart-deploy-lock -o yaml
 # 以及迁移记录：/migration-state、/migration-job、/migration-job-uid
 ```
 
-- `renewTime` 在最近 30s 内持续变化 → 有 Runner 正在发布：**等待**，不要动锁；
+- `renewTime` 在最近 45s（= 租期）内持续变化 → 有 Runner 正在发布：**等待**，不要动锁；
+  健康 Runner 的 `renewTime` 每 10s（续租间隔）刷新一次，因此「超过 45s 不更新」才可能是死锁；
 - `renewTime` 长时间不更新且超过租期 → 死锁，下一次发布会自动接管（但会先核验 `migration-*` 注解）；
 - 确认 Runner 已被强制终止（CI 任务取消、Pod 消失）但仍不愿等待租期时，才人工释放
   （**保留迁移注解**，只清 holder）：
@@ -1027,11 +1097,19 @@ vi manifest/kubernetes/examples/deploy-lock/rbac.yaml
 kubectl apply -f manifest/kubernetes/shared/namespace.yaml
 kubectl apply -f manifest/kubernetes/examples/deploy-lock/rbac.yaml
 
-# 3) 自检（三条都必须是 yes）
+# 3) 自检（七条都必须是 yes；与脚本的 LEASE_PERMISSION_CHECKS 一一对应）
 kubectl auth can-i get leases.coordination.k8s.io -n surgecart
 kubectl auth can-i create leases.coordination.k8s.io -n surgecart
 kubectl auth can-i update leases.coordination.k8s.io -n surgecart
+kubectl auth can-i get jobs.batch -n surgecart
+kubectl auth can-i list jobs.batch -n surgecart
+kubectl auth can-i get pods -n surgecart      # T2-06.1.3 / F-01：旧示例漏了这一项
+kubectl auth can-i list pods -n surgecart
 ```
+
+`test/manifest` 的 `TestRBACGrantsEveryPermissionTheScriptNeeds` 会自动比对
+「脚本实际使用的资源操作 ⊇ 脚本声明的权限 ⊆ RBAC 示例授权的权限」，
+本文件不再作为权限完整性的证据（手工检查 YAML 无法证明脚本还需要什么）。
 
 首次部署的顺序与后续发布一致（先迁移、后应用），额外只需要「命名空间 + RBAC」这两步：
 
@@ -1069,7 +1147,7 @@ kubectl -n surgecart get lease surgecart-deploy-lock -o yaml  # holderIdentity �
 | server-side dry-run | `kubectl apply --dry-run=server` | 无集群，NOT_VERIFIED |
 | 真实集群部署 | 迁移 Job、Deployment Available、Service、探针 | 无集群，NOT_VERIFIED |
 | **Lease 在真实 API Server 上的并发语义** | 真实集群 / etcd 事务 / 多 apiserver | 无集群，**NOT_VERIFIED** |
-| **RBAC 最小权限的实际效果（含 `jobs get,list`）** | 真实 RoleBinding + `auth can-i` | 无集群，**NOT_VERIFIED** |
+| **RBAC 最小权限的实际效果（含 `jobs`/`pods` 的 `get,list`）** | 真实 RoleBinding + `auth can-i` | 无集群，**NOT_VERIFIED**（静态契约已验证：脚本声明 == 实际使用 ⊆ RBAC 示例） |
 | **Job 被 `DeadlineExceeded` 终止后的条件传播时延** | 真实集群 + 真实 DDL 负载 | 无集群，**NOT_VERIFIED** |
 | **fencing 窗口实测** | 真实暂停 Runner + 网络分区 | 无集群，**NOT_VERIFIED** |
 | 滚动更新 / SIGTERM 时序 | 集群 preStop + 60s 宽限期实测 | 无集群，NOT_VERIFIED |
@@ -1081,7 +1159,16 @@ kubectl -n surgecart get lease surgecart-deploy-lock -o yaml  # holderIdentity �
 **fake kubectl 已验证的场景**（T2-06.1.1 / T2-06.1.2 新增/扩展）：
 
 - Lease `create` 原子性；`replace` 的 `resourceVersion` 与 `uid` 校验；确定性 409；
-- 续租请求超时、续租 API 500、续租 CAS 冲突、续租 UID 冲突 → 判定失锁并中止；
+- **接管 = 一次成功写入**：推进 `resourceVersion`、保持 UID；旧 rv 的 PUT 得到 409
+  且不覆盖新 holder（F-06；替身语义，不等于真实 API Server）；
+- 续租请求超时、续租 API 500、续租 CAS 冲突（连续三次）、续租 UID 冲突 → 判定失锁并中止；
+- **续租链的真实耗时**（外部包装记录的毫秒时间戳）：GET/REPLACE 各 0.9s、超时 1s 时，
+  三次 attempt 的实测耗时不超过 `attempts×(get+replace)+backoff`（F-02）；
+- **重试期间租约过期** → 不再写入 Lease，直接按失锁退出（F-02.4）；
+- **权限预检**：leases/jobs/pods 的每个 (verb, resource) 单独拒绝 → 退出码 3、零资源变更；
+  `auth can-i` 自身失败时输出「无法确认」而不是「缺少权限」（F-01）；
+- **Pod 查询分类**：空列表 / 全部终态 / 活动 Pod / 403 / 500 / 超时 / 归属不一致，
+  在 pod gate、全命名空间扫描、接管核验三处措辞一致（F-07）；
 - Job 状态序列（不存在 / 运行中 / 删除中 / Complete / Failed）、Job UID 变化、
   Job 列表扫描（未终结迁移阻断接管）；
 - 每次 Lease 写入携带的迁移记录（`lease.write` 事件）：接管/续租/释放不清空记录、
@@ -1106,6 +1193,13 @@ kubelet 终止迁移 Pod 后的条件传播时延、真实集群中「Failed 但
 - 不得把 Migration 与 Application 合并成一个无序部署入口；
 - 不得把 Lease 放进 Kustomize 入口（apply 会覆盖 holderIdentity，等于拆掉互斥）；
 - 不得把发布锁退化为本地 `flock` 或「先 GET 再无条件写」；
+- **不得把续租预算改回只计单次请求**（每次 attempt 都执行 GET + REPLACE，
+  见 §9.2 与 `docs/design/deploy-lock.md` §7.1）；
+- **不得在租约已过期时继续续租**：过期即失锁，禁止「立即续租复活」（§7.4）；
+- **不得在与脚本实际使用不一致的 RBAC 示例上宣称「已授权」**：`pods get/list` 缺失会让
+  首次发布失败，`test/manifest` 会拦住这类改动（§13.1）；
+- 不得让测试替身（`test/deployk8s/fakestate` + `fakekubectl`）的接管操作跳过
+  `resourceVersion` 推进：那会让 CAS 缺陷在测试里变成不可能出现的假阴性（F-06）；
 - 不得在迁移完成后提前释放发布锁，也不得在没有验证的情况下打印 `DEPLOY_K8S_SUCCESS`；
 - **不得在迁移未确认终态时释放发布锁**（含 SIGTERM/cleanup 路径、续租失败路径）；
 - **不得清空 `deploy-lock.surgecart.io/migration-*` 注解来绕过生命周期检查**；

@@ -199,7 +199,9 @@ func TestRecoveryRejectedWhenMigrationPodStillRuns(t *testing.T) {
 	res := runDeploy(t, f, "--lock-wait-timeout", "10", "--migration-timeout", "10")
 
 	res.requireCode(t, 7)
-	res.requireContains(t, "仍有迁移 Pod 未终止", "surgecart-migrate-orphan-pod")
+	// F-07：查询成功且存在活动 Pod → 措辞是「确实存在」，不能被说成「无法确认」。
+	res.requireContains(t, "**确实存在**仍在执行/终止中的迁移 Pod", "surgecart-migrate-orphan-pod")
+	res.requireNotContains(t, "无法确认迁移 Pod 状态")
 	f.requireNoEvent(t, "apply.migration")
 	f.requireNoEvent(t, "lease.acquire")
 }

@@ -1031,13 +1031,15 @@ func TestMigrationTimeoutTracksJobDeadline(t *testing.T) {
 	t.Logf("迁移等待上限 %ds > Job activeDeadlineSeconds %ds（余量 %ds）", timeout, deadline, timeout-deadline)
 }
 
-// TestLeaseRenewBudgetContract 断言发布脚本的默认租期参数满足 AUD-03 / AUD-D7 不变量：
+// TestLeaseRenewBudgetContract 断言发布脚本的默认租期参数满足 AUD-03 / AUD-D7 /
+// T2-06.1.3-F02 不变量：
 //
-//	renew_interval + attempts × renew_request_timeout + backoff + safety_margin
+//	renew_interval + attempts × (get_timeout + replace_timeout) + backoff + safety_margin
 //	  < lease_duration
 //
-// 旧默认值（10 + 30 > 30）会让锁在续租请求返回之前就过期；只计一次请求超时则会
-// 忽略「失败重试链」的最坏耗时（AUD-D7）。
+// 一次续租 attempt 真实执行两个请求（GET 读 + PUT 写），各受 --lease-renew-timeout 约束。
+// 旧公式只计一次请求超时：默认算出来 25 < 30 看似安全，真实最坏值 34 > 30，
+// 一次 API 抖动就能让续租链在锁过期之后才结束（审计 F-02）。
 func TestLeaseRenewBudgetContract(t *testing.T) {
 	path := filepath.Join(repoRoot(t), "scripts", "deploy-k8s.sh")
 	raw, err := os.ReadFile(path)
@@ -1063,11 +1065,61 @@ func TestLeaseRenewBudgetContract(t *testing.T) {
 	attempts := value("LOCK_RENEW_MAX_ATTEMPTS")
 	backoff := value("LOCK_RENEW_BACKOFF_BUDGET")
 	margin := value("LOCK_SAFETY_MARGIN")
-	budget := interval + attempts*requestTimeout + backoff + margin
-	if budget >= duration {
-		t.Fatalf("租期预算 %d + %d×%d + %d + %d = %d 必须小于 lease_duration=%d：否则一次续租失败后的重试链会让锁先过期",
-			interval, attempts, requestTimeout, backoff, margin, budget, duration)
+	backoffMs := value("LOCK_RENEW_BACKOFF_MS")
+
+	// 退避预算必须覆盖真实的 (attempts-1) 次退避，否则预算本身被低估。
+	if required := (attempts - 1) * backoffMs; required > backoff*1000 {
+		t.Fatalf("退避预算 %ds 小于实际退避 %dms：预算会低估最坏耗时", backoff, required)
 	}
-	t.Logf("租期预算 %d + %d×%d + %d + %d = %d < %d",
-		interval, attempts, requestTimeout, backoff, margin, budget, duration)
+
+	// GET 与 REPLACE 各自受同一个 --lease-renew-timeout 约束（见 LEASE_KUBECTL）。
+	attemptBudget := requestTimeout + requestTimeout
+	budget := interval + attempts*attemptBudget + backoff + margin
+	if budget >= duration {
+		t.Fatalf("租期预算 %d + %d×(%d+%d) + %d + %d = %d 必须严格小于 lease_duration=%d：否则一次续租失败后的重试链会让锁先过期",
+			interval, attempts, requestTimeout, requestTimeout, backoff, margin, budget, duration)
+	}
+	t.Logf("租期预算 %d + %d×(%d+%d) + %d + %d = %d < %d",
+		interval, attempts, requestTimeout, requestTimeout, backoff, margin, budget, duration)
+
+	// 续租链（不含首次等待）必须早于服务端过期：这是「失锁窗口推导」的输入（F-05）。
+	chain := attempts*attemptBudget + backoff
+	if chain >= duration {
+		t.Fatalf("续租链最坏 %ds 必须小于租期 %ds：否则锁会在续租链完成之前过期", chain, duration)
+	}
+
+	// F-03：帮助文本必须与代码默认值一致（同一份源码里的两处文字，任何人改一处都会失败）。
+	helpDefaults := map[string]string{
+		"--lease-duration":       fmt.Sprintf(`发布锁租期（默认 %d`, duration),
+		"--lease-renew-interval": fmt.Sprintf(`发布锁续租间隔（默认 %d）`, interval),
+		"--lease-renew-timeout":  fmt.Sprintf(`单次续租请求的超时（默认 %d；GET 与 REPLACE 各算一次）`, requestTimeout),
+	}
+	for flag, fragment := range helpDefaults {
+		if !strings.Contains(string(raw), fragment) {
+			t.Fatalf("--help 中 %s 的默认值与代码不一致：缺少 %q（代码默认 %s）", flag, fragment, fragment)
+		}
+	}
+	if !strings.Contains(string(raw), fmt.Sprintf("%d + %d×(%d+%d) + %d + %d = %d < %d",
+		interval, attempts, requestTimeout, requestTimeout, backoff, margin, budget, duration)) {
+		t.Fatalf("--help 中的预算算式没有随默认值更新：期望 %d + %d×(%d+%d) + %d + %d = %d < %d",
+			interval, attempts, requestTimeout, requestTimeout, backoff, margin, budget, duration)
+	}
+
+	// F-03：文档必须与代码一致（文档里的默认值也是「契约」的一部分）。
+	docPath := filepath.Join(repoRoot(t), "docs", "development", "kubernetes.md")
+	docRaw, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatalf("读取 %s: %v", docPath, err)
+	}
+	for _, fragment := range []string{
+		fmt.Sprintf("--lease-duration <sec>        发布锁租期（默认 %d", duration),
+		fmt.Sprintf("--lease-renew-interval <sec>  续租间隔（默认 %d）", interval),
+		fmt.Sprintf("--lease-renew-timeout <sec>   单次续租请求的超时（默认 %d；", requestTimeout),
+		fmt.Sprintf("默认：%d + %d×(%d+%d) + %d + %d = %d < %d",
+			interval, attempts, requestTimeout, requestTimeout, backoff, margin, budget, duration),
+	} {
+		if !strings.Contains(string(docRaw), fragment) {
+			t.Fatalf("docs/development/kubernetes.md §9.2 与代码默认值不一致：缺少 %q", fragment)
+		}
+	}
 }

@@ -31,7 +31,7 @@ func TestInflightLockLossStopsNewOperations(t *testing.T) {
 	})
 
 	a := runDeploy(t, f, "--migration-timeout", "60", "--rollout-timeout", "30",
-		"--lease-duration", "21", "--lease-renew-interval", "5")
+		"--lease-duration", "40", "--lease-renew-interval", "5")
 
 	a.requireCode(t, 3)
 	a.requireNoSuccess(t)
