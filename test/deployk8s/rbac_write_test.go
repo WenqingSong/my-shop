@@ -24,8 +24,10 @@ import (
 // 断言永远无法被证伪。
 //
 // 依赖：Agent C 的 fakestate 写路径授权（INTERFACE_CONTRACT.md §1.1 Authorize /
-// §1.3 写路径强制授权）。C 未落地时，这里的用例会明确 Skip 并标注 TODO ——
-// **不会**伪造成 PASS（审计要求：不允许把未验证说成已验证）。
+// §1.3 写路径强制授权，v1.2 起 apply 对已存在对象先按 patch 授权）。
+//
+// 这三个用例是**硬断言**：写路径不执行授权、或 apply 仍按 update 授权，都会直接
+// 失败（不是 Skip）。审计要求：不允许把「未验证」说成已验证。
 //
 // 实现方式：直接改写 fake 的 state.json，把 `permissions.rules` 换成真实规则。
 // 这样不依赖 fakestate 的 Go API（C 还在演进），也不需要修改 Agent C 的文件。
@@ -118,22 +120,20 @@ func injectPermissions(t *testing.T, f *fixture, permissions map[string]any) {
 	}
 }
 
-// writeEnforcementReady 判断这次失败是否**发生在真实写路径**上。
+// writeEnforcementMissing 是「写路径没有授权」时的失败信息。
 //
-// 旧版 fake 只在 `auth can-i` 上做权限判断，写请求一律放行；新版（C）会在写入之前
-// 调 Authorize。用同一个用例区分两者：如果「合法预检 + 非法写入」仍然成功，
-// 说明写路径没有授权，用例必须 Skip 而不是假装通过。
-func writeEnforcementReady(name string) string {
-	return "TODO(A-5): fake 的写路径尚未执行授权 —— " + name +
-		" 未验证。依赖 Agent C 的 fakestate.Authorize 落到 create/replace/apply 上" +
+// fake 只在 `auth can-i` 上判权限、写请求一律放行的话，本文件的所有结论都不成立，
+// 因此这是**失败**（不是 Skip）：审计 A-5 要求写路径本身 fail-closed。
+func writeEnforcementMissing(name string) string {
+	return "A-5 未闭环：fake 的写路径没有执行授权（" + name + " 因此「通过」）。" +
+		"fake 必须在 create/replace/apply 落盘前调用 fakestate.Authorize" +
 		"（INTERFACE_CONTRACT.md §1.3）。"
 }
 
 // injectRules 注入 RBAC 规则，并探测当前工作区的 fake 是否**理解** permissions.rules。
 //
-// 探测方式：Load → Save 一个往返。旧版 fakestate.State 没有 Rules 字段，序列化会把
-// "rules" 丢掉；新版会原样保留。返回 false 表示 fake 还不能按规则判定 ——
-// 此时任何「按规则授权」的结论都不可信，用例必须 Skip（不得伪造成 PASS）。
+// 探测方式：Load → Save 一个往返。若 "rules" 被丢掉，说明当前 fake 还不认识规则，
+// 此时任何「按规则授权」的结论都不可信 —— 调用方必须直接失败（不得 Skip）。
 func injectRules(t *testing.T, f *fixture, rules []map[string]any) bool {
 	t.Helper()
 	injectPermissions(t, f, map[string]any{"rules": rules})
@@ -203,13 +203,14 @@ func TestWritePathDeniedByResourceNamesFailsAfterPreflight(t *testing.T) {
 		t.Fatal("交付的 RBAC 里没有带 resourceNames 的 leases 规则：本用例的前提不成立")
 	}
 	if !injectRules(t, f, rules) {
-		t.Skip(writeEnforcementReady("预检通过但写入被拒"))
+		t.Fatalf("%s", writeEnforcementMissing("预检通过但写入被拒"))
 	}
 
 	res := runDeploy(t, f, "--migration-timeout", "10", "--rollout-timeout", "10")
 
 	if res.code == 0 {
-		t.Skip(writeEnforcementReady("预检通过但写入被拒"))
+		t.Fatalf("%s\n--- stdout ---\n%s\n--- stderr ---\n%s",
+			writeEnforcementMissing("预检通过但写入被拒"), res.stdout, res.stderr)
 	}
 	res.requireNoSuccess(t)
 	res.requireContains(t,
@@ -237,7 +238,7 @@ func TestDeliveredRBACOnlyUpgradeSucceeds(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, fixtureOptions{})
 	if !injectRules(t, f, deliveredRBACRules(t)) {
-		t.Skip(writeEnforcementReady("只载入交付的 RBAC → 升级发布"))
+		t.Fatalf("%s", writeEnforcementMissing("只载入交付的 RBAC → 升级发布"))
 	}
 
 	res := runDeploy(t, f, "--migration-timeout", "10", "--rollout-timeout", "10")
@@ -247,9 +248,9 @@ func TestDeliveredRBACOnlyUpgradeSucceeds(t *testing.T) {
 		return
 	}
 	if reason := applyVerbMismatch(res.output()); reason != "" {
-		t.Skip("TODO(interface): fake 把 apply 已存在对象授权为 update，真实 kubectl apply 用 patch（GET → create/patch，从不 PUT）。" +
-			"被拒对象：" + reason + "；见 agent-c-fake 的 Interface 契约 §1.3 —— " +
-			"交付 RBAC 只授予 kubectl 真正使用的 get/create/patch，不为迁就 fake 而过度授权。")
+		t.Fatalf("fake 仍把 apply 已存在对象按 update 授权（真实 kubectl apply 用 patch）。被拒对象：%s；"+
+			"Interface 契约 §1.3 v1.2 要求「先 patch，再退回 update」。\n--- stdout ---\n%s\n--- stderr ---\n%s",
+			reason, res.stdout, res.stderr)
 	}
 	t.Fatalf("只载入交付的 RBAC 时发布失败（退出码 %d）：交付的授权不足以支撑真实写路径\n--- stdout ---\n%s\n--- stderr ---\n%s",
 		res.code, res.stdout, res.stderr)
@@ -266,7 +267,7 @@ func TestDeliveredRBACOnlyFirstDeploySucceeds(t *testing.T) {
 	f := newFixture(t, fixtureOptions{firstDeploy: true})
 	f.updateState(func(st *fakestate.State) { st.NamespaceExists = false })
 	if !injectRules(t, f, deliveredRBACRules(t)) {
-		t.Skip(writeEnforcementReady("只载入交付的 RBAC → 首次发布"))
+		t.Fatalf("%s", writeEnforcementMissing("只载入交付的 RBAC → 首次发布"))
 	}
 
 	res := runDeploy(t, f, "--migration-timeout", "10", "--rollout-timeout", "10")
@@ -279,7 +280,7 @@ func TestDeliveredRBACOnlyFirstDeploySucceeds(t *testing.T) {
 		return
 	}
 	if reason := applyVerbMismatch(res.output()); reason != "" {
-		t.Skip("TODO(interface): 同 TestDeliveredRBACOnlyUpgradeSucceeds（apply→update vs apply→patch），被拒对象：" + reason)
+		t.Fatalf("fake 仍把 apply 已存在对象按 update 授权（同 TestDeliveredRBACOnlyUpgradeSucceeds），被拒对象：%s", reason)
 	}
 	if strings.Contains(res.output(), "缺少 namespaces 的") {
 		t.Fatalf("交付的 RBAC 仍然缺少集群级 namespaces 权限（审计 A-1 未闭环）：\n%s", res.output())
