@@ -701,7 +701,10 @@ kubectl -n surgecart get pods -l app.kubernetes.io/name=surgecart -o wide
   超时只说明 `t_resp` 没等到，不能推出 `t_acc` 没有发生；
 - 锁丢失后，已发出的 `kubectl apply` 仍可能被服务端执行 —— 「旧 Runner 的写在途、
   新 Runner 已接管」的跨接管写入**仍然可能发生**（AUD-05 = NOT_CLOSED）。
-  T2-06.1.4 的故障注入实验提供了这一现象的直接反例（`docs/design/deploy-lock.md` §10.4）；
+  直接反例：`test/deployk8s/application_inflight_test.go` 的
+  `TestLockLostDuringApplicationApplyReportsUnknown`（apply 延迟 1500ms，在途时接管，
+  断言请求仍被接受并生效）。这是 **fake kubectl 构造的窗口**，不是真实集群实验
+  （详见 `docs/design/deploy-lock.md` §10.4）；
 - 因此不能把本机制描述成「不会并发发布」，也不能用退出码判断线上状态 ——
   只能 `kubectl get -o yaml` 只读核对。
 

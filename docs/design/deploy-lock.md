@@ -649,9 +649,13 @@ t_resp  客户端收到响应（可能超时、连接断开，永远收不到）
 - 客户端超时 **≠** 请求未生效。`kubectl apply` 返回非零、进程收到 SIGTERM、租约已过期，
   都不能证明 Deployment / Job 没被修改；
 - 失锁之后仍然**可能**发生「旧 Runner 的写在途、新 Runner 已接管」的跨接管写入。
-  这不是理论风险：T2-06.1.4 的故障注入实验构造了一个在途写，在接管完成后才到达
-  API Server 并生效（见 §13 验证表「在途写跨接管」一行；具体延迟以该测试的实测输出
-  为准，本文不复述未经核对的毫秒数）；
+  这不是理论风险：`test/deployk8s/application_inflight_test.go` 的
+  `TestLockLostDuringApplicationApplyReportsUnknown` 让 Application apply 延迟 1500ms，
+  在请求确实在途时用 `stealLease` 完成一次并发接管，随后断言
+  `state.Applied == true`（请求已被接受并生效）、退出码 3、输出
+  `APPLICATION_OUTCOME_UNKNOWN`，且失锁后不再发出新的写请求；
+  `TestApplicationApplyAcceptedButClientTimesOut` 则覆盖「服务端已接受、客户端超时」；
+  **边界**：这是 fake kubectl 构造的窗口，真实集群上同类窗口的长度是 NOT_VERIFIED；
 - 判断线上状态只能靠**只读核对**（`kubectl get -o yaml` / `get pods`），不能靠退出码；
 - 真正的修复是写入侧 fencing（令牌校验），本任务不做（§10.1）。
 
@@ -809,6 +813,7 @@ T2-06.1.3 及更早的示例完全没有这两项，因此「按示例授权 →
 | Pod 查询错误分类（F-07） | `test/deployk8s/podquery_test.go`：空列表/全终态/活动 Pod/403/500/超时/归属不一致 | 已验证（脚本语义） |
 | 权限/业务资源错误分类（T2-06.1.4 / A-3 / AUD-09） | `test/deployk8s/rbac_test.go`：`TestSecretReadForbiddenIsNotMissingSecret`、`TestSecretReadFailureIsNotMissingSecret`、`TestSecretNotFoundIsReportedAsMissing`、`TestNamespaceReadFailureIsNotReportedAsAbsent`、`TestJobsListForbiddenIsNotUnfinishedJob`、`TestJobsListServerErrorIsNotUnfinishedJob`、`TestJobLogsForbiddenIsReported` | 已验证（脚本语义） |
 | 文档契约（T2-06.1.4） | `test/manifest/doc_contract_test.go`：从脚本常量 / `usage()` / RBAC 清单反推事实，断言 6 个 CLI 默认值、退出码枚举、续租预算算式与失锁窗口数值、权限集合（按作用域）、`AUD-02`/`AUD-05` 结论、NOT_VERIFIED 项 | 已验证（静态契约，改任一侧都会失败） |
+| 在途写跨接管生效（AUD-05） | `test/deployk8s/application_inflight_test.go`：`TestLockLostDuringApplicationApplyReportsUnknown`（apply 延迟 1500ms + 在途接管 → `Applied == true`、退出码 3、`APPLICATION_OUTCOME_UNKNOWN`）；`TestApplicationApplyAcceptedButClientTimesOut` | 已验证（**fake 构造的窗口**，真实集群长度 NOT_VERIFIED） |
 | 接管语义（F-06） | 替身推进 `resourceVersion`；`TestStaleResourceVersionCannotOverwriteTakeover` 断言旧 rv 的 PUT 得到 409 且不覆盖新 holder | 已验证（**替身语义**，不等于真实 API Server） |
 | 清单契约（版本标签、RBAC 名称与授权范围、超时与租期预算、help/文档默认值） | `test/manifest` 从 Kustomize 构建产物与源文件断言 | 已验证 |
 | 真实 API Server 的 Lease 竞争 | 需要在真实集群并发跑两个 Runner | **NOT_VERIFIED** |
