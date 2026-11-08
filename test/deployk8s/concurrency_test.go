@@ -602,22 +602,78 @@ func TestWritePathsEnforceRBAC(t *testing.T) {
 
 // TestRealRBACManifestDrivesAuthorization 覆盖 C-8：交付的 RBAC 清单可以直接驱动 fake，
 // 删除其中任一 (verb, resource) 后 `auth can-i` 必须变成 no。
+//
+// 断言分两层，避免「清单随审计要求扩充 → 契约测试变成假失败」：
+//   - 正例：脚本预检的 7 个 (verb, resource) 必须全 yes（F-01 的回归护栏）；
+//   - 负例：从**规则结构**推导一个确实未被授予的组合再断言 no —— 交付清单会扩充
+//     （secrets get、pods/log get、deployments/configmaps/services/pvc 都是本工作包
+//     补上的），把 `get secrets` 这类负例写死，会在清单补齐后变成假失败。
 func TestRealRBACManifestDrivesAuthorization(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(repoRootPath, "manifest", "kubernetes", "examples", "deploy-lock", "rbac.yaml")
-	rules, err := fakestate.LoadRBACRules(path)
+	requireRBACManifestContract(t, []string{path})
+
+	// 模拟「清单继续扩充」：额外授予 secrets get/list 与 jobs delete。
+	// 负例必须依然是推导出来的，否则这一步就会假失败。
+	extra := writeManifest(t, t.TempDir(), "extra.yaml", `apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: surgecart-deploy-extra
+  namespace: surgecart
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["delete"]
+`)
+	requireRBACManifestContract(t, []string{path, extra})
+}
+
+// ruleGrants 是**结构**检查（不调用被测的 Authorize）：规则集里是否存在 allow 规则
+// 覆盖 (group, resource, verb)。用于给「默认拒绝」挑选一个确实未被授予的组合。
+func ruleGrants(rules []fakestate.Rule, group, resource, verb string) bool {
+	for _, rule := range rules {
+		if strings.EqualFold(rule.Effect, "deny") {
+			continue
+		}
+		if !contains(rule.APIGroups, group) && !contains(rule.APIGroups, "*") {
+			continue
+		}
+		if !contains(rule.Resources, resource) && !contains(rule.Resources, "*") {
+			continue
+		}
+		if contains(rule.Verbs, verb) || contains(rule.Verbs, "*") {
+			return true
+		}
+	}
+	return false
+}
+
+func ruleGrantsAny(rules []fakestate.Rule, group, resource string, verbs ...string) bool {
+	for _, verb := range verbs {
+		if ruleGrants(rules, group, resource, verb) {
+			return true
+		}
+	}
+	return false
+}
+
+func requireRBACManifestContract(t *testing.T, paths []string) {
+	t.Helper()
+	rules, err := fakestate.LoadRBACRulesFromPaths(paths)
 	if err != nil {
-		t.Fatalf("解析 %s: %v", path, err)
+		t.Fatalf("解析 %v: %v", paths, err)
 	}
 	if len(rules) == 0 {
-		t.Fatalf("%s 没有解析出任何规则", path)
+		t.Fatalf("%v 没有解析出任何规则", paths)
 	}
-
 	dir := newFakeStateDir(t, func(st *fakestate.State) {
 		st.Permissions = fakestate.Permissions{Rules: rules}
 	})
 
-	// 脚本预检的 7 个 (verb, resource) 必须全部允许（pods 的 get/list 曾漏过 → F-01）。
+	// 正例：脚本预检的 7 个 (verb, resource) 必须全部允许（pods 的 get/list 曾漏过 → F-01）。
 	for _, pair := range [][2]string{
 		{"get", "leases.coordination.k8s.io"},
 		{"create", "leases.coordination.k8s.io"},
@@ -634,20 +690,36 @@ func TestRealRBACManifestDrivesAuthorization(t *testing.T) {
 		}
 	}
 
-	// 未授权的动词/资源必须是否（默认拒绝）。
-	for _, pair := range [][2]string{
-		{"delete", "leases.coordination.k8s.io"},
-		{"create", "pods"},
-		{"get", "secrets"},
-	} {
-		res := runFake(t, dir, "auth", "can-i", pair[0], pair[1], "-n", "surgecart")
+	// 负例：从规则结构里挑一个**确认未被授予**的组合，断言默认拒绝。
+	candidates := []struct{ verb, group, resource string }{
+		{"delete", "coordination.k8s.io", "leases"},
+		{"list", "", "secrets"},
+		{"create", "", "pods"},
+		{"watch", "", "pods"},
+		{"delete", "batch", "jobs"},
+		{"create", "apps", "statefulsets"},
+	}
+	checked := 0
+	for _, candidate := range candidates {
+		if ruleGrants(rules, candidate.group, candidate.resource, candidate.verb) {
+			continue // 清单确实授予了这一项：换下一个组合，不把授权当成拒绝
+		}
+		resourceArg := candidate.resource
+		if candidate.group != "" {
+			resourceArg += "." + candidate.group
+		}
+		res := runFake(t, dir, "auth", "can-i", candidate.verb, resourceArg, "-n", "surgecart")
 		res.requireCode(t, 1)
 		if got := strings.TrimSpace(res.stdout); got != "no" {
-			t.Fatalf("auth can-i %s %s = %q，期望 no", pair[0], pair[1], got)
+			t.Fatalf("auth can-i %s %s = %q，期望 no（默认拒绝）", candidate.verb, resourceArg, got)
 		}
+		checked++
+	}
+	if checked < 2 {
+		t.Fatalf("只构造出 %d 个未授权组合，负例覆盖不足（交付清单几乎全授权？）", checked)
 	}
 
-	// 其它命名空间不在 Role 的授权范围内。
+	// 其它命名空间不在 Role 的授权范围内（ClusterRole 的规则 Namespaces 为空，不受影响）。
 	other := runFake(t, dir, "auth", "can-i", "get", "leases", "-n", "default")
 	other.requireCode(t, 1)
 
@@ -662,21 +734,30 @@ func TestRealRBACManifestDrivesAuthorization(t *testing.T) {
 		t.Fatalf("删除 pods list 授权后 auth can-i 必须为 no，实际 %q", got)
 	}
 
-	// apply 不在锁角色的授权范围内：fake 不会隐式放行（必须显式追加 ManifestWriteRules）。
-	manifest := filepath.Join(dir, "ns.yaml")
-	if err := os.WriteFile(manifest, []byte("apiVersion: v1\nkind: Namespace\nmetadata:\n  name: surgecart\n"), 0o644); err != nil {
-		t.Fatalf("写清单: %v", err)
+	// 清单没覆盖的对象（apps/statefulsets）apply 必须 403：fake 不会隐式放行 apply。
+	statefulSet := writeManifest(t, dir, "statefulset.yaml",
+		"apiVersion: apps/v1\nkind: StatefulSet\nmetadata:\n  name: surgecart\n  namespace: surgecart\n")
+	if !ruleGrantsAny(rules, "apps", "statefulsets", "create", "patch", "update") {
+		forbidden := runFake(t, dir, "apply", "-f", statefulSet)
+		forbidden.requireCode(t, 1)
+		forbidden.requireContains(t, "Forbidden")
 	}
-	forbidden := runFake(t, dir, "apply", "-f", manifest)
-	forbidden.requireCode(t, 1)
-	forbidden.requireContains(t, "Forbidden")
 
-	// 追加 ManifestWriteRules 后同一个 apply 通过。
+	// 交付清单覆盖 apply 的真实动词（create/patch）时，apply 必须放行 —— 这一条是
+	// A 的「仅交付 RBAC → 发布成功」在 fake 侧的对应断言（apply 走 PATCH，不是 update）。
+	if ruleGrantsAny(rules, "apps", "deployments", "create", "patch") {
+		deployment := writeManifest(t, dir, "deployment.yaml",
+			"apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: surgecart\n  namespace: surgecart\n")
+		runFake(t, dir, "apply", "-f", deployment).requireCode(t, 0)
+	}
+
+	// 显式追加 ManifestWriteRules 后，即使清单没覆盖 statefulsets 也能 apply。
 	withWrites := newFakeStateDir(t, func(st *fakestate.State) {
 		st.Permissions = fakestate.Permissions{Rules: append(append([]fakestate.Rule(nil), rules...), fakestate.ManifestWriteRules()...)}
 	})
-	allowedManifest := writeManifest(t, withWrites, "namespace.yaml", "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: surgecart\n")
-	runFake(t, withWrites, "apply", "-f", allowedManifest).requireCode(t, 0)
+	allowed := writeManifest(t, withWrites, "deployment.yaml",
+		"apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: surgecart\n  namespace: surgecart\n")
+	runFake(t, withWrites, "apply", "-f", allowed).requireCode(t, 0)
 }
 
 // trimRuleVerb 从规则集里删掉 (group, resource, verb)：模拟「RBAC 清单少写了一项」。
@@ -892,6 +973,95 @@ spec:
 	canI.requireCode(t, 0)
 	deniedCanI := runFake(t, dirDenied, "auth", "can-i", "apply", "deployments.apps", "-n", "surgecart")
 	deniedCanI.requireCode(t, 1)
+}
+
+// TestWriteIntentUsesCallerBaseVersion 覆盖一个真实回归：
+//
+// 后台续租与主流程「写迁移记录」并发时，续租请求携带的是**它读到的**（较旧的）记录，
+// 而服务端记录已经被主流程推进。如果写意图按「当前服务端状态」判定，续租会被误判成
+// 写记录，按续租注入的故障（409/500）就漏掉了 —— 注入次数会随并发时序漂移。
+//
+// 正确语义：意图比较的是「调用方读到的那个版本 (metadata.resourceVersion)」与它写出的内容。
+func TestWriteIntentUsesCallerBaseVersion(t *testing.T) {
+	t.Parallel()
+	const prefix = "deploy-lock.surgecart.io/"
+	dir := newFakeStateDir(t, func(st *fakestate.State) {
+		st.Lease = &fakestate.Lease{
+			ResourceVersion: "10",
+			UID:             "lease-uid-seed",
+			HolderIdentity:  "runner-0",
+			RenewTime:       "2026-11-08T00:00:00Z",
+			DurationSeconds: 30,
+			Transitions:     1,
+			Annotations: map[string]string{
+				prefix + "migration-state": "MIGRATION_PENDING",
+				prefix + "migration-job":   "surgecart-migrate-old",
+			},
+		}
+	})
+
+	// 1) 主流程把记录推进到 RUNNING（holder 不变 → 这是 record 写）。
+	record := writeLeaseFile(t, dir, "record.yaml", "runner-0", "10", "lease-uid-seed", map[string]string{
+		prefix + "migration-state": "MIGRATION_RUNNING",
+		prefix + "migration-job":   "surgecart-migrate-old",
+	})
+	runFake(t, dir, "replace", "-f", record).requireCode(t, 0)
+
+	// 2) 后台续租用**旧 rv + 旧记录**写（它只读到过 PENDING）。
+	//    注入只作用于 intent=renew，并且用 **500**（而不是 409）：这样「注入是否命中」
+	//    可以和「CAS 冲突」区分开 —— 若意图被误判成 record，就会看到 CAS 的 409。
+	state, err := fakestate.Load(dir)
+	if err != nil {
+		t.Fatalf("读取状态: %v", err)
+	}
+	state.Injections = []fakestate.Injection{{
+		Verb: "update", Group: "coordination.k8s.io", Resource: "leases",
+		Intent: "renew", Status: 500, Message: "injected renew failure", Times: 1,
+	}}
+	if err := fakestate.Save(dir, state); err != nil {
+		t.Fatalf("写入注入: %v", err)
+	}
+
+	stale := writeLeaseFile(t, dir, "renew.yaml", "runner-0", "10", "lease-uid-seed", map[string]string{
+		prefix + "migration-state": "MIGRATION_PENDING",
+		prefix + "migration-job":   "surgecart-migrate-old",
+	})
+	res := runFake(t, dir, "replace", "-f", stale)
+	res.requireCode(t, 1)
+	res.requireContains(t, "InternalError", "injected renew failure")
+	res.requireNotContains(t, "Conflict")
+
+	// 3) 反向：真正改写记录的写（payload 相对自己的基线变了）必须是 record 意图，
+	//    不能被 intent=renew 的注入命中。
+	fresh := requireLease(t, dir)
+	state, err = fakestate.Load(dir)
+	if err != nil {
+		t.Fatalf("读取状态: %v", err)
+	}
+	state.Injections = []fakestate.Injection{{
+		Verb: "update", Group: "coordination.k8s.io", Resource: "leases",
+		Intent: "renew", Status: 500, Times: 1,
+	}}
+	if err := fakestate.Save(dir, state); err != nil {
+		t.Fatalf("写入注入: %v", err)
+	}
+	nextRecord := writeLeaseFile(t, dir, "record2.yaml", "runner-0", fresh.ResourceVersion, "lease-uid-seed", map[string]string{
+		prefix + "migration-state": "MIGRATION_COMPLETE",
+		prefix + "migration-job":   "surgecart-migrate-old",
+	})
+	runFake(t, dir, "replace", "-f", nextRecord).requireCode(t, 0)
+
+	events := fakestate.Read(dir, fakestate.EventsFileName)
+	want := "lease.write kind=record2.yaml"
+	found := false
+	for _, line := range events {
+		if strings.HasPrefix(line, want) && strings.HasSuffix(line, "intent=record") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("改写记录的写必须判定为 intent=record；事件:\n%s", strings.Join(events, "\n"))
+	}
 }
 
 func contains(values []string, want string) bool {

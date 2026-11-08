@@ -488,7 +488,11 @@ func leaseIntent(st *fakestate.State, manifest *leaseManifest) string {
 	if manifest.Spec.HolderIdentity != st.Lease.HolderIdentity {
 		return fakestate.IntentAcquire
 	}
-	if recordChanged(st.Lease.Annotations, manifest.Metadata.Annotations) {
+	// 关键：比较的是「调用方读到的那个版本」与它写出去的内容，而不是当前服务端状态。
+	// 后台续租与主流程写记录并发时，续租请求携带的是它读到的旧记录；若拿它跟已被
+	// 推进的服务端比较，就会被误判成「写记录」，续租类注入（409/500）随之漏掉。
+	base := st.LeaseBaseAnnotations(manifest.Metadata.ResourceVersion)
+	if base != nil && recordChanged(base, manifest.Metadata.Annotations) {
 		return fakestate.IntentRecord
 	}
 	return fakestate.IntentRenew
@@ -551,21 +555,22 @@ func cmdCreate(dir string, inv invocation) int {
 				return code, nil
 			}
 		}
-		if st.Lease != nil {
-			fmt.Fprintf(os.Stderr, "Error from server (AlreadyExists): error when creating %q: leases.coordination.k8s.io %q already exists\n", path, lockName)
-			return 1, nil
-		}
-		st.Lease = &fakestate.Lease{
-			ResourceVersion: st.NextResourceVersion(),
-			UID:             st.NextLeaseUID(),
+		err := fakestate.CreateLease(st, fakestate.Lease{
 			HolderIdentity:  manifest.Spec.HolderIdentity,
 			AcquireTime:     manifest.Spec.AcquireTime,
 			RenewTime:       manifest.Spec.RenewTime,
 			DurationSeconds: manifest.Spec.LeaseDurationSeconds,
 			Transitions:     manifest.Spec.LeaseTransitions,
 			Annotations:     manifest.Metadata.Annotations,
+		})
+		if err == fakestate.ErrLeaseExists {
+			fmt.Fprintf(os.Stderr, "Error from server (AlreadyExists): error when creating %q: leases.coordination.k8s.io %q already exists\n", path, lockName)
+			return 1, nil
 		}
-		st.LeaseAcquisitions++
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fake kubectl: 创建 Lease 失败: %v\n", err)
+			return 97, nil
+		}
 		fakestate.Append(dir, fakestate.EventsFileName, "lease.acquire holder="+manifest.Spec.HolderIdentity)
 		return 0, func() int { fmt.Printf("lease.coordination.k8s.io/%s created\n", lockName); return 0 }
 	})
@@ -933,17 +938,14 @@ func applyObject(st *fakestate.State, object manifestObject) error {
 		st.Jobs = append(st.Jobs, snapshot)
 	case "leases":
 		if st.Lease == nil {
-			st.Lease = &fakestate.Lease{
-				ResourceVersion: st.NextResourceVersion(),
-				UID:             st.NextLeaseUID(),
+			return fakestate.CreateLease(st, fakestate.Lease{
 				HolderIdentity:  object.Spec.HolderIdentity,
 				AcquireTime:     object.Spec.AcquireTime,
 				RenewTime:       object.Spec.RenewTime,
 				DurationSeconds: object.Spec.LeaseDurationSeconds,
 				Transitions:     object.Spec.LeaseTransitions,
 				Annotations:     object.Metadata.Annotations,
-			}
-			return nil
+			})
 		}
 		// 已存在 → UPDATE 语义，仍然走 CAS（apply 不允许跳过版本校验）。
 		if _, err := fakestate.CommitLeaseUpdate(st, fakestate.LeaseUpdate{
