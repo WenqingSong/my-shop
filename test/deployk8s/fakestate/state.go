@@ -150,6 +150,10 @@ type State struct {
 	Injections []Injection `json:"injections,omitempty"`
 
 	Lease *Lease `json:"lease"`
+	// LeaseHistory 保留最近若干个 Lease 版本的记录注解（rv → annotations）。
+	// 写意图（续租 vs 写迁移记录）必须比较「调用方读到的版本」，否则后台续租与
+	// 主流程写记录并发时会误判意图，导致按语义注入的故障漏掉（见 rememberLeaseVersion）。
+	LeaseHistory map[string]map[string]string `json:"leaseHistory,omitempty"`
 
 	// 下面的 Lease* 注入字段**全部是 Injection 的薄封装**（见 injection.go 的
 	// legacyInjections）：匹配条件一律是「调用语义」（verb=update/get，
@@ -278,6 +282,11 @@ func (st *State) Normalize() {
 	if st.Lease != nil {
 		if value, err := strconv.ParseInt(st.Lease.ResourceVersion, 10, 64); err == nil && value > st.ResourceVersionSeq {
 			st.ResourceVersionSeq = value
+		}
+		// 种子：手工构造的状态也必须有「调用方读到的版本」快照，否则第一次写会被
+		// 当成「不知道基线」而无法区分续租 / 写记录。
+		if _, ok := st.LeaseHistory[st.Lease.ResourceVersion]; !ok {
+			st.rememberLeaseVersion()
 		}
 	}
 }

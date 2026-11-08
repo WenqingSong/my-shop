@@ -894,6 +894,95 @@ spec:
 	deniedCanI.requireCode(t, 1)
 }
 
+// TestWriteIntentUsesCallerBaseVersion 覆盖一个真实回归：
+//
+// 后台续租与主流程「写迁移记录」并发时，续租请求携带的是**它读到的**（较旧的）记录，
+// 而服务端记录已经被主流程推进。如果写意图按「当前服务端状态」判定，续租会被误判成
+// 写记录，按续租注入的故障（409/500）就漏掉了 —— 注入次数会随并发时序漂移。
+//
+// 正确语义：意图比较的是「调用方读到的那个版本 (metadata.resourceVersion)」与它写出的内容。
+func TestWriteIntentUsesCallerBaseVersion(t *testing.T) {
+	t.Parallel()
+	const prefix = "deploy-lock.surgecart.io/"
+	dir := newFakeStateDir(t, func(st *fakestate.State) {
+		st.Lease = &fakestate.Lease{
+			ResourceVersion: "10",
+			UID:             "lease-uid-seed",
+			HolderIdentity:  "runner-0",
+			RenewTime:       "2026-11-08T00:00:00Z",
+			DurationSeconds: 30,
+			Transitions:     1,
+			Annotations: map[string]string{
+				prefix + "migration-state": "MIGRATION_PENDING",
+				prefix + "migration-job":   "surgecart-migrate-old",
+			},
+		}
+	})
+
+	// 1) 主流程把记录推进到 RUNNING（holder 不变 → 这是 record 写）。
+	record := writeLeaseFile(t, dir, "record.yaml", "runner-0", "10", "lease-uid-seed", map[string]string{
+		prefix + "migration-state": "MIGRATION_RUNNING",
+		prefix + "migration-job":   "surgecart-migrate-old",
+	})
+	runFake(t, dir, "replace", "-f", record).requireCode(t, 0)
+
+	// 2) 后台续租用**旧 rv + 旧记录**写（它只读到过 PENDING）。
+	//    注入只作用于 intent=renew，并且用 **500**（而不是 409）：这样「注入是否命中」
+	//    可以和「CAS 冲突」区分开 —— 若意图被误判成 record，就会看到 CAS 的 409。
+	state, err := fakestate.Load(dir)
+	if err != nil {
+		t.Fatalf("读取状态: %v", err)
+	}
+	state.Injections = []fakestate.Injection{{
+		Verb: "update", Group: "coordination.k8s.io", Resource: "leases",
+		Intent: "renew", Status: 500, Message: "injected renew failure", Times: 1,
+	}}
+	if err := fakestate.Save(dir, state); err != nil {
+		t.Fatalf("写入注入: %v", err)
+	}
+
+	stale := writeLeaseFile(t, dir, "renew.yaml", "runner-0", "10", "lease-uid-seed", map[string]string{
+		prefix + "migration-state": "MIGRATION_PENDING",
+		prefix + "migration-job":   "surgecart-migrate-old",
+	})
+	res := runFake(t, dir, "replace", "-f", stale)
+	res.requireCode(t, 1)
+	res.requireContains(t, "InternalError", "injected renew failure")
+	res.requireNotContains(t, "Conflict")
+
+	// 3) 反向：真正改写记录的写（payload 相对自己的基线变了）必须是 record 意图，
+	//    不能被 intent=renew 的注入命中。
+	fresh := requireLease(t, dir)
+	state, err = fakestate.Load(dir)
+	if err != nil {
+		t.Fatalf("读取状态: %v", err)
+	}
+	state.Injections = []fakestate.Injection{{
+		Verb: "update", Group: "coordination.k8s.io", Resource: "leases",
+		Intent: "renew", Status: 500, Times: 1,
+	}}
+	if err := fakestate.Save(dir, state); err != nil {
+		t.Fatalf("写入注入: %v", err)
+	}
+	nextRecord := writeLeaseFile(t, dir, "record2.yaml", "runner-0", fresh.ResourceVersion, "lease-uid-seed", map[string]string{
+		prefix + "migration-state": "MIGRATION_COMPLETE",
+		prefix + "migration-job":   "surgecart-migrate-old",
+	})
+	runFake(t, dir, "replace", "-f", nextRecord).requireCode(t, 0)
+
+	events := fakestate.Read(dir, fakestate.EventsFileName)
+	want := "lease.write kind=record2.yaml"
+	found := false
+	for _, line := range events {
+		if strings.HasPrefix(line, want) && strings.HasSuffix(line, "intent=record") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("改写记录的写必须判定为 intent=record；事件:\n%s", strings.Join(events, "\n"))
+	}
+}
+
 func contains(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
