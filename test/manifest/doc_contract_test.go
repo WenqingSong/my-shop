@@ -644,6 +644,21 @@ func TestDocRBACManifestsAndPermissions(t *testing.T) {
 		}
 	}
 
+	// 7) 运维前提必须写成硬前提：命名空间不存在时 Role/RoleBinding 会 NotFound，
+	// 而 ClusterRole/CRB 仍会成功 —— 半授权状态比全失败更难排查（T2-06.1.4 / A）。
+	if !strings.Contains(section, "硬前提") {
+		t.Error("docs/development/kubernetes.md §13.1 必须把「先创建命名空间」写成硬前提，并说明 Role/RoleBinding 会 NotFound")
+	}
+	if !strings.Contains(section, "NotFound") {
+		t.Error("docs/development/kubernetes.md §13.1 没有说明「命名空间缺失时 Role/RoleBinding 报 NotFound、ClusterRole 仍成功」这一半授权状态")
+	}
+	// 8) A-5 的写路径授权测试已落地：文件存在时文档必须点名，且不得再说成待办。
+	if _, err := os.Stat(filepath.Join(repoRoot(t), "test", "deployk8s", "rbac_write_test.go")); err == nil {
+		if !strings.Contains(manual, "TestDeliveredRBACOnlyUpgradeSucceeds") {
+			t.Error("test/deployk8s/rbac_write_test.go 已存在：文档必须点名 TestDeliveredRBACOnlyUpgradeSucceeds 作为「只喂交付清单即可完成发布」的证据")
+		}
+	}
+
 	namespaces := sortedKeys(roleNamespaces)
 	t.Logf("RBAC 清单 %v；Role 命名空间 %v；脚本声明 %d 项权限", files, namespaces, len(required))
 }

@@ -1147,7 +1147,8 @@ bash scripts/test-k8s-manifest.sh
 （契约测试会断言三者一致）。**不要**绑到应用自己的 ServiceAccount：
 应用 Pod 的 `automountServiceAccountToken=false`，不需要也不应该具备发布权限。
 
-**apply 顺序**（`Role`/`RoleBinding` 是命名空间对象，命名空间不存在时 apply 会失败）：
+**apply 顺序**（**硬前提**：`Role`/`RoleBinding` 是命名空间对象；`surgecart` 不存在时这 4 个
+对象会报 `NotFound`，而 `ClusterRole`/`ClusterRoleBinding` 仍会成功 —— 半授权状态比全失败更难排查）：
 
 ```bash
 # 1) 替换 3 处 subjects 占位符，改成同一个发布身份（三处必须一致）
@@ -1255,7 +1256,8 @@ kubectl -n surgecart get lease surgecart-deploy-lock -o yaml  # holderIdentity �
 | `renewTime` 锚点（B-1/B-2） | `TestMultiprocessPreflightDelayKeepsRenewTimeFresh`（预检 16s > 租期 15s）、`TestMultiprocessStaleRenewTimeAtCreateFailsClosed`（`LEASE_ANCHOR_INVALID`，零 apply） | 已验证（脚本语义 + `LEASE_WINDOW` 证据行） |
 | 过期锁不被「续命」（B-3/B-4） | `TestRecordWriteRefusedWhenLeaseExpired`：过期后写 COMPLETE 记录被拒、不改 `renewTime` | 已验证（脚本语义） |
 | 退避预算与实现同源（B-5） | `TestRenewBackoffBudgetIsSingleSourced`：常量 → 实际 sleep → 预算一致 | 已验证（源码契约） |
-| 权限/错误分类（T2-06.1.4 / A-3） | `test/deployk8s/rbac_test.go`：28+ 条权限矩阵、四类错误分类矩阵、首次发布、unknown 复检 | 已验证（脚本语义） |
+| 权限/错误分类（T2-06.1.4 / A-3） | `test/deployk8s/rbac_test.go`：29 条权限矩阵、四类错误分类矩阵、首次发布、unknown 复检 | 已验证（脚本语义） |
+| 写路径强制授权（T2-06.1.4 / A-5） | `test/deployk8s/rbac_write_test.go`（无 `t.Skip`）：`TestDeliveredRBACOnlyUpgradeSucceeds`（1.50s）、`TestDeliveredRBACOnlyFirstDeploySucceeds`（1.60s）、`TestWritePathDeniedByResourceNamesFailsAfterPreflight`（3.60s） | fake 层已验证；真实集群 RBAC/admission **NOT_VERIFIED** |
 | 文档契约（T2-06.1.4） | `test/manifest/doc_contract_test.go`：CLI 默认值 / 退出码 / 预算 / 权限集合 / AUD 结论 | 已验证（静态契约） |
 | preStop 命令在运行镜像可用 | `docker run --entrypoint /bin/sh my-shop-app:t204 -c '... sleep ...'`（`test-container-runtime` PASS[4]） | 已验证（本地构建镜像） |
 | server-side dry-run | `kubectl apply --dry-run=server` | 无集群，NOT_VERIFIED |

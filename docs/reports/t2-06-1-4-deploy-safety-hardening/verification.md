@@ -84,12 +84,15 @@ bash scripts/test-deploy-k8s.sh   exit=0   ok test/deployk8s 49.295s
 | 在途写跨接管仍生效（T2-06.1.2 的 harness 用例） | `test/deployk8s/application_inflight_test.go` 的 `TestLockLostDuringApplicationApplyReportsUnknown`（注入 1500ms 延迟 + 在途接管 → `Applied == true`） |
 | 在途写跨接管仍生效（T2-06.1.4 新增的多进程实证） | `test/deployk8s/multiprocess_test.go` 的 `TestMultiprocessPausedRunnerWriteLandsAfterTakeover`（A 在途 apply 在 B 接管并释放锁后仍落地；集成树上实测 `--- PASS (6.37s)`） |
 | fake 按调用语义注入、按真实 RBAC 清单判定 | Agent C 的 `INTERFACE_CONTRACT.md`（FROZEN，v1.2）与 `concurrency_test.go` |
+| A-5 写路径授权在 fake 层闭环 | `test/deployk8s/rbac_write_test.go`（**无 `t.Skip`**）：`TestDeliveredRBACOnlyUpgradeSucceeds` PASS 1.50s、`TestDeliveredRBACOnlyFirstDeploySucceeds` PASS 1.60s、`TestWritePathDeniedByResourceNamesFailsAfterPreflight` PASS 3.60s（本机在 A 的 worktree `4fe15b1` 上定向复跑，exit 0） |
 
 ## 6. NOT_VERIFIED（本工作包相关）
 
 - **真实 Kubernetes API Server / etcd 的并发与 Lease 语义**：环境无集群、无 kubectl，
   所有「并发」结论都来自 fake kubectl（单文件状态 + flock）。
 - **真实 `auth can-i` / RoleBinding 的效果**：文档里的 29 条自检命令没有在真实集群执行过。
+  A-5 的写路径授权只在 **fake** 上闭环（交付清单即可跑通完整发布、`resourceNames` 收紧会
+  fail-closed），真实集群的 RBAC / admission 行为仍未验证。
 - **在途写窗口的真实长度**：fake 里用 1500ms 的 apply 延迟构造窗口；真实集群上的窗口
   取决于网络与 apiserver 负载，未测量。
 - **时钟偏移导致的误接管/误失锁**：需要可控时钟的真实环境；本文只记录方向

@@ -745,8 +745,9 @@ CI 环境下必须额外设置 `DEPLOY_K8S_ALLOW_DOWNGRADE_IN_CI=1`。
 | 3 | `surgecart-deploy-cluster` | `ClusterRole` + `ClusterRoleBinding` | 集群级 | 同一个发布身份 |
 
 `kubectl apply -f manifest/kubernetes/examples/deploy-lock/rbac.yaml` 会按文件顺序
-创建这三组对象；**前提是 `surgecart` 命名空间已存在**（`Role`/`RoleBinding` 是命名空间
-对象，命名空间不存在时 apply 会失败）。所以顺序是：
+创建这三组对象。**硬前提：`surgecart` 命名空间已存在** —— `Role`/`RoleBinding` 是命名空间
+对象，命名空间不存在时那 4 个对象会报 `NotFound`（`ClusterRole`/`ClusterRoleBinding` 仍然
+会成功，于是会出现「集群级权限有了、命名空间级权限没有」的半授权状态）。所以顺序是：
 
 ```bash
 kubectl apply -f manifest/kubernetes/shared/namespace.yaml        # 1) 命名空间先存在
@@ -865,6 +866,7 @@ T2-06.1.3 及更早的示例完全没有这两项，因此「按示例授权 →
 | `renewTime` 锚点（B-1 / B-2） | `TestMultiprocessPreflightDelayKeepsRenewTimeFresh`（预检 16s > 租期 15s：旧实现必然创建即过期）、`TestMultiprocessStaleRenewTimeAtCreateFailsClosed`（`LEASE_ANCHOR_INVALID` + `LEASE_WINDOW … verdict=expired`，退出码 3，零 apply、不改写过期锁的 `renewTime`） | 已验证（脚本语义 + 证据行自证） |
 | 过期锁不得被「续命」（B-3 / B-4） | `TestRecordWriteRefusedWhenLeaseExpired`：租约在服务端过期后，写 COMPLETE 记录被拒绝（退出码 3）、不写 Lease、不改 `renewTime` | 已验证（脚本语义） |
 | 退避预算与实现同源（B-5） | `TestRenewBackoffBudgetIsSingleSourced`：`LOCK_RENEW_BACKOFF_MS` → 实际 sleep → 预算三者一致，且最后一次失败后不再 sleep | 已验证（源码契约） |
+| 写路径强制授权（T2-06.1.4 / A-5） | `test/deployk8s/rbac_write_test.go`（A 交付，**无 `t.Skip`**）：`TestDeliveredRBACOnlyUpgradeSucceeds`（只喂交付清单即可完成升级发布，PASS 1.50s）、`TestDeliveredRBACOnlyFirstDeploySucceeds`（空命名空间首次发布，PASS 1.60s）、`TestWritePathDeniedByResourceNamesFailsAfterPreflight`（预检通过但 `replace` 被 `resourceNames` 拒 → fail-closed，PASS 3.60s） | 已验证（**fake 写路径**）；真实集群 RBAC/admission **NOT_VERIFIED** |
 | 权限契约（F-01 / T2-06.1.4 A-1/A-2） | `test/manifest`：`TestDeliveredRBACMatchesRequiredPermissions`（脚本声明 ⊆ 交付 RBAC，按作用域）、`TestRequiredPermissionsCoversAuditFindings`、`TestRequiredPermissionsCoverBuiltManifests`、`TestScriptKubectlUsageIsDeclared`；`test/deployk8s/rbac_test.go`：`TestEveryRequiredPermissionIsEnforced` 等逐项拒绝 + Forbidden/unknown 区分 | 已验证（静态契约 + 脚本行为） |
 | Pod 查询错误分类（F-07） | `test/deployk8s/podquery_test.go`：空列表/全终态/活动 Pod/403/500/超时/归属不一致 | 已验证（脚本语义） |
 | 权限/业务资源错误分类（T2-06.1.4 / A-3 / AUD-09） | `test/deployk8s/rbac_test.go`：`TestSecretReadForbiddenIsNotMissingSecret`、`TestSecretReadFailureIsNotMissingSecret`、`TestSecretNotFoundIsReportedAsMissing`、`TestNamespaceReadFailureIsNotReportedAsAbsent`、`TestJobsListForbiddenIsNotUnfinishedJob`、`TestJobsListServerErrorIsNotUnfinishedJob`、`TestJobLogsForbiddenIsReported` | 已验证（脚本语义） |
