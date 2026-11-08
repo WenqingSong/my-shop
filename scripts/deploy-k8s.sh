@@ -9,8 +9,9 @@
 # 执行顺序（任一步失败立即非零退出，后续步骤不执行）：
 #   1. 环境预检：kubectl / 集群可达 / 构建两个清单 / 占位符 / 镜像与版本标记一致 /
 #      迁移等待上限与 Job activeDeadlineSeconds 的时间关系
-#   2. 命名空间引导（幂等；锁资源必须落在已存在的命名空间里）
-#   3. 锁权限预检（get / create / update leases）：权限不足在迁移之前失败
+#   2. 权限预检（REQUIRED_PERMISSIONS：集群级 → 命名空间级）+ 命名空间引导：
+#      全部权限判定发生在**第一次写请求之前**；只有命名空间确实不存在时才做幂等创建
+#      （审计 A-1/A-2/A-5：namespaces 是集群级资源，Role 无法授予；权限判定不得晚于写）
 #   4. 获取发布锁 coordination.k8s.io/v1 Lease/surgecart-deploy-lock（原子 create + resourceVersion CAS）
 #      接管已释放/已过期的锁之前，必须核验上一轮关联的 Migration Job（T2-06.1.1 / AUD-01）
 #   5. 锁内复检：Secret 就绪 + 版本降级保护（当前 Deployment 版本 vs 本次目标版本）
@@ -334,11 +335,29 @@ usage() {
   7 迁移生命周期未确认/未终结（fail-closed：拒绝接管、Job 与记录不一致、
     Job 已 Failed 但 Pod 仍在执行、无法确认 Pod 状态）。
 
+所需 RBAC（完整清单见 manifest/kubernetes/examples/deploy-lock/rbac.yaml，
+逐项事实来源是 scripts/deploy-k8s.sh 的 REQUIRED_PERMISSIONS）：
+权限预检在**任何写请求之前**执行；缺少任何一项都以退出码 3 失败，且不发起工作负载变更。
+
+  命名空间级（Role + RoleBinding，命名空间取自 Application 清单）
+    leases.coordination.k8s.io   get / create / update   （读锁 / 原子创建 / PUT+CAS 续租·接管·释放）
+    jobs.batch                   get / list / create / patch（核验上一轮 / 创建本轮迁移 Job）
+    pods                         get / list              （Pod 生命周期门禁）
+    pods/log                     get                     （迁移失败时读 Job 日志）
+    secrets                      get                     （锁内复检 Secret 是否存在）
+    deployments.apps             get / list / create / patch（降级保护 / 汇总 / apply）
+    configmaps                   get / create / patch    （apply Application 清单）
+    services                     get / list / create / patch
+    persistentvolumeclaims       get / create / patch    （apply Application 清单）
+
+  集群级（**必须** ClusterRole + ClusterRoleBinding；Role 无法授予，这是审计 A-1 的根因）
+    namespaces                   get / create            （首次部署引导命名空间）
+    selfsubjectaccessreviews.authorization.k8s.io  create （`kubectl auth can-i` 自身是 SSAR）
+
+  不授予 delete/deletecollection：脚本永不删除 Job / Pod / Lease / Deployment。
+
 前置条件：
   - 已安装 kubectl，且 kubeconfig 指向目标集群；
-  - 执行发布的身份具备 leases 的 get/create/update、jobs 的 get/list、pods 的 get/list
-    权限（见 manifest/kubernetes/examples/deploy-lock/rbac.yaml；权限预检在迁移之前，
-    缺少任何一项都以退出码 3 失败）；
   - 已按 manifest/kubernetes/examples/secrets/ 创建 Secret；
   - 两个 overlay 的镜像版本 / Job 名称后缀 / app.kubernetes.io/version 已替换为同一个
     真实短 SHA，REPLACE_WITH_* 占位符已全部替换；
@@ -501,6 +520,11 @@ JOB_FAILED=""
 JOB_REASON=""
 JOB_MESSAGE=""
 MIGRATION_LIST_ERROR=""
+# MIGRATION_LIST_CLASS：查询失败的分类（forbidden/api/timeout/...），
+# MIGRATION_LIST_ROWS ：列表结果。两者与 MIGRATION_LIST_ERROR 一样**必须**通过全局
+# 变量返回：`rows="$(job_list_migrations)"` 会开子 shell，错误文本与分类都会丢失。
+MIGRATION_LIST_CLASS=""
+MIGRATION_LIST_ROWS=""
 # Pod 读取结果通过全局变量返回（避免命令替换开子 shell 丢掉错误文本）：
 #   JOB_PODS_ROWS / JOB_PODS_ERROR            —— read_job_pods（本轮 Job 的 Pod 快照）
 #   MIGRATION_PODS_ROWS / MIGRATION_PODS_ERROR —— read_migration_pods_for_job / scan_migration_pods
@@ -1020,50 +1044,259 @@ require_lock_owned_server_side() {
 }
 
 # ---------------------------------------------------------------------------
-# 权限契约（T2-06.1.3 / F-01）
+# 权限契约（T2-06.1.4：审计 A-1 / A-2 / A-5 / A-8 / A-9 / D-3）
 #
-# 这张表是「脚本实际需要的 (verb, resource)」的**唯一事实来源**：
-#   - check_lease_permissions 逐项 auth can-i；
-#   - test/manifest 解析它，并与「脚本里真实出现的资源操作」以及
-#     manifest/kubernetes/examples/deploy-lock/rbac.yaml 的授权范围交叉校验。
+# REQUIRED_PERMISSIONS 是「脚本实际需要的 (verb, group, resource, scope)」的
+# **唯一事实来源**，替换 T2-06.1.3 的 LEASE_PERMISSION_CHECKS。旧表只有 7 项
+# （leases get/create/update + jobs get/list + pods get/list），漏掉了
+# namespaces、secrets、deployments、pods/log、configmaps、services、pvc 以及
+# 全部写动词 create/patch —— 按它授权的身份在首次发布时必然失败（审计 A-1/A-2）。
 #
-# 为什么必须做成契约测试：T2-06.1.2 的 RBAC 示例漏了 pods，而脚本在发布前要按
-# component 标签扫描残留迁移 Pod、并按 job-name 读取该 Job 的 Pod。缺失时首次发布
-# 就会在 Pod 门禁处失败 —— 示例看起来「已经授权」，实际不可用。手工看 YAML 不能
-# 证明完整性，所以要让测试比对三方。
+# 稳定格式（5 个竖线分隔字段，禁止在字段内使用 "|"）：
 #
-# 资源名的写法即 `kubectl auth can-i` 接受的写法（非 core group 需要带 group）。
+#   <verb>|<group>|<resource>|<scope>|<call site>
+#
+#   verb     ：get / list / create / patch / update
+#              （`kubectl replace` 才是 update；RBAC 里不存在 apply 这个 verb）
+#   group    ：core（core/v1，RBAC 清单里写作 ""）或 API group（batch/apps/...）
+#   resource ：资源名；子资源用 "/"，例如 pods/log
+#   scope    ：namespace（可以写在 Role 里）| cluster（必须是 ClusterRole，
+#              写进 Role 完全无效 —— 这正是审计 A-1 的根因）
+#   call site：调用点（函数名；Lnnnn 只是定位提示，会随改动漂移，函数名才是契约）
+#
+# 谁在读这张表：
+#   - check_required_permissions（本文件）：逐项 `kubectl auth can-i` 预检；
+#   - test/manifest/rbac_test.go：与 RBAC 清单做**双向**比对
+#     （脚本用到的必须被授权；被授权但脚本不用的报「过度授权」）；
+#   - test/deployk8s/rbac_test.go：逐条删掉一项 → 发布必须 fail-closed；
+#   - docs/development/kubernetes.md（Agent D）：授权说明。
+#
+# 关于 `apply`：kubectl apply = 「GET 读现状 → 不存在则 CREATE、存在则 PATCH」，
+# 因此每个被 apply 的资源都需要 get + create + patch 三个动词。
+#
+# **delete 一个都没有**：脚本永不删除 Job/Pod/Lease/Deployment（删除必须人工执行）。
 # ---------------------------------------------------------------------------
-LEASE_PERMISSION_CHECKS=(
-  # 发布锁：读取（get）/ 首次获取（create）/ 续租·接管·释放·写迁移记录（update=PUT+CAS）
-  "get leases.coordination.k8s.io"
-  "create leases.coordination.k8s.io"
-  "update leases.coordination.k8s.io"
-  # 迁移 Job 生命周期：按名称核验 + 列表扫描「是否存在未终结的迁移」
-  "get jobs.batch"
-  "list jobs.batch"
-  # 迁移 Pod 生命周期（AUD-D3 / F-01）：按 job-name 读取 + 按 component 标签扫描残留 Pod
-  "get pods"
-  "list pods"
+REQUIRED_PERMISSIONS=(
+  # --- 发布锁 leases（coordination.k8s.io）--------------------------------
+  # lease_read：读 holderIdentity / renewTime / resourceVersion / 迁移记录注解
+  "get|coordination.k8s.io|leases|namespace|lease_read@L755"
+  # lease_create：首次获取锁（原子 create；AlreadyExists 表示已被占用）
+  "create|coordination.k8s.io|leases|namespace|lease_create@L789"
+  # lease_takeover / lease_renew / lease_release / migration_record_write：
+  # `kubectl replace` = PUT + metadata.resourceVersion 做 CAS
+  "update|coordination.k8s.io|leases|namespace|lease_takeover,lease_renew,lease_release,migration_record_write@L805,L847,L904,L1968"
+
+  # --- 迁移 Job（batch）--------------------------------------------------
+  # job_probe：按名称读取 Job 条件 / uid / deletionTimestamp
+  "get|batch|jobs|namespace|job_probe@L2006"
+  # job_list_migrations：按 MIGRATION_JOB_SELECTOR 列出迁移 Job
+  # （接管核验 verify_previous_migration 与 begin_migration 都依赖它，审计 D-3）
+  "list|batch|jobs|namespace|job_list_migrations@L2042"
+  # begin_migration：`kubectl apply -f migration.yaml` 创建带版本后缀的新 Job
+  "create|batch|jobs|namespace|begin_migration/apply@L2306"
+  # 同一个 apply：Job 已存在时走 PATCH（kubectl apply 的第二条分支）
+  "patch|batch|jobs|namespace|begin_migration/apply@L2306"
+
+  # --- 迁移 Pod 与日志（core/v1）-----------------------------------------
+  # read_migration_pods_for_job / read_job_pods：按 job-name 读 Pod（phase / 归属）
+  "get|core|pods|namespace|read_migration_pods_for_job,read_job_pods@L1624,L2555"
+  # scan_migration_pods / verify_release：按 component 标签与发布 selector 列表扫描
+  "list|core|pods|namespace|scan_migration_pods,verify_release@L1645,L3040"
+  # 失败诊断：`kubectl logs job/<name>`（审计 A-8：以前失败被 `|| true` 吞掉）
+  "get|core|pods/log|namespace|print_job_logs@L1261"
+
+  # --- 前置条件读取（core/v1 / apps）-------------------------------------
+  # 锁内 Secret 复检（审计 A-3：以前把 403 报成「缺少 Secret」）
+  "get|core|secrets|namespace|require_secrets@L2705"
+  # read_deployment_state：读线上 Deployment 的镜像与版本标记（降级保护的事实来源）
+  "get|apps|deployments|namespace|read_deployment_state@L2509"
+  # verify_release 之后的只读汇总：`get deployment,service,pod -l ...`
+  "list|apps|deployments|namespace|release_summary@L3113"
+
+  # --- Application 清单 apply 的资源 -------------------------------------
+  # `kubectl apply -f application.yaml` 覆盖 Deployment / Service / ConfigMap /
+  # PersistentVolumeClaim：每条都需要 get（读现状）+ create + patch
+  "create|apps|deployments|namespace|apply_application@L2926"
+  "patch|apps|deployments|namespace|apply_application@L2926"
+  "get|core|configmaps|namespace|apply_application@L2926"
+  "create|core|configmaps|namespace|apply_application@L2926"
+  "patch|core|configmaps|namespace|apply_application@L2926"
+  "get|core|services|namespace|apply_application@L2926"
+  "create|core|services|namespace|apply_application@L2926"
+  "patch|core|services|namespace|apply_application@L2926"
+  "list|core|services|namespace|release_summary@L3113"
+  "get|core|persistentvolumeclaims|namespace|apply_application@L2926"
+  "create|core|persistentvolumeclaims|namespace|apply_application@L2926"
+  "patch|core|persistentvolumeclaims|namespace|apply_application@L2926"
+
+  # --- 集群级权限（只能由 ClusterRole + ClusterRoleBinding 授予）---------
+  # namespace_status：`kubectl get namespace <ns>` 判断命名空间是否存在
+  "get|core|namespaces|cluster|namespace_status@L1390"
+  # ensure_namespace：首次部署时 `kubectl apply -f shared/namespace.yaml`
+  "create|core|namespaces|cluster|ensure_namespace@L1414"
+  # 权限预检自身：`kubectl auth can-i` 就是对 selfsubjectaccessreviews 的 create。
+  # 内置 system:basic-user 通常已授予，但交付的清单必须显式声明，否则审计 A-9
+  # 无法闭环：身份缺少它时预检只能报「无法确认」，原因却指向不到 SSAR。
+  "create|authorization.k8s.io|selfsubjectaccessreviews|cluster|permission_probe@L1293,L1295"
 )
 
-# permission_probe <verb> <resource>
+# 预检状态（由 probe_permission_scope / permission_probe 维护）
+PERMISSION_DENIED_COUNT=0
+PERMISSION_UNKNOWN_COUNT=0
+PERMISSION_PROBED=0
+PERMISSION_DENIED_ENTRIES=()
+PERMISSION_UNKNOWN_ENTRIES=()
+
+# 命名空间存在性判定结果（namespace_status 维护）
+NAMESPACE_EXISTS=0
+NAMESPACE_PROBE_ERROR=""
+NAMESPACE_PROBE_CLASS=""
+NAMESPACE_CREATED=0
+
+# permission_ref <group> <resource> → `leases.coordination.k8s.io` / `pods` / `pods/log`
+permission_ref() {
+  local group="$1" resource="$2"
+  if [[ -z "${group}" || "${group}" == "core" ]]; then
+    printf '%s' "${resource}"
+  else
+    printf '%s.%s' "${resource}" "${group}"
+  fi
+}
+
+# 作用域的中文描述：错误信息必须让读者知道「缺的是命名空间级还是集群级」。
+permission_scope_label() {
+  case "$1" in
+    cluster) printf '集群级（cluster-scoped，Role 无法授予）' ;;
+    *)       printf '命名空间 %s' "${NAMESPACE}" ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# classify_api_error <stderr 文件> [resource] [name]
+#
+# 输出（全局变量）：
+#   API_ERROR_CLASS ∈ forbidden | notfound | api | timeout | unknown
+#   API_ERROR_TEXT  ：原始 stderr 压成单行（**必须**出现在错误信息里，不得丢弃）
+#
+# 四类语义冻结：
+#   forbidden : API Server 明确拒绝（403）。**不等于**「对象不存在」。
+#   notfound  : 严格匹配 `<resource> "<name>" not found`，只表示对象确实不存在。
+#   api       : API Server 自身故障（5xx / InternalError / ServiceUnavailable）。
+#   timeout   : 客户端超时 / 网络不可达 / 连接被拒绝 —— 请求可能已生效。
+#   unknown   : 以上都不是（例如读 Job 时收到
+#               `Error from server (NotFound): namespaces "x" not found`
+#               —— 这只能说明命名空间不见了，**不能**据此断言 Job 不存在）。
+#
+# 冻结规则：不允许把「查询失败」说成「不存在」，也不允许把「不存在」说成「无权限」。
+# ---------------------------------------------------------------------------
+classify_api_error() {
+  local file="$1" resource="${2:-}" name="${3:-}" text=""
+  API_ERROR_CLASS="unknown"
+  API_ERROR_TEXT=""
+  if [[ -f "${file}" ]]; then
+    text="$(tr '\n' ' ' < "${file}" 2>/dev/null || true)"
+  fi
+  # 去掉首尾空白（tr 之后仍可能带空格）
+  text="${text#"${text%%[![:space:]]*}"}"
+  text="${text%"${text##*[![:space:]]}"}"
+  API_ERROR_TEXT="${text}"
+  [[ -n "${text}" ]] || return 0
+
+  # 1) 明确 Forbidden（403）
+  if [[ "${text}" == *"(Forbidden)"* || "${text}" == *"forbidden:"* ]]; then
+    API_ERROR_CLASS="forbidden"
+    return 0
+  fi
+  # 2) 严格 NotFound：必须同时匹配资源与名称（AUD-09）
+  if [[ -n "${resource}" && -n "${name}" ]]; then
+    if is_not_found_for "${file}" "${resource}" "${name}"; then
+      API_ERROR_CLASS="notfound"
+      return 0
+    fi
+  fi
+  # 3) 网络 / 超时
+  case "${text}" in
+    *"Unable to connect to the server"* | *"connection refused"* | \
+      *"Client.Timeout exceeded"* | *"Timeout exceeded while awaiting"* | \
+      *"i/o timeout"* | *"TLS handshake timeout"* | *"no such host"* | \
+      *"connection reset by peer"* | *"request canceled"* | *"context deadline exceeded"*)
+      API_ERROR_CLASS="timeout"
+      return 0
+      ;;
+  esac
+  # 4) API Server 故障（5xx 等）
+  case "${text}" in
+    *"(InternalError)"* | *"(ServiceUnavailable)"* | *"(ServerTimeout)"* | \
+      *"(TooManyRequests)"* | *"(UnexpectedServerResponse)"* | \
+      *"Internal error occurred"* | *"the server is currently unable to handle the request"*)
+      API_ERROR_CLASS="api"
+      return 0
+      ;;
+  esac
+  return 0
+}
+
+# api_error_class_label <class>：错误信息里必须出现分类，否则排查方向会跑偏。
+api_error_class_label() {
+  case "$1" in
+    forbidden) printf 'Forbidden（权限不足：API Server 明确拒绝）' ;;
+    notfound)  printf 'NotFound（对象确实不存在）' ;;
+    api)       printf 'API 故障（服务端 5xx，状态未知）' ;;
+    timeout)   printf '网络超时/不可达（状态未知：请求可能已生效）' ;;
+    *)         printf '无法分类的错误（状态未知）' ;;
+  esac
+}
+
+# print_job_logs <job> [tail]
+#
+# 失败诊断：读取迁移 Pod 的日志。**失败必须被报告**（审计 A-8：旧实现用
+# `... || true` 静默吞掉 stderr，运维在「迁移失败」时看不到任何原因）：
+#   - Forbidden → 发布身份缺少 pods/log 的 get 权限（诊断能力缺失，**不等于**没有日志）
+#   - NotFound  → Job/Pod 可能已被 ttlSecondsAfterFinished 清理
+#   - 其余      → 输出分类 + 原始 stderr
+# 该函数只影响可观测性，不改变退出码（调用点已在失败分支里）。
+print_job_logs() {
+  local job="$1" tail_lines="${2:-200}" err rc=0
+  err="${TMP_DIR}/job-logs.err"
+  "${KUBECTL[@]}" -n "${NAMESPACE}" logs "job/${job}" --tail="${tail_lines}" --all-containers=true >&2 2>"${err}" || rc=$?
+  if (( rc == 0 )); then
+    return 0
+  fi
+  classify_api_error "${err}" "pods/log" ""
+  if [[ "${API_ERROR_CLASS}" == "forbidden" ]]; then
+    log_error "  无法读取 Job/${job} 的日志（Forbidden：发布身份缺少 pods/log 的 get 权限，见 manifest/kubernetes/examples/deploy-lock/rbac.yaml）。这**不等于**「Job 没有日志」。stderr: ${API_ERROR_TEXT:-无输出}"
+  elif [[ "${API_ERROR_TEXT}" == *"(NotFound)"* ]]; then
+    log_error "  无法读取 Job/${job} 的日志（NotFound：Job/Pod 可能已被 ttlSecondsAfterFinished 清理）。stderr: ${API_ERROR_TEXT:-无输出}"
+  else
+    log_error "  无法读取 Job/${job} 的日志（$(api_error_class_label "${API_ERROR_CLASS}")）：${API_ERROR_TEXT:-无输出}"
+  fi
+  return 0
+}
+
+# permission_probe <verb> <resource-ref> <scope>
 #
 # 结果写入 PERMISSION_STATE：allowed | denied | unknown。
 #   - allowed：`auth can-i` 返回 "yes" + 0
 #   - denied ：`auth can-i` 返回 "no"  + 非 0（明确的 Forbidden / 无绑定）
-#   - unknown：其他情况（SubjectAccessReview 失败、HTTP 5xx、超时、kubectl 报错）
+#   - unknown：其他情况（SSAR 无法完成、HTTP 5xx、超时、kubectl 报错）
 #
 # 为什么必须区分 denied 与 unknown：两者都要 fail-closed，但把「API 不可用」说成
-# 「权限被拒绝」会把排查方向引到错误的 RBAC 绑定上（审计 F-01 的同类问题）。
+# 「权限被拒绝」会把排查方向引到错误的 RBAC 绑定上（审计 F-01 / A-9 的同类问题）。
 permission_probe() {
-  local verb="$1" resource="$2" out err rc=0
+  local verb="$1" ref="$2" scope="$3" out err rc=0
   err="${TMP_DIR}/auth-can-i.err"
   PERMISSION_STATE="unknown"
   PERMISSION_DETAIL=""
-  out="$("${KUBECTL[@]}" auth can-i "${verb}" "${resource}" -n "${NAMESPACE}" 2>"${err}")" || rc=$?
+  if [[ "${scope}" == "cluster" ]]; then
+    # 集群级资源不能带 -n。SelfSubjectAccessReview 只做授权判定，
+    # 不校验命名空间是否存在 —— 这是「预检可以先于命名空间创建」的依据。
+    out="$("${KUBECTL[@]}" auth can-i "${verb}" "${ref}" 2>"${err}")" || rc=$?
+  else
+    out="$("${KUBECTL[@]}" auth can-i "${verb}" "${ref}" -n "${NAMESPACE}" 2>"${err}")" || rc=$?
+  fi
   out="$(printf '%s' "${out}" | tr -d '\r' | tr '\n' ' ')"
-  out="${out# }"; out="${out% }"
+  out="${out# }"
+  out="${out% }"
   if (( rc == 0 )) && [[ "${out}" == yes* ]]; then
     PERMISSION_STATE="allowed"
     return 0
@@ -1077,40 +1310,205 @@ permission_probe() {
   return 0
 }
 
-# 权限预检必须在迁移之前：没有 leases 权限就无法保证互斥，不能「先迁移再说」；
-# 没有 jobs/pods 读取权限就无法证明「没有迁移在运行」，同样不允许先迁移。
-check_lease_permissions() {
-  local entry verb resource denied=0 unknown=0
-  for entry in "${LEASE_PERMISSION_CHECKS[@]}"; do
-    verb="${entry%% *}"
-    resource="${entry#* }"
-    permission_probe "${verb}" "${resource}"
+# probe_permission_scope <scope> [entry...]
+#
+# 逐项预检并**立即**输出每一项的判定（不留到最后统一报，避免只报第一条）。
+# 省略 entry 时检查该作用域在 REQUIRED_PERMISSIONS 里的全部条目。
+probe_permission_scope() {
+  local scope="$1" entry verb group resource entry_scope site ref
+  shift || true
+  PERMISSION_DENIED_COUNT=0
+  PERMISSION_UNKNOWN_COUNT=0
+  PERMISSION_PROBED=0
+  PERMISSION_DENIED_ENTRIES=()
+  PERMISSION_UNKNOWN_ENTRIES=()
+  local entries=("$@")
+  if (( ${#entries[@]} == 0 )); then
+    for entry in "${REQUIRED_PERMISSIONS[@]}"; do
+      IFS='|' read -r verb group resource entry_scope site <<< "${entry}"
+      if [[ "${entry_scope}" == "${scope}" ]]; then
+        entries+=("${entry}")
+      fi
+    done
+  fi
+  for entry in "${entries[@]}"; do
+    IFS='|' read -r verb group resource entry_scope site <<< "${entry}"
+    ref="$(permission_ref "${group}" "${resource}")"
+    permission_probe "${verb}" "${ref}" "${entry_scope}"
+    PERMISSION_PROBED=$(( PERMISSION_PROBED + 1 ))
     case "${PERMISSION_STATE}" in
       allowed)
-        continue
         ;;
       denied)
-        denied=1
-        log_error "当前身份在命名空间 ${NAMESPACE} 缺少 ${resource} 的 ${verb} 权限（Forbidden：auth can-i 明确返回 no）。"
+        PERMISSION_DENIED_COUNT=$(( PERMISSION_DENIED_COUNT + 1 ))
+        PERMISSION_DENIED_ENTRIES+=("${entry}")
+        log_error "当前身份在$(permission_scope_label "${entry_scope}")缺少 ${ref} 的 ${verb} 权限（Forbidden：auth can-i 明确返回 no；调用点 ${site}）。"
         ;;
       *)
-        unknown=1
-        log_error "无法确认当前身份在命名空间 ${NAMESPACE} 是否有 ${resource} 的 ${verb} 权限（查询失败，**不是**「被拒绝」）：${PERMISSION_DETAIL}"
+        PERMISSION_UNKNOWN_COUNT=$(( PERMISSION_UNKNOWN_COUNT + 1 ))
+        PERMISSION_UNKNOWN_ENTRIES+=("${entry}")
+        log_error "无法确认当前身份在$(permission_scope_label "${entry_scope}")是否有 ${ref} 的 ${verb} 权限（查询失败，**不是**「被拒绝」）：${PERMISSION_DETAIL:-未知错误}"
+        if [[ "${resource}" == "selfsubjectaccessreviews" ]]; then
+          log_error "  权限预检本身就是一次 SelfSubjectAccessReview：无法确认时，最常见的原因是当前身份缺少 create selfsubjectaccessreviews.authorization.k8s.io（内置 system:basic-user 通常已授予）。"
+        fi
         ;;
     esac
   done
-  if (( denied )); then
-    log_error "权限不足，无法建立发布互斥或核验迁移生命周期：本次发布不执行任何资源变更。"
+}
+
+# report_permission_failures <phase>：输出结论并返回 1（调用方退出 3）。
+report_permission_failures() {
+  local phase="$1"
+  if (( PERMISSION_DENIED_COUNT > 0 )); then
+    if [[ "${phase}" == "cluster" ]]; then
+      log_error "权限不足：无法读取/创建目标命名空间 ${NAMESPACE}（缺少集群级权限）。本次发布不执行任何工作负载变更。"
+    else
+      log_error "权限不足，无法建立发布互斥或核验迁移生命周期：本次发布不执行任何资源变更。"
+    fi
     log_error "授权示例：kubectl apply -f manifest/kubernetes/examples/deploy-lock/rbac.yaml"
     log_error "自检：${KUBECTL[*]} auth can-i --list -n ${NAMESPACE}"
-    exit 3
+    return 1
   fi
-  if (( unknown )); then
+  if (( PERMISSION_UNKNOWN_COUNT > 0 )); then
     log_error "权限预检无法完成（auth can-i 查询失败）：不能假定「有权限」，按 fail-closed 处理。"
     log_error "自检：${KUBECTL[*]} auth can-i get leases.coordination.k8s.io -n ${NAMESPACE}"
+    return 1
+  fi
+  return 0
+}
+
+# 严格判定命名空间是否存在（AUD-09 / A-1）。
+#
+# 旧实现 `if ! kubectl get namespace ...; then 当作不存在` 把 403 / 5xx / 超时
+# 全部当成「不存在」，随后 apply → 首次 least-privilege 部署必现 403。
+# 现在：只有严格 NotFound 才是「不存在」，其余一律返回非零（调用方 fail-closed）。
+namespace_status() {
+  local err="${TMP_DIR}/get-namespace.err" out
+  NAMESPACE_EXISTS=0
+  NAMESPACE_PROBE_ERROR=""
+  NAMESPACE_PROBE_CLASS=""
+  if out="$("${KUBECTL[@]}" get namespace "${NAMESPACE}" 2>"${err}")"; then
+    NAMESPACE_EXISTS=1
+    return 0
+  fi
+  classify_api_error "${err}" "namespaces" "${NAMESPACE}"
+  NAMESPACE_PROBE_CLASS="${API_ERROR_CLASS}"
+  if [[ "${API_ERROR_CLASS}" == "notfound" ]]; then
+    NAMESPACE_EXISTS=0
+    return 0
+  fi
+  NAMESPACE_PROBE_ERROR="$(api_error_class_label "${API_ERROR_CLASS}")：${API_ERROR_TEXT:-无输出}"
+  return 1
+}
+
+# 幂等地创建命名空间。
+#
+# 这是**唯一**允许发生在完整命名空间级预检之前的写操作，理由：
+#   - 它不触碰锁、迁移 Job、Deployment 或任何工作负载，只创建一个空命名空间；
+#   - 只有在「命名空间不存在 + 某些 SSAR 无法完成」时才会走到这里（见
+#     check_required_permissions 阶段 3 的注释），之后会立即复检，失败即终止；
+#   - 反过来（先建后查）会让「缺 namespaces create 权限」在执行到一半才暴露。
+ensure_namespace() {
+  local err="${TMP_DIR}/apply-namespace.err"
+  log_info "创建命名空间 ${NAMESPACE}（按 ${NAMESPACE_MANIFEST}；幂等，不触碰锁/迁移/应用）"
+  if ! "${KUBECTL[@]}" apply -f "${ROOT_DIR}/${NAMESPACE_MANIFEST}" >/dev/null 2>"${err}"; then
+    classify_api_error "${err}" "namespaces" "${NAMESPACE}"
+    case "${API_ERROR_CLASS}" in
+      forbidden)
+        log_error "创建命名空间 ${NAMESPACE} 被拒绝（Forbidden：缺少 namespaces 的 create 权限）。namespaces 是集群级资源，Role 无法授予，必须用 ClusterRole + ClusterRoleBinding（审计 A-1）。stderr: ${API_ERROR_TEXT:-无输出}"
+        ;;
+      notfound)
+        log_error "创建命名空间 ${NAMESPACE} 失败（NotFound：${NAMESPACE_MANIFEST} 或其中的对象缺失）。stderr: ${API_ERROR_TEXT:-无输出}"
+        ;;
+      *)
+        log_error "创建命名空间 ${NAMESPACE} 失败（$(api_error_class_label "${API_ERROR_CLASS}")）：${API_ERROR_TEXT:-无输出}"
+        ;;
+    esac
     exit 3
   fi
-  log_info "发布锁权限就绪（leases: get/create/update；jobs: get/list；pods: get/list @ ${NAMESPACE}）"
+  if ! namespace_status; then
+    log_error "命名空间 ${NAMESPACE} 创建后仍然无法确认是否存在（${NAMESPACE_PROBE_ERROR}）：终止发布。"
+    exit 3
+  fi
+  if (( NAMESPACE_EXISTS == 0 )); then
+    log_error "命名空间 ${NAMESPACE} 的 apply 返回成功，但对象仍然不可见：拒绝继续（应用结果不可信）。"
+    exit 3
+  fi
+  NAMESPACE_CREATED=1
+}
+
+# ---------------------------------------------------------------------------
+# check_required_permissions：权限预检 + 命名空间引导（顺序是整个工作包的关键）
+#
+# 不变量：**所有权限判定都发生在第一次工作负载写请求之前**。
+# 真实调用顺序：
+#   阶段 1  集群级预检（namespaces get/create、selfsubjectaccessreviews create）
+#           —— 纯读，不需要命名空间存在，不写任何资源；
+#   阶段 2  命名空间存在性判定（读；严格分类，403/5xx/超时 ≠ 不存在）；
+#   阶段 3  命名空间级预检（leases/jobs/pods/pods-log/secrets/deployments/
+#           configmaps/services/pvc）—— 仍然是纯读，发生在任何写之前；
+#   阶段 4  命名空间引导（只在确实不存在时创建；幂等，不触碰锁/迁移/应用）；
+#   阶段 5  （调用方）获取发布锁 → 之后才是迁移与应用。
+#
+# 为什么阶段 3 在阶段 4 之前：SSAR 只做授权判定、不校验命名空间是否存在，因此
+# 首次部署也能在创建命名空间之前拿到全部判定结果。只有一种情况会退回到
+# 「先建空命名空间再复检」：某个授权器（webhook / 需命名空间已存在的实现）
+# 让 SSAR 无法完成（unknown）。那时只复检 unknown 的条目，且一旦复检仍失败就
+# 立即终止 —— 代价是留下一个空命名空间，换来「绝不带着未知权限进入锁/迁移」。
+#
+# 这就是 fail-closed 的含义：宁可留下一个空命名空间，也不在权限未知时碰锁。
+# ---------------------------------------------------------------------------
+check_required_permissions() {
+  local phase_unknown=()
+
+  # ---- 阶段 1：集群级权限（任何写操作之前）----
+  probe_permission_scope cluster
+  if (( PERMISSION_DENIED_COUNT > 0 || PERMISSION_UNKNOWN_COUNT > 0 )); then
+    report_permission_failures cluster || true
+    exit 3
+  fi
+
+  # ---- 阶段 2：命名空间是否存在（严格分类）----
+  if ! namespace_status; then
+    if [[ "${NAMESPACE_PROBE_CLASS}" == "forbidden" ]]; then
+      log_error "无权读取命名空间 ${NAMESPACE}（Forbidden）：发布身份需要集群级 namespaces 的 get 权限（Role 无法授予）。**这不是「命名空间不存在」**，不能据此去 apply 命名空间（审计 A-1/A-2）。stderr: ${API_ERROR_TEXT:-无输出}"
+    else
+      log_error "无法确认命名空间 ${NAMESPACE} 是否存在（${NAMESPACE_PROBE_ERROR}）：**这不是「命名空间不存在」**，按 fail-closed 处理，本次发布不执行任何变更。"
+    fi
+    exit 3
+  fi
+
+  # ---- 阶段 3：命名空间级权限（仍然没有任何写操作）----
+  probe_permission_scope namespace
+  if (( PERMISSION_DENIED_COUNT > 0 )); then
+    report_permission_failures namespace || true
+    exit 3
+  fi
+
+  if (( PERMISSION_UNKNOWN_COUNT > 0 )); then
+    phase_unknown=("${PERMISSION_UNKNOWN_ENTRIES[@]}")
+    if (( NAMESPACE_EXISTS )); then
+      log_error "命名空间 ${NAMESPACE} 已存在，但仍有 ${#phase_unknown[@]} 项权限无法确认：不能假定「有权限」，按 fail-closed 处理。"
+      report_permission_failures namespace || true
+      exit 3
+    fi
+    log_warn "命名空间 ${NAMESPACE} 尚不存在，且有 ${#phase_unknown[@]} 项权限无法确认（SSAR 可能需要命名空间已存在）：先创建空命名空间，再复检这些条目。"
+    ensure_namespace
+    probe_permission_scope namespace "${phase_unknown[@]}"
+    if (( PERMISSION_DENIED_COUNT > 0 || PERMISSION_UNKNOWN_COUNT > 0 )); then
+      report_permission_failures namespace || true
+      exit 3
+    fi
+    log_info "权限预检完成（命名空间创建后复检 ${PERMISSION_PROBED} 项，全部通过）"
+    return 0
+  fi
+
+  # ---- 阶段 4：命名空间引导（预检全部通过之后；幂等）----
+  if (( NAMESPACE_EXISTS == 0 )); then
+    ensure_namespace
+  fi
+
+  log_info "权限预检通过（${#REQUIRED_PERMISSIONS[@]} 项）：leases/jobs/pods/pods-log/secrets/deployments/configmaps/services/pvc @ ${NAMESPACE}；namespaces/selfsubjectaccessreviews @ 集群级；本次发布尚未发起任何工作负载写请求"
 }
 
 lock_is_free() {
@@ -1632,28 +2030,49 @@ job_probe() {
 }
 
 # 列出命名空间内所有迁移 Job：每行 name~uid~deletionTimestamp~Complete~Failed。
+#
+# 结果通过全局变量 MIGRATION_LIST_ROWS 返回，**不要**写成 `rows="$(job_list_migrations)"`：
+# 命令替换会开子 shell，函数里设置的 MIGRATION_LIST_ERROR / MIGRATION_LIST_CLASS 会丢失，
+# 错误信息退化成「未知错误」——那样「403 还是 500」就无法体现在输出里（审计 D-3）。
 job_list_migrations() {
   local err="${TMP_DIR}/jobs-list.err" out
+  MIGRATION_LIST_ROWS=""
   MIGRATION_LIST_ERROR=""
+  MIGRATION_LIST_CLASS=""
   if ! out="$("${KUBECTL[@]}" -n "${NAMESPACE}" get jobs -l "${MIGRATION_JOB_SELECTOR}" \
     -o "go-template=${JOBS_STATE_TEMPLATE}" 2>"${err}")"; then
-    MIGRATION_LIST_ERROR="$(tr '\n' ' ' < "${err}" 2>/dev/null || true)"
+    # 审计 D-3：查询失败必须保留 stderr 并分类，否则调用方会把「读不到」说成
+    # 「存在未终结的 Job」（或反过来当成「没有 Job」）。
+    classify_api_error "${err}" "jobs" ""
+    MIGRATION_LIST_CLASS="${API_ERROR_CLASS}"
+    MIGRATION_LIST_ERROR="${API_ERROR_TEXT:-未知错误}"
     return 1
   fi
-  strip_template_noise "${out}"
+  MIGRATION_LIST_ROWS="$(strip_template_noise "${out}")"
 }
 
-# 扫描「没有任何未终结的迁移 Job」。返回 0 = 干净，1 = 存在/无法确认（fail-closed）。
+# 扫描「没有任何未终结的迁移 Job」。
+#   返回 0 = 干净（查询成功且没有未终结 Job）
+#   返回 1 = **确实存在**未终结的迁移 Job（观察到的对象，不是推断）
+#   返回 2 = **无法确认**（查询失败：Forbidden / 5xx / 超时），fail-closed
+#
+# 三态必须分开（审计 D-3）：把 2 说成 1 是在描述一个没有被观测到的事实，
+# 会把排查方向从「权限/网络」误导到「有一个卡住的 Job」。
 #
 # 这是注解记录之外的第二道防线：即使上一轮 Runner 来不及写注解（升级前的老版本、
 # 手工 kubectl apply），只要集群里还有未终结的迁移 Job，就不允许开始新一轮迁移。
 scan_active_migrations() {
   local rows line name uid deleting complete failed found=0
-  if ! rows="$(job_list_migrations)"; then
-    log_error "无法列出命名空间 ${NAMESPACE} 的迁移 Job（${MIGRATION_LIST_ERROR:-未知错误}）："
-    log_error "  不能证明没有迁移正在执行，按 fail-closed 处理。"
-    return 1
+  if ! job_list_migrations; then
+    log_error "无法列出命名空间 ${NAMESPACE} 的迁移 Job（分类：$(api_error_class_label "${MIGRATION_LIST_CLASS}")）：${MIGRATION_LIST_ERROR:-未知错误}"
+    if [[ "${MIGRATION_LIST_CLASS}" == "forbidden" ]]; then
+      log_error "  这是**权限不足**（jobs 的 list 缺失）：**不是**「存在未终结的 Job」，**也不是**「没有 Job」。"
+    else
+      log_error "  这是**查询失败**：不能证明没有迁移正在执行，也不能证明存在迁移。按 fail-closed 处理。"
+    fi
+    return 2
   fi
+  rows="${MIGRATION_LIST_ROWS}"
   while IFS= read -r line; do
     [[ -n "${line}" ]] || continue
     IFS='~' read -r name uid deleting complete failed <<< "${line}"
@@ -1849,12 +2268,17 @@ await_job_object() {
 
 # 迁移开始：先记录「预期 Job 名」，再 apply，再用真实 UID 回写（§2.3 的固定顺序）。
 begin_migration() {
-  local pod_scan_rc=0
+  local pod_scan_rc=0 job_scan_rc=0
   require_lock_owned_server_side
 
   log_info "迁移前置检查：确认没有未终结的迁移 Job / Pod"
-  if ! scan_active_migrations; then
-    die 7 "存在未终结的迁移 Job：拒绝开始新一轮迁移（fail-closed）。排查：${KUBECTL[*]} -n ${NAMESPACE} get jobs -l ${MIGRATION_JOB_SELECTOR} -o wide"
+  scan_active_migrations || job_scan_rc=$?
+  if (( job_scan_rc == 1 )); then
+    die 7 "**确实存在**未终结的迁移 Job：拒绝开始新一轮迁移（fail-closed）。排查：${KUBECTL[*]} -n ${NAMESPACE} get jobs -l ${MIGRATION_JOB_SELECTOR} -o wide"
+  fi
+  if (( job_scan_rc != 0 )); then
+    # 审计 D-3：查询失败（Forbidden/5xx/超时）**不能**说成「存在未终结的 Job」。
+    die 7 "**无法确认**迁移 Job 状态（查询失败：$(api_error_class_label "${MIGRATION_LIST_CLASS}")：${MIGRATION_LIST_ERROR:-未知错误}）：拒绝开始新一轮迁移（fail-closed）。先修权限/网络，不要当作「没有 Job」。排查：${KUBECTL[*]} -n ${NAMESPACE} get jobs -l ${MIGRATION_JOB_SELECTOR} -o wide"
   fi
   # F-07：这里同样必须区分「确实有活动 Pod」与「无法确认」——两者的处置不同
   # （前者等待 Pod 结束，后者先修权限/网络），但都不得开始新一轮迁移。
@@ -2229,23 +2653,19 @@ fi
 log_info "目标命名空间: ${NAMESPACE}；镜像版本: ${IMAGE_TAG}；迁移 Job: ${JOB_NAME}"
 
 # ---------------------------------------------------------------------------
-# 2. 命名空间引导（锁之前，且只做幂等操作）
+# 2. 权限预检 + 命名空间引导（T2-06.1.4：预检前移到**任何写请求之前**）
 #
-# 首次部署时命名空间还不存在，而锁资源必须落在命名空间里。这里的顺序是：
-#   建命名空间（幂等）→ 锁权限预检 → 获取锁 → 之后才是迁移与应用。
-# 命名空间创建本身不是「发布变更」：它幂等、不改动任何工作负载，且是锁得以存在的前提。
-# 绝不因为「锁资源还不存在」就跳过锁直接部署。
+# 旧顺序（T2-06.1.3）是「get namespace → 失败就当不存在 → apply 命名空间 →
+# check_lease_permissions」，两个缺陷：
+#   A-1/A-2/D-9：`get namespace` 的任何失败（403/5xx/超时）都被当成「不存在」，
+#     接着 apply，首次 least-privilege 部署必现 403；
+#   A-5：权限预检晚于一次真实的写请求，缺权限时已经动过集群。
+#
+# 现在由 check_required_permissions 负责全部顺序（集群级预检 → 命名空间判定 →
+# 命名空间级预检 → 只有确实不存在才创建），细节与 fail-closed 依据见该函数注释。
+# 命名空间创建仍然只做幂等 apply，不改动任何工作负载；锁在预检全部通过之后才获取。
 # ---------------------------------------------------------------------------
-if ! "${KUBECTL[@]}" get namespace "${NAMESPACE}" >/dev/null 2>&1; then
-  log_info "命名空间 ${NAMESPACE} 不存在，按 ${NAMESPACE_MANIFEST} 创建"
-  "${KUBECTL[@]}" apply -f "${ROOT_DIR}/${NAMESPACE_MANIFEST}" >/dev/null \
-    || die "创建命名空间 ${NAMESPACE} 失败"
-fi
-
-# ---------------------------------------------------------------------------
-# 3. 锁权限预检（必须在迁移之前失败）
-# ---------------------------------------------------------------------------
-check_lease_permissions
+check_required_permissions
 
 # ---------------------------------------------------------------------------
 # 4. 获取发布锁（接管前核验上一轮迁移）
@@ -2275,9 +2695,27 @@ require_lock_alive
 mapfile -t SECRET_NAMES < <(awk '/secretRef:/{flag=1; next} flag && /name:/{print $2; flag=0}' \
   "${APPLICATION_MANIFEST}" | sort -u)
 [[ "${#SECRET_NAMES[@]}" -gt 0 ]] || die "Application 清单没有任何 Secret 引用（配置边界异常）"
+# 审计 A-3：旧实现 `get secret ... >/dev/null 2>&1 || die "缺少 Secret"` 把 403 / 5xx /
+# 超时全部报成「缺少 Secret」，并且丢弃了 kubectl 的 stderr。现在按四类分别处置：
+#   NotFound → 确实是缺少 Secret（提示按 examples/secrets 创建）
+#   Forbidden → 发布的 secrets get 权限缺失（退出码 3），**不能**说成「Secret 不存在」
+#   api/timeout → 无法确认（退出码 1），同样不能说成「缺少 Secret」
 for secret in "${SECRET_NAMES[@]}"; do
-  "${KUBECTL[@]}" -n "${NAMESPACE}" get secret "${secret}" >/dev/null 2>&1 \
-    || die "缺少 Secret ${NAMESPACE}/${secret}：请先按 manifest/kubernetes/examples/secrets/ 创建"
+  secret_err="${TMP_DIR}/get-secret.err"
+  if ! "${KUBECTL[@]}" -n "${NAMESPACE}" get secret "${secret}" >/dev/null 2>"${secret_err}"; then
+    classify_api_error "${secret_err}" "secrets" "${secret}"
+    case "${API_ERROR_CLASS}" in
+      notfound)
+        die "缺少 Secret ${NAMESPACE}/${secret}（NotFound）：请先按 manifest/kubernetes/examples/secrets/ 创建。stderr: ${API_ERROR_TEXT:-无输出}"
+        ;;
+      forbidden)
+        die 3 "无权读取 Secret ${NAMESPACE}/${secret}（Forbidden：发布身份缺少 secrets 的 get 权限，见 manifest/kubernetes/examples/deploy-lock/rbac.yaml）。**这不是「Secret 不存在」**。stderr: ${API_ERROR_TEXT:-无输出}"
+        ;;
+      *)
+        die "无法确认 Secret ${NAMESPACE}/${secret} 是否存在（$(api_error_class_label "${API_ERROR_CLASS}")）：${API_ERROR_TEXT:-无输出}。**这不等于「缺少 Secret」**，按 fail-closed 处理。"
+        ;;
+    esac
+  fi
 done
 log_info "Secret 就绪: ${SECRET_NAMES[*]}"
 
@@ -2385,7 +2823,9 @@ if (( migration_status == 2 )); then
   log_error "--- Job Pod 状态 ---"
   "${KUBECTL[@]}" -n "${NAMESPACE}" get pods -l "job-name=${JOB_NAME}" -o wide >&2 || true
   log_error "--- Job 日志（最后 200 行）---"
-  "${KUBECTL[@]}" -n "${NAMESPACE}" logs "job/${JOB_NAME}" --tail=200 --all-containers=true >&2 || true
+  # 审计 A-8：日志读取失败必须被报告（缺 pods/log 权限 / Pod 已被 TTL 清理），
+  # 不得再用 `|| true` 静默吞掉，否则「迁移失败」的排障信息会凭空消失。
+  print_job_logs "${JOB_NAME}" 200
   log_error "--- Pod 详情（终止原因 / 退出码）---"
   "${KUBECTL[@]}" -n "${NAMESPACE}" describe pods -l "job-name=${JOB_NAME}" >&2 || true
   log_error "恢复步骤（人工）："

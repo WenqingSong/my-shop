@@ -1,35 +1,66 @@
-# 发布锁（Lease）的最小 RBAC 示例 —— T2-06.1。
+# 发布身份的最小 RBAC 示例 —— T2-06.1 / T2-06.1.4
 #
 # 这不是部署清单的一部分：scripts/deploy-k8s.sh 不会 apply 本文件（发布身份不一定有
 # 授权 RBAC 的权限），也不把 Lease 放进 Kustomize 入口——把锁资源放进部署清单意味着
 # 每次 apply 都可能把别人的 holderIdentity 覆盖成空，等于绕过锁。
 #
 # 用途：由集群管理员**一次性**授予「执行发布的身份」下述权限。
+# 本文件是**单入口**，`kubectl apply -f` 一次应用全部 6 个对象：
 #
-# 需要的动词（对应 scripts/deploy-k8s.sh 的实际调用）：
+#   1. Role         surgecart-deploy-lock      （命名空间级：发布锁）
+#   2. RoleBinding  surgecart-deploy-lock
+#   3. Role         surgecart-deploy-workload  （命名空间级：迁移 Job / Pod / 应用清单）
+#   4. RoleBinding  surgecart-deploy-workload
+#   5. ClusterRole  surgecart-deploy-cluster   （集群级：namespaces / SSAR）
+#   6. ClusterRoleBinding surgecart-deploy-cluster
+#
+# 权限清单的事实来源是 scripts/deploy-k8s.sh 的 REQUIRED_PERMISSIONS（verb|group|
+# resource|scope|调用点）。本文件与它之间的**双向**一致性由
+# test/manifest/rbac_test.go 断言（脚本用到的必须授权；授权了但脚本不用的必须显式
+# 声明为 operator-only，否则门禁失败）。权限预检在**任何写请求之前**执行，
+# 缺少任何一项都以退出码 3 失败。
+#
+# 为什么必须拆出集群级 ClusterRole（审计 A-1 / A-2 / D-9 的根因）：
+#   namespaces 是**集群级**资源，命名空间里的 Role 对它是完全无效的。T2-06.1.3 的
+#   示例只有 Role + RoleBinding，于是「首次部署」这条路径（命名空间还不存在 → 需要
+#   create namespaces）在任何 least-privilege 身份上都必然 403。旧脚本还把
+#   `kubectl get namespace` 的 403/5xx/超时一律当成「命名空间不存在」，于是把一次
+#   权限错误变成了「先建命名空间再失败」的假象。
+#
+# 为什么显式声明 selfsubjectaccessreviews（审计 A-9）：
+#   `kubectl auth can-i` 本质是 create selfsubjectaccessreviews。内置
+#   system:basic-user 通常已授予它，但依赖「通常」会让权限预检在自定义身份上
+#   以「无法确认」失败，而错误信息指向不到 SSAR。必须显式授予，契约测试也会断言
+#   这一条存在。
+#
+# 关于 apply：kubectl apply = 「GET 读现状 → 不存在则 CREATE、存在则 PATCH」，
+# 所以每个被 apply 的资源都需要 get + create + patch，而不是一个「apply」动词。
+#
+# **不授予 delete / deletecollection**：脚本永不删除 Job / Pod / Lease / Deployment。
+# 清理失败 Job、清理卡死的锁都必须由人工执行（见 docs/development/kubernetes.md）。
+#
+# 部署前必须替换占位符（本文件共 3 处 subjects，全部要替换成同一个真实身份）：
+#   REPLACE_WITH_DEPLOYER_SERVICE_ACCOUNT / REPLACE_WITH_DEPLOYER_NAMESPACE
+# 例如：
+#   - kind: ServiceAccount, name: ci-deployer, namespace: ci        （集群内 Runner）
+#   - kind: User,           name: ci-deployer                       （外部 kubeconfig 用户）
+#   - kind: Group,          name: surgecart-deployers               （团队共享身份）
+#
+# 不要绑到应用自己的 ServiceAccount：应用 Pod 的 automountServiceAccountToken=false，
+# 不需要也不应该具备发布权限（否则一个被攻破的 Pod 就能改写发布锁）。
+---
+# ---------------------------------------------------------------------------
+# 1) 发布锁（Lease）
+# ---------------------------------------------------------------------------
+# 需要的动词（对应 REQUIRED_PERMISSIONS 里的三行 leases 条目）：
 #   get    读取锁记录（holderIdentity / renewTime / resourceVersion / 迁移记录注解）
 #   create 首次获取锁（原子创建，AlreadyExists 即表示已被占用）
 #   update 续租 / 接管过期锁 / 释放锁 / 写迁移记录（PUT + metadata.resourceVersion 做 CAS）
-# patch 不参与发布流程，仅供人工恢复 runbook 使用（见 docs/development/deploy-lock.md §8），
-# 授予它可以让值班人员在不具备 update 的情况下清理卡死的锁；不授予也不影响发布。
 #
-# T2-06.1.1 起额外需要 jobs 的 get/list：接管发布锁之前必须核验上一轮 Migration Job
-# 是否已经终结（只信 Lease 注解是不够的），发布前还要扫描命名空间里是否存在未终结的
-# 迁移 Job。缺少这两个动词时脚本会在权限预检阶段失败（退出码 3），不会带着未知的
-# 迁移状态继续发布。
-#
-# T2-06.1.3（F-01）起额外需要 core API 的 pods get/list：脚本既要按 job-name 读取
-# 「该 Job 的 Pod」（ownerReferences 归属校验 + phase/deletionTimestamp），也要按
-#   app.kubernetes.io/component=database-migration
-# 扫描命名空间里是否还有残留的迁移 Pod（覆盖「Job 已删除、Pod 仍存活」）。
-# 缺少这两个动词时：
-#   - 权限预检阶段直接失败（退出码 3，不会开始迁移）；
-#   - 即使绕过预检，Pod 门禁也会 fail-closed（退出码 7），不会退化成「放行」。
-# 审计发现 T2-06.1.2 的这份示例漏了 pods，导致按示例授权后首次发布就失败，
-# 因此 test/manifest 现在会比对「脚本声明的权限」与「本文件授权的权限」（不允许手工检查）。
-#
-# 注意：Lease / Job / Pod 都是 namespaced 资源，权限必须落在 surgecart 命名空间内，
-# 不要授予集群级 leases/jobs/pods 权限（那会让该身份能读写其他命名空间的资源）。
+# patch 不参与发布流程，但保留给**人工恢复**：docs 里卡死锁的处理步骤是
+#   kubectl annotate lease surgecart-deploy-lock ...
+# 那需要 patch。它被显式登记为 operator-only（见下面的 annotations），
+# 契约测试会把它算作「授权了但脚本不用」的可接受例外，并打印警告。
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -39,6 +70,11 @@ metadata:
     app.kubernetes.io/name: surgecart
     app.kubernetes.io/component: deploy-lock
     app.kubernetes.io/part-of: surgecart
+  annotations:
+    # 机器可读的例外声明：这些动词不在 REQUIRED_PERMISSIONS 里，只给人工恢复用。
+    # test/manifest/rbac_test.go 只对这里列出的 (resource/verb) 放行，其余
+    # 「脚本不用的授权」一律失败。
+    deploy-lock.surgecart.io/operator-only-verbs: "leases:patch"
 rules:
   # 只允许操作**这一个** Lease 对象：resourceNames 限制避免误伤同命名空间内的其他 Lease
   # （例如未来引入的控制器选主锁）。
@@ -51,28 +87,8 @@ rules:
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     verbs: ["create"]
-  # 迁移生命周期核验（T2-06.1.1）：按名称读取 Job + 列表扫描「是否存在未终结的迁移」。
-  # 只读，不含 delete/create：删除 Job 仍然必须由人工执行（脚本永不自动删除）。
-  - apiGroups: ["batch"]
-    resources: ["jobs"]
-    verbs: ["get", "list"]
-  # 迁移 Pod 生命周期核验（T2-06.1.2 引入、T2-06.1.3 补齐示例）：按 job-name 读取该
-  # Job 的 Pod（phase / deletionTimestamp / ownerReferences），以及按 component 标签
-  # 扫描残留迁移 Pod。只读，不含 delete：脚本永不删除 Pod。
-  # core group 的 apiGroups 必须写成 [""]（空字符串），不是 ["core"]。
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list"]
 ---
-# 把上面的 Role 绑定到执行发布的身份。
-#
-# subjects 必须替换为真实身份，例如：
-#   - kind: ServiceAccount, name: ci-deployer, namespace: ci        （集群内 Runner）
-#   - kind: User,           name: ci-deployer                       （外部 kubeconfig 用户）
-#   - kind: Group,          name: surgecart-deployers               （团队共享身份）
-#
-# 不要绑到应用自己的 ServiceAccount：应用 Pod 的 automountServiceAccountToken=false，
-# 不需要也不应该具备发布权限（否则一个被攻破的 Pod 就能改写发布锁）。
+# 把发布锁 Role 绑定到执行发布的身份（占位符 1/3）。
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
@@ -86,6 +102,137 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: surgecart-deploy-lock
+subjects:
+  - kind: ServiceAccount
+    name: REPLACE_WITH_DEPLOYER_SERVICE_ACCOUNT
+    namespace: REPLACE_WITH_DEPLOYER_NAMESPACE
+---
+# ---------------------------------------------------------------------------
+# 2) 工作负载权限（迁移 Job / Pod / 日志 / Secret 复检 / Application 清单）
+# ---------------------------------------------------------------------------
+# 与 T2-06.1.3 的示例相比，这里补齐了脚本真正调用、但示例从未授权的资源与动词
+# （审计 A-2）：secrets、deployments、configmaps、services、pvc、pods/log，
+# 以及 jobs / deployments / configmaps / services / pvc 的**写**动词。
+#
+# 每一条都对应 REQUIRED_PERMISSIONS 里的一行（调用点在括号内）：
+#   jobs get / list              （job_probe / job_list_migrations）
+#   jobs create / patch          （begin_migration 的 `kubectl apply -f migration.yaml`）
+#   pods get / list              （read_migration_pods_for_job / scan_migration_pods / verify_release）
+#   pods/log get                 （print_job_logs：迁移失败时读日志，审计 A-8）
+#   secrets get                  （锁内 Secret 复检，审计 A-3）
+#   deployments get / list        （read_deployment_state / release_summary）
+#   deployments create / patch    （apply Application 清单）
+#   configmaps get/create/patch   （apply Application / migration 清单里的 database-config）
+#   services get/list/create/patch（apply Application 清单 + 发布后只读汇总）
+#   persistentvolumeclaims get/create/patch（apply Application 清单里的 storage.yaml）
+#
+# core group 的 apiGroups 必须写成 [""]（空字符串），不是 ["core"]。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: surgecart-deploy-workload
+  namespace: surgecart
+  labels:
+    app.kubernetes.io/name: surgecart
+    app.kubernetes.io/component: deploy-workload
+    app.kubernetes.io/part-of: surgecart
+rules:
+  # 迁移 Job 生命周期：按名称核验 + 列表扫描「是否存在未终结的迁移」+ 创建本轮 Job。
+  # delete 仍然必须由人工执行（脚本永不删除 Job）。
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "create", "patch"]
+  # 迁移 Pod 生命周期：按 job-name 读取（ownerReferences 归属校验）+ 按
+  # app.kubernetes.io/component=database-migration 扫描残留 Pod。
+  # 只读，不含 delete：脚本永不删除 Pod。
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  # 失败诊断日志（kubectl logs job/<name>）。子资源必须单列，pods 的 get 不隐含它。
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  # 锁内 Secret 复检：只读，只 get（不 list，避免枚举命名空间内的全部 Secret）。
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+  # 线上 Deployment：读状态（降级保护）+ apply + 发布后只读汇总。
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "create", "patch"]
+  # Application / Migration 清单里的 ConfigMap。
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "create", "patch"]
+  # Application 清单里的 Service。
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "create", "patch"]
+  # Application 清单里的 PVC（storage.yaml）。
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "create", "patch"]
+---
+# 把工作负载 Role 绑定到执行发布的身份（占位符 2/3）。
+# subjects 必须与 surgecart-deploy-lock RoleBinding **完全相同**。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: surgecart-deploy-workload
+  namespace: surgecart
+  labels:
+    app.kubernetes.io/name: surgecart
+    app.kubernetes.io/component: deploy-workload
+    app.kubernetes.io/part-of: surgecart
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: surgecart-deploy-workload
+subjects:
+  - kind: ServiceAccount
+    name: REPLACE_WITH_DEPLOYER_SERVICE_ACCOUNT
+    namespace: REPLACE_WITH_DEPLOYER_NAMESPACE
+---
+# ---------------------------------------------------------------------------
+# 3) 集群级权限（ClusterRole + ClusterRoleBinding）
+# ---------------------------------------------------------------------------
+# 这**不能**写成 Role：namespaces 是集群级资源，Role 对它没有任何效果。
+# 审计 A-1/A-2/D-9 的根因就是缺这一段——首次部署必须先 create 命名空间。
+#
+# 权限严格限制在两个集群级资源上，不包含 nodes / clusterroles / crd 等任何其他资源：
+#   namespaces get / create                     （命名空间存在性判定 + 首次部署引导）
+#   selfsubjectaccessreviews create             （`kubectl auth can-i` 自身，审计 A-9）
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: surgecart-deploy-cluster
+  labels:
+    app.kubernetes.io/name: surgecart
+    app.kubernetes.io/component: deploy-cluster
+    app.kubernetes.io/part-of: surgecart
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "create"]
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["selfsubjectaccessreviews"]
+    verbs: ["create"]
+---
+# 把集群级 ClusterRole 绑定到执行发布的身份（占位符 3/3）。
+# subjects 必须与两个 RoleBinding **完全相同**，否则会出现「预检通过但写入被拒」
+# 或者反过来的撕裂状态。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: surgecart-deploy-cluster
+  labels:
+    app.kubernetes.io/name: surgecart
+    app.kubernetes.io/component: deploy-cluster
+    app.kubernetes.io/part-of: surgecart
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: surgecart-deploy-cluster
 subjects:
   - kind: ServiceAccount
     name: REPLACE_WITH_DEPLOYER_SERVICE_ACCOUNT
