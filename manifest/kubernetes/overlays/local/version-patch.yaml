@@ -1,0 +1,15 @@
+# 本地发布版本标记：必须等于 kustomization.yaml 的 images.newTag。
+#
+# 该标签随 Pod 复制，是「当前 Deployment 是哪个构建」的事实来源；T2-06.1 的发布脚本用它
+# 判断版本先后，本地手工发布也保持同一约定，避免两份事实（镜像 tag 与标签）漂移。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: surgecart
+  labels:
+    app.kubernetes.io/version: "b8f7e20-t3-02"
+spec:
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/version: "b8f7e20-t3-02"

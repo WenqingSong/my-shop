@@ -1,0 +1,30 @@
+# 本地 kind 集群（T3-02）的迁移入口。
+#
+# 与 production overlay 的差别只有两点，且都不涉及迁移语义：
+#   1. 镜像来自本地构建并 `kind load` 的 surgecart:<短SHA>-t3-02（不推送到任何仓库）；
+#   2. 不施加 nameSuffix —— 本地只有一次发布，Job 名称固定，便于重复 `kubectl logs` 排障。
+#
+# 其余全部继承 migration/base：同一个 Job 模板、同一份数据库 ConfigMap
+# （DATABASE_DEFAULT_HOST = mysql.surgecart.svc.cluster.local）、同一份 Secret
+# （surgecart-db-credentials）。也就是说「本地迁移」与「生产迁移」执行的是同一条命令：
+#   /app/my-shop migrate up
+#
+# 构建/部署（顺序由本目录之外的部署步骤保证：先迁移、再发布应用）：
+#   kubectl kustomize manifest/kubernetes/migration/overlays/local
+#   kubectl apply -k manifest/kubernetes/migration/overlays/local
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # 迁移 Job 本体。
+  - ../../base
+  # 与 Application 共用的 Namespace 与数据库连接配置（同一份资源，不重复定义）。
+  - ../../../shared
+
+namespace: surgecart
+
+# 本地镜像：构建标签为 docker build -t surgecart:<短SHA>-t3-02，并由 kind load 注入节点。
+images:
+  - name: docker.cnb.cool/framework-station/my-shop
+    newName: surgecart
+    newTag: "b8f7e20-t3-02"

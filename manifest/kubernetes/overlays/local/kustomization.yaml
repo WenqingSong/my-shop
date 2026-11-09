@@ -1,0 +1,33 @@
+# 本地 kind 集群（T3-02）的 Application 部署入口。
+#
+# 与 production overlay 的差别（全部属于「环境差异」，不改变资源结构）：
+#   1. 镜像来自本地构建并 `kind load` 的 surgecart:<短SHA>-t3-02，不依赖任何镜像仓库；
+#   2. 数据库/Redis/Kafka 全部指向集群内 Service（base 与 shared 的默认值即是集群内地址，
+#      因此本 overlay 不需要像生产那样覆盖成外部域名）；
+#   3. 七牛空间名与访问域名属于账号专属值，仓库里只保留 REPLACE_WITH_* 占位符，部署时由
+#      `scripts/` 之外的本机环境注入（与 Secret 同一套凭据边界：值不进仓库）。
+#
+# 探针、安全上下文、终止预算、卷挂载、Service 端口全部继承 base，本 overlay 一律不重写。
+#
+# 构建/部署：
+#   kubectl kustomize manifest/kubernetes/overlays/local
+#   kubectl apply -k manifest/kubernetes/overlays/local   # 需先把 QINIU_* 占位符替换掉
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+namespace: surgecart
+
+# 本地镜像：docker build -t surgecart:<短SHA>-t3-02 + kind load docker-image。
+images:
+  - name: docker.cnb.cool/framework-station/my-shop
+    newName: surgecart
+    newTag: "b8f7e20-t3-02"
+
+patches:
+  # 版本标记必须等于镜像 tag（与 production 同一契约，便于 deploy-k8s.sh 语义一致）。
+  - path: version-patch.yaml
+  # 账号专属非敏感值：仓库只放占位符。
+  - path: configmap-patch.yaml
