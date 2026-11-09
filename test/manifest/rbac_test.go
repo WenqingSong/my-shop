@@ -606,6 +606,219 @@ func TestRequiredPermissionsCoverBuiltManifests(t *testing.T) {
 	t.Logf("构建产物中的 kind（%d 种）全部有对应的 get/create/patch 授权", len(collected))
 }
 
+// verbSupportsResourceName 判断动词能否按对象名授权（与 Kubernetes RBAC 一致）：
+// 只有 get/update/patch/delete 的请求带对象名；create 的名字在授权时不可知，
+// list/watch/deletecollection 是集合请求。
+func verbSupportsResourceName(verb string) bool {
+	switch verb {
+	case "get", "update", "patch", "delete":
+		return true
+	default:
+		return false
+	}
+}
+
+// leaseResourceNamesViolations 返回「交付清单里 leases 规则的 resourceNames」与
+// 「预检对象名（LOCK_NAME）」之间的全部不一致项（空切片 = 一致）。
+//
+// 契约（T2-06.1.5 / 审计 F-01）：
+//   - 必须存在 leases 规则，且至少有一条按对象名限定的规则；
+//   - get/update/patch/delete → resourceNames **精确等于** [LOCK_NAME]：
+//     名字缺失或写错，对象级预检在真实集群上恒为 no；多出别的名字（扩大范围）
+//     等于允许改写同命名空间的其它 Lease，最小权限被悄悄放大；
+//   - create → 不能带 resourceNames（真实 create 请求的授权属性没有对象名，
+//     带了的规则永远匹配不到）；
+//   - list/watch/deletecollection → 不能带 resourceNames（集合请求没有名字），
+//     这类规则只会给人「已经授权了」的错觉。
+//
+// 抽成纯函数的目的：负控元测试（TestResourceNamesContractDetectsWeakenedManifest）
+// 要在**人为削弱**的清单副本上证明这套断言真的会失败，而不是永远为真。
+func leaseResourceNamesViolations(docs []rbacDocument, lockName string) []string {
+	var problems []string
+	leaseRules, nameScopedRules := 0, 0
+	for _, doc := range docs {
+		if doc.Kind != "Role" && doc.Kind != "ClusterRole" {
+			continue
+		}
+		for _, rule := range doc.Rules {
+			if !containsAny(rule.APIGroups, "coordination.k8s.io", "") || !containsAny(rule.Resources, "leases", "") {
+				continue
+			}
+			leaseRules++
+			for _, verb := range rule.Verbs {
+				switch {
+				case verb == "create":
+					if len(rule.ResourceNames) > 0 {
+						problems = append(problems, fmt.Sprintf(
+							"%s 给 leases 的 create 加了 resourceNames=%v：真实 create 请求的授权属性没有对象名，这条规则永远匹配不到，create 会 403",
+							doc.Metadata.Name, rule.ResourceNames))
+					}
+				case !verbSupportsResourceName(verb):
+					if len(rule.ResourceNames) > 0 {
+						problems = append(problems, fmt.Sprintf(
+							"%s 给 leases 的 %q 加了 resourceNames=%v：该动词是集合请求（没有对象名），这条规则永远匹配不到真实请求",
+							doc.Metadata.Name, verb, rule.ResourceNames))
+					}
+				default:
+					nameScopedRules++
+					if len(rule.ResourceNames) != 1 || rule.ResourceNames[0] != lockName {
+						problems = append(problems, fmt.Sprintf(
+							"%s 授予了 leases 的 %q，但 resourceNames=%v 不是精确的 [%q]：名字缺失/写错会让对象级预检在真实集群上恒为 no，多出的名字等于放大了最小权限",
+							doc.Metadata.Name, verb, rule.ResourceNames, lockName))
+					}
+				}
+			}
+		}
+	}
+	if leaseRules == 0 {
+		problems = append(problems, "没有任何 leases 规则：发布锁无法工作")
+	} else if nameScopedRules == 0 {
+		problems = append(problems, "没有任何按对象名（resourceNames）限定的 leases 规则：get/update/patch 退化为对整个资源的授权")
+	}
+	return problems
+}
+
+// patchLeaseRules 对每个 Role/ClusterRole 里的 leases 规则调用 mutate，返回是否真的改过。
+// 负控用例用它构造「被削弱的清单副本」。
+func patchLeaseRules(docs []rbacDocument, mutate func(rule *rbacRule) bool) bool {
+	patched := false
+	for docIndex := range docs {
+		if docs[docIndex].Kind != "Role" && docs[docIndex].Kind != "ClusterRole" {
+			continue
+		}
+		for ruleIndex := range docs[docIndex].Rules {
+			rule := &docs[docIndex].Rules[ruleIndex]
+			if !containsAny(rule.Resources, "leases", "") {
+				continue
+			}
+			if mutate(rule) {
+				patched = true
+			}
+		}
+	}
+	return patched
+}
+
+// cloneRBACDocs 深拷贝解析结果，避免负控修改污染其它断言。
+func cloneRBACDocs(docs []rbacDocument) []rbacDocument {
+	out := make([]rbacDocument, len(docs))
+	for i, doc := range docs {
+		out[i] = doc
+		out[i].Rules = make([]rbacRule, len(doc.Rules))
+		for j, rule := range doc.Rules {
+			out[i].Rules[j] = rbacRule{
+				APIGroups:     append([]string(nil), rule.APIGroups...),
+				Resources:     append([]string(nil), rule.Resources...),
+				Verbs:         append([]string(nil), rule.Verbs...),
+				ResourceNames: append([]string(nil), rule.ResourceNames...),
+			}
+		}
+	}
+	return out
+}
+
+// TestResourceNamesContractDetectsWeakenedManifest 是反向契约的**负控**（T2-06.1.5）：
+//
+// 只断言「交付清单现在是对的」不足以证明契约有效 —— 断言可能因为写死或恒真而永远
+// 通过。这里在**人为削弱**的清单副本上重跑同一个比对函数，要求它必须报出问题：
+// 删除 resourceNames、改成错误名称、扩大授权范围、给 create 加名字、删除整条规则。
+func TestResourceNamesContractDetectsWeakenedManifest(t *testing.T) {
+	script := readScript(t)
+	docs := loadRBAC(t, rbacPath(t))
+	lockName := lockNameOf(t, script)
+
+	if problems := leaseResourceNamesViolations(docs, lockName); len(problems) != 0 {
+		t.Fatalf("交付清单本身就有 %d 处不一致，负控失去意义：%v", len(problems), problems)
+	}
+
+	cases := []struct {
+		name   string
+		mutate func(docs []rbacDocument) bool
+	}{
+		{
+			name: "删除 resourceNames（退化为整资源授权）",
+			mutate: func(docs []rbacDocument) bool {
+				return patchLeaseRules(docs, func(rule *rbacRule) bool {
+					if len(rule.ResourceNames) == 0 {
+						return false
+					}
+					rule.ResourceNames = nil
+					return true
+				})
+			},
+		},
+		{
+			name: "改成错误的 Lease 名称",
+			mutate: func(docs []rbacDocument) bool {
+				return patchLeaseRules(docs, func(rule *rbacRule) bool {
+					if len(rule.ResourceNames) == 0 {
+						return false
+					}
+					rule.ResourceNames = []string{"another-pipeline-lock"}
+					return true
+				})
+			},
+		},
+		{
+			name: "扩大 resourceNames（追加第二个 Lease）",
+			mutate: func(docs []rbacDocument) bool {
+				return patchLeaseRules(docs, func(rule *rbacRule) bool {
+					if len(rule.ResourceNames) == 0 {
+						return false
+					}
+					rule.ResourceNames = append(rule.ResourceNames, "another-pipeline-lock")
+					return true
+				})
+			},
+		},
+		{
+			name: "给 create 加 resourceNames",
+			mutate: func(docs []rbacDocument) bool {
+				return patchLeaseRules(docs, func(rule *rbacRule) bool {
+					if !containsAny(rule.Verbs, "create", "") || len(rule.ResourceNames) > 0 {
+						return false
+					}
+					rule.ResourceNames = []string{lockName}
+					return true
+				})
+			},
+		},
+		{
+			name: "删除整条带 resourceNames 的 leases 规则",
+			mutate: func(docs []rbacDocument) bool {
+				removed := false
+				for docIndex := range docs {
+					if docs[docIndex].Kind != "Role" && docs[docIndex].Kind != "ClusterRole" {
+						continue
+					}
+					kept := make([]rbacRule, 0, len(docs[docIndex].Rules))
+					for _, rule := range docs[docIndex].Rules {
+						if containsAny(rule.Resources, "leases", "") && len(rule.ResourceNames) > 0 {
+							removed = true
+							continue
+						}
+						kept = append(kept, rule)
+					}
+					docs[docIndex].Rules = kept
+				}
+				return removed
+			},
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			mutated := cloneRBACDocs(docs)
+			if !tc.mutate(mutated) {
+				t.Fatal("没有找到可修改的 leases 规则：负控的前提不成立")
+			}
+			if problems := leaseResourceNamesViolations(mutated, lockName); len(problems) == 0 {
+				t.Fatalf("%s 之后契约仍然通过：反向契约没有区分能力", tc.name)
+			}
+		})
+	}
+}
+
 // TestDeliveredRBACMatchesRequiredPermissions 是核心双向契约。
 func TestDeliveredRBACMatchesRequiredPermissions(t *testing.T) {
 	script := readScript(t)
@@ -724,35 +937,10 @@ func TestDeliveredRBACMatchesRequiredPermissions(t *testing.T) {
 	}
 
 	// 5) 发布锁必须**逐动词**用 resourceNames 限定到脚本实际使用的 Lease
-	//    （T2-06.1.5 / 审计 F-01 的反向契约）：
-	//      - get/update/patch → resourceNames 必须正好包含 LOCK_NAME；
-	//      - create → 不能带 resourceNames（真实 create 请求没有对象名，
-	//        带了 resourceNames 的规则永远匹配不到它，等于白授权）。
-	//    删掉或改错 resourceNames → 这里失败；即使这里被绕过，行为测试里的预检也会失败。
-	leasesRuleSeen := false
-	for _, doc := range namespacedRoles {
-		for _, rule := range doc.Rules {
-			if !containsAny(rule.APIGroups, "coordination.k8s.io", "") || !containsAny(rule.Resources, "leases", "") {
-				continue
-			}
-			for _, verb := range rule.Verbs {
-				leasesRuleSeen = true
-				if verb == "create" {
-					if len(rule.ResourceNames) > 0 {
-						t.Fatalf("%s 的 %s 给 leases 的 create 加了 resourceNames：真实 create 请求的授权属性没有对象名，这条规则永远匹配不到，create 会 403",
-							path, doc.Metadata.Name)
-					}
-					continue
-				}
-				if !containsAny(rule.ResourceNames, lockName, "") {
-					t.Fatalf("%s 的 %s 授予了 leases 的 %q 但没有用 resourceNames 限定到 %q：权限范围过大（可改写同命名空间的任意 Lease），且对象级预检会失去意义",
-						path, doc.Metadata.Name, verb, lockName)
-				}
-			}
-		}
-	}
-	if !leasesRuleSeen {
-		t.Fatalf("%s 没有任何 leases 规则：发布锁无法工作", path)
+	//    （T2-06.1.5 / 审计 F-01 的反向契约）。规则本身在 leaseResourceNamesViolations
+	//    里，抽成纯函数是为了让负控元测试能在人为削弱的清单副本上证明断言有区分能力。
+	for _, problem := range leaseResourceNamesViolations(namespacedRoles, lockName) {
+		t.Fatalf("%s：%s", path, problem)
 	}
 
 	// 6) 两个作用域的绑定都必须存在，且 subjects 完全一致（否则会出现「预检通过、

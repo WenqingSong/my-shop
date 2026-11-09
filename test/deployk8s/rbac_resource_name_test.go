@@ -311,6 +311,68 @@ func TestPreflightRejectsObjectNameForCreate(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// 权限表运行时自检（阶段 0）：表坏了就不能相信预检结论
+// ---------------------------------------------------------------------------
+
+// TestPermissionTableSelfCheckRejectsInvalidEntry 覆盖脚本**自身**的权限表自检：
+//
+//	给 create 配对象名是无效语义（真实 create 请求的授权属性没有 name），
+//	字段数损坏会让名字/调用点静默错位。两者都必须在发出**任何** auth can-i 之前
+//	fail-closed，并且用退出码 1（参数/预检失败），而不是 3（发布锁失败/权限不足）——
+//	把脚本自身的配置错误报成「权限不足」会把排查方向引向 RBAC 绑定。
+//
+// 用例改的是 fixture 复制出来的脚本副本，不触碰仓库源文件。
+func TestPermissionTableSelfCheckRejectsInvalidEntry(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		original string
+		broken   string
+	}{
+		{
+			name:     "给 create 加对象名",
+			original: `"create|coordination.k8s.io|leases|namespace||lease_create@L789"`,
+			broken:   `"create|coordination.k8s.io|leases|namespace|surgecart-deploy-lock|lease_create@L789"`,
+		},
+		{
+			name:     "字段数从 6 变成 7",
+			original: `"get|coordination.k8s.io|leases|namespace|surgecart-deploy-lock|lease_read@L755"`,
+			broken:   `"get|coordination.k8s.io|leases|namespace|surgecart-deploy-lock|lease_read@L755|extra"`,
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newFixture(t, fixtureOptions{})
+
+			path := filepath.Join(f.root, "scripts", "deploy-k8s.sh")
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("读取 fixture 脚本: %v", err)
+			}
+			if !strings.Contains(string(raw), tc.original) {
+				t.Fatalf("fixture 脚本里找不到条目 %q：本用例的前提不成立", tc.original)
+			}
+			if err := os.WriteFile(path, []byte(strings.Replace(string(raw), tc.original, tc.broken, 1)), 0o755); err != nil {
+				t.Fatalf("写入 fixture 脚本: %v", err)
+			}
+
+			res := runDeploy(t, f)
+
+			res.requireCode(t, 1)
+			res.requireNoSuccess(t)
+			res.requireContains(t, "内部参数错误", "REQUIRED_PERMISSIONS")
+			if calls := authCanICalls(f); len(calls) != 0 {
+				t.Fatalf("权限表自检失败时不得发出任何 auth can-i；实际：\n%s", strings.Join(calls, "\n"))
+			}
+			requireNoResourceMutations(t, f)
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
 // 写路径强制授权（A-5 不被削弱）：预检通过后权限被撤销 → 写入必须被拒
 // ---------------------------------------------------------------------------
 

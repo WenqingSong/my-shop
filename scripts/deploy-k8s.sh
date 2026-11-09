@@ -1434,21 +1434,53 @@ REQUIRED_PERMISSIONS=(
   "create|authorization.k8s.io|selfsubjectaccessreviews|cluster||permission_probe@L1623,L1625"
 )
 
-# 内部不变量：带对象名的条目必须正好指向脚本写入的那个 Lease（LOCK_NAME）。
+# 权限表运行时自检（启动时、在发出任何 auth can-i 之前）。
 #
-# 写错名字的后果不是「测试失败」而是「预检去查一个 RBAC 没授权的对象」：真实集群上
-# 会以 denied 退出 3，错误信息却指向「授权不足」，排查方向被误导。LOCK_NAME 是唯一
-# 事实来源，这里在启动时就把漂移挡住（退出码 1 = 参数/配置错误，不发出任何请求）。
-for permission_entry in "${REQUIRED_PERMISSIONS[@]}"; do
-  IFS='|' read -r permission_verb permission_group permission_resource permission_scope \
-    permission_name permission_site <<< "${permission_entry}"
-  [[ -n "${permission_name}" ]] || continue
-  if [[ "${permission_resource}" != "leases" || "${permission_name}" != "${LOCK_NAME}" ]]; then
-    die 1 "内部参数错误：REQUIRED_PERMISSIONS 的对象名条目「${permission_entry}」与发布锁 ${LOCK_NAME} 不一致；受 resourceNames 限制的操作必须用真实对象名检查"
-  fi
-done
-unset permission_entry permission_verb permission_group permission_resource permission_scope \
-  permission_name permission_site
+# 表坏了就不能相信预检结论：每一条漂移都会让「预检结论 ≠ 真实 RBAC 结论」，而不是
+# 让某个测试变红。三类漂移必须在这里挡住：
+#   1. 带对象名的条目不指向脚本实际写入的那个 Lease（LOCK_NAME）：真实集群上会以
+#      denied 退出 3，错误信息却指向「授权不足」，排查方向被误导；
+#   2. 给不支持对象名的动词（create/list/watch/deletecollection）配对象名：真实 RBAC
+#      的 resourceNames 只匹配带对象名的请求 —— create 的名字在授权时不可知、集合请求
+#      没有名字，这类条目永远匹配不到真实请求，于是「检查过」其实什么也没检查；
+#   3. 字段数/scope/必填字段损坏：多余字段会被 `read` 静默吞进最后一个变量，少一个字段
+#      会让对象名错位到调用点。
+#
+# 退出码是 **1**（参数/预检失败，未发出任何变更请求），不是 3（发布锁失败/权限不足）：
+# 这是脚本自身的配置错误，把它报成「权限不足」会把排查方向引向 RBAC 绑定。
+permission_verb_is_name_scoped() {
+  case "$1" in
+    get|update|patch|delete) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+validate_permission_table() {
+  local entry verb group resource scope name site
+  local -a fields
+  for entry in "${REQUIRED_PERMISSIONS[@]}"; do
+    IFS='|' read -r -a fields <<< "${entry}"
+    if (( ${#fields[@]} != 6 )); then
+      die 1 "内部参数错误：REQUIRED_PERMISSIONS 条目「${entry}」有 ${#fields[@]} 个字段，期望 6 个（<verb>|<group>|<resource>|<scope>|<name>|<call site>）"
+    fi
+    IFS='|' read -r verb group resource scope name site <<< "${entry}"
+    if [[ -z "${verb}" || -z "${resource}" || -z "${site}" ]]; then
+      die 1 "内部参数错误：REQUIRED_PERMISSIONS 条目「${entry}」缺少 verb / resource / 调用点"
+    fi
+    if [[ "${scope}" != "namespace" && "${scope}" != "cluster" ]]; then
+      die 1 "内部参数错误：REQUIRED_PERMISSIONS 条目「${entry}」的 scope 只能是 namespace 或 cluster（实际 ${scope:-<空>}）"
+    fi
+    [[ -n "${name}" ]] || continue
+    if ! permission_verb_is_name_scoped "${verb}"; then
+      die 1 "内部参数错误：REQUIRED_PERMISSIONS 条目「${entry}」给 ${verb} 指定了对象名 ${name}；Kubernetes RBAC 的 resourceNames 只对 get/update/patch/delete 生效（create 的对象名在授权时不可知，list/watch/deletecollection 是集合请求）"
+    fi
+    if [[ "${resource}" != "leases" || "${name}" != "${LOCK_NAME}" ]]; then
+      die 1 "内部参数错误：REQUIRED_PERMISSIONS 的对象名条目「${entry}」与发布锁 ${LOCK_NAME} 不一致；受 resourceNames 限制的操作必须用真实对象名检查"
+    fi
+  done
+}
+
+validate_permission_table
 
 # 预检状态（由 probe_permission_scope / permission_probe 维护）
 PERMISSION_DENIED_COUNT=0

@@ -862,6 +862,9 @@ kubectl auth can-i get pods --subresource=log -n surgecart
 ### 12.4 预检顺序（全部发生在第一个写请求之前）
 
 ```text
+阶段 0  权限表自检（不发出任何 can-i）：字段数 6 / scope ∈ {namespace, cluster} /
+        name 非空只能用于 get/update/patch/delete 且必须是 LOCK_NAME
+        → 失败退出 **1**（配置错误，不是权限不足）
 阶段 1  集群级权限（不含 -n）：namespaces get/create、selfsubjectaccessreviews create
 阶段 2  严格判断命名空间是否存在：只有 `<资源> "<名字>" not found` 才是「不存在」
 阶段 3  命名空间级权限： leases / jobs / pods / pods-log / secrets / deployments /
@@ -870,6 +873,11 @@ kubectl auth can-i get pods --subresource=log -n surgecart
         pods/log 用 --subresource=log 检查
 阶段 4  命名空间引导（仅在确认不存在且权限齐备时；幂等）
 ```
+
+阶段 0 存在的理由：表坏掉时「预检通过」不代表真实权限足够。给 create 配对象名会被
+`read` 解析成合法条目、真实集群上却永远匹配不到请求；字段数多一个会被静默吞进调用点。
+这类错误必须在发出任何 `auth can-i` 之前 fail-closed，并且用退出码 **1**（参数/预检失败），
+而不是 3（发布锁失败/权限不足）—— 报成「权限不足」会把排查方向引向 RBAC 绑定。
 
 任何一项 `denied`（`auth can-i` 明确返回 `no`）或 `unknown`（SSAR 本身 5xx/超时）
 都在阶段 1/3 直接退出 **3**，不会发起锁/迁移/Deployment 的任何写请求。
@@ -881,7 +889,12 @@ kubectl auth can-i get pods --subresource=log -n surgecart
 （目前只有 leases 的 get/update），为空表示真实请求没有对象名（create/list，
 或不受 resourceNames 限制的 get）。`test/manifest/rbac_test.go` 会断言：
 `name` 非空的条目必须由清单里**同一个名字**的 `resourceNames` 规则支撑；
-leases 上除 create 外的每个动词都必须被 `resourceNames` 限定到 `LOCK_NAME`。
+leases 上除 create 外的每个动词都必须被 `resourceNames` **精确**限定到
+`LOCK_NAME`（多一个名字也算扩大授权），create 则不得带 `resourceNames`。
+
+这组静态断言自带**负控元测试**（`TestResourceNamesContractDetectsWeakenedManifest`）：
+在人为删除 / 改错 / 扩大 `resourceNames`、给 create 加名字、删除整条规则的清单副本上
+重跑同一个比对函数，要求它必须报错。没有这一条，「契约测试通过」可能只是断言恒真。
 
 ### 12.5 退出码与错误分类（T2-06.1.4 / T2-06.1.5）
 
