@@ -341,7 +341,6 @@ T3-02 的前置条件已具备：集群可用、三个依赖协议级可用、Se
 ## 13. 最终 Git SHA
 
 - 基线：`ffc0bddf805b670bc34ef39209dd0cf73469dbb5`
-- 本次提交：`feat(k8s): validate local cluster infrastructure`
-- 最终 HEAD：提交后由 `git rev-parse HEAD` 回填（见任务回执与下方"最终 HEAD"行）
-
-最终 HEAD：`__FINAL_HEAD_SHA__`
+- 实现 + 报告提交：`fb21a15cee030b66fa8a690397b8a42ffd203375`（`feat(k8s): validate local cluster infrastructure`）
+- SHA 回填提交：在本提交之后追加，仅修改本节元数据，不改动任何实现或测试
+- 最终 HEAD：以 `git log -1 --format=%H` 为准（即 SHA 回填提交本身）
