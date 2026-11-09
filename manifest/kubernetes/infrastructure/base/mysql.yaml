@@ -1,0 +1,190 @@
+# MySQL 8.0（本地 Kubernetes，T2-07）。
+#
+# 版本与镜像：mysql:8.0 —— 与 docker-compose.yml 完全一致，不额外升级。
+# 端口/库名/账号：不复写，全部引用 ConfigMap/surgecart-database-config（与 Application/
+# Migration 共用），因此「应用连的库」与「MySQL 创建的库」不可能漂移。
+#
+# 运行身份（restricted PSS 兼容，已实测）：
+#   官方镜像内置 mysql 用户 uid/gid=999，数据目录与 socket 目录都由该用户持有；
+#   容器以 999:999 启动，不经过 root → 不需要 root、不需要 chown、不需要特权。
+#   - /var/lib/mysql（PVC，fsGroup=999 由 kubelet 授权）
+#   - /var/run/mysqld（emptyDir，socket 与 pid 文件）
+#   - /tmp（emptyDir，只读根文件系统下唯一临时目录）
+#   只读根文件系统 + capabilities 全丢弃 + no-new-privileges + RuntimeDefault seccomp。
+#
+# 副本与存储：单副本 + Recreate + RWO PVC。本地开发不存在 HA 语义；
+#   Deployment 而非 StatefulSet 的理由：单副本没有稳定网络标识/有序启动需求，
+#   PVC 作为独立对象显式命名，销毁时数据归属一目了然（见 scripts/k8s-infra.sh delete 的告警）。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-data
+  labels:
+    app.kubernetes.io/name: mysql
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: surgecart
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      # 本地开发：只承载 schema 与联调数据。真实体量按环境调整，不在仓库里猜。
+      storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  labels:
+    app.kubernetes.io/name: mysql
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: surgecart
+spec:
+  # ClusterIP：只在集群内可达。宿主机访问通过 scripts/k8s-infra.sh info 打印的 port-forward。
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: mysql
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: mysql
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+  labels:
+    app.kubernetes.io/name: mysql
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: surgecart
+spec:
+  replicas: 1
+  # RWO 卷 + 单副本：先停旧 Pod 再起新 Pod，避免新旧同时挂载同一卷。
+  strategy:
+    type: Recreate
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mysql
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mysql
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: surgecart
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # 关闭时必须先把 InnoDB 刷盘：30s 对本地数据量足够，超时会被强制 kill。
+      terminationGracePeriodSeconds: 60
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        # fsGroup 与运行用户一致：PVC 挂载点由 kubelet chgrp/chmod，非 root 可写。
+        fsGroup: 999
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: mysql
+              containerPort: 3306
+              protocol: TCP
+
+          # 配置外部化：库名与账号来自 ConfigMap，口令来自 Secret。
+          # 缺失任何一项都会让容器启动失败（镜像自身要求 MYSQL_ROOT_PASSWORD 非空），
+          # 不会静默退化成「无认证数据库」。
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: surgecart-db-credentials
+                  key: MYSQL_ROOT_PASSWORD
+            # 应用账号：与 Application / Migration 的 DATABASE_DEFAULT_USER / PASS 同源。
+            - name: MYSQL_DATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: surgecart-database-config
+                  key: DATABASE_DEFAULT_NAME
+            - name: MYSQL_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: surgecart-database-config
+                  key: DATABASE_DEFAULT_USER
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: surgecart-db-credentials
+                  key: DATABASE_DEFAULT_PASS
+
+          # 就绪判定必须是「应用账号能连上并执行查询」，不是「端口能连通」：
+          #   mysqladmin ping 在口令错误时仍返回 0（实测），只能证明服务端在说话；
+          #   因此用 mysql 客户端执行 SELECT 1，口令经 MYSQL_PWD 传入（不进 argv）。
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - MYSQL_PWD="$MYSQL_PASSWORD" mysql --protocol=TCP -h 127.0.0.1 -u "$MYSQL_USER" -D "$MYSQL_DATABASE" -e 'SELECT 1' >/dev/null
+            # 首次初始化（建库 + 建账号 + 临时实例重启）需要数十秒，
+            # 这期间不 Ready 是正确的；liveness 的 initialDelaySeconds 覆盖同一窗口。
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # 存活判定只看「MySQL 协议还能否应答」，**不判断授权**：
+          # 口令错误/账号缺失属于配置问题，重启数据库不会修好它（只会在 readiness 上体现）。
+          # 失败阈值 6 × 20s = 2 分钟，避免慢查询/临时锁等待触发无谓重启（数据库重启代价高）。
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin --protocol=TCP -h 127.0.0.1 -u root ping >/dev/null
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+            - name: run
+              mountPath: /var/run/mysqld
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: mysql-data
+        # socket/pid 文件不需要持久化，进程退出即可丢弃。
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

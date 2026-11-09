@@ -84,6 +84,26 @@ spec:
           # 镜像 tag 不可变，节点上有该 tag 时无需每次回源。
           imagePullPolicy: IfNotPresent
 
+          # 显式覆盖镜像 ENTRYPOINT（T2-07 / 迁移职责分离）：
+          #
+          # 镜像 ENTRYPOINT 是 /app/docker-entrypoint.sh，其语义是
+          #   `my-shop migrate up` → `exec /app/my-shop serve`
+          # ——为 docker-compose 的单容器场景设计。如果在 Kubernetes 里沿用该 ENTRYPOINT，
+          # 每一个应用 Pod（含扩容出来的副本、滚动更新时的新 Pod）启动时都会执行一次
+          # `migrate up`，与 T2-05 冻结的「迁移只由独立 Job 执行」冲突：
+          #   - 应用 Pod 拿到了 DDL 权限，迁移时机不可控（每次重启都可能改 schema）；
+          #   - 迁移失败会让 Pod 进入 CrashLoopBackOff，看起来是「应用挂了」；
+          #   - 数据库 GET_LOCK 只能串行化，不能消除「发布流程之外的迁移」。
+          #
+          # 因此这里直接指定二进制与子命令：ENTRYPOINT 被替换，容器内不会出现
+          # docker-entrypoint.sh，也就不会执行 migrate。迁移只由
+          # manifest/kubernetes/migration/ 的 Job（`/app/my-shop migrate up`）负责。
+          #
+          # 契约由 test/manifest/app_workload_test.go 从构建产物断言：
+          # 应用工作负载的 command 必须是 /app/my-shop，且不得出现迁移入口。
+          command: ["/app/my-shop"]
+          args: ["serve"]
+
           ports:
             # 命名端口：Service targetPort 与探针都引用 http，避免端口号在多处漂移。
             - name: http

@@ -1,0 +1,17 @@
+# kind 集群定义（T2-07，本地 Kubernetes 运行基线）。
+#
+# 为什么是单节点、无端口映射：
+#   - 本阶段只需要「一个能真实跑 Pod 的集群」，不是生产级 HA；多节点只会增加资源占用
+#     与排查成本，不会让 SurgeCart 的行为更接近生产；
+#   - 不映射 80/443/NodePort：宿主机访问依赖统一走 `kubectl port-forward`
+#     （端口与 docker-compose 一致，见 scripts/k8s-infra.sh info），
+#     避免把本地开发暴露成「对外服务」；
+#   - 不指定 apiServerPort：让 kind 自己挑一个空闲端口，避免与已有集群/本地服务冲突。
+#     具体端口由 `bash scripts/k8s-cluster.sh info` 打印。
+#
+# 集群名由 `--name` 传入（scripts/k8s-cluster.sh 的 K8S_CLUSTER_NAME），
+# 不写死在本文件里，避免两处名字不一致导致「创建了一个、查询了另一个」。
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane

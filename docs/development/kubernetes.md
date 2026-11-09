@@ -13,8 +13,12 @@
 ## 1. 范围与边界
 
 - 本体系只编排**本仓库的后端服务**：应用 Deployment/Service、配置与凭据引用、持久化 PVC、
-  以及独立的数据库迁移 Job。MySQL、Redis、Kafka、Ingress Controller、监控栈属于环境能力，
-  不在本仓库内定义，也不写死任何云厂商配置。
+  以及独立的数据库迁移 Job。**生产环境的** MySQL、Redis、Kafka、Ingress Controller、监控栈
+  属于环境能力，不在本仓库内定义，也不写死任何云厂商配置。
+- 例外（T2-07）：为了让应用能在**本地 Kubernetes** 上真实运行，
+  `manifest/kubernetes/infrastructure/` 定义了本地单副本依赖（MySQL/Redis/Kafka），
+  由 `scripts/k8s-infra.sh` 部署与验证。该目录没有 production overlay，
+  不改变本文描述的生产发布流程；详见 `docs/development/local-infrastructure.md`。
 - 不虚构生产入口：默认只提供 `ClusterIP` Service。没有真实域名、Ingress Controller 与 TLS
   方案之前不提供 Ingress 资源（叠加方法见 §6.3）。
 - 发布是**串行**的：任何通过 `scripts/deploy-k8s.sh` 执行的发布都在完整生命周期内持有
@@ -54,6 +58,15 @@ manifest/kubernetes/
 │       ├── kustomization.yaml                # 组合：版本化 Job + 共享资源
 │       ├── database-patch.yaml               # 与 Application 同值的外部数据库地址
 │       └── job/kustomization.yaml            # 发布版本后缀 + 迁移镜像版本
+├── infrastructure/                           # T2-07 本地依赖（无 production overlay）
+│   ├── base/                                 # MySQL / Redis / Kafka + Topic 初始化 Job
+│   │   ├── kustomization.yaml
+│   │   ├── configmap.yaml                    # ConfigMap/surgecart-kafka-config
+│   │   ├── mysql.yaml                        # PVC + Service + Deployment
+│   │   ├── redis.yaml
+│   │   ├── kafka.yaml
+│   │   └── kafka-topics-job.yaml
+│   └── verify/                               # 集群内真实验证 Job（mysql/redis/kafka）
 └── examples/
     ├── secrets/
     │   ├── database-secret.example.yaml      # Secret/surgecart-db-credentials（模板）

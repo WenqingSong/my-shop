@@ -1,0 +1,87 @@
+# Redis 集群内连通性验证（T2-07）。
+#
+# 证明「另一个 Pod 通过 Service DNS 执行 PING 并得到 PONG」。
+# 地址取应用实际使用的 ConfigMap（REDIS_DEFAULT_ADDRESS，形如 host:port），
+# 因此验证的就是应用会连的那个地址，而不是验证脚本自己拼的地址。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: verify-redis
+  namespace: surgecart
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: verification
+    app.kubernetes.io/part-of: surgecart
+spec:
+  parallelism: 1
+  completions: 1
+  backoffLimit: 0
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/component: verification
+        app.kubernetes.io/part-of: surgecart
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: verify-redis
+          image: redis:7-alpine
+          imagePullPolicy: IfNotPresent
+          # 覆盖镜像入口（会启动 redis-server），只执行客户端命令。
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              ADDR="${REDIS_DEFAULT_ADDRESS}"
+              HOST="${ADDR%%:*}"
+              PORT="${ADDR##*:}"
+              echo "[verify-redis] 目标: ${HOST}:${PORT} (db=${REDIS_DEFAULT_DB})"
+              if [ -n "${REDIS_DEFAULT_PASS:-}" ]; then
+                PONG=$(redis-cli -h "${HOST}" -p "${PORT}" -a "${REDIS_DEFAULT_PASS}" --no-auth-warning ping)
+              else
+                PONG=$(redis-cli -h "${HOST}" -p "${PORT}" ping)
+              fi
+              echo "[verify-redis] PING -> ${PONG}"
+              [ "${PONG}" = "PONG" ]
+              echo "REDIS_VERIFY_OK"
+          env:
+            # 与 Application ConfigMap 的 REDIS_DEFAULT_ADDRESS **同值**（Service DNS + 端口）。
+            # 这里显式写字面量而不是 envFrom surgecart-config：
+            #   - T2-07 阶段应用清单尚未部署，基础设施验证不能依赖应用 ConfigMap 是否存在；
+            #   - 验证要证明的正是「应用会用的那个地址」可达，而不是「某个配置键被读到」。
+            # 两处一致性由 test/manifest/infrastructure_test.go 断言，改一处漏另一处会失败。
+            - name: REDIS_DEFAULT_ADDRESS
+              value: "redis.surgecart.svc.cluster.local:6379"
+            - name: REDIS_DEFAULT_DB
+              value: "0"
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

@@ -1,0 +1,78 @@
+# Kafka Broker 的非敏感配置 + 业务 Topic 名称（T2-07）。
+#
+# 为什么键名直接是 Kafka 的配置名：apache/kafka 镜像会把容器内的 `KAFKA_*` 环境变量
+# 逐项写成 broker 属性（server.properties），所以 `KAFKA_LISTENERS` 这类键由镜像自身
+# 消费，不需要额外的转换层。
+#
+# 为什么 Topic 名称键不带 KAFKA_ 前缀：带前缀的键会被镜像写进 server.properties，
+# 变成 `topic.order.requested=...` 这种无效 broker 属性。Topic 名称只被本目录的
+# Topic 初始化 Job（以及后续应用的 FLASH_SALE_KAFKA_TOPIC）使用，前缀会污染 broker 配置。
+#
+# 地址的事实边界（T2-07 的核心问题）：
+#   1. 容器内监听地址：0.0.0.0:9092 / 0.0.0.0:9093 / 0.0.0.0:29092（只影响 bind，不对外广播）；
+#   2. 集群内广播地址：kafka.surgecart.svc.cluster.local:9092（Pod 通过 Service DNS 访问，
+#      Kafka 客户端拿到元数据后仍能连回该地址）；
+#   3. 宿主机访问地址：127.0.0.1:29092（只在使用 `kubectl port-forward svc/kafka 29092:29092`
+#      时有效，与 docker-compose 的宿主机端口一致）；
+#   4. 控制器 quorum：1@127.0.0.1:9093 —— 单 Broker + Controller 合一，控制器地址是
+#      进程内自连，走 Pod 自身回环，不经过 Service（避免 hairpin NAT）。
+#
+# 不能把这四项混成一个地址：容器内写 127.0.0.1 会让跨 Pod 客户端拿到不可达的地址；
+# 广播 Service DNS 又会让宿主机客户端无法解析（宿主机没有集群 DNS）。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: surgecart-kafka-config
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/component: messaging
+    app.kubernetes.io/part-of: surgecart
+data:
+  # ---------- KRaft（单节点，无 ZooKeeper）----------
+  # CLUSTER_ID 必须固定：PVC 已被格式化后重建容器仍复用同一 KRaft 集群元数据。
+  # 取值与 docker-compose.yml 相同，两个环境的日志目录语义一致。
+  CLUSTER_ID: "a6SsLG7YBxBAeqa-3gKwgg"
+  KAFKA_NODE_ID: "1"
+  KAFKA_PROCESS_ROLES: "broker,controller"
+  KAFKA_CONTROLLER_QUORUM_VOTERS: "1@127.0.0.1:9093"
+  KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+
+  # ---------- 监听器 ----------
+  KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:29092"
+  # 集群内客户端使用的 bootstrap 地址（与下面的 PLAINTEXT 广播地址必须一致）。
+  # 单独成键是给 Topic 初始化 Job 与验证 Job 用的：它们不该去解析 KAFKA_ADVERTISED_LISTENERS
+  # 这种「listener 名 + 广播」复合字符串。一致性由 test/manifest/infrastructure_test.go 断言。
+  KAFKA_BOOTSTRAP_INTERNAL: "kafka.surgecart.svc.cluster.local:9092"
+  # 广播地址见文件头「地址的事实边界」第 2、3 条。
+  KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka.surgecart.svc.cluster.local:9092,EXTERNAL://127.0.0.1:29092"
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT"
+  KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+
+  # ---------- 存储 ----------
+  # 与 PVC 挂载点一致（mysql/redis 的文件存储目录同理）。
+  KAFKA_LOG_DIRS: "/var/lib/kafka/data"
+
+  # ---------- 单节点副本因子 ----------
+  # 本地只有 1 个 Broker：内部 Topic 与业务 Topic 均为 RF=1 / min.insync.replicas=1。
+  # 这**不具备** Broker 故障容忍能力，生产需 3 Broker、RF=3、min.insync.replicas=2。
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+  KAFKA_MIN_INSYNC_REPLICAS: "1"
+  KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+
+  # Topic 必须显式创建：自动建 Topic 会让分区/副本数由客户端决定，不可控。
+  KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+
+  # JVM 堆：镜像默认 -Xmx1G，在 1Gi 内存 limit 的容器里会被 OOMKill。
+  # 本地开发降低到 256m/512m，与 resources.limits.memory 配套（留出堆外内存与页缓存）。
+  KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"
+
+  # ---------- 业务 Topic（与 docker-compose.yml / 应用配置同值）----------
+  # 键名不带 KAFKA_ 前缀：见文件头说明（前缀会被写进 broker 属性）。
+  TOPIC_ORDER_REQUESTED: "surgecart.flashsale.order.requested.v1"
+  TOPIC_ORDER_REQUESTED_DLQ: "surgecart.flashsale.order.requested.v1.dlq"
+  TOPIC_CONSUMER_GROUP: "surgecart-flashsale-order-worker-v1"
+  # 单分区：秒杀请求按订单维度保证分区内有序；本地开发不做并行度调优。
+  TOPIC_ORDER_REQUESTED_PARTITIONS: "1"
+  TOPIC_ORDER_REQUESTED_REPLICATION: "1"
