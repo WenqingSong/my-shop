@@ -523,11 +523,21 @@ Kafka 消费不新建第二套 Redis 库存体系，完全复用既有机制：
 业务侧仍复用既有的 `flashsale_requests_total{interface="consume", result=...}` 与耗时直方图。
 不包含 `request_id` / `user_id` / `activity_id` 等高基数标签。
 
-**Consumer Lag 仍然未实现**：当前只依赖 `franz-go/pkg/kgo`（v1.18.1），
-Lag 需要消费组元数据 API（`kadm`），为避免引入新依赖并伪造数据，本仓库不提供 Lag 指标
-（可用 `kafka-consumer-groups.sh --describe` 人工核查）。
-`flashsale_consumer_joined` 与 `flashsale_outbox_backlog_pending` **都不是 Lag**，
-三者语义不同，见 10.12.3。
+**Consumer Lag（T4-02 起已实现）**：`surgecart_kafka_consumer_lag{consumer_group, topic, partition}`
+（Gauge，messages）= `max(0, log_end_offset - committed_offset)`。
+
+- 采集方式：独立 Kafka 客户端（`internal/mq/kafka/lag.go`）用 `kmsg` 原生协议发
+  `OffsetFetch` + `ListOffsets(-1)`（未提交位移的分区再发 `ListOffsets(-2)`），
+  **不引入 kadm**，也不复用消费客户端（避免监控耦合到消费组会话生命周期）；
+- 未提交位移（`committed_offset = -1`）：按 `log_start_offset` 计算初始积压，
+  这只与「franz-go 默认 `ConsumeResetOffset = AtStart`」的消费起点一致；拿不到起始位移时
+  跳过该分区（保留上一次有效值），**绝不把 Lag 伪造成 0**；
+- 采样：后台每 10s 一次（单次预算 5s），`/metrics` 抓取路径不访问 Kafka；
+  采样失败只把 `surgecart_sampler_up{sampler="kafka_lag"}` 置 0，Lag 保留上一次有效值；
+- 适用范围：仅 `dispatch_mode=kafka`。`db_scanner` 模式没有 Consumer，不采集、不导出该序列。
+
+`flashsale_consumer_joined`（是否入组）、`flashsale_outbox_backlog_pending`（发布侧积压）
+与 `surgecart_kafka_consumer_lag`（消费侧积压）是三个不同的量，见 10.12.3。
 
 ### 9.9 已知限制
 
@@ -537,7 +547,7 @@ Lag 需要消费组元数据 API（`kadm`），为避免引入新依赖并伪造
 - **默认单条批量**：牺牲吞吐换位移连续性，后续需基于真实压测决定是否提高批量。
 - **单 SKU 单分区**：分区键 `<activity_id>:<sku_id>` 决定热点 SKU 的消费并行度上限为 1，
   这是 B2.1 已接受的架构取舍。
-- **无 Lag / 无消费堆积告警**：见 9.8。
+- **无消费堆积告警**：Lag 指标已在 T4-02 提供（见 9.8），但告警规则与 Prometheus 部署属于 T4-03。
 - **模式切换需重启**：B4 不实现运行中热切换，只能通过重启进程在 `db_scanner` / `kafka`
   之间切换（见第 10 节）。
 
@@ -885,14 +895,17 @@ SELECT COUNT(*) FROM flash_sale_order_requests
   绝不会把积压伪造成 0；
 - 采样失败不影响订单、Outbox 发布与 Consumer（只读、独立 goroutine、独立预算）；
 - 采样循环纳入 Runtime 生命周期：`Shutdown` 第一段取消并等待它退出；
-- 指标关闭时不执行任何查询；`db_scanner` 模式不启动采样、不导出该序列。
+- 指标关闭时不启动采样器（不产生任何查询）；`db_scanner` 模式不启动采样、不导出该序列；
+- T4-02 起同一次采样额外写入 `surgecart_outbox_oldest_age_seconds`（最老待发布事件年龄）
+  与 `surgecart_sampler_up{sampler="outbox"}`（采样成功状态），不新增任何 SQL。
 
 三个概念不要混淆：
 
 | 指标/工具 | 含义 |
 | --- | --- |
 | `flashsale_outbox_backlog_pending` | **MySQL 中还没有被 Kafka 确认**的待发布记录数（本仓库的发布侧积压） |
-| Kafka Consumer Lag（`kafka-consumer-groups.sh --describe`） | 已进入 Kafka、尚未被消费组消费的消息条数（消费侧积压） |
+| `surgecart_outbox_oldest_age_seconds` | 上述待发布集合中**最老一条**的年龄（秒，MySQL `NOW(6) - created_at`），用于识别「积压不动」 |
+| `surgecart_kafka_consumer_lag`（亦可用 `kafka-consumer-groups.sh --describe` 交叉核对） | 已进入 Kafka、尚未被消费组确认的消息条数（消费侧积压） |
 | `published_at` 非空但请求仍 `queued` | 消息已发布、Consumer 尚未处理完（在途窗口，不是积压） |
 
 因此「backlog=0 且 Lag>0」是正常的：发布侧已清空，消费侧仍在追赶；
@@ -905,11 +918,15 @@ SELECT COUNT(*) FROM flash_sale_order_requests
 1. **看 Consumer joined**（`flashsale_consumer_joined`）：
    0 且从未出现 `flashsale_consumer_joined` 日志 → 从未加入组（Broker/Topic/鉴权/配置问题）；
    1 → 0 → 检查 `flashsale_consumer_left_group` / `flashsale_consumer_group_lost` 与 Broker 状态。
-2. **看 Outbox backlog**（`flashsale_outbox_backlog_pending`）：
-   持续上涨 → 发布侧没有进展；结合 `/metrics` 中 `flashsale_outbox_publish_failed_total{reason}`
+2. **看 Outbox backlog**（`flashsale_outbox_backlog_pending` + `surgecart_outbox_oldest_age_seconds`）：
+   持续上涨 → 发布侧没有进展；最老年龄同步增长说明消息「发不出去」而不是「发得慢」；
+   结合 `/metrics` 中 `flashsale_outbox_publish_failed_total{reason}`
    区分 `kafka`（Broker 明确失败）/ `unknown`（结果未知）/ `encode`（历史数据不满足契约）。
 3. **检查 Kafka Broker**：容器健康、Broker API 可用、Topic 存在且分区正常（见第 11 节命令）。
-4. **检查 Consumer Group**：`kafka-consumer-groups.sh --describe --group <group>` 看成员与 Lag；
+4. **看 Consumer Lag**（`surgecart_kafka_consumer_lag`）：
+   持续上涨 → 消费侧追不上（或消费者未运行）；同时看 `surgecart_sampler_up{sampler="kafka_lag"}`：
+   为 0 说明「Lag 本身没采到」，此时 Lag 值是上一次有效值，不能据此判断消费停滞。
+   再用 `kafka-consumer-groups.sh --describe --group <group>` 交叉核对成员与 Lag；
    `UnknownMemberId` / `IllegalGeneration` 通常对应会话超时或被踢出组。
 5. **检查发布错误日志**：`flashsale_outbox_publish_failed`（含 request_id、错误原因）、
    `flashsale_outbox_loop_backoff`（本轮无进展的退避）、`flashsale_outbox_mark_*`（标记未命中）。
@@ -925,9 +942,12 @@ SELECT COUNT(*) FROM flash_sale_order_requests
 
 ```bash
 # 只在 FLASH_SALE_METRICS_ENABLED=true 时存在 /metrics
-curl -s http://127.0.0.1:8000/metrics | grep -E 'flashsale_consumer_joined|flashsale_outbox_backlog_pending'
+curl -s http://127.0.0.1:8000/metrics | grep -E 'flashsale_consumer_joined|flashsale_outbox_backlog_pending|surgecart_outbox_oldest_age_seconds|surgecart_kafka_consumer_lag|surgecart_sampler_up'
 # flashsale_consumer_joined 1            → 已加入消费组（0 见 10.12.2）
 # flashsale_outbox_backlog_pending 0     → 发布侧没有积压（>0 结合 10.12.3 判读）
+# surgecart_outbox_oldest_age_seconds    → 最老待发布事件年龄（不增长说明积压正在被消化）
+# surgecart_kafka_consumer_lag           → 消费侧积压（按 partition）
+# surgecart_sampler_up{sampler=...} 0    → 该采样器最近一次采样失败，指标为上一次有效值
 ```
 
 ```bash
@@ -998,12 +1018,15 @@ docker compose --profile kafka logs -f kafka
 - T2-02：`/health`、`/ready` 语义冻结（Kafka 不参与健康判定）、
   `flashsale_consumer_joined`（消费组成员资格）、`flashsale_outbox_backlog_pending`
   （Outbox 待发布积压，后台有界采样）、真实 Kafka 停机故障注入（进程级 + 进程内）、
-  健康检查与异步状态指标文档（见 10.12 / 10.13）。
+  健康检查与异步状态指标文档（见 10.12 / 10.13）；
+- T4-02：`surgecart_kafka_consumer_lag`（分区级真实 Lag，kmsg 原生 OffsetFetch/ListOffsets，
+  后台采样 + 失败保留上次值）、`surgecart_outbox_oldest_age_seconds`、HTTP 三类指标与
+  `surgecart_sampler_up`（见 9.8）。
 
 未实现（后续阶段）：
 
 - Kubernetes/Helm 部署、多 Broker 生产集群、Kafka 多实例容量验证；
-- Consumer Lag 指标与消费堆积告警（需要消费组元数据 API，见 9.8/10.12.3）；
+- 消费堆积告警规则与 Prometheus/Grafana 部署（T4-03 起）；
 - 分区暂停/恢复、消费端 seek 重试；
 - 运行中热切换模式（B4 明确要求通过重启生效）；
 - Schema Registry、Kafka 分区键重新设计。
