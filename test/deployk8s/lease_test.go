@@ -284,8 +284,9 @@ func TestLeasePermissionDeniedFailsBeforeMigration(t *testing.T) {
 
 	res.requireCode(t, 3)
 	res.requireNoSuccess(t)
-	// F-01：权限预检必须能区分「明确被拒绝（Forbidden）」与「无法确认」。
-	res.requireContains(t, "缺少 leases.coordination.k8s.io 的 update 权限", "Forbidden")
+	// F-01：权限预检必须能区分「明确被拒绝（Forbidden）」与「无法确认」；
+	// T2-06.1.5：Lease 的 update 必须按对象名检查，错误信息里也必须是对象级写法。
+	res.requireContains(t, "缺少 leases.coordination.k8s.io/surgecart-deploy-lock 的 update 权限", "Forbidden")
 	res.requireNotContains(t, "无法确认")
 	f.requireNoEvent(t, "apply.migration")
 	f.requireNoEvent(t, "apply.application")

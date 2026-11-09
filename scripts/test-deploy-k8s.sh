@@ -55,6 +55,9 @@ log_info "bash -n scripts/deploy-k8s.sh"
 bash -n "${SCRIPT_DIR}/deploy-k8s.sh" || fail "scripts/deploy-k8s.sh 存在语法错误"
 
 log_info "发布脚本行为测试（真实执行脚本 + fake kubectl）..."
-go test -count=1 -v ./test/deployk8s/
+# `...` 必须保留：test/deployk8s/fakestate 是授权语义的单元测试（T2-06.1.5 / F-01：
+# resourceNames 对象名匹配、TYPE/NAME 解析）。只跑 ./test/deployk8s/ 会把它们漏掉，
+# 于是「替身是否忠实于真实 RBAC」就没有任何门禁。
+go test -count=1 -v ./test/deployk8s/...
 
 log_info "发布脚本行为测试全部通过（真实集群语义仍未验证：NOT_VERIFIED）"

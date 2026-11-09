@@ -172,67 +172,25 @@ func applyVerbMismatch(output string) string {
 	return strings.Join(names, ",")
 }
 
-// ---------------------------------------------------------------------------
-// 用例 1：预检通过、写路径被拒（resourceNames 收紧）
-// ---------------------------------------------------------------------------
-//
-// 这是「预检 ≠ 真实授权」最贴近现实的场景：RBAC 把 leases 的 update 限定到另一个
-// 资源名。`auth can-i update leases`（name 为空）仍然返回 yes，但真实
-// `replace -f lease-record.yaml`（name=surgecart-deploy-lock）必须被拒绝。
-// 一旦如此，脚本必须在写入迁移记录失败时 fail-closed，且不 apply 迁移清单。
-func TestWritePathDeniedByResourceNamesFailsAfterPreflight(t *testing.T) {
-	t.Parallel()
-	f := newFixture(t, fixtureOptions{})
-
-	rules := deliveredRBACRules(t)
-	// 把 leases 的规则收窄到一个**不存在**的 Lease 名：
-	// 预检（name=""）通过，真实写入（name=surgecart-deploy-lock）被拒。
-	patched := false
-	for _, rule := range rules {
-		resources, _ := rule["resources"].([]string)
-		if len(resources) != 1 || resources[0] != "leases" {
-			continue
-		}
-		if _, ok := rule["resourceNames"]; !ok {
-			continue // create 规则本来就没有 resourceNames
-		}
-		rule["resourceNames"] = []string{"another-pipeline-lock"}
-		patched = true
-	}
-	if !patched {
-		t.Fatal("交付的 RBAC 里没有带 resourceNames 的 leases 规则：本用例的前提不成立")
-	}
-	if !injectRules(t, f, rules) {
-		t.Fatalf("%s", writeEnforcementMissing("预检通过但写入被拒"))
-	}
-
-	res := runDeploy(t, f, "--migration-timeout", "10", "--rollout-timeout", "10")
-
-	if res.code == 0 {
-		t.Fatalf("%s\n--- stdout ---\n%s\n--- stderr ---\n%s",
-			writeEnforcementMissing("预检通过但写入被拒"), res.stdout, res.stderr)
-	}
-	res.requireNoSuccess(t)
-	res.requireContains(t,
-		"权限预检通过",    // 证明失败发生在预检之后
-		"Forbidden", // 真实 API 拒绝
-		"leases",    // 指向被拒的资源
-	)
-	f.requireNoEvent(t, "apply.migration")
-	f.requireNoEvent(t, "apply.application")
-}
+// 用例 1（写路径被拒）已迁移到 rbac_resource_name_test.go 的
+// TestWritePathDeniedAfterPreflightFailsClosed：预检现在会按对象名检查，静态改坏
+// resourceNames 会在预检阶段被拦住（由 TestWrongResourceNameFailsPreflightBeforeAnyWrite
+// 覆盖），因此「预检通过、写入被拒」只能用真实的 TOCTOU 构造。
 
 // ---------------------------------------------------------------------------
-// 用例 2：只载入交付的 RBAC → 完整发布必须成功（升级路径）
+// 用例 2：只载入交付的 RBAC → 完整发布必须成功（升级路径，T2）
 // ---------------------------------------------------------------------------
 //
 // 这是「仅授予交付的 RBAC 权限，发布能完整运行」的**权限层面**证据：
 // permissions 里只有 RBAC 清单解析出的规则，没有任何 allow-all 兜底。
 //
+// 断言不止退出码：还要证明预检**按对象名**检查了 Lease、每条权限恰好检查一次、
+// Lease 只 create 一次，以及最终资源状态（锁已释放 + 迁移记录 COMPLETE）。
+//
 // 已知分歧（已 message agent-c-fake）：C 的 fake 对「apply 已存在的对象」用
 // verb=update 授权，而真实 kubectl apply 用 PATCH（GET → create 或 patch，从不 PUT）。
 // 若因此在本用例里看到 `cannot update resource "deployments"`，说明分歧仍在，
-// 用例 Skip 并指向该分歧，而不是去给 RBAC 加上脚本根本不用的 update 权限
+// 用例失败并指向该分歧，而不是去给 RBAC 加上脚本根本不用的 update 权限
 // （那会让「最小权限」失去意义，也会被反向契约测试判成过度授权）。
 func TestDeliveredRBACOnlyUpgradeSucceeds(t *testing.T) {
 	t.Parallel()
@@ -245,6 +203,14 @@ func TestDeliveredRBACOnlyUpgradeSucceeds(t *testing.T) {
 
 	if res.code == 0 {
 		res.requireSuccess(t)
+		requireDeliveredRBACPreflightShape(t, f, "surgecart-deploy-lock")
+		requireLeaseReleaseAndRecord(t, f)
+		if got := countCalls(f, " create -f "); got != 1 {
+			t.Fatalf("Lease create 调用次数 = %d，期望 1（原子创建）", got)
+		}
+		if state := f.state(); !state.Applied || !state.MigrationApplied {
+			t.Fatalf("最终状态不完整：applied=%v migrationApplied=%v", state.Applied, state.MigrationApplied)
+		}
 		return
 	}
 	if reason := applyVerbMismatch(res.output()); reason != "" {
@@ -257,7 +223,7 @@ func TestDeliveredRBACOnlyUpgradeSucceeds(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 用例 3：只载入交付的 RBAC → 首次发布（空命名空间）必须成功
+// 用例 3：只载入交付的 RBAC → 首次发布（空命名空间）必须成功（T1）
 // ---------------------------------------------------------------------------
 //
 // 覆盖审计 A-1 的完整路径：命名空间不存在 → 集群级 ClusterRole（namespaces get/create）
@@ -277,6 +243,13 @@ func TestDeliveredRBACOnlyFirstDeploySucceeds(t *testing.T) {
 		if !f.state().NamespaceExists {
 			t.Fatal("首次发布必须创建命名空间")
 		}
+		requireDeliveredRBACPreflightShape(t, f, "surgecart-deploy-lock")
+		requireLeaseReleaseAndRecord(t, f)
+		if state := f.state(); !state.Applied || !state.MigrationApplied {
+			t.Fatalf("最终状态不完整：applied=%v migrationApplied=%v", state.Applied, state.MigrationApplied)
+		}
+		// 命名空间引导必须发生在锁与迁移之前（否则锁无处落地）。
+		f.requireEventOrder(t, "apply.namespace", "apply.migration", "apply.application")
 		return
 	}
 	if reason := applyVerbMismatch(res.output()); reason != "" {

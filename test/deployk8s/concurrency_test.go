@@ -673,11 +673,14 @@ func requireRBACManifestContract(t *testing.T, paths []string) {
 		st.Permissions = fakestate.Permissions{Rules: rules}
 	})
 
-	// 正例：脚本预检的 7 个 (verb, resource) 必须全部允许（pods 的 get/list 曾漏过 → F-01）。
+	// 正例：脚本预检的 (verb, resource) 必须全部允许（pods 的 get/list 曾漏过 → F-01）。
+	//
+	// 注意 leases：交付清单用 resourceNames 限定到锁对象，因此**必须带对象名**才会
+	// 返回 yes（T2-06.1.5 / 审计 F-01）。写成不带名字的形式会得到 no —— 那不是授权不足。
 	for _, pair := range [][2]string{
-		{"get", "leases.coordination.k8s.io"},
+		{"get", "leases.coordination.k8s.io/surgecart-deploy-lock"},
 		{"create", "leases.coordination.k8s.io"},
-		{"update", "leases.coordination.k8s.io"},
+		{"update", "leases.coordination.k8s.io/surgecart-deploy-lock"},
 		{"get", "jobs.batch"},
 		{"list", "jobs.batch"},
 		{"get", "pods"},
@@ -688,6 +691,22 @@ func requireRBACManifestContract(t *testing.T, paths []string) {
 		if got := strings.TrimSpace(res.stdout); got != "yes" {
 			t.Fatalf("auth can-i %s %s = %q，期望 yes", pair[0], pair[1], got)
 		}
+	}
+
+	// 反例：受 resourceNames 限制的 leases 操作，**不带对象名**必须为 no
+	// （真实集群同样如此；旧替身在这里放行，掩盖了 F-01）。
+	for _, verb := range []string{"get", "update"} {
+		res := runFake(t, dir, "auth", "can-i", verb, "leases.coordination.k8s.io", "-n", "surgecart")
+		res.requireCode(t, 1)
+		if got := strings.TrimSpace(res.stdout); got != "no" {
+			t.Fatalf("auth can-i %s leases.coordination.k8s.io（无对象名）= %q，期望 no", verb, got)
+		}
+	}
+	// 反例：错误的对象名同样必须为 no。
+	wrong := runFake(t, dir, "auth", "can-i", "get", "leases.coordination.k8s.io/another-pipeline-lock", "-n", "surgecart")
+	wrong.requireCode(t, 1)
+	if got := strings.TrimSpace(wrong.stdout); got != "no" {
+		t.Fatalf("错误对象名的 get leases = %q，期望 no", got)
 	}
 
 	// 负例：从规则结构里挑一个**确认未被授予**的组合，断言默认拒绝。
@@ -790,8 +809,11 @@ func trimRuleVerb(t *testing.T, rules []fakestate.Rule, group, resource, verb st
 }
 
 // TestAuthCanISupportsNamespaceAndSubresource 覆盖 `auth can-i` 的参数语义：
-// -n 真正参与判定、`<resource>/<subresource>` 与 `--subresource=` 等价、
-// 子资源必须显式授权（只有 "pods" 的规则不授予 "pods/log"）。
+//   - -n 真正参与判定；
+//   - 子资源只能用 `--subresource=` 表达；`pods/log` 里的 "log" 是**对象名**
+//     （与真实 kubectl 的 SplitN(args[1], "/", 2) 一致，T2-06.1.5 / 审计 F-01）；
+//   - 子资源必须显式授权（只有 "pods" 的规则不授予 "pods/log"）；
+//   - 第三个位置参数（`can-i VERB TYPE NAME`）会被真实 kubectl 拒绝，替身同样拒绝。
 func TestAuthCanISupportsNamespaceAndSubresource(t *testing.T) {
 	t.Parallel()
 	dir := newFakeStateDir(t, func(st *fakestate.State) {
@@ -808,14 +830,15 @@ func TestAuthCanISupportsNamespaceAndSubresource(t *testing.T) {
 		code int
 		want string
 	}{
-		{args: []string{"auth", "can-i", "get", "pods/log", "-n", "surgecart"}, code: 0, want: "yes"},
 		{args: []string{"auth", "can-i", "get", "pods", "--subresource=log", "-n", "surgecart"}, code: 0, want: "yes"},
+		// "pods/log" 是「名为 log 的 Pod」，不是子资源：只授予 pods/log 时必须 no。
+		{args: []string{"auth", "can-i", "get", "pods/log", "-n", "surgecart"}, code: 1, want: "no"},
 		// 子资源必须显式授权：pods 本体没有规则。
 		{args: []string{"auth", "can-i", "get", "pods", "-n", "surgecart"}, code: 1, want: "no"},
 		// 命名空间参与判定。
-		{args: []string{"auth", "can-i", "get", "pods/log", "-n", "default"}, code: 1, want: "no"},
+		{args: []string{"auth", "can-i", "get", "pods", "--subresource=log", "-n", "default"}, code: 1, want: "no"},
 		// 未声明的动词默认拒绝。
-		{args: []string{"auth", "can-i", "list", "pods/log", "-n", "surgecart"}, code: 1, want: "no"},
+		{args: []string{"auth", "can-i", "list", "pods", "--subresource=log", "-n", "surgecart"}, code: 1, want: "no"},
 	}
 	for _, tc := range cases {
 		res := runFake(t, dir, tc.args...)
@@ -824,6 +847,32 @@ func TestAuthCanISupportsNamespaceAndSubresource(t *testing.T) {
 			t.Fatalf("%v = %q，期望 %q", tc.args, got, tc.want)
 		}
 	}
+
+	// TYPE/NAME 的 NAME 是对象名：授予 pods get 后，`pods/log`（名为 log 的 Pod）允许，
+	// 但 `pods --subresource=log` 仍然拒绝（pods/log 子资源没有授权）。
+	named := newFakeStateDir(t, func(st *fakestate.State) {
+		st.Permissions = fakestate.Permissions{Rules: []fakestate.Rule{{
+			APIGroups:  []string{""},
+			Resources:  []string{"pods"},
+			Verbs:      []string{"get"},
+			Namespaces: []string{"surgecart"},
+		}}}
+	})
+	res := runFake(t, named, "auth", "can-i", "get", "pods/log", "-n", "surgecart")
+	res.requireCode(t, 0)
+	if got := strings.TrimSpace(res.stdout); got != "yes" {
+		t.Fatalf("授予 pods get 后，`get pods/log` 应被当作名为 log 的对象（允许），实际 %q", got)
+	}
+	res = runFake(t, named, "auth", "can-i", "get", "pods", "--subresource=log", "-n", "surgecart")
+	res.requireCode(t, 1)
+	if got := strings.TrimSpace(res.stdout); got != "no" {
+		t.Fatalf("只授予 pods get 时，pods/log 子资源必须拒绝，实际 %q", got)
+	}
+
+	// 第三个位置参数：真实 kubectl 报 "you must specify two arguments..."。
+	tooMany := runFake(t, dir, "auth", "can-i", "get", "pods", "surgecart-deploy-lock", "-n", "surgecart")
+	tooMany.requireCode(t, 1)
+	tooMany.requireContains(t, "you must specify two arguments")
 }
 
 // TestLoadRBACRulesFromMultipleFiles 覆盖「RBAC 拆成多份物理文件」的载入：

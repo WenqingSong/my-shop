@@ -409,18 +409,20 @@ func docLoadRBACDir(t *testing.T) ([]string, []docRBACDocument) {
 
 // docPermission 是脚本声明的单条权限。
 //
-// T2-06.1.4 的格式是 `"verb|group|resource|scope|callers@Lline"`：
+// T2-06.1.5 的格式是 `"verb|group|resource|scope|name|callers@Lline"`：
 //   - group 为 `core` 表示 core/v1（RBAC 里写 `""`）；
 //   - scope 为 `namespace` / `cluster`：决定它只能被 Role 还是 ClusterRole 授予；
+//   - name 是受 RBAC `resourceNames` 限制的对象名（不受限时为空）；
 //   - callers 是使用该权限的函数名（`@L<line>` 是脚本里的行号）。
 //
-// 基线（T2-06.1.3）的格式是 `"<verb> <resource.group>"`，没有 scope/行号。
-// 两种都支持：不允许因为脚本改了声明格式就让文档契约静默失效。
+// 兼容基线：T2-06.1.4 的 5 字段格式（无 name）与 T2-06.1.3 的
+// `"<verb> <resource.group>"` 格式。不允许因为脚本改了声明格式就让文档契约静默失效。
 type docPermission struct {
 	verb     string
 	group    string
 	resource string
 	scope    string
+	name     string
 	callers  string
 	line     int
 }
@@ -447,7 +449,8 @@ func docScriptRequiredPermissions(t *testing.T, script string) []docPermission {
 		}
 		var out []docPermission
 		legacy := regexp.MustCompile(`^"([a-z]+) ([^"|]+)"$`)
-		structured := regexp.MustCompile(`^"([a-z]+)\|([^"|]*)\|([^"|]+)\|([a-z]*)\|?([^"|]*)"$`)
+		structured6 := regexp.MustCompile(`^"([a-z]+)\|([^"|]*)\|([^"|]+)\|([a-z]*)\|([^"|]*)\|([^"|]*)"$`)
+		structured5 := regexp.MustCompile(`^"([a-z]+)\|([^"|]*)\|([^"|]+)\|([a-z]*)\|?([^"|]*)"$`)
 		for _, line := range strings.Split(block[1], "\n") {
 			trimmed := strings.TrimSpace(line)
 			if trimmed == "" || strings.HasPrefix(trimmed, "#") {
@@ -458,16 +461,21 @@ func docScriptRequiredPermissions(t *testing.T, script string) []docPermission {
 				out = append(out, docPermission{verb: match[1], group: group, resource: resource})
 				continue
 			}
-			match := structured.FindStringSubmatch(trimmed)
-			if match == nil {
+			match := structured6.FindStringSubmatch(trimmed)
+			objectName, callers := "", ""
+			if match != nil {
+				objectName, callers = match[5], match[6]
+			} else if match = structured5.FindStringSubmatch(trimmed); match != nil {
+				callers = match[5]
+			} else {
 				t.Fatalf("%s 里的条目无法解析: %q", name, trimmed)
 			}
 			group := match[2]
 			if group == "core" {
 				group = ""
 			}
-			entry := docPermission{verb: match[1], group: group, resource: match[3], scope: match[4]}
-			entry.callers = match[5]
+			entry := docPermission{verb: match[1], group: group, resource: match[3], scope: match[4], name: objectName}
+			entry.callers = callers
 			if idx := strings.LastIndex(entry.callers, "@L"); idx >= 0 {
 				if number, err := strconv.Atoi(entry.callers[idx+2:]); err == nil {
 					entry.line = number

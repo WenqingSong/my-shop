@@ -34,15 +34,21 @@ type requiredPermission struct {
 	Group    string // core/v1 归一化为 ""
 	Resource string
 	Scope    string // namespace | cluster
+	Name     string // 受 resourceNames 限制的对象名；空 = 不受限
 	CallSite string
 }
 
-// ref 返回 `kubectl auth can-i` 接受的写法（非 core group 带 group 后缀）。
+// ref 返回 `kubectl auth can-i` 接受的写法（非 core group 带 group 后缀；
+// 有对象名时写成 `TYPE/NAME` —— 这是 kubectl 唯一支持的对象级写法）。
 func (p requiredPermission) ref() string {
-	if p.Group == "" {
-		return p.Resource
+	base := p.Resource
+	if p.Group != "" {
+		base = p.Resource + "." + p.Group
 	}
-	return p.Resource + "." + p.Group
+	if p.Name != "" {
+		return base + "/" + p.Name
+	}
+	return base
 }
 
 // shortResource 是 fake 的 Denied 使用的写法：fake 按第一个 "." 截断 group，
@@ -63,7 +69,8 @@ func requiredPermissionsFromScript(t *testing.T) []requiredPermission {
 	if block == nil {
 		t.Fatal("scripts/deploy-k8s.sh 缺少 REQUIRED_PERMISSIONS：本文件的权限矩阵会失去意义")
 	}
-	entryPattern := regexp.MustCompile(`^"([^"|]+)\|([^"|]*)\|([^"|]+)\|([^"|]+)\|([^"|]*)"$`)
+	// 6 个字段：verb|group|resource|scope|name|call site（T2-06.1.5 / 审计 F-01）。
+	entryPattern := regexp.MustCompile(`^"([^"|]+)\|([^"|]*)\|([^"|]+)\|([^"|]+)\|([^"|]*)\|([^"|]*)"$`)
 	var out []requiredPermission
 	for _, line := range strings.Split(block[1], "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -72,14 +79,15 @@ func requiredPermissionsFromScript(t *testing.T) []requiredPermission {
 		}
 		match := entryPattern.FindStringSubmatch(trimmed)
 		if match == nil {
-			t.Fatalf("REQUIRED_PERMISSIONS 条目无法解析: %q", trimmed)
+			t.Fatalf("REQUIRED_PERMISSIONS 条目无法解析: %q（期望 \"<verb>|<group>|<resource>|<scope>|<name>|<call site>\"）", trimmed)
 		}
 		group := match[2]
 		if group == "core" {
 			group = ""
 		}
 		out = append(out, requiredPermission{
-			Verb: match[1], Group: group, Resource: match[3], Scope: match[4], CallSite: match[5],
+			Verb: match[1], Group: group, Resource: match[3], Scope: match[4],
+			Name: match[5], CallSite: match[6],
 		})
 	}
 	if len(out) == 0 {

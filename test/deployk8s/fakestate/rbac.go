@@ -25,7 +25,9 @@ import (
 //     不再有第二套判定逻辑。
 //
 // 边界：这不是 RBAC 授权器的完整实现（不处理 aggregationRule、RoleBinding 的
-// subject 匹配、resourceNames 的通配）。它只覆盖 deploy-k8s.sh 用到的子集。
+// subject 匹配、Aggregated ClusterRole）。它覆盖 deploy-k8s.sh 用到的子集，但
+// **resourceNames 的匹配语义必须与真实授权器逐字一致**（T2-06.1.5 / 审计 F-01：
+// 替身在这里放水一次，就会让「交付的 RBAC 跑不起来」这个 S1 缺陷藏在绿灯后面）。
 
 // Decision 是授权判定的结果。
 type Decision string
@@ -46,7 +48,8 @@ const (
 //   - Resources：支持子资源 "pods/log"；子资源必须**显式**列出（只有 "pods" 的规则
 //     不授予 "pods/log"，与 RBAC 一致）；"*" 表示全部资源；
 //   - Verbs：get / list / create / update / patch / delete / deletecollection / "*"；
-//   - ResourceNames：空 = 全部对象名；非空 = 仅这些对象名；
+//   - ResourceNames：空 = 全部对象名；非空 = 仅这些对象名，且请求必须带对象名
+//     （逐字相等；RBAC 的 resourceNames 没有通配符，"*" 只是一个普通名字）；
 //   - Namespaces：空 = 全部命名空间；非空 = 仅这些命名空间（由 Role 的
 //     metadata.namespace 填充）；
 //   - Effect：""/"allow" = 允许；"deny" = 拒绝（只用于兼容旧的 Denied 写法，
@@ -69,27 +72,36 @@ const ruleSourceLegacy = "legacy"
 
 func (r Rule) denies() bool { return strings.EqualFold(r.Effect, "deny") }
 
-// SplitResource 把 kubectl 里常见的资源写法归一为 (group, resource)。
+// ParseResourceArg 解析 `kubectl auth can-i <verb> <TYPE | TYPE/NAME>` 的资源参数，
+// 返回 (group, resource, name)。
 //
-//	"leases.coordination.k8s.io" → ("coordination.k8s.io", "leases")
-//	"jobs.batch"                 → ("batch", "jobs")
-//	"pods"                       → ("", "pods")
-//	"pods/log"                   → ("", "pods/log")
-//	"leases.coordination.k8s.io/surgecart-deploy-lock" → 同上，最后一个 "/" 之后是名字
-func SplitResource(arg string) (group, resource string) {
+//	"leases.coordination.k8s.io"                       → ("coordination.k8s.io", "leases", "")
+//	"leases.coordination.k8s.io/surgecart-deploy-lock" → ("coordination.k8s.io", "leases", "surgecart-deploy-lock")
+//	"pods"                                             → ("", "pods", "")
+//	"pods/nginx"                                       → ("", "pods", "nginx")
+//
+// 语义以真实 kubectl 为准（kubectl/pkg/cmd/auth/cani.go）：它把第二个位置参数用
+// **第一个** "/" 切成 TYPE 与 Name，`TYPE/NAME` 里的 NAME 就是**对象名**。
+// 子资源不在这里表达 —— 真实 kubectl 用 `--subresource=<sub>`，由调用方（fakekubectl）
+// 把子资源合并进 Resource（例如 "pods" + log → "pods/log"）。
+//
+// 为什么这一点很重要（T2-06.1.5 / 审计 F-01）：把 "pods/log" 当成子资源会让
+// `auth can-i get pods/log` 变成一次**子资源**检查；真实 kubectl 检查的是
+// 「名为 log 的 Pod」（GET pods 规则即可满足）——替身比真实集群宽松，测试因此失去意义。
+func ParseResourceArg(arg string) (group, resource, name string) {
 	arg = strings.TrimSpace(arg)
 	if arg == "" {
-		return "", ""
+		return "", "", ""
 	}
-	// 子资源（"pods/log"）要保留：它决定 RBAC 的匹配项，不能丢掉。
-	suffix := ""
+	typePart := arg
 	if slash := strings.Index(arg, "/"); slash >= 0 {
-		arg, suffix = arg[:slash], arg[slash:]
+		typePart = arg[:slash]
+		name = arg[slash+1:]
 	}
-	if dot := strings.Index(arg, "."); dot > 0 {
-		return arg[dot+1:], arg[:dot] + suffix
+	if dot := strings.Index(typePart, "."); dot > 0 {
+		return typePart[dot+1:], typePart[:dot], name
 	}
-	return "", arg + suffix
+	return "", typePart, name
 }
 
 // splitSubresource 把 "pods/log" 拆成 ("pods", "log")。
@@ -100,7 +112,21 @@ func splitSubresource(resource string) (base, sub string) {
 	return resource, ""
 }
 
-// ruleMatches 判断规则是否覆盖该请求。name 为空表示「调用方没有限定对象名」。
+// ruleMatches 判断规则是否覆盖该请求。name 为空表示「请求没有对象名」。
+//
+// resourceNames 的语义与 Kubernetes RBAC 的 authorizer 完全一致
+// （plugin/pkg/auth/authorizer/rbac/rbac.go → ResourceNameMatches）：
+//
+//	if len(rule.ResourceNames) == 0 { return true }
+//	return has(rule.ResourceNames, requestName)
+//
+// 也就是「规则里写了 resourceNames 时，请求必须带对象名且逐字相等」。由此推导出：
+//   - name=="" 的检查**不匹配**受限规则（这正是真实集群上
+//     `kubectl auth can-i get leases.coordination.k8s.io` 对 resourceNames 规则返回
+//     no 的原因；旧实现对此放行，掩盖了审计 F-01）；
+//   - resourceNames 没有通配符："*" 是一个普通字符串，不是一个「全部」；
+//   - create / list / watch / deletecollection 的真实请求没有对象名，所以带
+//     resourceNames 的规则永远不会命中它们（不是这里特判，而是上面的语义自然结果）。
 func (r Rule) ruleMatches(verb, group, resource, namespace, name string) bool {
 	if !containsToken(r.Verbs, verb) {
 		return false
@@ -129,20 +155,18 @@ func (r Rule) ruleMatches(verb, group, resource, namespace, name string) bool {
 		}
 	}
 	if len(r.ResourceNames) > 0 {
-		// 真实写请求总是带 name，此时严格匹配；can-i 不带名字（name==""）时，
-		// 只要规则覆盖该 (verb, resource) 就算允许 —— 否则 resourceNames 限定的
-		// 最小权限示例会让 `auth can-i get leases` 恒为 no，预检失去意义。
-		if name != "" {
-			ok := false
-			for _, n := range r.ResourceNames {
-				if n == name || n == "*" {
-					ok = true
-					break
-				}
+		if name == "" {
+			return false
+		}
+		ok := false
+		for _, n := range r.ResourceNames {
+			if n == name { // 精确相等：RBAC 的 resourceNames 不支持通配符
+				ok = true
+				break
 			}
-			if !ok {
-				return false
-			}
+		}
+		if !ok {
+			return false
 		}
 	}
 	return true

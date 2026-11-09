@@ -111,3 +111,19 @@ bash scripts/test-deploy-k8s.sh   exit=0   ok test/deployk8s 49.295s
 |---|---|---|
 | `AUD-02`（缺少 fencing token） | **NOT_CLOSED** | 本任务未实现服务端 fencing |
 | `AUD-05`（已发出的请求无法撤销） | **NOT_CLOSED** | 已由故障注入实验直接观测到跨接管写入 |
+
+## 8. T2-06.1.5 补充说明（F-01 更正，2026-11-09）
+
+> 本节由 T2-06.1.5 追加，**不修改**上文的历史记录与结论；它只更正那些在当时
+> 无法发现、现在已被证伪的表述。
+
+- 上文第 5 节「A-5 写路径授权在 fake 层闭环」以及第 6 节「交付清单即可跑通完整发布」
+  依赖了伪 kubectl 的 `resourceNames` 判定。该判定当时对「无对象名的授权检查」错误放行
+  （`ruleMatches` 里 `name == ""` 直接跳过 resourceNames 匹配），与真实 RBAC 的
+  `ResourceNameMatches` 语义不一致；同时 `scripts/deploy-k8s.sh` 的预检也**没有**携带
+  Lease 对象名。两者叠加的结果是：测试全绿，但交付的最小权限 RBAC 在真实集群上会让
+  预检（`auth can-i get leases.coordination.k8s.io`）返回 `no`，发布直接退出 3。
+- 因此 T2-06.1.4 关于「交付 RBAC 可支撑发布」的结论应限定为**替身层**；真实集群上
+  该结论直到 T2-06.1.5 才具备可验证的前提（预检改为对象级、替身改为忠实语义）。
+- 上文第 6 节的 NOT_VERIFIED 项（真实 `auth can-i` / RoleBinding）**仍然成立**。
+- 详见 `T2-06.1.5_IMPLEMENTATION_REPORT.md`。

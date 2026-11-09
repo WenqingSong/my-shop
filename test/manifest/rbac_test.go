@@ -17,7 +17,7 @@ import (
 // 三方必须一致，任何一方漂移都要让门禁失败：
 //
 //  1. scripts/deploy-k8s.sh 的 REQUIRED_PERMISSIONS —— 脚本**声明**需要的权限
-//     （唯一事实来源；格式 `<verb>|<group>|<resource>|<scope>|<call site>`）；
+//     （唯一事实来源；格式 `<verb>|<group>|<resource>|<scope>|<name>|<call site>`）；
 //  2. 脚本里真实出现的 kubectl 调用 —— 脚本**实际**使用的权限；
 //  3. manifest/kubernetes/examples/deploy-lock/rbac.yaml —— **交付**的授权范围。
 //
@@ -35,6 +35,9 @@ type permission struct {
 	group    string
 	resource string
 	scope    string
+	// name 是脚本按对象名检查/操作的那个对象（受 RBAC resourceNames 限制时非空）。
+	// 空 = 请求没有对象名（create/list 或不受限的 get）。
+	name     string
 	callSite string
 }
 
@@ -47,18 +50,30 @@ func (p permission) String() string {
 	if scope == "" {
 		scope = "any"
 	}
-	return fmt.Sprintf("%s %s (%s, %s)", p.verb, p.resource, group, scope)
-}
-
-// ref 返回 `kubectl auth can-i` 接受的资源写法：非 core group 需要带 group 后缀。
-func (p permission) ref() string {
-	if p.group == "" || p.group == "core" {
-		return p.resource
+	name := p.name
+	if name == "" {
+		name = "<无对象名>"
 	}
-	return p.resource + "." + p.group
+	return fmt.Sprintf("%s %s/%s (%s, %s)", p.verb, p.resource, name, group, scope)
 }
 
-// key 用于集合比较（不含调用点）。
+// ref 返回 `kubectl auth can-i` 接受的资源写法：非 core group 需要带 group 后缀；
+// 有对象名时写成 `TYPE/NAME`（kubectl 唯一支持的对象级写法）。
+func (p permission) ref() string {
+	base := p.resource
+	if p.group != "" && p.group != "core" {
+		base = p.resource + "." + p.group
+	}
+	if p.name != "" {
+		return base + "/" + p.name
+	}
+	return base
+}
+
+// key 用于集合比较（不含调用点与对象名：对象名是「怎么检查」，不是「授了什么」）。
+//
+// 名字是否匹配由 grants() 与 §5 的对象名断言单独保证 —— 把它们混进 key 会让
+// 「表里少了 objectName」变成「少了一条权限」，错误信息指向错误的方向。
 func (p permission) key() string {
 	return p.verb + "|" + p.group + "|" + p.resource + "|" + p.scope
 }
@@ -73,16 +88,17 @@ var requiredPermissionsPattern = regexp.MustCompile(`(?s)REQUIRED_PERMISSIONS=\(
 //
 // 格式契约（任何违反都让测试失败，不给「宽松解析」留后门）：
 //
-//	"<verb>|<group>|<resource>|<scope>|<call site>"
+//	"<verb>|<group>|<resource>|<scope>|<name>|<call site>"
 //
-// 5 个字段必须全部存在；group 用 core 表示 core/v1；scope 只能是 namespace/cluster。
+// 6 个字段必须全部存在；group 用 core 表示 core/v1；scope 只能是 namespace/cluster；
+// name 是受 resourceNames 限制的对象名（不受限时为空字段）。
 func requiredPermissions(t *testing.T, script string) []permission {
 	t.Helper()
 	block := requiredPermissionsPattern.FindStringSubmatch(script)
 	if block == nil {
 		t.Fatal("scripts/deploy-k8s.sh 缺少 REQUIRED_PERMISSIONS：权限契约的唯一事实来源不能缺失")
 	}
-	entryPattern := regexp.MustCompile(`^"([^"|]+)\|([^"|]*)\|([^"|]+)\|([^"|]+)\|([^"|]*)"$`)
+	entryPattern := regexp.MustCompile(`^"([^"|]+)\|([^"|]*)\|([^"|]+)\|([^"|]+)\|([^"|]*)\|([^"|]*)"$`)
 	var out []permission
 	seen := map[string]bool{}
 	for _, line := range strings.Split(block[1], "\n") {
@@ -92,9 +108,9 @@ func requiredPermissions(t *testing.T, script string) []permission {
 		}
 		match := entryPattern.FindStringSubmatch(trimmed)
 		if match == nil {
-			t.Fatalf("REQUIRED_PERMISSIONS 里的条目格式无法解析: %q（期望 \"<verb>|<group>|<resource>|<scope>|<call site>\"）", trimmed)
+			t.Fatalf("REQUIRED_PERMISSIONS 里的条目格式无法解析: %q（期望 \"<verb>|<group>|<resource>|<scope>|<name>|<call site>\"）", trimmed)
 		}
-		entry := permission{verb: match[1], group: match[2], resource: match[3], scope: match[4], callSite: match[5]}
+		entry := permission{verb: match[1], group: match[2], resource: match[3], scope: match[4], name: match[5], callSite: match[6]}
 		if entry.group == "" {
 			t.Fatalf("REQUIRED_PERMISSIONS 条目 %q 的 group 为空：core/v1 必须显式写成 core（空字段会让解析模糊）", trimmed)
 		}
@@ -118,6 +134,16 @@ func requiredPermissions(t *testing.T, script string) []permission {
 		t.Fatal("REQUIRED_PERMISSIONS 为空：权限预检实际不会执行")
 	}
 	return out
+}
+
+// lockNameOf 解析脚本里的 LOCK_NAME（受 resourceNames 限制的那个 Lease 对象名）。
+func lockNameOf(t *testing.T, script string) string {
+	t.Helper()
+	match := regexp.MustCompile(`(?m)^LOCK_NAME="([^"]+)"`).FindStringSubmatch(script)
+	if match == nil {
+		t.Fatal("scripts/deploy-k8s.sh 缺少 LOCK_NAME")
+	}
+	return match[1]
 }
 
 func permissionSet(entries []permission) map[string]permission {
@@ -254,9 +280,14 @@ func containsAny(values []string, want, wildcard string) bool {
 	return false
 }
 
-// grants 判断某个权限是否被授予。lockName 用于校验 resourceNames 限定，
-// nameScoped 表示该资源在脚本里是「按名称操作」的（只有 leases 属于这一类）。
-func (g grantIndex) grants(entry permission, lockName string, nameScoped bool) (bool, string) {
+// grants 判断某个权限是否被授予。
+//
+// 对象名（resourceNames）语义必须与真实 RBAC 一致（T2-06.1.5 / 审计 F-01）：
+//   - 规则的 resourceNames 非空时，只匹配**带相同对象名**的请求。因此
+//     entry.name 为空的检查（create/list）不能靠这类规则「算作已授权」；
+//   - entry.name 非空时，交付清单必须真的用 resourceNames 限定到这个名字 ——
+//     否则「按对象名检查」就失去了最小权限的依据（也说明表与清单已经脱节）。
+func (g grantIndex) grants(entry permission) bool {
 	for _, doc := range g.docs {
 		for _, rule := range doc.Rules {
 			if !containsAny(rule.APIGroups, entry.group, "*") {
@@ -269,17 +300,24 @@ func (g grantIndex) grants(entry permission, lockName string, nameScoped bool) (
 				continue
 			}
 			if len(rule.ResourceNames) > 0 {
-				if !nameScoped {
-					return false, fmt.Sprintf("%s 对 %s 用 resourceNames 限定了对象名，但脚本对它是按标签/列表访问的", doc.Metadata.Name, entry.resource)
-				}
-				if !containsAny(rule.ResourceNames, lockName, "") {
+				if entry.name == "" {
+					// 真实集群上，无对象名的请求不会匹配带 resourceNames 的规则。
 					continue
 				}
+				if !containsAny(rule.ResourceNames, entry.name, "") {
+					continue
+				}
+				return true
 			}
-			return true, ""
+			if entry.name != "" {
+				// 未限定对象名的规则虽然也能放行，但它无法证明「按对象名检查」这条
+				// 契约成立；交付清单必须显式限定（否则删掉 resourceNames 也能测试全绿）。
+				continue
+			}
+			return true
 		}
 	}
-	return false, ""
+	return false
 }
 
 // ---------------------------------------------------------------------------
@@ -413,12 +451,14 @@ func TestRequiredPermissionsCoversAuditFindings(t *testing.T) {
 	script := readScript(t)
 	entries := requiredPermissions(t, script)
 	set := permissionSet(entries)
+	lockName := lockNameOf(t, script)
 
 	required := []permission{
-		// 发布锁
-		{verb: "get", group: "coordination.k8s.io", resource: "leases", scope: "namespace"},
+		// 发布锁：get/update 必须按对象名检查（T2-06.1.5 / 审计 F-01）；
+		// create 例外 —— create 请求没有对象名，resourceNames 无法约束它。
+		{verb: "get", group: "coordination.k8s.io", resource: "leases", scope: "namespace", name: lockName},
 		{verb: "create", group: "coordination.k8s.io", resource: "leases", scope: "namespace"},
-		{verb: "update", group: "coordination.k8s.io", resource: "leases", scope: "namespace"},
+		{verb: "update", group: "coordination.k8s.io", resource: "leases", scope: "namespace", name: lockName},
 		// 迁移 Job
 		{verb: "get", group: "batch", resource: "jobs", scope: "namespace"},
 		{verb: "list", group: "batch", resource: "jobs", scope: "namespace"},
@@ -450,8 +490,30 @@ func TestRequiredPermissionsCoversAuditFindings(t *testing.T) {
 		{verb: "create", group: "authorization.k8s.io", resource: "selfsubjectaccessreviews", scope: "cluster"},
 	}
 	for _, want := range required {
-		if _, ok := set[want.key()]; !ok {
+		got, ok := set[want.key()]
+		if !ok {
 			t.Fatalf("REQUIRED_PERMISSIONS 缺少 %s：这是审计点名的权限，缺失时按示例授权的身份会在真实集群上 403", want)
+		}
+		if want.name != "" && got.name != want.name {
+			t.Fatalf("REQUIRED_PERMISSIONS 的 %s 对象名为 %q，期望 %q：受 resourceNames 限制的操作必须按具体对象名预检（审计 F-01）",
+				want, got.name, want.name)
+		}
+		if want.name == "" && got.name != "" {
+			t.Fatalf("REQUIRED_PERMISSIONS 的 %s 带了对象名 %q：create/list 等没有对象名的请求不能按对象名检查（真实 RBAC 里它们不匹配 resourceNames 规则）",
+				want, got.name)
+		}
+	}
+
+	// 对象名只允许出现在 leases 上（本仓库唯一的 resourceNames 资源）；且必须等于 LOCK_NAME。
+	for _, entry := range entries {
+		if entry.name == "" {
+			continue
+		}
+		if entry.resource != "leases" {
+			t.Fatalf("%s 带对象名 %q，但只有 leases 受 resourceNames 限制：给不受限的操作加名字会让预检检查一个不存在的对象", entry, entry.name)
+		}
+		if entry.name != lockName {
+			t.Fatalf("%s 的对象名 %q 与 LOCK_NAME=%q 不一致：预检会去查一个 RBAC 没有授权的对象", entry, entry.name, lockName)
 		}
 	}
 
@@ -551,10 +613,7 @@ func TestDeliveredRBACMatchesRequiredPermissions(t *testing.T) {
 	path := rbacPath(t)
 	docs := loadRBAC(t, path)
 
-	lockName := regexp.MustCompile(`(?m)^LOCK_NAME="([^"]+)"`).FindStringSubmatch(script)
-	if lockName == nil {
-		t.Fatal("scripts/deploy-k8s.sh 缺少 LOCK_NAME")
-	}
+	lockName := lockNameOf(t, script)
 
 	namespace := "surgecart"
 	if meta := mapAt(t, appDeployment(t), "metadata"); meta["namespace"] != nil {
@@ -584,17 +643,14 @@ func TestDeliveredRBACMatchesRequiredPermissions(t *testing.T) {
 	clusterGrants := grantIndex{docs: clusterRoles}
 
 	// 1) 交付 RBAC ⊇ REQUIRED_PERMISSIONS：按示例授权的身份必须能跑完整个发布会话。
+	//    entry.name 非空的条目要求清单用 resourceNames 限定到同一个名字 ——
+	//    否则「按对象名检查」在真实集群上就会变成 no（审计 F-01 的形态）。
 	for _, entry := range entries {
-		nameScoped := entry.resource == "leases"
 		var granted bool
-		var why string
 		if entry.scope == "cluster" {
-			granted, why = clusterGrants.grants(entry, lockName[1], nameScoped)
+			granted = clusterGrants.grants(entry)
 		} else {
-			granted, why = nsGrants.grants(entry, lockName[1], nameScoped)
-		}
-		if why != "" {
-			t.Fatalf("%s：%s", path, why)
+			granted = nsGrants.grants(entry)
 		}
 		if !granted {
 			t.Fatalf("%s 没有授权 %s（调用点 %s）：按示例授权的身份会在权限预检阶段失败（退出码 3）", path, entry, entry.callSite)
@@ -667,20 +723,36 @@ func TestDeliveredRBACMatchesRequiredPermissions(t *testing.T) {
 		}
 	}
 
-	// 5) 发布锁必须用 resourceNames 限定到脚本实际使用的 Lease。
-	lockScoped := false
+	// 5) 发布锁必须**逐动词**用 resourceNames 限定到脚本实际使用的 Lease
+	//    （T2-06.1.5 / 审计 F-01 的反向契约）：
+	//      - get/update/patch → resourceNames 必须正好包含 LOCK_NAME；
+	//      - create → 不能带 resourceNames（真实 create 请求没有对象名，
+	//        带了 resourceNames 的规则永远匹配不到它，等于白授权）。
+	//    删掉或改错 resourceNames → 这里失败；即使这里被绕过，行为测试里的预检也会失败。
+	leasesRuleSeen := false
 	for _, doc := range namespacedRoles {
 		for _, rule := range doc.Rules {
-			if len(rule.ResourceNames) == 0 {
+			if !containsAny(rule.APIGroups, "coordination.k8s.io", "") || !containsAny(rule.Resources, "leases", "") {
 				continue
 			}
-			if containsAny(rule.Resources, "leases", "") && containsAny(rule.ResourceNames, lockName[1], "") {
-				lockScoped = true
+			for _, verb := range rule.Verbs {
+				leasesRuleSeen = true
+				if verb == "create" {
+					if len(rule.ResourceNames) > 0 {
+						t.Fatalf("%s 的 %s 给 leases 的 create 加了 resourceNames：真实 create 请求的授权属性没有对象名，这条规则永远匹配不到，create 会 403",
+							path, doc.Metadata.Name)
+					}
+					continue
+				}
+				if !containsAny(rule.ResourceNames, lockName, "") {
+					t.Fatalf("%s 的 %s 授予了 leases 的 %q 但没有用 resourceNames 限定到 %q：权限范围过大（可改写同命名空间的任意 Lease），且对象级预检会失去意义",
+						path, doc.Metadata.Name, verb, lockName)
+				}
 			}
 		}
 	}
-	if !lockScoped {
-		t.Fatalf("%s 没有把 leases 的 get/update 限定到 Lease %q：权限范围过大（可改写同命名空间的任意 Lease）", path, lockName[1])
+	if !leasesRuleSeen {
+		t.Fatalf("%s 没有任何 leases 规则：发布锁无法工作", path)
 	}
 
 	// 6) 两个作用域的绑定都必须存在，且 subjects 完全一致（否则会出现「预检通过、

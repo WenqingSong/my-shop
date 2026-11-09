@@ -262,45 +262,50 @@ func cmdKustomize(dir string, inv invocation) int {
 	return 0
 }
 
-// cmdAuth 实现 `kubectl auth can-i <verb> <resource> [-n ns] [name]`，判定一律走
-// fakestate.Authorize（唯一入口）。这保证「删除 RBAC 任一 (verb,resource) →
-// 预检失败 → 行为测试失败」这条链真的成立（审计 A-5 / C-8）。
+// cmdAuth 实现 `kubectl auth can-i <verb> <TYPE[/NAME]> [-n ns] [--subresource=sub]`，
+// 判定一律走 fakestate.Authorize（唯一入口）。这保证「删除 RBAC 任一
+// (verb,resource) → 预检失败 → 行为测试失败」这条链真的成立（审计 A-5 / C-8）。
+//
+// 解析规则与真实 kubectl 一致（T2-06.1.5 / 审计 F-01）：
+//   - 只接受**两个**位置参数（verb + TYPE[/NAME]）。真实 kubectl 对三个参数直接
+//     报 "you must specify two arguments: verb resource or verb resource/resourceName"；
+//     旧实现接受 `auth can-i get leases <name>`，会让一条真实环境必失败的调用通过测试。
+//   - TYPE/NAME 的 "/" 之后是**对象名**（cani.go 的 SplitN(args[1], "/", 2)）。
+//   - 子资源只能由 `--subresource` 表达，合并进 Resource（pods + log → pods/log）。
 func cmdAuth(dir string, inv invocation) int {
-	if len(inv.Positional) < 3 {
-		fmt.Fprintln(os.Stderr, "fake kubectl: auth can-i 参数不足")
+	if len(inv.Positional) != 4 {
+		fmt.Fprintln(os.Stderr, "you must specify two arguments: verb resource or verb resource/resourceName.")
+		fmt.Fprintln(os.Stderr, "See 'kubectl auth can-i -h' for help and examples.")
 		return 1
 	}
 	verb := inv.Positional[2]
-	resourceArg := ""
-	name := ""
-	if len(inv.Positional) >= 4 {
-		resourceArg = inv.Positional[3]
-	}
-	if len(inv.Positional) >= 5 {
-		name = inv.Positional[4]
-	}
+	group, resource, name := fakestate.ParseResourceArg(inv.Positional[3])
 	if inv.Subresource != "" {
-		resourceArg = strings.TrimSuffix(resourceArg, "/"+inv.Subresource) + "/" + inv.Subresource
+		resource = resource + "/" + inv.Subresource
 	}
-	group, resource := fakestate.SplitResource(resourceArg)
 	if inv.Namespace == "" && !inv.AllNamespaces {
 		inv.Namespace = namespace
 	}
 	if inv.AllNamespaces {
 		inv.Namespace = ""
 	}
+	// 事件里必须带对象名：T3/T4/T7 的断言就是「预检真的按这个对象名检查过」。
+	label := resource
+	if name != "" {
+		label += "/" + name
+	}
 	return mutateAck(dir, func(st *fakestate.State) (int, func() int) {
 		decision, err := fakestate.Authorize(st, verb, group, resource, inv.Namespace, name)
 		switch decision {
 		case fakestate.DecisionAllowed:
-			fakestate.Append(dir, fakestate.EventsFileName, "auth.allowed "+verb+" "+resource)
+			fakestate.Append(dir, fakestate.EventsFileName, "auth.allowed "+verb+" "+label)
 			return 0, func() int { fmt.Println("yes"); return 0 }
 		case fakestate.DecisionUnknown:
-			fakestate.Append(dir, fakestate.EventsFileName, "auth.error "+verb+" "+resource)
+			fakestate.Append(dir, fakestate.EventsFileName, "auth.error "+verb+" "+label)
 			fmt.Fprintln(os.Stderr, err)
 			return 1, nil
 		default:
-			fakestate.Append(dir, fakestate.EventsFileName, "auth.denied "+verb+" "+resource)
+			fakestate.Append(dir, fakestate.EventsFileName, "auth.denied "+verb+" "+label)
 			fmt.Println("no")
 			return 1, nil
 		}

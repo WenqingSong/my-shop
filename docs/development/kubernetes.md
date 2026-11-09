@@ -832,7 +832,7 @@ kubectl -n surgecart wait --for=condition=complete job/surgecart-migrate-<短SHA
 
 | 现象 | 原因 | 处理 |
 |---|---|---|
-| `当前身份缺少 <resource> 的 <verb> 权限（Forbidden：auth can-i 明确返回 no）` | 明确被拒绝：清单没授权 | 按 §13.1 检查三个权限组是否都 apply；`namespaces`/`selfsubjectaccessreviews` 只能由 `ClusterRole` 授予 |
+| `当前身份缺少 <resource>[/<name>] 的 <verb> 权限（Forbidden：auth can-i 明确返回 no）` | 明确被拒绝：清单没授权（或对象名对不上） | 按 §13.1 检查三个权限组是否都 apply；`namespaces`/`selfsubjectaccessreviews` 只能由 `ClusterRole` 授予；带 `/surgecart-deploy-lock` 的条目必须是 `resourceNames` 对应的那个名字 |
 | `无法确认…是否有…权限（查询失败，**不是**「被拒绝」）` | SubjectAccessReview 本身失败（API 5xx / 超时 / RBAC 不可用） | 先修 API Server / 网络；**不要**改 RoleBinding（问题不在绑定） |
 | `无权读取命名空间 surgecart（Forbidden）…**这不是「命名空间不存在」**` | 缺集群级 `namespaces get` | 补 `ClusterRole`（`Role` 无法授予集群级资源） |
 | `创建命名空间 surgecart 被拒绝（Forbidden…）` | 缺集群级 `namespaces create` | 同上 |
@@ -1056,9 +1056,11 @@ kubectl -n surgecart logs job/surgecart-migrate-<短SHA>
 kubectl -n surgecart get lease surgecart-deploy-lock -o yaml
 kubectl -n surgecart get lease surgecart-deploy-lock \
   -o go-template='{{index .spec "holderIdentity"}} {{index .spec "renewTime"}} {{index .metadata "resourceVersion"}}{{"\n"}}'
-kubectl auth can-i get leases.coordination.k8s.io -n surgecart
-kubectl auth can-i create leases.coordination.k8s.io -n surgecart
-kubectl auth can-i update leases.coordination.k8s.io -n surgecart
+# 受 resourceNames 限制的操作必须带对象名（T2-06.1.5 / 审计 F-01）：
+# 不带对象名的 `auth can-i get leases.coordination.k8s.io` 在真实集群上恒为 no。
+kubectl auth can-i get    leases.coordination.k8s.io/surgecart-deploy-lock -n surgecart
+kubectl auth can-i update leases.coordination.k8s.io/surgecart-deploy-lock -n surgecart
+kubectl auth can-i create leases.coordination.k8s.io                        -n surgecart
 
 # 迁移生命周期记录（锁上的注解）+ 是否有未终结的迁移 Job / Pod
 kubectl -n surgecart get lease surgecart-deploy-lock \
@@ -1119,9 +1121,13 @@ bash scripts/test-k8s-manifest.sh
 前置条件：
 
 - 集群版本 >= 1.23（Pod Security Admission 标签才生效；Lease 是 1.14+ 的稳定 API）；
+- kubectl >= 1.24（权限预检用 `auth can-i --subresource=log` 检查 `pods/log`，
+  该 flag 从 1.24 起可用；更早的客户端会以「无法确认」失败并退出 3）；
 - 已配置默认 StorageClass（或按 §7 指定）；
 - 已创建两个 Secret（§4.2）；
 - **发布身份具备 leases 的 get/create/update 权限（§13.1）**；
+- **交付的 RBAC 用 `resourceNames` 限定 Lease**，因此手工自检必须带对象名
+  （`auth can-i get leases.coordination.k8s.io/surgecart-deploy-lock`，见 §13.1）；
 - 节点可拉取 `docker.cnb.cool/framework-station/my-shop`（私有仓库需 `imagePullSecrets`，
   由环境在 Pod spec 中叠加，仓库不内置凭据）；
 - 集群内可达外部 MySQL 与 Redis（NetworkPolicy / 安全组需放通）；
@@ -1175,18 +1181,26 @@ T2-06.1.3 及更早的示例没有这两项，这是审计 A-1/A-2 的根因。
 
 自检（全部必须是 `yes`；与脚本 `REQUIRED_PERMISSIONS` 的 29 项一一对应）：
 
+> **对象级检查（T2-06.1.5 / 审计 F-01）**：交付的 Role 把 leases 的 get/update/patch
+> 用 `resourceNames` 限定到 `surgecart-deploy-lock`。RBAC 只匹配**带对象名**的请求，
+> 所以 leases 的 get/update 必须写成 `TYPE/NAME`；写成
+> `auth can-i get leases.coordination.k8s.io` 会得到 `no` —— 那不是授权不足。
+> `create` 是例外（对象尚不存在，请求没有 name），只能按资源检查。
+> 子资源同样不能写成 `pods/log`（那会被解析成「名为 log 的 Pod」），必须用
+> `--subresource=log`（kubectl ≥ 1.24）。
+
 ```bash
 # 命名空间级（29 项中除集群级 4 项外的 25 项）
-kubectl auth can-i get    leases.coordination.k8s.io -n surgecart
-kubectl auth can-i create leases.coordination.k8s.io -n surgecart
-kubectl auth can-i update leases.coordination.k8s.io -n surgecart
+kubectl auth can-i get    leases.coordination.k8s.io/surgecart-deploy-lock -n surgecart
+kubectl auth can-i create leases.coordination.k8s.io                        -n surgecart
+kubectl auth can-i update leases.coordination.k8s.io/surgecart-deploy-lock -n surgecart
 kubectl auth can-i get    jobs.batch -n surgecart
 kubectl auth can-i list   jobs.batch -n surgecart
 kubectl auth can-i create jobs.batch -n surgecart
 kubectl auth can-i patch  jobs.batch -n surgecart
 kubectl auth can-i get    pods -n surgecart
 kubectl auth can-i list   pods -n surgecart
-kubectl auth can-i get    pods/log -n surgecart
+kubectl auth can-i get    pods --subresource=log -n surgecart
 kubectl auth can-i get    secrets -n surgecart
 kubectl auth can-i get    deployments.apps -n surgecart
 kubectl auth can-i list   deployments.apps -n surgecart
@@ -1257,7 +1271,8 @@ kubectl -n surgecart get lease surgecart-deploy-lock -o yaml  # holderIdentity �
 | 过期锁不被「续命」（B-3/B-4） | `TestRecordWriteRefusedWhenLeaseExpired`：过期后写 COMPLETE 记录被拒、不改 `renewTime` | 已验证（脚本语义） |
 | 退避预算与实现同源（B-5） | `TestRenewBackoffBudgetIsSingleSourced`：常量 → 实际 sleep → 预算一致 | 已验证（源码契约） |
 | 权限/错误分类（T2-06.1.4 / A-3） | `test/deployk8s/rbac_test.go`：29 条权限矩阵、四类错误分类矩阵、首次发布、unknown 复检 | 已验证（脚本语义） |
-| 写路径强制授权（T2-06.1.4 / A-5） | `test/deployk8s/rbac_write_test.go`（无 `t.Skip`）：`TestDeliveredRBACOnlyUpgradeSucceeds`（1.50s）、`TestDeliveredRBACOnlyFirstDeploySucceeds`（1.60s）、`TestWritePathDeniedByResourceNamesFailsAfterPreflight`（3.60s） | fake 层已验证；真实集群 RBAC/admission **NOT_VERIFIED** |
+| 写路径强制授权（T2-06.1.4 / A-5） | `test/deployk8s/rbac_write_test.go`（无 `t.Skip`）：`TestDeliveredRBACOnlyUpgradeSucceeds`、`TestDeliveredRBACOnlyFirstDeploySucceeds`（断言预检对象、调用次数与最终资源状态）；`TestWritePathDeniedAfterPreflightFailsClosed`（T2-06.1.5 改为真实 TOCTOU） | fake 层已验证；真实集群 RBAC/admission **NOT_VERIFIED** |
+| resourceNames 对象级语义（T2-06.1.5 / F-01） | `test/deployk8s/fakestate/rbac_test.go`（正确名允许 / 错误名拒绝 / 无对象名拒绝 / create·list 不被名称规则放行 / resourceNames 无通配 / 交付清单直连替身）；`test/deployk8s/rbac_resource_name_test.go`（预检按 `TYPE/NAME`、改坏或删除 resourceNames → 退出码 3 且零写入、`--subresource=log`） | 替身语义 + 脚本行为已验证；真实 `auth can-i` **NOT_VERIFIED** |
 | 文档契约（T2-06.1.4） | `test/manifest/doc_contract_test.go`：CLI 默认值 / 退出码 / 预算 / 权限集合 / AUD 结论 | 已验证（静态契约） |
 | preStop 命令在运行镜像可用 | `docker run --entrypoint /bin/sh my-shop-app:t204 -c '... sleep ...'`（`test-container-runtime` PASS[4]） | 已验证（本地构建镜像） |
 | server-side dry-run | `kubectl apply --dry-run=server` | 无集群，NOT_VERIFIED |
