@@ -1,0 +1,84 @@
+# MySQL 集群内连通性验证（T2-07）。
+#
+# 证明的是「另一个 Pod 通过 Service DNS + 应用账号能执行查询」，
+# 不是「宿主机能连」「端口开着」。连接参数全部取应用实际使用的 ConfigMap/Secret：
+# 如果应用账号、库名、口令有任何一项与实际部署不一致，这里就会失败。
+#
+# 运行身份：mysql 镜像内置 mysql 用户 999，非 root、只读根文件系统、capabilities 全丢弃，
+# 与基础设施容器同等级，确保验证 Pod 不会因为「用了更宽松的权限」而通过。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: verify-mysql
+  namespace: surgecart
+  labels:
+    app.kubernetes.io/name: mysql
+    app.kubernetes.io/component: verification
+    app.kubernetes.io/part-of: surgecart
+spec:
+  parallelism: 1
+  completions: 1
+  # 验证不做重试：失败就是失败，重试只会把「连不上」拖成「等很久才连不上」。
+  backoffLimit: 0
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mysql
+        app.kubernetes.io/component: verification
+        app.kubernetes.io/part-of: surgecart
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: verify-mysql
+          image: mysql:8.0
+          imagePullPolicy: IfNotPresent
+          # 覆盖镜像入口（会启动 mysqld），只执行客户端命令。
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -eu
+              echo "[verify-mysql] 目标: ${DATABASE_DEFAULT_USER}@${DATABASE_DEFAULT_HOST}:${DATABASE_DEFAULT_PORT}/${DATABASE_DEFAULT_NAME}"
+              echo "[verify-mysql] DNS 解析: $(getent hosts "${DATABASE_DEFAULT_HOST}" | head -1)"
+              MYSQL_PWD="${DATABASE_DEFAULT_PASS}" mysql \
+                --protocol=TCP \
+                -h "${DATABASE_DEFAULT_HOST}" \
+                -P "${DATABASE_DEFAULT_PORT}" \
+                -u "${DATABASE_DEFAULT_USER}" \
+                -D "${DATABASE_DEFAULT_NAME}" \
+                -e "SELECT 1 AS mysql_select_1; SELECT DATABASE() AS current_database;"
+              echo "MYSQL_VERIFY_OK"
+          envFrom:
+            - configMapRef:
+                name: surgecart-database-config
+            - secretRef:
+                name: surgecart-db-credentials
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 300m
+              memory: 192Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

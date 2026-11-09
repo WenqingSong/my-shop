@@ -47,6 +47,15 @@ log_info "校验 Kustomize 部署体系（T2-06：真实构建 + 构建产物断
 log_info "校验发布脚本行为（T2-06.1：发布锁 + 降级保护 + 成功判定 + 故障恢复）..."
 "${SCRIPT_DIR}/test-deploy-k8s.sh"
 
+# T2-07：本地 Kubernetes 基础设施（MySQL/Redis/Kafka）清单契约与集群脚本行为。
+# 都不需要集群：「能构建、契约正确、脚本幂等」与「真实 Pod 能跑起来」是两种事实，
+# 后者由 scripts/k8s-infra.sh verify 在真实集群内验证。
+log_info "校验本地基础设施清单（T2-07：依赖构建产物 + restricted PSS + Kafka 监听器边界）..."
+"${SCRIPT_DIR}/test-k8s-infra.sh"
+
+log_info "校验集群管理脚本行为（T2-07：创建幂等 + 状态 + 销毁确认，fake kind/kubectl）..."
+"${SCRIPT_DIR}/test-k8s-cluster.sh"
+
 log_info "校验 Nginx 反向代理配置..."
 "${SCRIPT_DIR}/test-nginx.sh"
 

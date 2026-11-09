@@ -1,0 +1,36 @@
+# 本地开发基础设施（T2-07）：MySQL / Redis / Kafka 的集群内运行基座。
+#
+# 定位（与 Application / Migration 两个发布入口的区别）：
+#   - 本目录**只服务于本地 Kubernetes**（kind 单节点）。生产环境的 MySQL/Redis/Kafka
+#     是环境能力（托管数据库、托管缓存、托管 Kafka），不在本仓库内定义；
+#   - 因此这里不提供 production overlay：引入 overlay 只会让「本地开发」与「生产」两套
+#     不同的基础设施事实看起来像同一件事。生产仍通过 overlays/production 覆盖外部地址。
+#
+# 与另两个入口共享同一份集群级事实：
+#   - Namespace/surgecart（PSS restricted）
+#   - ConfigMap/surgecart-database-config（库名、用户名、端口、字符集）
+# 共享而不是复制，保证「应用连的库」与「基础设施创建的库」是同一份事实。
+#
+# 镜像版本固定在各资源的 `image` 字段（与 docker-compose.yml 一致，均不使用 latest）；
+# 不在 kustomization 里再写一遍 images 覆盖，避免同一事实出现两个来源。
+#
+# 构建（不接触集群）：
+#   kubectl kustomize manifest/kubernetes/infrastructure/base
+#
+# 部署（幂等，由 scripts/k8s-infra.sh 调用）：
+#   bash scripts/k8s-infra.sh create
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # Namespace + 数据库连接非敏感配置（与 Application / Migration 同一份资源）。
+  - ../../shared
+  # Kafka Broker 属性与业务 Topic 名称（Kafka 容器与本目录的 Topic 初始化 Job 共用）。
+  - configmap.yaml
+  - mysql.yaml
+  - redis.yaml
+  - kafka.yaml
+  # Topic 必须显式创建（KAFKA_AUTO_CREATE_TOPICS_ENABLE=false），分区/副本数由这里决定。
+  - kafka-topics-job.yaml
+
+namespace: surgecart

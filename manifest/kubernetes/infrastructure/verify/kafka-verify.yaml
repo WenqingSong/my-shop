@@ -1,0 +1,116 @@
+# Kafka 集群内端到端验证（T2-07）。
+#
+# 四步，任何一步失败即 Job 失败：
+#   1. broker 元数据：客户端用 Service DNS 连接并取到 broker API 版本；
+#   2. Topic：确认业务 Topic 存在（由 kafka-topics-init 创建，分区/副本符合预期）；
+#   3. 生产：向业务 Topic 写入一条唯一标记的消息；
+#   4. 消费：从同一 Topic 读回该标记（断言完全一致）。
+#
+# 为什么必须做生产/消费：advertised.listeners 配错时，客户端能连上 bootstrap，
+# 但拿到的是不可达的 broker 地址，随后 produce/consume 才超时。
+# 「能连上 bootstrap」和「能收发消息」是两种不同的事实，验收标准要求的是后者。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: verify-kafka
+  namespace: surgecart
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/component: verification
+    app.kubernetes.io/part-of: surgecart
+spec:
+  parallelism: 1
+  completions: 1
+  backoffLimit: 0
+  # JVM 启动 + 消费等待窗口，5 分钟足够本地单 Broker。
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kafka
+        app.kubernetes.io/component: verification
+        app.kubernetes.io/part-of: surgecart
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: verify-kafka
+          image: apache/kafka:3.9.1
+          imagePullPolicy: IfNotPresent
+          # 覆盖镜像入口（会启动 Broker），只执行客户端命令。
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              BOOTSTRAP="${KAFKA_BOOTSTRAP_INTERNAL}"
+              TOPIC="${TOPIC_ORDER_REQUESTED}"
+              DLQ="${TOPIC_ORDER_REQUESTED_DLQ}"
+
+              echo "[verify-kafka] bootstrap: ${BOOTSTRAP}"
+              echo "[verify-kafka] 1/4 broker 元数据"
+              /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server "${BOOTSTRAP}" \
+                > /tmp/broker-api.txt
+              # 输出第一行形如 `kafka.surgecart.svc.cluster.local:9092 (id: 1 ...) -> (`
+              # 断言广播地址就是 Service DNS：客户端拿到这个地址后仍能连回 Broker。
+              grep -qF "${BOOTSTRAP} (id:" /tmp/broker-api.txt \
+                || { echo "[verify-kafka] broker 广播地址与 Service DNS 不一致:" >&2; head -3 /tmp/broker-api.txt >&2; exit 1; }
+              head -2 /tmp/broker-api.txt
+
+              echo "[verify-kafka] 2/4 Topic 存在性"
+              /opt/kafka/bin/kafka-topics.sh --bootstrap-server "${BOOTSTRAP}" \
+                --describe --topic "${TOPIC}" --if-exists | tee /tmp/topic.txt
+              grep -q "Topic: ${TOPIC}" /tmp/topic.txt
+              grep -q "PartitionCount: ${TOPIC_ORDER_REQUESTED_PARTITIONS}" /tmp/topic.txt
+              grep -q "ReplicationFactor: ${TOPIC_ORDER_REQUESTED_REPLICATION}" /tmp/topic.txt
+              /opt/kafka/bin/kafka-topics.sh --bootstrap-server "${BOOTSTRAP}" \
+                --describe --topic "${DLQ}" --if-exists | tee /tmp/dlq.txt
+              grep -q "Topic: ${DLQ}" /tmp/dlq.txt
+
+              MARKER="verify-kafka-$(date +%s)-$$"
+              echo "[verify-kafka] 3/4 生产: ${MARKER}"
+              printf '%s\n' "${MARKER}" | /opt/kafka/bin/kafka-console-producer.sh \
+                --bootstrap-server "${BOOTSTRAP}" --topic "${TOPIC}"
+
+              echo "[verify-kafka] 4/4 消费（回读并断言标记一致）"
+              /opt/kafka/bin/kafka-console-consumer.sh \
+                --bootstrap-server "${BOOTSTRAP}" \
+                --topic "${TOPIC}" \
+                --from-beginning \
+                --timeout-ms 20000 > /tmp/consumed.txt 2>/dev/null || true
+              echo "[verify-kafka] 已消费 $(wc -l < /tmp/consumed.txt) 条"
+              grep -qx "${MARKER}" /tmp/consumed.txt || {
+                echo "[verify-kafka] 未消费到刚生产的消息 ${MARKER}" >&2
+                exit 1
+              }
+              echo "KAFKA_VERIFY_OK"
+          envFrom:
+            - configMapRef:
+                name: surgecart-kafka-config
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

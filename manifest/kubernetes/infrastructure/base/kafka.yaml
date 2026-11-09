@@ -1,0 +1,187 @@
+# Kafka 3.9.1（单 Broker KRaft，本地 Kubernetes，T2-07）。
+#
+# 版本与模式：apache/kafka:3.9.1 + KRaft 单节点（broker 与 controller 合一），
+# 与 docker-compose.yml 相同；**不引入 ZooKeeper**。
+#
+# Broker 配置不在本文件里重复：全部来自 ConfigMap/surgecart-kafka-config（envFrom）。
+# 该 ConfigMap 同时说明了「容器内地址 / Service 地址 / 宿主机地址 / 控制器地址」的边界，
+# 本文件只负责把同一组事实注入容器并挂载可写目录。
+#
+# 运行身份（restricted PSS 兼容，已实测）：
+#   官方镜像内置 appuser uid/gid=1000，以 1000:1000 启动。
+#   只读根文件系统下仍需三个可写目录，都是进程运行期产物（不承载业务数据）：
+#     - /var/lib/kafka/data（PVC：KRaft 元数据 + 消息日志）
+#     - /opt/kafka/config（emptyDir：镜像启动时用环境变量生成 server.properties）
+#     - /opt/kafka/logs（emptyDir：GC 日志，JVM 直接写文件）
+#   /opt/kafka/config 与 /opt/kafka/logs 不能省：镜像入口在没有写权限时会直接退出，
+#   实测报错分别是 "file not writable" 与 "Read-only file system"。
+#
+# 为什么不用 hostPath / hostNetwork：两者都被 restricted PSS 禁止，且会破坏「Pod 只能
+# 通过 Service 访问依赖」这一边界；宿主机访问统一走 port-forward（见 k8s-infra.sh info）。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kafka-data
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/component: messaging
+    app.kubernetes.io/part-of: surgecart
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/component: messaging
+    app.kubernetes.io/part-of: surgecart
+spec:
+  # ClusterIP 足够：集群内客户端用 kafka.surgecart.svc.cluster.local:9092；
+  # 宿主机客户端用 `kubectl port-forward svc/kafka 29092:29092` 命中 EXTERNAL 监听器。
+  # 不使用 NodePort/LoadBalancer：那会把「本地开发」伪装成「对外提供消息服务」。
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: kafka
+  ports:
+    - name: plaintext
+      port: 9092
+      targetPort: plaintext
+      protocol: TCP
+    - name: external
+      port: 29092
+      targetPort: external
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/component: messaging
+    app.kubernetes.io/part-of: surgecart
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kafka
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kafka
+        app.kubernetes.io/component: messaging
+        app.kubernetes.io/part-of: surgecart
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # KRaft 正常关闭需要刷元数据与日志段；60s 覆盖本地数据量，超时会损坏 log 段尾部。
+      terminationGracePeriodSeconds: 60
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: kafka
+          image: apache/kafka:3.9.1
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: plaintext
+              containerPort: 9092
+              protocol: TCP
+            # KRaft 控制器监听器：只在 Pod 内自连（quorum voter 为 127.0.0.1:9093），
+            # 不通过 Service 暴露，端口声明仅用于文档化。
+            - name: controller
+              containerPort: 9093
+              protocol: TCP
+            - name: external
+              containerPort: 29092
+              protocol: TCP
+
+          # 全部 broker 属性来自 ConfigMap（CLUSTER_ID / LISTENERS / ADVERTISED_LISTENERS / ...）。
+          envFrom:
+            - configMapRef:
+                name: surgecart-kafka-config
+
+          # 就绪：必须能完成 Kafka 协议握手并取到 broker API 版本，
+          # 而不是「9092 端口可连」。KRaft 选举完成前端口已经 listen，但请求会失败，
+          # 只探端口会把「不可用」误判为「可用」。
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server 127.0.0.1:9092 >/dev/null 2>&1
+            # JVM 启动 + 日志段恢复需要时间；期间不 Ready 是正确的。
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 20
+            failureThreshold: 4
+
+          # 存活：同一判定但更宽松（30s × 6 = 3 分钟），避免滚动/恢复期被误杀。
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server 127.0.0.1:9092 >/dev/null 2>&1
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 20
+            failureThreshold: 6
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            # 堆 -Xmx512m + 堆外/元空间/页缓存；1Gi 在本地开发足够，超过会被 OOMKill。
+            limits:
+              cpu: "1"
+              memory: 1Gi
+
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/kafka/data
+            - name: kafka-config
+              mountPath: /opt/kafka/config
+            - name: kafka-logs
+              mountPath: /opt/kafka/logs
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: kafka-data
+        # 生成出来的 server.properties：每次启动都由镜像重新生成，不需要持久化。
+        - name: kafka-config
+          emptyDir:
+            sizeLimit: 16Mi
+        - name: kafka-logs
+          emptyDir:
+            sizeLimit: 128Mi
+        - name: tmp
+          emptyDir: {}

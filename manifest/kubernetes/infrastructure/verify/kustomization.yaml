@@ -1,0 +1,23 @@
+# 基础设施真实验证入口（T2-07）。
+#
+# 与 infrastructure/base 分开的原因：
+#   - base 是「运行基座」，长期存在；
+#   - 本目录是一次性验证 Job，只在 `bash scripts/k8s-infra.sh verify` 时创建，
+#     验证通过后删除。把它混进 base 会让每次 create 都跑一遍验证，也会让
+#     「依赖是否健康」和「验证是否被真正执行过」两件事混在一起。
+#
+# 每个 Job 都从**集群内另一个 Pod**发起真实协议交互，而不是在宿主机 port-forward 上验证：
+#   1. MySQL：经 Service DNS 用应用账号执行 SELECT 1（证明账号权限与网络都通）；
+#   2. Redis：经 Service DNS 执行 PING 并断言 PONG；
+#   3. Kafka：经 Service DNS 取 Broker 元数据、创建/确认 Topic、生产并消费一条消息。
+#
+# 这三条断言对应验收标准 3/4/5/6。Pod 处于 Running 或端口可连都不算通过。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - mysql-verify.yaml
+  - redis-verify.yaml
+  - kafka-verify.yaml
+
+namespace: surgecart

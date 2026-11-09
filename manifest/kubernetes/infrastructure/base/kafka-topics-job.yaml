@@ -1,0 +1,118 @@
+# 业务 Topic 初始化 Job（T2-07）。
+#
+# 为什么是独立 Job 而不是让应用启动时建 Topic：
+#   - Broker 已关闭自动建 Topic（KAFKA_AUTO_CREATE_TOPICS_ENABLE=false）：分区数、副本数
+#     必须由仓库里的清单决定，不能让第一个连上来的客户端「顺手」创建；
+#   - 应用进程（serve）的职责是消费/生产，不是管理 Broker 元数据；把建 Topic 塞进应用启动
+#     会让「应用能否启动」依赖 Broker 管理权限，扩大故障面；
+#   - Topic 名称与分区/副本数与 ConfigMap/surgecart-kafka-config 同源，避免两处漂移。
+#
+# 幂等性：
+#   - `--create --if-not-exists`：Topic 已存在时成功返回且不改动既有分区/副本；
+#   - Job 名称固定，`kubectl apply` 在清单未变化时是 no-op（不会重跑已完成的 Pod）；
+#   - 因此重复执行 `bash scripts/k8s-infra.sh create` 不会产生第二个 Topic 或第二个初始化 Job。
+#
+# 运行身份：与 Kafka 容器相同的 appuser(1000)，非 root、只读根文件系统、capabilities 全丢弃。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-topics-init
+  namespace: surgecart
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/component: messaging
+    app.kubernetes.io/part-of: surgecart
+spec:
+  parallelism: 1
+  completions: 1
+  # Broker 尚未 Ready 时命令会失败；容器内已有等待循环，这里的重试只兜底真正的瞬时错误。
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  # 完成后保留 1h 便于排障，随后自动清理（避免本地集群无限堆积历史 Job）。
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kafka
+        app.kubernetes.io/component: messaging
+        app.kubernetes.io/part-of: surgecart
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: kafka-topics-init
+          # 与 Broker 同一镜像：Topic 管理工具与 Broker 版本严格一致（避免协议/CLI 漂移）。
+          image: apache/kafka:3.9.1
+          imagePullPolicy: IfNotPresent
+          # 覆盖镜像入口（/etc/kafka/docker/run 会启动 Broker），只执行 Topic 管理命令。
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              BOOTSTRAP="${KAFKA_BOOTSTRAP_INTERNAL}"
+
+              echo "[topics] 等待 Broker 可应答: ${BOOTSTRAP}"
+              ready=false
+              for _ in $(seq 1 60); do
+                if /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server "${BOOTSTRAP}" >/dev/null 2>&1; then
+                  ready=true
+                  break
+                fi
+                sleep 3
+              done
+              if [ "${ready}" != "true" ]; then
+                echo "[topics] Broker 在等待窗口内未就绪" >&2
+                exit 1
+              fi
+
+              create_topic() {
+                local topic="$1"
+                echo "[topics] 创建（若不存在）: ${topic}"
+                /opt/kafka/bin/kafka-topics.sh --bootstrap-server "${BOOTSTRAP}" \
+                  --create --if-not-exists \
+                  --topic "${topic}" \
+                  --partitions "${TOPIC_ORDER_REQUESTED_PARTITIONS}" \
+                  --replication-factor "${TOPIC_ORDER_REQUESTED_REPLICATION}"
+              }
+
+              create_topic "${TOPIC_ORDER_REQUESTED}"
+              create_topic "${TOPIC_ORDER_REQUESTED_DLQ}"
+
+              echo "[topics] 当前集群 Topic："
+              /opt/kafka/bin/kafka-topics.sh --bootstrap-server "${BOOTSTRAP}" --list
+              echo "[topics] 业务 Topic 详情："
+              /opt/kafka/bin/kafka-topics.sh --bootstrap-server "${BOOTSTRAP}" \
+                --describe --topic "${TOPIC_ORDER_REQUESTED}"
+              echo "[topics] 完成"
+          envFrom:
+            - configMapRef:
+                name: surgecart-kafka-config
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

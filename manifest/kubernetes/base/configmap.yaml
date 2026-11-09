@@ -53,6 +53,16 @@ data:
   # （/tmp 为内存型 emptyDir，不承载业务数据）。
   STORAGE_LOCAL_ROOT: "/app/storage"
 
+  # ---------- Kafka（集群内地址，T2-07）----------
+  # 容器内不能沿用 config.yaml 的默认值 127.0.0.1:29092：Pod 里的 127.0.0.1 是 Pod 自身，
+  # 不是 Broker。Kubernetes 下必须用 Service DNS（T2-07 部署的 Service/kafka）。
+  # 宿主机客户端仍可用 127.0.0.1:29092，但需要先
+  # `kubectl -n surgecart port-forward svc/kafka 29092:29092`。
+  #
+  # 当前 FLASH_SALE_DISPATCH_MODE=db_scanner + FLASH_SALE_KAFKA_ENABLED=false，
+  # 该地址不会建立连接；它保证「打开 Kafka 开关时不会连错地方」。
+  FLASH_SALE_KAFKA_BROKERS: "kafka.surgecart.svc.cluster.local:9092"
+
   # ---------- 七牛对象存储（非敏感项）----------
   # AK/SK 来自 Secret；region 有稳定默认值，bucket/domain 属于环境专属值，
   # 由 overlays/production/configmap-patch.yaml 提供。
