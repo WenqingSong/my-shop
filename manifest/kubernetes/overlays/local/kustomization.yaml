@@ -1,7 +1,7 @@
 # 本地 kind 集群（T3-02）的 Application 部署入口。
 #
 # 与 production overlay 的差别（全部属于「环境差异」，不改变资源结构）：
-#   1. 镜像来自本地构建并 `kind load` 的 surgecart:<短SHA>-t3-02，不依赖任何镜像仓库；
+#   1. 镜像来自本地构建并导入 kind 节点的 surgecart:<短SHA>-t4-03，不依赖任何镜像仓库；
 #   2. 数据库/Redis/Kafka 全部指向集群内 Service（base 与 shared 的默认值即是集群内地址，
 #      因此本 overlay 不需要像生产那样覆盖成外部域名）；
 #   3. 七牛空间名与访问域名属于账号专属值，仓库里只保留 REPLACE_WITH_* 占位符，部署时由
@@ -20,11 +20,14 @@ resources:
 
 namespace: surgecart
 
-# 本地镜像：docker build -t surgecart:<短SHA>-t3-02 + kind load docker-image。
+# 本地镜像：docker build -t surgecart:<短SHA>-t4-03 + 导入 kind 节点（ctr images import）。
+#
+# T4-03 起 tag 对应「包含 T4-02 应用指标实现」的构建：短 SHA 64ebbbd 即 T4-02 最终提交
+# （应用代码停在 T4-02，本任务只增加监控清单），t4-03 后缀标记本次部署任务。
 images:
   - name: docker.cnb.cool/framework-station/my-shop
     newName: surgecart
-    newTag: "b8f7e20-t3-02"
+    newTag: "64ebbbd-t4-03"
 
 patches:
   # 版本标记必须等于镜像 tag（与 production 同一契约，便于 deploy-k8s.sh 语义一致）。

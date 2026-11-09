@@ -1,0 +1,24 @@
+# 监控命名空间（T4-03）。
+#
+# 独立于业务命名空间 surgecart：
+#   - Prometheus 只**读取**业务 Service 的 /metrics（跨命名空间 DNS），不需要任何业务侧权限；
+#   - 监控栈的生命周期（升级、重建、容量）不应牵动秒杀业务工作负载；
+#   - 反向也成立：清理 surgecart 命名空间不会连带删除监控数据（PVC 在 monitoring 内）。
+#
+# PSS 标签：enforce=restricted 由 API Server 强制；audit/warn 同值以便早期发现前缀违规。
+# 该标签与 Deployment 的 securityContext 一起构成「监控栈不放宽安全基线」的双重保证
+# （静态断言见 test/manifest/monitoring_test.go）。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    app.kubernetes.io/name: monitoring
+    app.kubernetes.io/part-of: surgecart
+    # 命名空间自身的 PSS 控制标签（ClusterIP 内网监控栈，不对外暴露）。
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest

@@ -7,9 +7,9 @@ kind: Deployment
 metadata:
   name: surgecart
   labels:
-    app.kubernetes.io/version: "b8f7e20-t3-02"
+    app.kubernetes.io/version: "64ebbbd-t4-03"
 spec:
   template:
     metadata:
       labels:
-        app.kubernetes.io/version: "b8f7e20-t3-02"
+        app.kubernetes.io/version: "64ebbbd-t4-03"
