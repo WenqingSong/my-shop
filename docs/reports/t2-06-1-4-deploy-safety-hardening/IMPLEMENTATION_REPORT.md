@@ -394,4 +394,4 @@ HEAD: aef26dc210f490d163e67619b440bd6cdf1e99e2
    反向契约测试）。
 4. `AUD-02` / `AUD-05` 状态未变化，仍为 `NOT_CLOSED`。
 
-详见 `T2-06.1.5_IMPLEMENTATION_REPORT.md`。
+详见 `../t2-06-1-5-rbac-resource-name-final/IMPLEMENTATION_REPORT.md`。

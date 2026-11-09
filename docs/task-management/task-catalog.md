@@ -9,7 +9,7 @@
 - 状态口径与权威边界见 [README.md](README.md#3-状态词汇本目录专用)。
 - 证据列中的路径均相对仓库根；完整命令输出见 [治理报告](../reports/2026-10-18-agent-task-governance.md)。
 - **不得**根据目录名或本表推断未列出的状态；State 缺失或不可解析时以表内 `UNKNOWN` / `DONE/DOC` / `INCONSISTENT` 为准。
-- `分类目录` 列为 2026-10-18 迁移后的物理位置（`blocked/` 6 项、`archive/` 5 项、`completed/` 40 项、`active/` 0 项）；分类依据见 `.agent/tasks/layout.yaml`，规则见 [TaskLayoutExtension](../../.agent/specs/TaskLayoutExtension.md)。
+- `分类目录` 列为 2026-10-18 迁移后的物理位置（`blocked/` 6 项、`archive/` 5 项、`completed/` 40 项、`active/` 0 项）；分类依据见 `.agent/tasks/layout.yaml`，规则见 `.agent/specs/TaskLayoutExtension.md`（该文件已随 Agent Workflow V4 删除，此行为历史记录）。
 
 ## 1. 活动 / 待处理（11）
 

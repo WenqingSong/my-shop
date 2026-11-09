@@ -126,4 +126,4 @@ bash scripts/test-deploy-k8s.sh   exit=0   ok test/deployk8s 49.295s
 - 因此 T2-06.1.4 关于「交付 RBAC 可支撑发布」的结论应限定为**替身层**；真实集群上
   该结论直到 T2-06.1.5 才具备可验证的前提（预检改为对象级、替身改为忠实语义）。
 - 上文第 6 节的 NOT_VERIFIED 项（真实 `auth can-i` / RoleBinding）**仍然成立**。
-- 详见 `T2-06.1.5_IMPLEMENTATION_REPORT.md`。
+- 详见 `../t2-06-1-5-rbac-resource-name-final/IMPLEMENTATION_REPORT.md`。

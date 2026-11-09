@@ -4,7 +4,7 @@
 
 ## 两条核心交易链路
 
-**普通订单：**用户从购物车或直接购买发起下单 → 服务端重读 SKU 价格并保存商品、价格和地址快照 → 同一 MySQL 事务创建订单、订单项并条件扣减库存 → 通过订单状态机执行 Mock 支付、取消、发货、收货等操作。幂等键与数据库唯一约束防止重复建单，条件扣减和 `RowsAffected` 防止超卖，取消或退款只恢复一次库存。详见[普通订单设计](design/order.md)和[核心逻辑验证](../.agent/tasks/order-v1/core-logic.md)。
+**普通订单：**用户从购物车或直接购买发起下单 → 服务端重读 SKU 价格并保存商品、价格和地址快照 → 同一 MySQL 事务创建订单、订单项并条件扣减库存 → 通过订单状态机执行 Mock 支付、取消、发货、收货等操作。幂等键与数据库唯一约束防止重复建单，条件扣减和 `RowsAffected` 防止超卖，取消或退款只恢复一次库存。详见[普通订单设计](design/order.md)和[核心逻辑验证](../.agent/tasks/_archive/order-v1/core-logic.md)。
 
 **秒杀：**V1 先用 MySQL 条件更新与唯一约束证明不超卖、一人一单和请求幂等；V2 增加 Redis + Lua 准入，提前拒绝无效请求；V3 将请求写入 MySQL 出队表，再由应用内消费者异步落单；V4 补充崩溃重投、幂等库存收敛、死信修复与审计；V5 增加限流、排队软上限、熔断、指标和逐级压测脚本。Redis 的预扣库存是准入闸门，MySQL 始终是订单与已售数量的最终事实来源。详见[秒杀设计](design/flash-sale.md)、[V4 核心逻辑验证](../.agent/tasks/flash-sale-v4/core-logic.md)和[V5 交付证据](../.agent/tasks/flash-sale-v5/delivery.md)。
 
