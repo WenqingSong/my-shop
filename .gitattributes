@@ -1,0 +1,11 @@
+# 换行符契约：仓库内文本文件统一以 LF 存储与检出。
+#
+# 为什么需要这份文件：
+#   - scripts/*.sh 在 CRLF 检出下会直接失败（`set -o pipefail\r` 之类的行尾字符会变成
+#     命令的一部分），Windows + core.autocrlf=true 的默认检出就会产生这种工作区；
+#   - test/manifest 的门禁用正则锚定 `\n`（例如 usage() 的 heredoc），CRLF 会让断言
+#     在本机假失败，掩盖真实回归；
+#   - 这里只约束「如何检出」，不改变任何已提交内容（索引内本来就是 LF）。
+#
+# 二进制文件由 text=auto 的二进制探测保留原样，不做转换。
+* text=auto eol=lf

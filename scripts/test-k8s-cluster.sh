@@ -115,6 +115,31 @@ log_info "doctor：工具齐全时应通过"
 PATH="${FAKE_BIN}:${PATH}" bash "${CLUSTER_SCRIPT}" doctor >/dev/null || fail "doctor 在工具齐全时失败"
 grep -q 'privileged' "${TMP_DIR}/calls.log" || true
 
+# 特权探测必须向容器传原样的 /bin/true：Git Bash（MSYS2）会把以 / 开头的参数改写成
+# Windows 路径，docker 会报 "exec: D:/.../usr/bin/true: no such file or directory"，
+# 把「Docker 允许特权容器」误判成「特权不可用」。
+log_info "doctor：特权探测不得被 MSYS 路径转换改写（Windows/Git Bash）"
+grep -q 'MSYS2_ARG_CONV_EXCL' "${CLUSTER_SCRIPT}" \
+  || fail "特权探测未隔离 MSYS 参数转换：Git Bash 下会误判「特权不可用」"
+
+log_info "doctor：Docker 不允许特权容器时必须失败（kind 的硬前提）"
+mkdir -p "${TMP_DIR}/bin-nopriv"
+cat > "${TMP_DIR}/bin-nopriv/docker" <<'FAKE'
+#!/usr/bin/env bash
+case "$1" in
+  info) echo "Server Version: fake"; exit 0 ;;
+  version) echo "fake-29.0"; exit 0 ;;
+  run) echo "docker: Error response from daemon: operation not permitted" >&2; exit 1 ;;
+  *) exit 0 ;;
+esac
+FAKE
+chmod 0755 "${TMP_DIR}/bin-nopriv/docker"
+set +e
+PATH="${TMP_DIR}/bin-nopriv:${FAKE_BIN}:${PATH}" bash "${CLUSTER_SCRIPT}" doctor >/dev/null 2>&1
+doctor_nopriv=$?
+set -e
+[[ "${doctor_nopriv}" -ne 0 ]] || fail "Docker 不允许特权容器时 doctor 仍然通过：会把「kind 无法运行」说成「环境就绪」"
+
 log_info "doctor：缺少 kind 时必须失败"
 mv "${FAKE_BIN}/kind" "${FAKE_BIN}/kind.disabled"
 set +e
