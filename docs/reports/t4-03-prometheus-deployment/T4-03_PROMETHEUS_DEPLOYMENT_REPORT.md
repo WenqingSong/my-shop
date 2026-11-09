@@ -9,8 +9,9 @@
 | 基线 | `64ebbbd4c1c53c087c0b30c4f2636f48da433c51`（T4-02 最终提交，独立开发分支，未合入 main） |
 | main | `82243c0fbce614e03c4ff57dcc829b5f68fb08f2`（未修改、未合并） |
 | 开发分支 | `feat/k8s-t4-03-prometheus-deployment`（从 `64ebbbd` 创建） |
-| 最终 HEAD SHA | `PENDING_COMMIT_SHA`（见 §14） |
-| 推送状态 | `PENDING_PUSH_STATUS`（见 §14） |
+| 实现提交 SHA | `53fba1475d5789cfac805b27974e63ece2d7615f` |
+| 最终 HEAD SHA | `53fba1475d5789cfac805b27974e63ece2d7615f`（实现 + 报告）；其后仅追加一次「回填本报告元数据」的 docs 提交 |
+| 推送状态 | 已推送：`origin/feat/k8s-t4-03-prometheus-deployment`（`git push -u` 成功，new branch） |
 | 集群 | kind `surgecart-local`，节点 `surgecart-local-control-plane`（v1.37.0，Ready） |
 | 监控命名空间 | `monitoring`（新建，PSS `enforce=restricted`） |
 
@@ -317,10 +318,10 @@ lag > 0 的数值正确性由 T4-02 的真实 Kafka 集成测试覆盖（`TestLa
 ```text
 FEATURE_BRANCH=feat/k8s-t4-03-prometheus-deployment
 BASELINE_SHA=64ebbbd4c1c53c087c0b30c4f2636f48da433c51
-IMPLEMENTATION_COMMIT=PENDING_COMMIT_SHA
-FINAL_HEAD_SHA=PENDING_COMMIT_SHA
-REMOTE_BRANCH_SHA=PENDING_PUSH_STATUS
-WORKTREE_STATUS=PENDING_PUSH_STATUS
+IMPLEMENTATION_COMMIT=53fba1475d5789cfac805b27974e63ece2d7615f
+FINAL_HEAD_SHA=53fba1475d5789cfac805b27974e63ece2d7615f
+REMOTE_BRANCH_SHA=53fba1475d5789cfac805b27974e63ece2d7615f
+WORKTREE_STATUS=clean（回填本段元数据时仅本文件变更，随后以 docs 提交推送）
 ```
 
 最终状态：
@@ -331,7 +332,7 @@ TASK=T4-03
 
 BASELINE_SHA=64ebbbd4c1c53c087c0b30c4f2636f48da433c51
 FINAL_BRANCH=feat/k8s-t4-03-prometheus-deployment
-FINAL_HEAD_SHA=PENDING_COMMIT_SHA
+FINAL_HEAD_SHA=53fba1475d5789cfac805b27974e63ece2d7615f
 
 APPLICATION_METRICS_ENDPOINT=http://surgecart.surgecart.svc.cluster.local:8000/metrics
 APPLICATION_METRICS_ENABLED=true
@@ -352,12 +353,12 @@ STATIC_TESTS=PASS（gofmt / kustomize build×5 / promtool / server-side dry-run�
 UNIT_TESTS=PASS（Linux 容器 golang:1.26）
 MANIFEST_TESTS=PASS（含新增 5 个监控断言 + 变异测试）
 
-PUSH_STATUS=PENDING_PUSH_STATUS
-WORKTREE_STATUS=PENDING_PUSH_STATUS
+PUSH_STATUS=PUSHED（origin/feat/k8s-t4-03-prometheus-deployment）
+WORKTREE_STATUS=CLEAN
 
 REPORT=docs/reports/t4-03-prometheus-deployment/T4-03_PROMETHEUS_DEPLOYMENT_REPORT.md
 
-T4_03_ACCEPTANCE=PENDING_COMMIT_SHA
+T4_03_ACCEPTANCE=PASS
 T4_04_STARTED=NO
 T5_STARTED=NO
 
