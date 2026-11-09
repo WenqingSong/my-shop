@@ -824,17 +824,22 @@ T4-01_MONITORING_AUDIT.md      （仓库根，新增）
 | 初始 HEAD SHA | `175b7fccd7cf8c147a37e506bdba33dff42ec24b` |
 | 提交内容 | 仅 `T4-01_MONITORING_AUDIT.md` |
 | 提交信息 | `docs(monitoring): audit prometheus readiness` |
-| 提交 SHA | 见本报告提交后的 `git rev-parse HEAD`（回填见下方“交付回填”） |
-| Push 状态 | 见下方“交付回填” |
-| 工作区状态 | 提交后应为干净（仅未跟踪无） |
+| 提交 SHA（报告本身） | `83e37c73ca6a37c50587e057bad225f5a89e4f03` |
+| Push 状态 | **FAILED**（网络：本地代理 `127.0.0.1:18081` 未监听，`cnb.cool:443` 不可达） |
+| 工作区状态 | 干净（`git status --short` 无输出） |
 
 **交付回填**（提交/推送执行后由执行者补记，禁止改写历史）：
 
 ```
-COMMIT_SHA=（见 git log -1 --format=%H）
-REMOTE_SHA=（git rev-parse origin/feat/k8s-t4-prometheus-monitoring，若推送成功）
-PUSH_STATUS=（SUCCESS / FAILED: 详见失败原因）
-WORKTREE_STATUS=（git status --short）
+COMMIT_SHA=83e37c73ca6a37c50587e057bad225f5a89e4f03   # 报告首提交
+REMOTE_SHA=UNKNOWN                                      # 推送失败，远端无该分支
+PUSH_STATUS=FAILED
+            原因：fatal: unable to access 'https://cnb.cool/framework-station/my-shop/':
+                  Failed to connect to cnb.cool port 443 via 127.0.0.1 after 2088 ms
+            说明：git 配置 http(s).proxy=http://127.0.0.1:18081，该端口未监听；
+                  按约束未修改 git config、未切换代理。
+            处置：本地提交保留（未 rebase / 未 force / 未重写历史）。
+WORKTREE_STATUS=clean
 ```
 
 **推送失败原因（已发生一次）**：`git` 被配置为经 `http://127.0.0.1:18081` 代理访问，该端口未监听；按约束未修改任何 Git 配置。若推送失败，本地提交保留，如实报告，不做 rebase/force/重写历史。
