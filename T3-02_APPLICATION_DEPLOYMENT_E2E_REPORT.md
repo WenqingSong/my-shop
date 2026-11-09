@@ -385,6 +385,6 @@ Windows 原生失败项（已定位为平台限制，非本次改动）：
 ## 15. 最终 Git SHA
 
 - 基线：`b8f7e20dfa56ce0fbe4944805844b6173ded9fd9`
-- 实现 + 报告提交：见下方 SHA 回填提交前的提交记录
-- SHA 回填提交：仅修改本节元数据，不改动实现
-- 最终 HEAD：以 `git log -1 --format=%H` 为准
+- 实现 + 报告提交：`c98371bd3ff0a0182561f9b715fb742ab5cf62e7`（`feat(k8s): deploy application and validate e2e`）
+- SHA 回填提交：在本提交之后追加，仅修改本节元数据，不改动任何实现或测试
+- 最终 HEAD：以 `git log -1 --format=%H` 为准（即 SHA 回填提交本身）
