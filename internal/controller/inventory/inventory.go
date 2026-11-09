@@ -62,13 +62,9 @@ func (c *ControllerV1) Deduct(ctx context.Context, req *v1.DeductReq) (res *v1.D
 	return &v1.DeductRes{Inventory: *inv}, nil
 }
 
-// ListLogs 处理查询库存流水。
+// ListLogs 处理分页查询库存流水。
 func (c *ControllerV1) ListLogs(ctx context.Context, req *v1.ListLogsReq) (res *v1.ListLogsRes, err error) {
-	logs, err := service.Inventory().ListLogs(ctx, req.SkuId)
-	if err != nil {
-		return nil, err
-	}
-	return &v1.ListLogsRes{Items: logs}, nil
+	return service.Inventory().ListLogs(ctx, req.SkuId, req.Page, req.Size)
 }
 
 // adminOperatorID 从 AdminPrincipal 取当前管理员 id 作为操作者；缺失返回 401。

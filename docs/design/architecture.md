@@ -41,7 +41,7 @@ SurgeCart 基于 GoFrame v2 提供 HTTP API，MySQL 保存交易与身份数据�
         └──────────┘            └──────────────┘
 ```
 
-分层职责（遵循 GoFrame 惯例，见 `AGENTS.md` §2）：
+分层职责（遵循 GoFrame 惯例，见 [engineering-guidelines.md](engineering-guidelines.md) §2）：
 
 | 层 | 目录 | 职责 |
 | --- | --- | --- |
@@ -183,6 +183,7 @@ CNB CI（`.cnb.yml`）：
 
 - **`pull_request` → `pr-check`**：`docker compose up -d mysql redis` → `make test` → `make test-race`。
 - **`push` → `main-ci`**（单 job 顺序 stage）：依赖启动 → `make test` → `make test-race` → `go build` → `docker build`（短 SHA 标签 + `latest` 标签，同源同 digest）→ `docker push`（先短 SHA 后 `latest`）→ 原仓库专属的 GitHub 镜像同步。
+- `make test-race` 分两段：熔断器状态机（纯内存）+ Outbox 并发/租约/token/人工修复竞态（`go test -race -p 1`，使用一次性隔离库 `my_shop_outbox_race`，测试结束即删除；缺少 MySQL 或用例未实际执行都会失败而非跳过）。
 - 制品库：`docker.cnb.cool/framework-station/my-shop`（由 CNB 内置变量派生），凭据用 CNB 内置 token，流水线不出现硬编码密码。
 - 回滚用历史短 SHA 标签，`latest` 不作为回滚锚点。
 

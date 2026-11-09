@@ -60,7 +60,7 @@
 
 ## 5. 安全与权限边界
 
-- 后台查询（仅 `AdminAuth`，无读权限）：`GET /admin/inventories/:sku_id`、`GET /admin/inventories/:sku_id/logs`。
+- 后台查询（仅 `AdminAuth`，无读权限）：`GET /admin/inventories/:sku_id`、`GET /admin/inventories/:sku_id/logs`。流水查询支持 `page`/`size` 分页（默认 1/20，上限 100），响应为 `{items, total, page, size}`，按 `id` 倒序。
 - 后台写操作：`AdminAuth` + `RequirePermission`：
   - `POST /admin/inventories/:sku_id/increase` → `inventory:increase`
   - `POST /admin/inventories/:sku_id/deduct` → `inventory:deduct`
@@ -88,4 +88,4 @@
 
 - 「设置绝对量/盘点修正」不提供单步接口，需组合增加/扣减完成；盘点/出入库单据在 Out of Scope。
 - 幂等键缺失：扣减无去重，未来订单模块接入时必须补 `request_id`/`deduction_no` 防重复扣减（当前无订单模块、后台入口，风险可接受）。
-- 流水无分页（V1 全量返回，按 `id` 倒序）；量大时由后续任务加分页。
+- 流水分页已提供（`page`/`size`，默认 1/20、上限 100，按 `id` 倒序）；更高阶的按时间/类型筛选仍按需扩展。

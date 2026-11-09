@@ -91,8 +91,46 @@ order:
   cancel_scan_interval: 60
 
 # 秒杀配置（以下均为开发默认值，可通过环境变量覆盖）
-# 对应环境变量：FLASH_SALE_RECONCILE_SCAN_INTERVAL / FLASH_SALE_CONSUME_SCAN_INTERVAL
+# 对应环境变量：FLASH_SALE_RECONCILE_SCAN_INTERVAL / FLASH_SALE_CONSUME_SCAN_INTERVAL /
+#              FLASH_SALE_KAFKA_*
 flash_sale:
+  # 秒杀消费入口（两种模式严格互斥，进程启动时确定；切换模式需重启应用）：
+  #   db_scanner：MySQL 出队表扫描器（默认，不依赖 Kafka）。
+  #   kafka      ：Redis 准入 + MySQL Outbox + Kafka Publisher + Kafka Consumer；
+  #                必须同时设置 kafka.enabled=true，且不启动 MySQL 消费扫描器。
+  # 配置矛盾（kafka 模式但 enabled=false，或 db_scanner 模式但 enabled=true）会启动失败，
+  # 不会静默退回另一种模式。
+  dispatch_mode: "db_scanner"
+
+  # 秒杀后台组件统一关闭预算（Go duration）：覆盖停止 Publisher、等待 Consumer.Run、
+  # 关闭客户端与 Producer Flush、停止扫描器的总时长；超时会记录明确日志。
+  shutdown_timeout: "30s"
+
+  # Kafka 配置。默认关闭：关闭时不创建任何 Kafka 客户端或后台循环，
+  # db_scanner 路径与既有行为完全一致（本地开发无需安装 Kafka）。
+  kafka:
+    # 是否启用 Kafka。kafka 模式必须为 true；db_scanner 模式必须为 false。
+    enabled: false
+    # Broker 地址列表，逗号分隔、自动去空格；启用时必须至少配置一个合法 host:port。
+    # 本地开发：宿主机进程连 127.0.0.1:29092；容器内进程连 kafka:9092。
+    brokers: "127.0.0.1:29092"
+    # 秒杀请求事件主题（分区数、副本数需显式创建，不依赖 Broker 自动建 Topic）。
+    topic: "surgecart.flashsale.order.requested.v1"
+    # 死信主题：必须与 topic 不同，避免失败消息回灌正常链路。
+    dlq_topic: "surgecart.flashsale.order.requested.v1.dlq"
+    # 消费组名：同组实例分摊分区；更换组名会导致从新组的起始位移重新消费。
+    consumer_group: "surgecart-flashsale-order-worker-v1"
+
+    # Outbox 后台发布循环参数（仅 kafka 模式生效）。
+    publisher:
+      # 单轮领取上限：Kafka 网络调用在领取事务提交之后进行，批次越大单轮耗时越长。
+      batch_size: 100
+      # 轮询间隔（Go duration）：无数据或每轮结束后至少等待该时长，不会无间隔空转。
+      poll_interval: "200ms"
+      # 发布失败/数据库不可用时的退避起点（Go duration），实际按指数增长、30s 封顶；
+      # 单条失败还会写入 next_publish_at 做更长时间的业务退避。
+      error_backoff: "2s"
+
   # 秒杀缓存对账/回补的后台扫描周期（秒）。
   reconcile_scan_interval: 60
   # 秒杀异步下单的消费扫描周期（秒），保证排队请求低延迟落单。

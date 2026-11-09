@@ -203,11 +203,29 @@ make test-race  # 竞态检测
 
 `make test` 依次执行 `go vet`、单元测试（不依赖 MySQL/Redis）、集成测试（需 MySQL/Redis）、Registry 一致性校验与容器化静态断言。集成测试前需先就绪依赖（`make init` 或 `make deps-start`）。独立目标：`test-unit` / `test-integration` / `test-race` / `test-prometheus` / `test-container` / `test-nginx` / `test-lib` / `test-storage`（真实存储 E2E，需七牛凭据）。
 
+## Task 管理（Agent Workflow）
+
+当前框架为 Agent Workflow `4.0.0`（上游发布线 `refs/tags/v4.0.0`，升级于 2026-11-05，见[升级报告](docs/reports/2026-11-05-agent-workflow-upgrade-v4.0.0.md)）。V4 删除了 Workflow Engine、`state.yaml`、五个 Gate 与 Stage 推导：工作流由 Lead Agent 组织，事实写在 Markdown 与 Git 里，机器只做静态校验。历史 Task 平铺在 `.agent/tasks/<task-id>/`（29 个 V3 记录作为冻结证据保留），22 个更早的历史任务隔离在 `.agent/tasks/_archive/`。人类可读导航与兼容说明见 [Task 管理入口](docs/task-management/README.md)：
+
+- [Task 目录](docs/task-management/task-catalog.md)：51 项的状态、领域、交付与证据（快照 2026-10-18）。
+- [Task 关系图](docs/task-management/task-relationships.md)：版本演进、前置依赖与业务关联。
+- [Owner 决策清单](docs/task-management/owner-decisions.md)：仍需人类决定的事项。
+
+```bash
+.agent/adoption/workflow-adoption verify --target .   # 框架文件与哈希校验（V4 唯一的机器校验）
+.agent/tools/git-facts --json                         # 只读 Git 事实：分支 / HEAD / 上游 / 领先落后
+```
+
+新任务由 [TaskBuilderPrompt](.agent/roles/TaskBuilderPrompt.md) 建档到 `.agent/tasks/<task-slug>/`，使用六份 Markdown 记录（`task.md`、`plan.md`、`handoff.md`、`findings.md`、`delivery.md`、`decisions.md`）；角色是能力边界、由 Lead 按需调用，入口见 [`.agent/README.md`](.agent/README.md) 与 [WorkflowAgentDirective](.agent/specs/WorkflowAgentDirective.md)。
+
+29 个在用历史任务是 V3 证据：其 `state.yaml`、`route` 与 Gate 结论均为冻结事实，V4 不解析、不续用，也不得为通过旧校验补写字段。`.agent/engine/`、`.agent/bin/workflow-check`、`.agent/workflow.yaml` 已随 V4 删除；`.agent/registry/*.md` 保留为普通 Markdown 文档，不再有机器 schema。
+
 ## 部署
 
 - **本地/单机**：Docker Compose 编排 nginx/app/MySQL/Redis/Prometheus 五个服务，Nginx 为对外唯一入口，app 仅暴露 Compose 内网端口；`make init` + `make up` 两阶段拉起。
 - **镜像发布**：`make docker-build` / `make docker-push` 构建并推送短 SHA + `latest` 双标签镜像（同源同 digest）。
 - **CI/CD**：CNB 流水线（`.cnb.yml`）按「测试 → 竞态检测 → 构建 → 镜像发布」顺序执行，任一阶段失败即中断；`latest` 仅指向测试全绿的构建。
+- **秒杀消费模式**：`flash_sale.dispatch_mode` 二选一——`db_scanner`（默认，仅 MySQL 扫描器）或 `kafka`（Redis 准入 + MySQL Outbox + Kafka Publisher/Consumer，需同时设置 `kafka.enabled=true`）。两种模式严格互斥，切换需重启进程；默认模式不需要安装 Kafka。详见 [Kafka 开发说明](docs/development/kafka.md#10-b4serve-集成与运行闭环)。
 
 详细部署模型、启动生命周期、持久化与健康检查语义见 [部署设计](docs/design/deployment.md)。
 
@@ -217,6 +235,8 @@ make test-race  # 竞态检测
 - [系统架构](docs/design/architecture.md)：分层结构、模块边界、核心业务流程与基础设施。
 - 核心设计：[订单](docs/design/order.md)、[秒杀](docs/design/flash-sale.md)、[商品](docs/design/product.md)、[分类](docs/design/category.md)、[SKU](docs/design/sku.md)、[库存](docs/design/inventory.md)、[购物车](docs/design/cart.md)、[IAM](docs/design/iam.md)、[RBAC](docs/design/rbac.md)、[优惠券](docs/design/coupon.md)、[退款](docs/design/refund.md)。
 - 部署与运维：[容器化部署](docs/design/deployment.md)、[数据库迁移](docs/design/migration.md)、[错误码](docs/design/error-codes.md)、[对象存储](docs/design/storage.md)。
+- 开发环境：[Kafka 开发说明](docs/development/kafka.md)（B4 已完成：两种运行模式、serve 装配、Publisher/Consumer 生命周期、F-03/F-04 修复、优雅关闭与真实端到端门禁）。
+- Task 管理：[Task 管理入口](docs/task-management/README.md)、[Task 目录](docs/task-management/task-catalog.md)、[Task 关系图](docs/task-management/task-relationships.md)、[Owner 决策清单](docs/task-management/owner-decisions.md)。
 - 运营与内容：[轮播图](docs/design/banner.md)、[文章](docs/design/article.md)、[推荐位](docs/design/recommendation.md)、[评价](docs/design/review.md)、[数据大屏](docs/design/dashboard.md)、[收藏](docs/design/favorite.md)、[点赞](docs/design/like.md)。
 
 `docs/design/*` 记录持续维护的项目级长期设计，是了解各模块现状与边界的权威来源。

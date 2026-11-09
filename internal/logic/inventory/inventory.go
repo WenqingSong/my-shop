@@ -18,6 +18,11 @@ const (
 	// 变更类型（DB TINYINT）。
 	changeTypeIncrease = 1
 	changeTypeDeduct   = 2
+
+	// 库存流水分页默认值与上限（与后台其他列表一致）。
+	defaultLogPage = 1
+	defaultLogSize = 20
+	maxLogSize     = 100
 )
 
 type sInventory struct{}
@@ -158,20 +163,45 @@ func (s *sInventory) DeductInTx(ctx context.Context, tx gdb.TX, skuID, qty int64
 	return toInventory(rec), nil
 }
 
-// ListLogs 查询指定 SKU 的库存流水（id 倒序）；SKU 不存在返回 5001（404）。
-func (s *sInventory) ListLogs(ctx context.Context, skuID int64) ([]*v1.Log, error) {
+// ListLogs 分页查询指定 SKU 的库存流水（id 倒序）；SKU 不存在返回 5001（404）。
+// 分页参数非法时按默认值/上限归一，避免一次拉取全部流水导致响应无界。
+func (s *sInventory) ListLogs(ctx context.Context, skuID int64, page, size int) (*v1.ListLogsRes, error) {
 	if err := s.ensureSkuExists(ctx, skuID); err != nil {
 		return nil, err
 	}
+	page, size = normalizeLogPage(page, size)
+
+	total, err := g.DB().Model("inventory_logs").Ctx(ctx).Where("sku_id", skuID).Count()
+	if err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("统计库存流水: %w", err))
+	}
 	var records []*inventoryLog
-	if err := g.DB().Model("inventory_logs").Ctx(ctx).Where("sku_id", skuID).Order("id DESC").Scan(&records); err != nil {
+	if err := g.DB().Model("inventory_logs").Ctx(ctx).
+		Where("sku_id", skuID).
+		Order("id DESC").
+		Page(page, size).
+		Scan(&records); err != nil {
 		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("查询库存流水: %w", err))
 	}
 	items := make([]*v1.Log, 0, len(records))
 	for _, r := range records {
 		items = append(items, toLog(r))
 	}
-	return items, nil
+	return &v1.ListLogsRes{Items: items, Total: total, Page: page, Size: size}, nil
+}
+
+// normalizeLogPage 归一库存流水分页参数：page 最小 1，size 默认 20、最大 100。
+func normalizeLogPage(page, size int) (int, int) {
+	if page < 1 {
+		page = defaultLogPage
+	}
+	if size < 1 {
+		size = defaultLogSize
+	}
+	if size > maxLogSize {
+		size = maxLogSize
+	}
+	return page, size
 }
 
 // ensureSkuExists 校验 sku_id 指向存在的 SKU，否则返回 5001（404）且后续无写入。

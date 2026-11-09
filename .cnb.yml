@@ -47,6 +47,9 @@ main:
           script: make test
 
         - name: race
+          # 复用 start-dependencies 已就绪的 MySQL/Redis：test-race 除了纯内存的熔断器
+          # 状态机，还会在独立可销毁库（my_shop_outbox_race）中执行 Outbox 并发/租约/
+          # 人工修复竞态测试（-race -p 1），缺少依赖或用例未实际执行都会失败而非跳过。
           script: make test-race
 
   push:
@@ -70,6 +73,7 @@ main:
           script: make test
 
         - name: race
+          # 与 pr-check 相同：包含 Outbox 并发 Race 门禁（隔离库 my_shop_outbox_race）。
           script: make test-race
 
         - name: build

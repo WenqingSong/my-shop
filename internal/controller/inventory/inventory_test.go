@@ -456,12 +456,18 @@ func TestInventoryLogsOrdering(t *testing.T) {
 	assertOK(t, res, "list logs")
 	var lr struct {
 		Items []logJSON `json:"items"`
+		Total int       `json:"total"`
+		Page  int       `json:"page"`
+		Size  int       `json:"size"`
 	}
 	if err := json.Unmarshal(res.Data, &lr); err != nil {
 		t.Fatalf("unmarshal logs: %v", err)
 	}
 	if len(lr.Items) != 3 {
 		t.Fatalf("expected 3 logs, got %d", len(lr.Items))
+	}
+	if lr.Total != 3 || lr.Page != 1 || lr.Size != 20 {
+		t.Fatalf("unexpected pagination meta: total=%d page=%d size=%d", lr.Total, lr.Page, lr.Size)
 	}
 	// id 倒序：最新在前。
 	if lr.Items[0].ChangeType != "deduct" || lr.Items[0].BeforeQty != 15 || lr.Items[0].AfterQty != 12 {
@@ -475,6 +481,59 @@ func TestInventoryLogsOrdering(t *testing.T) {
 		if it.OperatorAdminId == nil {
 			t.Fatalf("expected operator_admin_id recorded, got nil in %+v", it)
 		}
+	}
+}
+
+// TestInventoryLogsPagination 覆盖流水分页：total 为全量、items 为当前页、id 倒序，
+// 非法 page/size 按默认值与上限归一，越界页返回空列表而非报错。
+func TestInventoryLogsPagination(t *testing.T) {
+	base, token := setupInventoryServer(t)
+	skuID := newSku(t, base, token)
+	for i := 1; i <= 5; i++ {
+		increase(t, base, token, skuID, 1)
+	}
+
+	type pageRes struct {
+		Items []logJSON `json:"items"`
+		Total int       `json:"total"`
+		Page  int       `json:"page"`
+		Size  int       `json:"size"`
+	}
+	fetch := func(query string) pageRes {
+		t.Helper()
+		res := doRequest(t, base, "GET", fmt.Sprintf("/admin/inventories/%d/logs%s", skuID, query), nil, authHeader(token))
+		assertOK(t, res, "list logs "+query)
+		var pr pageRes
+		if err := json.Unmarshal(res.Data, &pr); err != nil {
+			t.Fatalf("unmarshal logs %s: %v", query, err)
+		}
+		return pr
+	}
+
+	first := fetch("?page=1&size=2")
+	if len(first.Items) != 2 || first.Total != 5 || first.Page != 1 || first.Size != 2 {
+		t.Fatalf("page1: items=%d total=%d page=%d size=%d", len(first.Items), first.Total, first.Page, first.Size)
+	}
+	second := fetch("?page=2&size=2")
+	if len(second.Items) != 2 || second.Total != 5 {
+		t.Fatalf("page2: items=%d total=%d", len(second.Items), second.Total)
+	}
+	if first.Items[1].Id <= second.Items[0].Id {
+		t.Fatalf("logs not in id desc order across pages: %d <= %d", first.Items[1].Id, second.Items[0].Id)
+	}
+
+	clamped := fetch("?page=0&size=0")
+	if len(clamped.Items) != 5 || clamped.Total != 5 || clamped.Page != 1 || clamped.Size != 20 {
+		t.Fatalf("clamp defaults: items=%d total=%d page=%d size=%d", len(clamped.Items), clamped.Total, clamped.Page, clamped.Size)
+	}
+	capped := fetch("?page=-1&size=1000")
+	if capped.Page != 1 || capped.Size != 100 {
+		t.Fatalf("clamp cap: page=%d size=%d", capped.Page, capped.Size)
+	}
+
+	beyond := fetch("?page=99&size=2")
+	if len(beyond.Items) != 0 || beyond.Total != 5 || beyond.Page != 99 {
+		t.Fatalf("beyond page: items=%d total=%d page=%d", len(beyond.Items), beyond.Total, beyond.Page)
 	}
 }
 

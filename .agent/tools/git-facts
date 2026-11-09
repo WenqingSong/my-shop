@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""只读 Git 事实：分支、HEAD、上游、领先/落后、工作区状态、远端同步。
+
+不修改仓库，不依赖第三方库。用于角色冷启动与交付前核对。
+
+用法:
+    .agent/tools/git-facts [--json] [--repo PATH]
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+
+
+def run(repo: str, *args: str) -> tuple[int, str]:
+    proc = subprocess.run(
+        ["git", "-C", repo, *args],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return proc.returncode, (proc.stdout or proc.stderr).strip()
+
+
+def collect(repo: str) -> dict:
+    facts: dict = {"repo": repo}
+
+    code, out = run(repo, "rev-parse", "--show-toplevel")
+    facts["root"] = out if code == 0 else None
+
+    code, out = run(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    facts["branch"] = out if code == 0 else None
+
+    code, out = run(repo, "rev-parse", "HEAD")
+    facts["head"] = out if code == 0 else None
+
+    code, out = run(repo, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+    if code == 0 and out:
+        facts["upstream"] = out
+        code, counts = run(repo, "rev-list", "--left-right", "--count", f"{out}...HEAD")
+        if code == 0 and counts:
+            behind, ahead = counts.split()
+            facts["behind"] = int(behind)
+            facts["ahead"] = int(ahead)
+        code, remote_sha = run(repo, "rev-parse", out)
+        facts["upstream_head"] = remote_sha if code == 0 else None
+    else:
+        facts["upstream"] = None
+        facts["ahead"] = None
+        facts["behind"] = None
+        facts["upstream_head"] = None
+
+    code, out = run(repo, "status", "--porcelain")
+    lines = [line for line in out.splitlines() if line.strip()] if code == 0 else []
+    facts["dirty"] = bool(lines)
+    facts["dirty_files"] = lines
+    facts["clean"] = not lines
+
+    return facts
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="只读 Git 事实")
+    parser.add_argument("--repo", default=".")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+
+    facts = collect(args.repo)
+
+    if args.json:
+        print(json.dumps(facts, ensure_ascii=False, indent=2))
+        return 0
+
+    print(f"root     : {facts['root']}")
+    print(f"branch   : {facts['branch']}")
+    print(f"head     : {facts['head']}")
+    print(f"upstream : {facts['upstream']}")
+    if facts.get("upstream"):
+        print(f"ahead    : {facts['ahead']}")
+        print(f"behind   : {facts['behind']}")
+    print(f"clean    : {facts['clean']}")
+    for line in facts["dirty_files"]:
+        print(f"  {line}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

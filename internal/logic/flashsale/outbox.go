@@ -1,0 +1,907 @@
+// 秒杀 B2（Kafka 可靠发布）：Request Outbox Publisher。
+//
+// 本文件把既有 flash_sale_order_requests 表当作 Outbox 使用：HTTP 准入后的 Request INSERT
+// 提交即意味着「事件具备可恢复的发布来源」，无需第二张 Outbox 表，也不额外写库。
+//
+// 核心不变量（与设计文档一一对应）：
+//   - INV-1：Request 提交即事件可恢复；发布只在事务提交之后进行。
+//   - INV-2：只有 Kafka Broker 明确确认（acks=all）之后才允许写 published_at；
+//     任何「先标记后发布」的写法都会在 Broker 故障时永久丢事件。
+//   - INV-3：发布失败、进程崩溃、租约过期都不会让请求永久丢失——租约到期后重新可领取。
+//   - INV-4：event_id 由 request_id 稳定推导，重发不变（见 message.go）。
+//     它只标识逻辑事件，不是业务完成凭证：人工修复（dead→queued）后会再次发布同一 event_id。
+//   - INV-5：多实例互斥依赖数据库行锁 + 租约，而不是进程内 mutex；
+//     租约过期后的重复发布属于允许的 at-least-once 语义。
+//   - INV-6：Publisher 只读写发布相关列，不改 status/retry_count/flash_order_id，
+//     也不触碰 Redis 预扣、订单与库存。
+//
+// 发布流程固定为四段，边界不可合并：
+//  1. 短事务领取：SELECT ... FOR UPDATE SKIP LOCKED + 写 token/租约/attempts，随后立刻提交；
+//  2. 发布：事务已结束才调用 Kafka，绝不在持有行锁时等待 ACK；
+//  3. 标记：逐条以 request_id + claim token 为条件更新（逐条结果，绝不整批成功化）；
+//  4. 失败退避：写 next_publish_at 并释放租约，下一轮再试。
+//
+// 消息路由与分区键（B2.1 冻结）：
+//   - 主题由 OutboxPublisher 构造参数显式写入 Message.Topic，不依赖 Producer 默认值；
+//   - Kafka Key 固定为 <activity_id>:<sku_id>，同一活动 SKU 的消息进入同一分区，
+//     以保持该 SKU 的分区内处理顺序，并避免多个 Consumer 争抢同一 SKU 的库存行。
+//     代价是热点 SKU 只能利用单个分区：即使 Topic 有 12 个分区，单 SKU 的消费
+//     并行度仍然是 1。这是当前接受的架构取舍，后续以真实压测评估，不在 B2.1 修改。
+//
+// 特别注意：同一 SKU 固定分区只保证「同 key 消息在分区内追加有序」，
+// 多 Publisher 并发下 Kafka 中的消息顺序不等价于 MySQL id/request_id 顺序，
+// 也不能把分区顺序当作数据库事务正确性的保证。业务正确性不得依赖该顺序。
+package flashsale
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/go-sql-driver/mysql"
+	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
+
+	"cnb.cool/go-cloud-devops/my-shop/internal/logx"
+	"cnb.cool/go-cloud-devops/my-shop/internal/metrics"
+	"cnb.cool/go-cloud-devops/my-shop/internal/mq"
+)
+
+// outboxTable 是承载 Outbox 语义的既有请求表（不新建表）。
+const outboxTable = "flash_sale_order_requests"
+
+// 发布参数的默认值与上限。
+const (
+	// defaultOutboxBatchSize 是单轮领取上限：批量太大既拉长单轮耗时，也会放大部分失败的重发代价。
+	defaultOutboxBatchSize = 100
+	// maxOutboxBatchSize 是调用方可请求的硬上限，避免单轮无界占用连接与内存。
+	maxOutboxBatchSize = 1000
+
+	// defaultOutboxLease 是领取租约时长。它必须覆盖「最坏发布耗时 + 标记阶段耗时」：
+	// Kafka 投递超时 30s 由发布超时（20s）先截断，标记阶段（10s）再留出余量，
+	// 合计 30s，租约 60s 仍保有 30s 冗余（含安全余量校验）。
+	defaultOutboxLease = 60 * time.Second
+	// defaultOutboxPublishTimeout 是单批等待 Broker 确认的上限。
+	defaultOutboxPublishTimeout = 20 * time.Second
+	// defaultOutboxMarkTimeout 是「整个标记阶段」的总预算（含 Published 与 Failure 标记），
+	// 不是单条记录的预算。这样即使批次内有 100 条记录，标记阶段也不会线性放大到数分钟。
+	// F-04：标记使用 FOR UPDATE NOWAIT，单条不会等待业务行锁；总预算再兜住连接/网络异常。
+	defaultOutboxMarkTimeout = 10 * time.Second
+	// defaultOutboxClaimTimeout 是领取阶段（SKIP LOCKED 短事务）的上限。
+	defaultOutboxClaimTimeout = 5 * time.Second
+	// outboxLeaseSafetyMargin 是租约相对「发布超时 + 标记预算」的最小安全余量：
+	// 租约必须显著长于正常批次的最坏耗时，否则正常的慢批次会在标记前被他人重新领取，
+	// 产生不必要的重复投递。注意这里不是为了让租约去覆盖临时锁等待——
+	// F-04 要求标记不得等待业务行锁，而不是把租约调大来掩盖锁等待。
+	outboxLeaseSafetyMargin = 10 * time.Second
+
+	// defaultOutboxBackoffBase / defaultOutboxBackoffMax 是发布失败退避的指数区间（2s 起步、5min 封顶）。
+	// 有界退避的意义：Kafka 短时故障时既不会紧密循环重发，也不会把记录永远压在很长的时间里。
+	defaultOutboxBackoffBase = 2 * time.Second
+	defaultOutboxBackoffMax  = 5 * time.Minute
+
+	// maxPublishErrorLength 与 last_publish_error VARCHAR(255) 对齐；超长错误截断而不报错，
+	// 因为诊断信息不应反过来让标记失败。
+	maxPublishErrorLength = 255
+
+	// outboxClaimTokenBytes 是租约令牌的随机字节数（16 字节 → 32 位十六进制，远小于 VARCHAR(64)）。
+	outboxClaimTokenBytes = 16
+
+	// markLockRetryAttempts / markLockRetryDelay 是 NOWAIT 取锁失败后的**有界**重试：
+	// 并发 Publisher 的 claim 会在 idx_outbox_claim 上持有短暂的 next-key 锁，
+	// 与本轮的标记更新（published_at/next_publish_at）发生索引级冲突时，
+	// 一次 10ms 级别的重试即可跨过窗口；绝不能在这里退化为长时间等待业务行锁。
+	markLockRetryAttempts = 3
+	markLockRetryDelay    = 20 * time.Millisecond
+)
+
+// OutboxOptions 是 Publisher 的运行参数；零值字段使用默认值。
+type OutboxOptions struct {
+	// BatchSize 是单轮默认领取上限（PublishBatch 的 limit<=0 时使用）。
+	BatchSize int
+	// Lease 是领取租约时长，必须覆盖 PublishTimeout + MarkTimeout 并留有安全余量。
+	Lease time.Duration
+	// PublishTimeout 是单批等待 Broker 确认的上限，必须小于 Lease。
+	PublishTimeout time.Duration
+	// MarkTimeout 是整轮标记阶段（Published 与 Failure 标记合计）的总时间预算。
+	// 它不是单条预算：批次越大越依赖这个总预算兜住数据库异常，避免单轮无限延长。
+	MarkTimeout time.Duration
+	// ClaimTimeout 是领取阶段短事务的时间预算；SKIP LOCKED 不等待业务行锁，
+	// 该预算主要兜住连接池耗尽/MySQL 无响应等基础设施故障。
+	ClaimTimeout time.Duration
+	// BackoffBase / BackoffMax 是失败退避的指数基础值与上限。
+	BackoffBase time.Duration
+	BackoffMax  time.Duration
+}
+
+// withDefaults 用默认值补齐零值字段。
+func (o OutboxOptions) withDefaults() OutboxOptions {
+	if o.BatchSize <= 0 {
+		o.BatchSize = defaultOutboxBatchSize
+	}
+	if o.BatchSize > maxOutboxBatchSize {
+		o.BatchSize = maxOutboxBatchSize
+	}
+	if o.Lease <= 0 {
+		o.Lease = defaultOutboxLease
+	}
+	if o.PublishTimeout <= 0 {
+		o.PublishTimeout = defaultOutboxPublishTimeout
+	}
+	if o.MarkTimeout <= 0 {
+		o.MarkTimeout = defaultOutboxMarkTimeout
+	}
+	if o.ClaimTimeout <= 0 {
+		o.ClaimTimeout = defaultOutboxClaimTimeout
+	}
+	if o.BackoffBase <= 0 {
+		o.BackoffBase = defaultOutboxBackoffBase
+	}
+	if o.BackoffMax <= 0 {
+		o.BackoffMax = defaultOutboxBackoffMax
+	}
+	return o
+}
+
+// validate 校验参数自洽性：租约必须覆盖「发布 + 标记」并显著长于该总耗时，
+// 退避上限不得小于基础值。
+//
+// 这些约束如果被违反，不会让数据丢失（终态仍可由租约过期恢复），但会产生本可避免的
+// 重复投递或不必要的租约回收。租约不能靠无限调大来掩盖标记等待锁的问题：
+// 标记阶段本身通过 NOWAIT + MarkTimeout 保证有界（F-04）。
+func (o OutboxOptions) validate() error {
+	if o.Lease <= o.PublishTimeout+o.MarkTimeout+outboxLeaseSafetyMargin {
+		return fmt.Errorf("Outbox 租约 %s 必须大于发布超时 %s + 标记预算 %s + 安全余量 %s，否则正常批次会在标记前被重新领取",
+			o.Lease, o.PublishTimeout, o.MarkTimeout, outboxLeaseSafetyMargin)
+	}
+	if o.BackoffMax < o.BackoffBase {
+		return fmt.Errorf("Outbox 退避上限 %s 不得小于基础值 %s", o.BackoffMax, o.BackoffBase)
+	}
+	return nil
+}
+
+// OutboxPublisher 把 queued 且未发布的请求可靠地发布到 Kafka Requested Topic。
+//
+// 生命周期：底层 mq.Publisher（通常是 Kafka Producer）由装配方（B4）创建与关闭；
+// 本类型不接管其 Close，避免出现「谁关闭谁负责」的歧义。
+// 本类型可被多实例/多 goroutine 同时使用：互斥完全依赖数据库行锁与租约，
+// 不依赖任何进程内状态（因此不能把安全性寄托在 mutex 上）。
+type OutboxPublisher struct {
+	pub   mq.Publisher
+	topic string
+	opts  OutboxOptions
+}
+
+// NewOutboxPublisher 构造 Outbox Publisher。
+// topic 为空或 pub 为 nil 时直接失败：宁可装配期报错，也不要在运行期把事件发到未知主题。
+func NewOutboxPublisher(pub mq.Publisher, topic string, opts OutboxOptions) (*OutboxPublisher, error) {
+	if pub == nil {
+		return nil, errors.New("创建秒杀 Outbox Publisher: 发布器不能为空")
+	}
+	if topic == "" {
+		return nil, errors.New("创建秒杀 Outbox Publisher: Kafka Topic 不能为空")
+	}
+	o := opts.withDefaults()
+	if err := o.validate(); err != nil {
+		return nil, fmt.Errorf("创建秒杀 Outbox Publisher: %w", err)
+	}
+	return &OutboxPublisher{pub: pub, topic: topic, opts: o}, nil
+}
+
+// OutboxStats 是一轮发布的观测结果（非业务事实）：发布失败不会改变 Request 的 queued 状态。
+type OutboxStats struct {
+	Claimed        int           // 本轮领取到的待发布记录数
+	LeaseReclaimed int           // 其中「租约已过期后被重新领取」的记录数
+	Published      int           // 获得 Broker 确认的条数（含紧随其后标记失败、需要重发的条数）
+	Failed         int           // 未获得 Broker 确认或无法构造事件的条数
+	Retried        int           // 已成功写入 next_publish_at 退避记录的条数
+	MarkFailed     int           // Broker 已确认但 MySQL 标记失败的条数（记录仍可被重新发布）
+	MarkSkipped    int           // 标记时租约已被他人接管、或已被发布的条数（不得覆盖）
+	Duration       time.Duration // 本轮总耗时
+}
+
+// OutboxBacklog 是待发布积压快照，供后续 Prometheus 采集或健康检查接入。
+// Pending 统计 queued 且 published_at IS NULL 的全部记录（含退避中、租约中的记录）；
+// OldestAge 用数据库时间计算，避免应用与 MySQL 时钟漂移造成负年龄或虚高年龄。
+type OutboxBacklog struct {
+	Pending         int64
+	OldestID        int64
+	OldestCreatedAt time.Time
+	OldestAge       time.Duration
+}
+
+// outboxBeforeMarkHook 是「Kafka 已确认、写 published_at 之前」注入故障的测试钩子（生产恒为 nil）。
+// 用于验证本层最危险的故障窗口：Broker 已收到消息但数据库标记失败，
+// 记录必须保持未发布并在租约到期后可重新发布（允许重复投递，绝不丢事件）。
+var outboxBeforeMarkHook func(ctx context.Context, requestID int64) error
+
+// outboxClaim 是一条被本轮领取的待发布请求（只读取发布所需的列）。
+type outboxClaim struct {
+	Id              int64       `json:"id"`
+	UserId          int64       `json:"user_id"`
+	ActivityId      int64       `json:"activity_id"`
+	SkuId           int64       `json:"sku_id"`
+	IdempotencyKey  string      `json:"idempotency_key"`
+	RequestHash     string      `json:"request_hash"`
+	PublishAttempts int         `json:"publish_attempts"`
+	LeaseUntil      *gtime.Time `json:"publish_lease_until"`
+	CreatedAt       *gtime.Time `json:"created_at"`
+}
+
+// outboxMarkOutcome 描述条件标记的结果，用于区分「已确认终态」与「租约丢失」。
+type outboxMarkOutcome int
+
+const (
+	// markApplied：条件更新命中，发布事实已写入。
+	markApplied outboxMarkOutcome = iota
+	// markSkippedLeaseLost：租约令牌已失效（被其他 Publisher 重新领取或人工修复重置），不得覆盖。
+	markSkippedLeaseLost
+	// markSkippedAlreadyPublished：记录已由其他 Publisher 标记发布，属于重复投递下的幂等结果。
+	markSkippedAlreadyPublished
+	// markSkippedLockBusy：目标行正被其他事务锁定（典型：Consumer 正在处理同一请求）。
+	// F-04：标记使用 FOR UPDATE NOWAIT 立即返回，绝不等待业务行锁；
+	// 记录保持未发布且租约仍在，租约到期后由恢复路径重新发布（允许重复，绝不丢失）。
+	markSkippedLockBusy
+)
+
+// errOutboxMarkLocked 是标记阶段「行锁被占用」的内部哨兵，由 applyMark 转换为 markSkippedLockBusy。
+var errOutboxMarkLocked = errors.New("秒杀请求行被其他事务锁定（NOWAIT）")
+
+// mysqlErrLockNowait 是 MySQL ER_LOCK_NOWAIT：SELECT ... FOR UPDATE NOWAIT 未能立即取锁。
+const mysqlErrLockNowait = 3572
+
+// PublishBatch 执行一轮「领取 → 发布 → 标记」，返回本轮统计。
+//
+// limit<=0 时使用配置的 BatchSize；超过硬上限时按上限截断。
+// 返回的 error 只表示「本轮有失败项或上下文结束」，调用方应记录并继续下一轮，
+// 不应据此终止 Publisher：失败记录已写入退避时间，后续轮次会自动重试。
+func (p *OutboxPublisher) PublishBatch(ctx context.Context, limit int) (stats OutboxStats, err error) {
+	if limit <= 0 {
+		limit = p.opts.BatchSize
+	}
+	if limit > maxOutboxBatchSize {
+		limit = maxOutboxBatchSize
+	}
+
+	started := time.Now()
+	defer func() {
+		stats.Duration = time.Since(started)
+		metrics.ObserveOutboxPublishDuration(ctx, stats.Duration)
+	}()
+
+	// 领取阶段有独立预算：SKIP LOCKED 不会等待业务行锁，但连接池耗尽或 MySQL 无响应
+	// 仍可能让一次查询无限拖住整轮发布。
+	claimCtx, cancelClaim := context.WithTimeout(ctx, p.opts.ClaimTimeout)
+	claims, token, reclaimed, err := p.claim(claimCtx, limit)
+	cancelClaim()
+	if err != nil {
+		return stats, fmt.Errorf("领取待发布秒杀请求（预算 %s）: %w", p.opts.ClaimTimeout, err)
+	}
+	stats.Claimed = len(claims)
+	stats.LeaseReclaimed = reclaimed
+	metrics.ObserveOutboxClaim(ctx, stats.Claimed, stats.LeaseReclaimed)
+	if len(claims) == 0 {
+		return stats, nil
+	}
+	logx.Info(ctx, "flashsale_outbox_claimed", "秒杀 Outbox 领取待发布请求", logx.Fields{
+		"claimed":         stats.Claimed,
+		"lease_reclaimed": stats.LeaseReclaimed,
+		"claim_token":     claimTokenDigest(token),
+	})
+
+	// 阶段 1：构造事件。构造失败的记录无法发布（例如历史数据字段不满足契约），
+	// 先收集起来，与发布结果一起在标记阶段统一处理——标签阶段共享同一份总预算，
+	// 避免「构造失败逐条排队标记 + 发布 + 逐条标记」让单轮耗时膨胀。
+	var (
+		pendings      []outboxPending
+		buildFailures []outboxBuildFailure
+		errs          []error
+		roundError    error
+	)
+	for _, c := range claims {
+		msg, buildErr := buildRequestedMessage(p.topic, c)
+		if buildErr != nil {
+			buildFailures = append(buildFailures, outboxBuildFailure{claim: c, err: buildErr})
+			continue
+		}
+		pendings = append(pendings, outboxPending{claim: c, message: msg})
+	}
+
+	// 阶段 2：发布。注意此处领取事务已经提交——Kafka 网络调用期间不持有任何 MySQL 行锁。
+	var (
+		results    []mq.PublishResult
+		publishErr error
+	)
+	if len(pendings) > 0 {
+		messages := make([]mq.Message, len(pendings))
+		for i := range pendings {
+			messages[i] = pendings[i].message
+		}
+		publishCtx, cancel := context.WithTimeout(ctx, p.opts.PublishTimeout)
+		results, publishErr = p.pub.Publish(publishCtx, messages...)
+		cancel()
+		if publishErr != nil {
+			errs = append(errs, fmt.Errorf("秒杀 Outbox 发布 %d 条消息存在未确认项: %w", len(pendings), publishErr))
+		}
+	}
+
+	// 阶段 3：标记。整轮共享 MarkTimeout 总预算（Ctx 到期后剩余标记快速失败），
+	// 单条标记内部使用 NOWAIT，不会等待 Consumer 持有的业务行锁（F-04）。
+	markCtx, cancelMark := context.WithTimeout(ctx, p.opts.MarkTimeout)
+	defer cancelMark()
+
+	for _, failure := range buildFailures {
+		stats.Failed++
+		errs = append(errs, failure.err)
+		metrics.ObserveOutboxFailed(ctx, metrics.OutboxFailureEncode)
+		if e := p.applyPublishFailure(markCtx, failure.claim, token, failure.err, &stats, &errs); e != nil {
+			roundError = errors.Join(roundError, e)
+		}
+	}
+
+	if len(pendings) > 0 {
+		if publishErr != nil && results == nil {
+			// 整批结果未知（调用前/入队前 context 结束、客户端已关闭）：按「可能已发送」处理，
+			// 不写 published_at，只安排退避重发。业务幂等由消费方以 MySQL 请求行状态保证
+			// （事务内锁行读取 status）；event_id 只用于识别这次重复投递。
+			for _, item := range pendings {
+				stats.Failed++
+				metrics.ObserveOutboxFailed(ctx, metrics.OutboxFailureUnknown)
+				if e := p.applyPublishFailure(markCtx, item.claim, token, publishErr, &stats, &errs); e != nil {
+					roundError = errors.Join(roundError, e)
+				}
+			}
+		} else {
+			// 阶段 3 逐条处理结果。一条失败不得影响其他条的成功标记，
+			// 也不允许把整批重新标记为成功。
+			for i, item := range pendings {
+				res, ok := pickPublishResult(results, i)
+				if !ok {
+					stats.Failed++
+					metrics.ObserveOutboxFailed(ctx, metrics.OutboxFailureMissingResult)
+					if e := p.applyPublishFailure(markCtx, item.claim, token,
+						fmt.Errorf("发布结果缺失（Broker 未返回第 %d 条结果）", i), &stats, &errs); e != nil {
+						roundError = errors.Join(roundError, e)
+					}
+					continue
+				}
+				if res.Err != nil {
+					stats.Failed++
+					// F-03：区分「Broker 明确失败」与「context 结束导致结果未知」，
+					// 后者只能按可能已发送处理，不能当作明确失败而缩短重试路径。
+					if errors.Is(res.Err, mq.ErrPublishUnknown) {
+						metrics.ObserveOutboxFailed(ctx, metrics.OutboxFailureUnknown)
+					} else {
+						metrics.ObserveOutboxFailed(ctx, metrics.OutboxFailureKafka)
+					}
+					if e := p.applyPublishFailure(markCtx, item.claim, token, res.Err, &stats, &errs); e != nil {
+						roundError = errors.Join(roundError, e)
+					}
+					continue
+				}
+				// Broker 已确认：即使随后 DB 标记失败，也必须计入 Published——
+				// 这两件事的观测口径不同，混在一起会掩盖「ACK 成功但标记失败」的故障窗口。
+				stats.Published++
+				metrics.ObserveOutboxPublished(ctx)
+				outcome, markErr := p.markPublished(markCtx, item.claim, token, res)
+				switch {
+				case markErr != nil:
+					// 最危险的窗口：消息可能已进入 Kafka，但 published_at 未落库。
+					// 记录保持未发布、租约到期后会被重新发布，允许重复投递但绝不丢事件。
+					stats.MarkFailed++
+					roundError = errors.Join(roundError, markErr)
+				case outcome != markApplied:
+					p.observeMarkSkipped(ctx, item.claim.Id, token, outcome, &stats)
+				}
+			}
+		}
+	}
+
+	if len(errs) > 0 {
+		roundError = errors.Join(roundError, errors.Join(errs...))
+	}
+	if roundError != nil {
+		logx.Warning(ctx, "flashsale_outbox_round_failed", "秒杀 Outbox 本轮存在失败项", logx.Fields{
+			"claimed":         stats.Claimed,
+			"published":       stats.Published,
+			"failed":          stats.Failed,
+			"retried":         stats.Retried,
+			"mark_failed":     stats.MarkFailed,
+			"mark_skipped":    stats.MarkSkipped,
+			"lease_reclaimed": stats.LeaseReclaimed,
+			"error":           roundError.Error(),
+		})
+	}
+	return stats, roundError
+}
+
+// outboxPending 是「已领取且已成功构造事件」的待发布项。
+type outboxPending struct {
+	claim   *outboxClaim
+	message mq.Message
+}
+
+// outboxBuildFailure 是「已领取但事件无法构造」的项，与发布结果共用标记阶段预算。
+type outboxBuildFailure struct {
+	claim *outboxClaim
+	err   error
+}
+
+// applyPublishFailure 记录一次发布失败的退避，并集计统计。
+// 失败退避本身是 MySQL 写入：它失败时只记录错误，记录会凭租约到期恢复，不会丢失。
+func (p *OutboxPublisher) applyPublishFailure(
+	ctx context.Context, c *outboxClaim, token string, cause error, stats *OutboxStats, errs *[]error,
+) error {
+	outcome, err := p.markPublishFailure(ctx, c, token, cause)
+	if err != nil {
+		stats.MarkFailed++
+		*errs = append(*errs, err)
+		return nil
+	}
+	if outcome != markApplied {
+		// 租约已失效、已被发布或被业务行锁占用：不能覆盖他人的标记，
+		// 记录保持未发布，由当前持有者/租约恢复路径负责。
+		p.observeMarkSkipped(ctx, c.Id, token, outcome, stats)
+		return nil
+	}
+	stats.Retried++
+	metrics.ObserveOutboxRetried(ctx)
+	logx.Warning(ctx, "flashsale_outbox_publish_failed", "秒杀 Outbox 发布失败，已安排退避重试", logx.Fields{
+		"request_id":       c.Id,
+		"flashsale_id":     c.ActivityId,
+		"publish_attempts": c.PublishAttempts + 1,
+		"claim_token":      claimTokenDigest(token),
+		"error":            cause.Error(),
+	})
+	return nil
+}
+
+// observeMarkSkipped 汇总一次「标记未命中」的统计、指标与日志。
+// F-04 的 lock_busy 必须单独留痕：它意味着 Kafka 已 ACK 但 MySQL 标记被业务事务阻塞，
+// 记录会保留租约并在到期后重新发布（允许重复，绝不丢事件）。
+func (p *OutboxPublisher) observeMarkSkipped(
+	ctx context.Context, requestID int64, token string, outcome outboxMarkOutcome, stats *OutboxStats,
+) {
+	stats.MarkSkipped++
+	reason := markOutcomeReason(outcome)
+	metrics.ObserveOutboxMarkSkipped(ctx, reason)
+	fields := logx.Fields{
+		"request_id":  requestID,
+		"claim_token": claimTokenDigest(token),
+		"reason":      reason,
+	}
+	if outcome == markSkippedLockBusy {
+		logx.Warning(ctx, "flashsale_outbox_mark_lock_busy", "秒杀 Outbox 标记遇到业务行锁（NOWAIT），保留租约等待恢复", fields)
+		return
+	}
+	logx.Warning(ctx, "flashsale_outbox_mark_skipped", "秒杀 Outbox 标记未命中（租约已被接管或已发布）", fields)
+}
+
+// claim 执行领取阶段：一个短事务内完成「加锁选择 + 计数回收 + 写 token/租约/attempts」，
+// 事务在返回前提交，Kafka 调用不持有任何行锁。
+//
+// 多实例安全的三重保证：
+//   - FOR UPDATE SKIP LOCKED：并发领取时直接跳过已被他人加锁的行，既不阻塞也不重复领取；
+//   - 数据库时间 NOW(6)：租约到期判定使用 MySQL 时钟，不依赖各实例本地时间；
+//   - 每次领取生成新的 claim token：旧持有者即使租约过期后恢复，也无法凭旧 token 写入新租约的状态。
+func (p *OutboxPublisher) claim(ctx context.Context, limit int) (claims []*outboxClaim, token string, reclaimed int, err error) {
+	token, err = newClaimToken()
+	if err != nil {
+		return nil, "", 0, err
+	}
+	leaseMicros := p.opts.Lease.Microseconds()
+
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		var rows []*outboxClaim
+		if e := tx.Model(outboxTable).Ctx(ctx).
+			Fields("id,user_id,activity_id,sku_id,idempotency_key,request_hash,publish_attempts,created_at,publish_lease_until").
+			Where("status", requestStatusQueued).
+			Where("published_at IS NULL").
+			Where("next_publish_at IS NULL OR next_publish_at <= NOW(6)").
+			Where("publish_lease_until IS NULL OR publish_lease_until <= NOW(6)").
+			// 按到期时间（其次 id）领取：与 idx_outbox_claim(status, published_at, next_publish_at, id)
+			// 的索引顺序一致，避免 filesort，也避免把退避中的行读入并加锁。
+			Order("next_publish_at", "id").
+			Limit(limit).
+			LockUpdateSkipLocked().
+			Scan(&rows); e != nil {
+			return fmt.Errorf("领取待发布秒杀请求: %w", e)
+		}
+		if len(rows) == 0 {
+			return nil
+		}
+
+		ids := make([]int64, 0, len(rows))
+		for _, r := range rows {
+			ids = append(ids, r.Id)
+		}
+
+		// 租约过期回收计数：必须在覆盖租约之前统计，且用数据库时间判定。
+		if n, e := tx.Model(outboxTable).Ctx(ctx).
+			WhereIn("id", ids).
+			Where("publish_lease_until IS NOT NULL").
+			Where("publish_lease_until <= NOW(6)").
+			Count(); e != nil {
+			return fmt.Errorf("统计过期租约回收: %w", e)
+		} else {
+			reclaimed = int(n)
+		}
+
+		if _, e := tx.Model(outboxTable).Ctx(ctx).
+			WhereIn("id", ids).
+			Data(g.Map{
+				"publish_claim_token": token,
+				"publish_lease_until": gdb.Raw("DATE_ADD(NOW(6), INTERVAL " + strconv.FormatInt(leaseMicros, 10) + " MICROSECOND)"),
+				"publish_attempts":    gdb.Raw("publish_attempts + 1"),
+			}).Update(); e != nil {
+			return fmt.Errorf("写入秒杀请求发布租约: %w", e)
+		}
+		claims = rows
+		return nil
+	})
+	if err != nil {
+		return nil, "", 0, err
+	}
+	return claims, token, reclaimed, nil
+}
+
+// markLockNowaitSQL 在标记前立即获取行锁，而不是等待 MySQL 默认的
+// innodb_lock_wait_timeout（可达 50 秒，远大于 Outbox 租约）。
+//
+// 为什么这样安全：
+//   - Consumer 处理同一 Request 时会在其业务事务内持有该行锁；
+//   - NOWAIT 让 Publisher 立即返回 3572，而不是把整轮标记拖到租约过期；
+//   - 未取得锁时不写任何列（尤其不写 published_at），记录保持未发布 + 原租约，
+//     租约到期后由恢复路径重新发布（at-least-once，允许重复，绝不丢事件）。
+//
+// 必须在事务内执行：拿到锁后紧跟的条件 UPDATE 在同事务中不会再次等待该行锁。
+const markLockNowaitSQL = "SELECT id FROM " + outboxTable +
+	" WHERE id = ? AND publish_claim_token = ? AND published_at IS NULL FOR UPDATE NOWAIT"
+
+// markPublished 以 request_id + claim token 为条件写入发布事实。
+//
+// 条件里刻意不包含 status：Kafka ACK 与 DB 标记之间存在天然故障窗口，
+// 消费者可能在 ACK 之后已经把请求改成 success/failed。
+// 此时仍然必须记录「事件已发布」，但绝不回写业务状态（更不允许把终态改回 queued）。
+// token 条件同时保证：旧 Publisher 的迟到标记不会覆盖人工修复后的新一代租约。
+func (p *OutboxPublisher) markPublished(
+	ctx context.Context, c *outboxClaim, token string, res mq.PublishResult,
+) (outboxMarkOutcome, error) {
+	if outboxBeforeMarkHook != nil {
+		if hookErr := outboxBeforeMarkHook(ctx, c.Id); hookErr != nil {
+			return markApplied, fmt.Errorf("标记秒杀请求 %d 已发布（测试故障注入）: %w", c.Id, hookErr)
+		}
+	}
+	return p.applyMarkWithRetry(ctx, c.Id, token, g.Map{
+		"published_at":        gdb.Raw("NOW(6)"),
+		"publish_claim_token": nil,
+		"publish_lease_until": nil,
+		"next_publish_at":     nil,
+		"last_publish_error":  nil,
+		"published_partition": res.Partition,
+		"published_offset":    res.Offset,
+	})
+}
+
+// markPublishFailure 记录发布失败：释放租约 + 按尝试次数设置指数退避时间 + 留痕错误原因。
+//
+// 这里绝不修改 status：短时 Kafka 故障不是业务失败，不能把请求标成 failed/dead。
+// 记录保持 queued（业务上仍然「排队中」），由 Outbox 自己按 next_publish_at 重试。
+func (p *OutboxPublisher) markPublishFailure(
+	ctx context.Context, c *outboxClaim, token string, cause error,
+) (outboxMarkOutcome, error) {
+	attempts := c.PublishAttempts + 1
+	backoff := publishBackoff(attempts, p.opts.BackoffBase, p.opts.BackoffMax)
+	return p.applyMarkWithRetry(ctx, c.Id, token, g.Map{
+		"publish_claim_token": nil,
+		"publish_lease_until": nil,
+		"next_publish_at":     gdb.Raw("DATE_ADD(NOW(6), INTERVAL " + strconv.FormatInt(backoff.Microseconds(), 10) + " MICROSECOND)"),
+		"last_publish_error":  truncatePublishError(cause.Error()),
+	})
+}
+
+// applyMarkWithRetry 在 NOWAIT 遇到短暂锁冲突时做有界重试，避免一条记录的标记
+// 因并发 claim 的瞬时索引锁而推迟到整个租约到期。
+//
+// 边界：
+//   - 只重试 markSkippedLockBusy（明确的其他错误直接返回）；
+//   - 最多 markLockRetryAttempts 次，总等待 ≤ 2 × markLockRetryDelay；
+//   - 等待可被 markCtx（整轮标记预算）取消，不会突破 F-04 的时间预算。
+func (p *OutboxPublisher) applyMarkWithRetry(
+	ctx context.Context, requestID int64, token string, data g.Map,
+) (outboxMarkOutcome, error) {
+	outcome, err := p.applyMark(ctx, requestID, token, data)
+	for attempt := 1; attempt < markLockRetryAttempts && err == nil && outcome == markSkippedLockBusy; attempt++ {
+		if waitMarkRetry(ctx) != nil {
+			return outcome, nil
+		}
+		outcome, err = p.applyMark(ctx, requestID, token, data)
+	}
+	return outcome, err
+}
+
+// waitMarkRetry 是可取消的短暂标记重试等待；ctx 结束返回错误。
+func waitMarkRetry(ctx context.Context) error {
+	timer := time.NewTimer(markLockRetryDelay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+// applyMark 在「NOWAIT 锁定 + 条件更新」的短事务中写入发布标记。
+//
+// 事务边界与时间预算：
+//   - 外层调用方已用 MarkTimeout 约束整轮标记阶段，这里不再叠加单条超时；
+//   - 锁等待被 NOWAIT 消除，因此数据库不可用/连接池耗尽才是仅剩的阻塞来源，
+//     由外层 ctx 兜底；
+//   - 任何错误都会回滚，不会出现「published_at 已写但 token 未清」的半成品。
+func (p *OutboxPublisher) applyMark(
+	ctx context.Context, requestID int64, token string, data g.Map,
+) (outboxMarkOutcome, error) {
+	outcome := markSkippedLeaseLost
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		rows, err := tx.Ctx(ctx).GetAll(markLockNowaitSQL, requestID, token)
+		if err != nil {
+			if isLockNowaitError(err) {
+				return errOutboxMarkLocked
+			}
+			return fmt.Errorf("锁定秒杀请求 %d 的发布标记: %w", requestID, err)
+		}
+		if len(rows) == 0 {
+			// 未命中 token/未发布条件（或记录已不存在）：不写任何状态。
+			var explainErr error
+			outcome, explainErr = explainMarkMiss(ctx, tx, requestID, token)
+			return explainErr
+		}
+		if _, err := tx.Model(outboxTable).Ctx(ctx).
+			Where("id", requestID).
+			Where("publish_claim_token", token).
+			Where("published_at IS NULL").
+			Data(data).Update(); err != nil {
+			return fmt.Errorf("写入秒杀请求 %d 的发布标记: %w", requestID, err)
+		}
+		outcome = markApplied
+		return nil
+	})
+	if errors.Is(err, errOutboxMarkLocked) {
+		// 锁被占用不是本轮故障：记录保持未发布且租约仍在，到期后自动恢复。
+		return markSkippedLockBusy, nil
+	}
+	return outcome, err
+}
+
+// explainMarkMiss 在 NOWAIT 未取到目标行时判定原因，避免把「已发布」「租约被接管」
+// 误判成错误。三类情况必须区分：已确认终态（别人已标记发布）、租约丢失、
+// 以及真正的异常（理论上不可达）。
+func explainMarkMiss(ctx context.Context, tx gdb.TX, requestID int64, token string) (outboxMarkOutcome, error) {
+	var rows []struct {
+		PublishedAt       *gtime.Time `json:"published_at"`
+		PublishClaimToken *string     `json:"publish_claim_token"`
+	}
+	if err := tx.Model(outboxTable).Ctx(ctx).
+		Fields("published_at,publish_claim_token").
+		Where("id", requestID).
+		Scan(&rows); err != nil {
+		return markSkippedLeaseLost, fmt.Errorf("核对秒杀请求 %d 的发布标记: %w", requestID, err)
+	}
+	if len(rows) == 0 {
+		// 记录已被删除（本项目无删除接口，属异常），按租约丢失处理：不覆盖任何状态。
+		return markSkippedLeaseLost, nil
+	}
+	if rows[0].PublishedAt != nil {
+		return markSkippedAlreadyPublished, nil
+	}
+	if rows[0].PublishClaimToken == nil || *rows[0].PublishClaimToken != token {
+		return markSkippedLeaseLost, nil
+	}
+	// 条件更新理论上不会在 token 相同且未发布时未命中；若发生，说明存在本层不可见的并发写入。
+	return markSkippedLeaseLost, nil
+}
+
+// isLockNowaitError 判断 MySQL 是否因 NOWAIT 拒绝立即取锁（ER_LOCK_NOWAIT = 3572）。
+// 使用驱动错误码而不是字符串前缀；额外保留文本兜底，避免驱动/中间件包装丢失类型。
+func isLockNowaitError(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	if errors.As(err, &mysqlErr) && mysqlErr.Number == mysqlErrLockNowait {
+		return true
+	}
+	return strings.Contains(err.Error(), "Error 3572")
+}
+
+// pickPublishResult 按下标取逐条结果；结果缺失时返回 ok=false（按结果未知处理）。
+func pickPublishResult(results []mq.PublishResult, i int) (mq.PublishResult, bool) {
+	if i < 0 || i >= len(results) {
+		return mq.PublishResult{}, false
+	}
+	return results[i], true
+}
+
+// buildRequestedMessage 由持久化请求构造 RequestedEvent v1 消息。
+//
+// 字段全部来自 MySQL 权威行：occurred_at 使用请求实际创建时间（重发不变），
+// 不掺入价格/库存/sold，也不在每次重发时生成新时间。
+//
+// topic 是 OutboxPublisher 构造时指定的目标主题，必须显式写入 Message.Topic。
+// 若留空，实际主题会退化为底层 Producer 的默认 Topic：一旦装配期两者不一致，
+// 消息可能被投递到错误主题，而 MySQL 仍按「Broker 已确认」写入 published_at，
+// 形成「标记成功但事件在错误主题」的静默错投。
+//
+// Kafka Key 固定为 <activity_id>:<sku_id>（B2.1 冻结）：同一活动 SKU 的消息进入
+// 同一分区，保持该 SKU 的分区内处理顺序；代价是热点 SKU 只能利用单个分区的消费并行度。
+// 该 Key 不是 request_id：Kafka 只保证分区内追加有序，不保证多 Publisher 下的消息
+// 顺序与 MySQL request_id 顺序一致，也不能把分区顺序当作事务正确性的保证。
+func buildRequestedMessage(topic string, c *outboxClaim) (mq.Message, error) {
+	if topic == "" {
+		// 构造期已拒绝空 Topic；此处防御任何绕过构造函数的调用路径，避免静默回退到默认主题。
+		return mq.Message{}, fmt.Errorf("秒杀请求 %d 缺少目标 Topic，无法构造事件", c.Id)
+	}
+	if c.CreatedAt == nil {
+		return mq.Message{}, fmt.Errorf("秒杀请求 %d 缺少 created_at，无法构造事件", c.Id)
+	}
+	event := NewRequestedEvent(RequestedEventInput{
+		RequestID:      c.Id,
+		UserID:         c.UserId,
+		ActivityID:     c.ActivityId,
+		SkuID:          c.SkuId,
+		IdempotencyKey: c.IdempotencyKey,
+		RequestHash:    c.RequestHash,
+		OccurredAt:     c.CreatedAt.Time,
+	})
+	value, err := event.Encode()
+	if err != nil {
+		return mq.Message{}, fmt.Errorf("构造秒杀请求 %d 的事件消息: %w", c.Id, err)
+	}
+	return mq.Message{
+		// 显式指定目标主题：这是 Topic 参数唯一真正生效的位置。
+		Topic: topic,
+		Key:   []byte(requestedMessageKey(c.ActivityId, c.SkuId)),
+		Value: value,
+		Headers: []mq.Header{
+			{Key: "event_id", Value: []byte(event.EventID)},
+			{Key: "event_type", Value: []byte(event.EventType)},
+			{Key: "schema_version", Value: []byte(strconv.Itoa(event.SchemaVersion))},
+		},
+		// 传输层时间戳留空：由驱动在发送时填充当前时间。
+		// 不能用 occurred_at 充当记录时间戳——它是 DATETIME 墙钟（无时区），且重投时可能已过去很久，
+		// 而 franz-go 会用记录时间戳判断 RecordDeliveryTimeout，历史时间会导致消息被立即判为超时。
+		// 「事件发生时间」以消息体里的 occurred_at 为准（跨重投稳定）。
+	}, nil
+}
+
+// requestedMessageKey 返回 Kafka 分区键 <activity_id>:<sku_id>（B2.1 架构决策，不再改回 request_id）。
+//
+// 选择该 Key 的理由：
+//   - 同一活动 SKU 的消息进入同一分区，保持该 SKU 的分区内处理顺序；
+//   - 避免多个 Consumer 同时争抢同一个 SKU 的库存记录。
+//
+// 必须承认的代价：若活动只有一个热门 SKU，该 SKU 的消息会集中到单个分区，
+// 即使 Topic 配置 12 个分区也无法自动获得 12 路消费并行度。
+// 同 key 固定分区只提供聚合与顺序性便利，业务正确性不依赖跨请求顺序。
+func requestedMessageKey(activityID, skuID int64) string {
+	return strconv.FormatInt(activityID, 10) + ":" + strconv.FormatInt(skuID, 10)
+}
+
+// publishBackoff 计算第 attempts 次发布尝试失败后的指数退避（base 起步、max 封顶）。
+// 循环次数受 max/base 的对数约束，不会随 attempts 线性增长。
+func publishBackoff(attempts int, base, max time.Duration) time.Duration {
+	if base <= 0 {
+		base = defaultOutboxBackoffBase
+	}
+	if max <= 0 {
+		max = defaultOutboxBackoffMax
+	}
+	if max < base {
+		// 上限小于基础值属于非法配置（构造期已拒绝）；此处退化为「不放大」，而不是悄悄放大到默认上限。
+		max = base
+	}
+	if attempts <= 1 {
+		return base
+	}
+	d := base
+	for i := 1; i < attempts; i++ {
+		if d >= max || d > max/2 {
+			return max
+		}
+		d *= 2
+	}
+	return d
+}
+
+// truncatePublishError 按列宽截断错误文本（不会因为诊断信息过长而让标记失败）。
+func truncatePublishError(msg string) string {
+	if len(msg) <= maxPublishErrorLength {
+		return msg
+	}
+	return msg[:maxPublishErrorLength]
+}
+
+// newClaimToken 生成一轮领取的租约令牌：随机 16 字节的十六进制串。
+// 随机性保证「新一轮领取」与「旧租约」在数据库条件更新中不会混淆。
+func newClaimToken() (string, error) {
+	var b [outboxClaimTokenBytes]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("生成秒杀 Outbox 领取令牌: %w", err)
+	}
+	return hex.EncodeToString(b[:]), nil
+}
+
+// claimTokenDigest 返回令牌的安全摘要（sha256 前 8 位十六进制），用于日志关联而不泄露完整令牌。
+func claimTokenDigest(token string) string {
+	if token == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])[:8]
+}
+
+// markOutcomeReason 把标记结果映射为低基数指标标签。
+func markOutcomeReason(o outboxMarkOutcome) string {
+	switch o {
+	case markSkippedAlreadyPublished:
+		return metrics.OutboxMarkAlreadyPublished
+	case markSkippedLockBusy:
+		return metrics.OutboxMarkLockBusy
+	default:
+		return metrics.OutboxMarkLeaseLost
+	}
+}
+
+// Backlog 返回待发布积压快照（待发布数量与最老待发布事件年龄）。
+//
+// 计数使用 idx_outbox_claim 的前缀（status, published_at）做覆盖扫描；
+// 最老年龄只回表读取一条记录，并用数据库 NOW(6) 计算，避免应用与 MySQL 时钟漂移。
+func (p *OutboxPublisher) Backlog(ctx context.Context) (OutboxBacklog, error) {
+	var backlog OutboxBacklog
+
+	var agg []struct {
+		Pending  int64 `json:"pending"`
+		OldestId int64 `json:"oldest_id"`
+	}
+	if err := g.DB().Model(outboxTable).Ctx(ctx).
+		Fields("COUNT(*) AS pending, MIN(id) AS oldest_id").
+		Where("status", requestStatusQueued).
+		Where("published_at IS NULL").
+		Scan(&agg); err != nil {
+		return backlog, fmt.Errorf("统计待发布秒杀请求: %w", err)
+	}
+	if len(agg) == 0 {
+		return backlog, nil
+	}
+	backlog.Pending = agg[0].Pending
+	backlog.OldestID = agg[0].OldestId
+	if backlog.OldestID <= 0 {
+		return backlog, nil
+	}
+
+	var rows []struct {
+		CreatedAt *gtime.Time `json:"created_at"`
+		DbNow     *gtime.Time `json:"db_now"`
+	}
+	if err := g.DB().Model(outboxTable).Ctx(ctx).
+		Fields("created_at, NOW(6) AS db_now").
+		Where("id", backlog.OldestID).
+		Scan(&rows); err != nil {
+		return backlog, fmt.Errorf("查询最老待发布秒杀请求 %d: %w", backlog.OldestID, err)
+	}
+	if len(rows) == 0 || rows[0].CreatedAt == nil || rows[0].DbNow == nil {
+		// 统计与回表之间记录被并发处理掉：保留计数，年龄留空（不谎报）。
+		return backlog, nil
+	}
+	backlog.OldestCreatedAt = rows[0].CreatedAt.Time
+	backlog.OldestAge = rows[0].DbNow.Time.Sub(rows[0].CreatedAt.Time)
+	if backlog.OldestAge < 0 {
+		backlog.OldestAge = 0
+	}
+	return backlog, nil
+}

@@ -10,7 +10,7 @@ SHELL := /bin/bash
 
 SCRIPTS := scripts
 
-.PHONY: help bootstrap init up down restart status logs health deps-start test test-unit test-integration test-race test-prometheus test-container test-nginx test-lib test-storage clean build docker-build docker-push migrate-up migrate-version migrate-force config-check
+.PHONY: help bootstrap init up down restart status logs health deps-start test test-unit test-integration test-race test-prometheus test-container test-nginx test-lib test-storage test-kafka-e2e test-serve-lifecycle clean build docker-build docker-push migrate-up migrate-version migrate-force config-check
 
 help: ## 列出所有可用目标及说明
 	@bash $(SCRIPTS)/help.sh
@@ -51,8 +51,14 @@ test-unit: ## 仅运行不依赖 MySQL/Redis 的纯内存单元测试
 test-integration: ## 仅运行依赖 MySQL/Redis 的真实集成测试（需先 make deps-start 或 make init/up）
 	@bash $(SCRIPTS)/test-integration.sh
 
-test-race: ## 执行 go test -race（进程内共享内存并发逻辑，与 DB 集成测试隔离）
+test-race: ## 执行 go test -race（熔断器状态机 + Outbox 并发/租约/修复竞态；后者需 MySQL/Redis）
 	@bash $(SCRIPTS)/test-race.sh
+
+test-kafka-e2e: ## B4 真实 Kafka 秒杀端到端（专用 MySQL/Redis/Kafka，含可选故障注入）
+	@bash $(SCRIPTS)/test-kafka-e2e.sh
+
+test-serve-lifecycle: ## B4.1 进程级 serve 生命周期（真实进程 + 真实 SIGTERM + 重启收敛）
+	@bash $(SCRIPTS)/test-serve-lifecycle.sh
 
 test-prometheus: ## 校验 Prometheus 抓取配置与 compose 服务定义
 	@bash $(SCRIPTS)/test-prometheus.sh

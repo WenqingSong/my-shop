@@ -1,14 +1,23 @@
-# Agent Workflow V3 — 核心架构设计
+# Agent Workflow V3 — 核心架构设计（历史归档）
 
-> **Workflow V3 Baseline**（`.agent/VERSION` = `3.0.0`）
+> ### 历史归档（ARCHIVED）：本文描述 Workflow V3.0.0，不是当前规范
 >
-> 当前 Workflow 协作 / 工程架构 major version 为 **V3**。Baseline 包含：six-role independent-session workflow、Evidence Snapshot、machine gates、Generic Shared Resources、strict YAML、independent Workflow Engine module、Adoption mechanism。
+> 本文件在项目曾升级到 4.x 期间归档保留，只用于回溯 V3 的设计决策与演进原因。正文为 V3 原文，未改写，也不得作为当前实现的权威依据。
+>
+> - 当前框架版本：`.agent/VERSION` = `4.0.0`（上游发布线 `refs/tags/v4.0.0`；`https://cnb.cool/framework-station/agent-workflow`，Commit `304bdb26b4c46f428e14e6067159f33505e14f7d`；2026-11-05 经 adoption 事务由 `3.4.0` 升级，见 `docs/reports/2026-11-05-agent-workflow-upgrade-v4.0.0.md`）。
+> - 当前权威入口：`.agent/README.md`（运行资产索引）；唯一入口 `.agent/specs/WorkflowAgentDirective.md`；协作原则 `.agent/specs/AgentCollaborationSpecification.md`；权责边界 `.agent/specs/Five-AgentResponsibilityBoundary.md`；角色 Prompt `.agent/roles/`（七个）。V4 已删除 Engine 与 Route 选择，本文正文中所有 Gate / `state.yaml` / `workflow-check` 描述都是 V3 历史。
+> - 迁移与历史 Task 兼容规则：`.agent/specs/WorkflowAdoption.md`（分发 / 安装 / 升级 / 回滚 / 校验；V4 不解析 state schema）。
+> - 世代说明：项目在 2026-10-29 由 4.x 未发布线（`229edfd`，上游无 tag）切回发布线 `3.2.0`；2026-11-05 上游发布 `v4.0.0`（结构性重写，删除 Engine / Gate / Route / Registry 机器机制）后，项目由 `3.4.0` 升级到该发布线。V3 与 V4 在 `v3.0.0`（`7727e0a`）之后连续演进，不再存在无 tag 的分支世代。
+>
+> **Workflow V3 Baseline**（`.agent/VERSION` = `3.0.0`，归档时快照）
+>
+> V3 协作 / 工程架构 major version 为 **V3**。Baseline 包含：six-role independent-session workflow、Evidence Snapshot、machine gates、Generic Shared Resources、strict YAML、independent Workflow Engine module、Adoption mechanism。
 >
 > 已知验证边界：Cross-project Adoption Dogfood **NOT PERFORMED**（DEFERRED BY OWNER）。portability architecture 已静态与内部验证，但尚未在第二个真实项目验证跨项目 Adoption。
 >
-> 命名约定：正文中「Workflow V2」若指当前架构名称，已被 V3 取代；若指 V1→V2 历史演进、legacy reference 或 state schema v2/v3，则保留历史含义，不随本次 Release Marking 改写。`module workflow-v2-engine` 为 historical technical identifier，本轮不改。
+> 命名约定：正文中「Workflow V2」若指 V3 之前的架构名称，已被 V3 取代；若指 V1→V2 历史演进、legacy reference 或 state schema v2/v3，则保留历史含义，不随归档改写。`module workflow-v2-engine` 为 historical technical identifier，归档不改。
 
-本文是 Workflow V3 的**唯一核心架构 Design 文档**：解释「为什么这样设计」「整个系统如何运行」「各概念之间的关系」「为什么需要这些 Gate / Git / Evidence 规则」。
+本文是 Workflow V3 的**核心架构 Design 文档（归档原文）**：解释 V3 为什么这样设计、整个系统如何运行、各概念之间的关系、为什么需要这些 Gate / Git / Evidence 规则。V4.3.0 的现行架构说明见 `.agent/specs/Architecture.md`；Task 目录分类（项目本地扩展）见 `.agent/specs/TaskLayoutExtension.md`。
 
 本文定位是「**为什么**」。`.agent/specs/*`（协作规范、职责边界）与 `.agent/roles/*`（六个角色 Prompt）负责「**具体怎么做**」，引用本文，不重复定义。
 
@@ -660,7 +669,7 @@ Workflow 有三层事实：
 
 1. **Workflow Core**：Roles、Authority、Evidence Snapshot、Handoff、Gate、Completion Contract、Git safety model、Registry coordination concept——跨项目稳定，固化在 `.agent/engine/internal/workflow/*` 与 `.agent/specs/*`、`.agent/roles/*`。
 2. **Machine Configuration**：`.agent/workflow.yaml`——「跨项目会变化、且 Workflow Engine runtime 必须知道的最小参数」。
-3. **Project Policy**：README / Makefile / `docs/design/*` / `AGENTS.md` 等——项目工程约束，供 Agent 读取，不供 `workflow-check` 机器解析。
+3. **Project Policy**：README / Makefile / `docs/design/*`（含 engineering-guidelines.md）等——项目工程约束，供 Agent 读取，不供 `workflow-check` 机器解析。
 
 `.agent/workflow.yaml` 是长期机器配置，**不是** `PROJECT_ADAPTATION.md`（一次性临时工作单）、不是 Task Artifact、不是业务配置。它在 Adoption 完成后长期存在，供 `workflow-check` 读取。
 

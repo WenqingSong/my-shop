@@ -1,62 +1,82 @@
-# Workflow V3 Runtime Assets
+# `.agent/` — Workflow V4 运行时命名空间
 
-`.agent/` 是 Workflow V3 的 Repository Runtime Namespace：集中存放角色 Prompt、协作规范、职责边界、Adoption 协议、模板、机器配置、Registry 与运行时 Task Artifact。Agent 正常执行 Workflow 时，主要读取本目录。
+`.agent/` 存放行为规范、角色能力、工作记录与工程工具。V4 没有工作流引擎：工作流由 **Lead Agent** 组织，事实写在 Markdown 与 Git 里。
 
-> **Workflow V3 Baseline**（`.agent/VERSION` = `3.0.0`）
->
-> 当前 Workflow major version = **3**。Baseline 包含：six-role independent-session workflow、Evidence Snapshot、machine gates、Generic Shared Resources、strict YAML、independent Workflow Engine module、Adoption mechanism。
->
-> Cross-project Adoption Dogfood：**NOT PERFORMED**（DEFERRED BY OWNER）。
->
-> 命名约定：`module workflow-v2-engine` 是 historical technical identifier（本轮不随 Release Marking 修改）；state schema v2/v3 版本号与 Workflow major version 相互独立。
+## 版本
 
-## Entry
+`.agent/VERSION` = `4.0.0`
 
-仓库 Agent 入口：`../AGENTS.md`
+V4.0.0 相对 V3.4.0 的变化：
 
-架构 Design：`../docs/design/agent-workflow.md`
+- 删除 Workflow Engine、`state.yaml`、Schema 解析、五个 Gate、Stage 推导、Route 选择、固定交接矩阵与为它们服务的二进制；
+- 删除 `HANDOFF_PROMPT`，交接固定 4 个字段 + 可选证据行；
+- 角色从「流水线工位」改为「能力边界」，由 Lead 按需调用，可并行、可多轮、可跳过；
+- 工作记录改为六份普通 Markdown：`task.md`、`plan.md`、`handoff.md`、`findings.md`、`delivery.md`、`decisions.md`；
+- 失败处理简化为「判断原因 → 最多两次有依据的尝试 → 升级 Lead → 必要时升级 Owner」；
+- 发布只产出源码资产与发布记录，不再构建 Engine 二进制。
 
-## Structure
+V3.4.0 的规范与证据归档在 `docs/history/v3.4.0/`，实现保存在 Git 历史中。
 
-- `roles/` — 六个独立 Agent Role Prompt
-- `specs/` — 协作协议、Authority / Responsibility Boundary、Project Adoption
-- `templates/` — Workflow / Adoption 临时模板
-- `workflow.yaml` — Workflow Engine machine configuration
-- `registry/` — shared resource registries
-- `tasks/` — task runtime artifacts
-- `engine/` — 独立 Workflow Engine Go Module（`module workflow-v2-engine`），含 `go.mod`/`go.sum`、`cmd/workflow-check`、`internal/workflow`
-- `bin/` — 本地生成的 `workflow-check` binary（Git ignore，不进入 Git）
+## 入口
 
-## Workflow Engine（独立 Module）
+| 用途 | 路径 |
+| --- | --- |
+| 唯一入口 | `specs/WorkflowAgentDirective.md` |
+| 协作原则 | `specs/AgentCollaborationSpecification.md` |
+| 权责边界 | `specs/Five-AgentResponsibilityBoundary.md` |
+| 交接格式 | `specs/WorkflowHandoffContract.md` |
+| Git 纪律 | `specs/WorkflowGitLifecycle.md` |
+| 失败处理 | `specs/WorkflowLoopCircuitBreaker.md` |
+| 安装/升级 | `specs/WorkflowAdoption.md` |
+| 角色 Prompt | `roles/`（7 个） |
+| 记录模板 | `templates/task/` |
+| 安装工具 | `adoption/workflow-adoption` |
+| 只读 Git 事实 | `tools/git-facts` |
 
-Workflow Engine 位于 `.agent/engine/`，是 source-vendored 独立 Go Module，不依赖宿主业务 Go Module、`go.work`、root `replace`；只依赖 Git 仓库与 Go toolchain。
+## 目录
 
 ```text
-# 构建本地 binary（进入 .agent/bin/，被 Git ignore）
-go -C .agent/engine build -o ../bin/workflow-check ./cmd/workflow-check
-
-# 运行（正式 Gate 机器入口优先 direct binary，保留 0/1/2 exit code）
-.agent/bin/workflow-check gate <gate> <task>
-
-# 测试 / 静态检查（Engine 与 Business 分开运行）
-go -C .agent/engine test ./...
-go -C .agent/engine test -race ./...
-go -C .agent/engine vet ./...
-go -C .agent/engine build ./...
+.agent/
+  VERSION                 框架版本
+  README.md               本文件
+  specs/                  7 份行为规范
+  roles/                  7 个角色 Prompt
+  templates/              任务记录模板、接入模板、provenance 模板
+  adoption/               安装 / 升级 / 回滚 / 校验 / 一致性检查
+  tools/git-facts         只读 Git 事实（分支、HEAD、上游、领先落后）
+  tasks/                  宿主任务记录（安装时不创建、不覆盖）
+  upstream.json           安装来源与文件哈希（只由成功事务写入）
 ```
 
-Repository Root 通过 `git rev-parse --show-toplevel` 解析，与 Engine Module Root（`.agent/engine/`）无关；workflow config / task / registry 始终位于 `<repo-root>/.agent/workflow.yaml`、`<repo-root>/.agent/tasks/`、`<repo-root>/.agent/registry/`。
+`registry/` 在 V4 中不存在。V3 的共享资源分配机制随 Engine 一并删除；如宿主需要资源登记，用普通 Markdown 记录，不引入机器 schema。
 
-## Normal Flow
+## 角色调用
 
-TaskBuilder → Analyst → Coder → Cleaner → OwnerGate → Deliverer → Owner Integration
+```text
+以 CODER 角色执行任务：
+.agent/tasks/<task-slug>/
+```
 
-## Important
+角色读取入口规范与任务目录全部记录，输出开工声明，结束时落盘并给出 4 字段交接块。
 
-- historical task artifacts are evidence, not current Workflow specification
-- normal Agent rules come from roles/specs/design
-- PROJECT_ADAPTATION.md is temporary and removed after successful Adoption
+## 安装与升级
 
-## Separate: Project Mastery Workflow
+```bash
+.agent/adoption/workflow-adoption dist    --source . --output dist/
+.agent/adoption/workflow-adoption install --target /path/to/host --package <tgz> \
+  --distribution-sha256 <sha> --source-commit <40-hex> \
+  --integration-branch <branch> --owner <owner> --owner-authorized --execute
+.agent/adoption/workflow-adoption upgrade --target /path/to/host --package <tgz> \
+  --distribution-sha256 <sha> --source-commit <40-hex> --owner <owner> --owner-authorized --execute
+.agent/adoption/workflow-adoption rollback --target /path/to/host --execute
+.agent/adoption/workflow-adoption verify   --target /path/to/host
+.agent/adoption/workflow-adoption check    --repo .
+```
 
-`.agent/mastery/` 是独立的 Project Mastery Workflow（学习 / 面试掌握），与 Workflow V3 生产开发流程目的不同、资产隔离，不参与 Workflow V3 状态机。入口：`mastery/README.md`。
+`check` 是静态一致性检查（文件集合、规范与角色完整性、禁止术语、记录必需文件），不解析任务状态，不是工作流引擎。
+
+## 重要
+
+- 历史任务记录是证据，不是当前规范；
+- 不得恢复 Engine / Gate / Stage / `state.yaml`；
+- 不得把「流程跑完」当作「验证通过」。

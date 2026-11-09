@@ -6,10 +6,10 @@
 #
 # 拆分依据：仓库大部分测试为集成测试（启动完整 app + 真实 MySQL/Redis），仅有少数纯内存测试，
 # 且部分包同时包含纯内存与集成测试。本脚本用「整包 go test + -run 精确匹配」枚举纯内存测试：
-#   - 整包纯内存：auth / metrics / logic/health / logic/dashboard / controller/health；
-#   - 混合包纯内存：iam（用户名/密码校验）、flashsale（熔断器状态机 / 结果映射）、
+#   - 整包纯内存：auth / metrics / logic/health / logic/dashboard / controller/health / mq / worker；
+#   - 混合包纯内存：iam（用户名/密码校验）、flashsale（熔断器状态机 / 结果映射 / Kafka 消息契约）、
 #     legacymigrate（金额/状态映射 / DSN 构建拒绝）、migrations（DSN 构建 / charset）、
-#     middleware（RequestID 中间件）、cmd（扫描器 ctx 取消即停止）。
+#     middleware（RequestID 中间件）。
 # 新增纯内存测试时应在此登记；集成测试一律由 test-integration.sh 覆盖。
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,14 +24,19 @@ go test \
   ./internal/metrics/... \
   ./internal/logic/health/... \
   ./internal/logic/dashboard/... \
-  ./internal/controller/health/...
+  ./internal/controller/health/... \
+  ./internal/mq/... \
+  ./internal/worker/...
 
 log_info "go test：混合包中的纯内存测试（-run 精确匹配）..."
 go test -run 'TestValidateUsername|TestValidatePassword' ./internal/logic/iam/...
-go test -run 'TestCircuitBreakerStateMachine|TestOrderOutcomeMapping' ./internal/logic/flashsale/...
+# B3 Consumer 的纯内存用例：消息解析/死信分类、位移提交与 AllowRebalance 生命周期、
+# 重试预算与退避。需要 MySQL/Redis 的消费事务用例见 test-integration.sh / test-race.sh。
+go test -run 'TestCircuitBreakerStateMachine|TestOrderOutcomeMapping|TestRequestedEvent|TestOutboxPublishBackoff|TestOutboxClaimToken|TestOutboxOptionsValidation|TestOutboxMessageContract|TestConsumerParseRequestedEvent|TestConsumerInvalidMessageGoesToDLQAndCommits|TestConsumerDLQFailureKeepsOffset|TestConsumerCommitFailureStopsProgress|TestConsumerIdentityMismatchGoesToDLQ|TestConsumerRetryBudgetExhaustedGoesToDLQ|TestConsumerDeadLetterFailureKeepsOffset|TestConsumerRetryThenSuccess|TestConsumerPersistenceFailureNeverDropsMessage|TestConsumerBackoffBounded|TestConsumerOptionsValidation|TestConsumerContextCancelReleasesRebalance' ./internal/logic/flashsale/...
 go test -run 'TestYuanToCents|TestMapCategoryStatus|TestMapProductStatus|TestSkuStatusForProduct|TestSplitSliderImages|TestMapSkusInventoryDedup|TestOpenConnectionsRejectsEmptyPass|TestBuildDSNCharsetUTF8MB4' ./internal/logic/legacymigrate/...
 go test -run 'TestBuildDSNRejectsEmptyPass|TestBuildDSNCharsetUTF8MB4' ./internal/migrations/...
 go test -run 'TestRequestID' ./internal/middleware/...
-go test -run 'TestScannersStopOnContextCancel' ./internal/cmd/...
+# 注：扫描器 ctx 取消与 B4 秒杀装配/互斥/恢复用例已随 ./internal/worker/... 整包执行，
+# 不再指向 ./internal/cmd（该包没有同名用例，旧命令是空跑）。
 
 log_info "单元测试全部通过"

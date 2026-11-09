@@ -2,7 +2,7 @@
 
 本文件是 **migration version 分配**的权威事实源（`.agent/registry/`，位于 `develop` 上）。任何需要新增 migration 的 Task，必须在进入 Coder 前，通过一个只改 Registry 文件的 commit 把 `RESERVED` 条目提交到 `develop`，才能使用对应 version；仅在 Feature Branch 内自行声明不构成有效预留。
 
-机制、生命周期与角色职责见 `.agent/specs/AgentCollaborationSpecification.md`（跨任务全局资源预留）与 `.agent/specs/Five-AgentResponsibilityBoundary.md`。
+机制、生命周期与角色职责见 `.agent/specs/AgentCollaborationSpecification.md`（跨任务全局资源预留）与 `.agent/specs/AgentResponsibilityBoundary.md`。
 
 ## 状态与生命周期
 
@@ -46,3 +46,4 @@
 | 20261001000021 | coupon | coupon-v1 | ACTIVE | coupon_templates + user_coupons 优惠券两表 |
 | 20261001000022 | order_coupon_amounts | coupon-v1 | ACTIVE | orders 增 original_amount/discount_amount/user_coupon_id 三列 + 回填 |
 | 20261001000023 | legacy_id_map | legacy-data-migration | ACTIVE | 目标库新增 legacy_id_map 旧 ID→新 ID 映射表 |
+| 20261001000024 | flash_sale_request_outbox | flashsale-kafka-b2 | RESERVED | flash_sale_order_requests 增发布标记/租约/退避列及领取索引 idx_outbox_claim |
