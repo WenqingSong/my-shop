@@ -752,16 +752,20 @@ CI 环境下必须额外设置 `DEPLOY_K8S_ALLOW_DOWNGRADE_IN_CI=1`。
 ```bash
 kubectl apply -f manifest/kubernetes/shared/namespace.yaml        # 1) 命名空间先存在
 kubectl apply -f manifest/kubernetes/examples/deploy-lock/rbac.yaml  # 2) 三个权限组
-kubectl auth can-i update leases.coordination.k8s.io -n surgecart    # 3) 自检（§13.1 有完整列表）
+# 3) 自检：leases 的 get/update 受 resourceNames 限制，必须带对象名（F-01）
+kubectl auth can-i get    leases.coordination.k8s.io/surgecart-deploy-lock -n surgecart
+kubectl auth can-i update leases.coordination.k8s.io/surgecart-deploy-lock -n surgecart
+kubectl auth can-i create leases.coordination.k8s.io -n surgecart    # create 不能带对象名
 ```
+（完整列表见 `docs/development/kubernetes.md` §13.1。）
 
 ### 12.1 命名空间级权限（Role + RoleBinding）
 
 | 资源（group/resource） | 动词 | 用途 |
 |---|---|---|
-| `coordination.k8s.io/leases`（`resourceNames: surgecart-deploy-lock`） | `get` | 读取 holder / `renewTime` / rv / 迁移记录注解 |
-| `coordination.k8s.io/leases` | `create` | 首次原子获取锁（`resourceNames` 无法约束 create） |
-| `coordination.k8s.io/leases` | `update` | 续租 / 接管 / 释放 / 写迁移记录（`replace` = PUT + rv CAS） |
+| `coordination.k8s.io/leases`（`resourceNames: surgecart-deploy-lock`） | `get` | 读取 holder / `renewTime` / rv / 迁移记录注解。**预检必须带对象名**：`auth can-i get leases.coordination.k8s.io/surgecart-deploy-lock` |
+| `coordination.k8s.io/leases` | `create` | 首次原子获取锁（`resourceNames` 无法约束 create；预检**不能**带对象名） |
+| `coordination.k8s.io/leases` | `update` | 续租 / 接管 / 释放 / 写迁移记录（`replace` = PUT + rv CAS）。**预检必须带对象名** |
 | `coordination.k8s.io/leases` | `patch`（**operator-only**） | 脚本**不用**；只供人工恢复（`kubectl annotate lease surgecart-deploy-lock ...`，脚本的恢复提示里给出的正是这条命令）。清单用注解 `deploy-lock.surgecart.io/operator-only-verbs: "leases:patch"` 显式声明，契约测试把它作为唯一允许的「脚本不用的授权」并打印警告 |
 | `batch/jobs` | `get`/`list` | 核验上一轮迁移 Job、扫描未终结迁移 |
 | `batch/jobs` | `create`/`patch` | `kubectl apply -f migration.yaml` 的两个分支（新建 / 已存在则 PATCH） |
@@ -798,10 +802,14 @@ T2-06.1.3 及更早的示例完全没有这两项，因此「按示例授权 →
 ### 12.3 预检顺序（全部发生在第一个写请求之前）
 
 ```text
+阶段 0  权限表自检：scope 合法；只有 get/update/patch/delete 允许带对象名
 阶段 1  集群级权限（不含 -n）：namespaces get/create、selfsubjectaccessreviews create
 阶段 2  严格判断命名空间是否存在：只有 `<资源> "<名字>" not found` 才是「不存在」
 阶段 3  命名空间级权限： leases / jobs / pods / pods-log / secrets / deployments /
                           configmaps / services / pvc（按 REQUIRED_PERMISSIONS 逐项）
+        - leases 的 get/update 用对象级形式 leases.coordination.k8s.io/<LOCK_NAME>
+          （清单用 resourceNames 限制，未指定对象的检查在真实 RBAC 上恒为 no）
+        - pods/log 用 `--subresource=log`（位置参数 `pods/log` 是「名为 log 的 Pod」）
 阶段 4  命名空间引导（仅在确认不存在且权限齐备时；幂等）
 ```
 
@@ -809,6 +817,18 @@ T2-06.1.3 及更早的示例完全没有这两项，因此「按示例授权 →
 都在阶段 1/3 直接退出 **3**，不会发起锁/迁移/Deployment 的任何写请求。
 阶段 3 的 `unknown` 有一个例外：命名空间尚不存在时 SSAR 可能无法判定，脚本会先创建
 空命名空间再**复检**这些条目，复检仍失败则退出 3。
+
+对象级预检的必要性（T2-06.1.5 / F-01）：RBAC 的 `ResourceNameMatches` 是
+
+```text
+len(rule.ResourceNames) == 0 → 匹配
+否则                          → has(rule.ResourceNames, request.Name)
+```
+
+因此 `kubectl auth can-i get leases.coordination.k8s.io`（`request.Name` 为空）对
+受 `resourceNames` 限制的规则**永远返回 no**。脚本必须按具体对象检查，Fake 也必须
+按同一语义判定；旧 Fake 对空对象名特殊放行，导致「Fake 通过、真实集群不可用」。
+`create` 不在其列：对象名在授权时不可知，`resourceNames` 无法限制它。
 
 ### 12.4 退出码与错误分类（T2-06.1.4）
 
@@ -866,8 +886,9 @@ T2-06.1.3 及更早的示例完全没有这两项，因此「按示例授权 →
 | `renewTime` 锚点（B-1 / B-2） | `TestMultiprocessPreflightDelayKeepsRenewTimeFresh`（预检 16s > 租期 15s：旧实现必然创建即过期）、`TestMultiprocessStaleRenewTimeAtCreateFailsClosed`（`LEASE_ANCHOR_INVALID` + `LEASE_WINDOW … verdict=expired`，退出码 3，零 apply、不改写过期锁的 `renewTime`） | 已验证（脚本语义 + 证据行自证） |
 | 过期锁不得被「续命」（B-3 / B-4） | `TestRecordWriteRefusedWhenLeaseExpired`：租约在服务端过期后，写 COMPLETE 记录被拒绝（退出码 3）、不写 Lease、不改 `renewTime` | 已验证（脚本语义） |
 | 退避预算与实现同源（B-5） | `TestRenewBackoffBudgetIsSingleSourced`：`LOCK_RENEW_BACKOFF_MS` → 实际 sleep → 预算三者一致，且最后一次失败后不再 sleep | 已验证（源码契约） |
-| 写路径强制授权（T2-06.1.4 / A-5） | `test/deployk8s/rbac_write_test.go`（A 交付，**无 `t.Skip`**）：`TestDeliveredRBACOnlyUpgradeSucceeds`（只喂交付清单即可完成升级发布，PASS 1.50s）、`TestDeliveredRBACOnlyFirstDeploySucceeds`（空命名空间首次发布，PASS 1.60s）、`TestWritePathDeniedByResourceNamesFailsAfterPreflight`（预检通过但 `replace` 被 `resourceNames` 拒 → fail-closed，PASS 3.60s） | 已验证（**fake 写路径**）；真实集群 RBAC/admission **NOT_VERIFIED** |
+| 写路径强制授权（T2-06.1.4 / A-5） | `test/deployk8s/rbac_write_test.go`（**无 `t.Skip`**）：`TestDeliveredRBACOnlyUpgradeSucceeds`、`TestDeliveredRBACOnlyFirstDeploySucceeds`、`TestWrongLeaseResourceNameFailsAtPreflight`、`TestWrongLeaseResourceNameFailsAtPreflightForUpdate`；断言同时覆盖授权对象、调用次数与最终资源状态 | 已验证（**fake 写路径**）；真实集群 RBAC/admission **NOT_VERIFIED** |
 | 权限契约（F-01 / T2-06.1.4 A-1/A-2） | `test/manifest`：`TestDeliveredRBACMatchesRequiredPermissions`（脚本声明 ⊆ 交付 RBAC，按作用域）、`TestRequiredPermissionsCoversAuditFindings`、`TestRequiredPermissionsCoverBuiltManifests`、`TestScriptKubectlUsageIsDeclared`；`test/deployk8s/rbac_test.go`：`TestEveryRequiredPermissionIsEnforced` 等逐项拒绝 + Forbidden/unknown 区分 | 已验证（静态契约 + 脚本行为） |
+| **resourceNames 对象级语义（T2-06.1.5 / F-01）** | `test/deployk8s/rbac_resource_names_test.go`：交付清单驱动的 `Authorize` 矩阵（正确/错误/**空**对象名 → allow/deny/deny；`create`/`list` 不被 resourceNames 授予）、`resourceNames` 不支持 `"*"` 通配、`auth can-i` 的 `TYPE/NAME` 与 `--subresource` 解析、预检早于首次写；`test/manifest`：`TestResourceNamesAreMirroredByPreflight` 与负控 `TestResourceNamesContractDetectsWeakenedManifest` | 已验证（替身语义 + 静态契约）；真实 API Server 的 SSAR 结果 **NOT_VERIFIED** |
 | Pod 查询错误分类（F-07） | `test/deployk8s/podquery_test.go`：空列表/全终态/活动 Pod/403/500/超时/归属不一致 | 已验证（脚本语义） |
 | 权限/业务资源错误分类（T2-06.1.4 / A-3 / AUD-09） | `test/deployk8s/rbac_test.go`：`TestSecretReadForbiddenIsNotMissingSecret`、`TestSecretReadFailureIsNotMissingSecret`、`TestSecretNotFoundIsReportedAsMissing`、`TestNamespaceReadFailureIsNotReportedAsAbsent`、`TestJobsListForbiddenIsNotUnfinishedJob`、`TestJobsListServerErrorIsNotUnfinishedJob`、`TestJobLogsForbiddenIsReported` | 已验证（脚本语义） |
 | 文档契约（T2-06.1.4） | `test/manifest/doc_contract_test.go`：从脚本常量 / `usage()` / RBAC 清单反推事实，断言 6 个 CLI 默认值、退出码枚举、续租预算算式与失锁窗口数值、权限集合（按作用域）、`AUD-02`/`AUD-05` 结论、NOT_VERIFIED 项 | 已验证（静态契约，改任一侧都会失败） |

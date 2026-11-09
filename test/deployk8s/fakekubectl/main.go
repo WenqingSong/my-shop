@@ -4,7 +4,9 @@
 //
 //	version                               集群可达性
 //	kustomize <path>                      输出预置清单（migration.yaml / application.yaml）
-//	auth can-i <verb> <resource>          权限预检（走唯一的 fakestate.Authorize）
+//	auth can-i <verb> <type[/name]>       权限预检（走唯一的 fakestate.Authorize；
+//	                                      参数语义与真实 kubectl 一致：TYPE/NAME 的
+//	                                      NAME 是对象名，子资源只来自 --subresource）
 //	create -f <Lease>                     原子创建（同名只能成功一次），持久化注解
 //	replace -f <Lease>                    PUT + resourceVersion/UID 校验的 CAS，持久化注解
 //	delete lease <name>                   删除 Lease（--ignore-not-found / -o name）
@@ -262,32 +264,51 @@ func cmdKustomize(dir string, inv invocation) int {
 	return 0
 }
 
-// cmdAuth 实现 `kubectl auth can-i <verb> <resource> [-n ns] [name]`，判定一律走
-// fakestate.Authorize（唯一入口）。这保证「删除 RBAC 任一 (verb,resource) →
-// 预检失败 → 行为测试失败」这条链真的成立（审计 A-5 / C-8）。
+// cmdAuth 实现 `kubectl auth can-i VERB [TYPE | TYPE/NAME] [-n ns] [--subresource=...]`，
+// 判定一律走 fakestate.Authorize（唯一入口）。这保证「删除 RBAC 任一
+// (verb,resource) → 预检失败 → 行为测试失败」这条链真的成立（审计 A-5 / C-8）。
+//
+// 参数语义**必须**与真实 kubectl 对齐（T2-06.1.5 / F-01、B-7）。kubectl 的实现
+// （staging/src/k8s.io/kubectl/pkg/cmd/auth/cani.go Complete）是：
+//
+//	resourceTokens := strings.SplitN(args[1], "/", 2)
+//	Resource       = resourceTokens[0]   // TYPE，可带 .group
+//	ResourceName   = resourceTokens[1]   // 第一个 "/" 之后全部是**对象名**
+//	Subresource    = 只来自 --subresource
+//
+// 所以：
+//   - `leases.coordination.k8s.io/surgecart-deploy-lock` → name=surgecart-deploy-lock；
+//   - `pods/log` **不是**子资源，而是「名为 log 的 Pod」；
+//   - 子资源必须写成 `pods --subresource=log`；
+//   - 位置参数只能有两个（VERB + TYPE[/NAME]），第三个直接报错。
 func cmdAuth(dir string, inv invocation) int {
-	if len(inv.Positional) < 3 {
-		fmt.Fprintln(os.Stderr, "fake kubectl: auth can-i 参数不足")
+	positional := inv.Positional[2:] // 去掉 "auth" "can-i"
+	if len(positional) != 2 {
+		fmt.Fprintln(os.Stderr, "you must specify two arguments: verb resource or verb resource/resourceName.\nSee 'kubectl auth can-i -h' for help and examples.")
 		return 1
 	}
-	verb := inv.Positional[2]
-	resourceArg := ""
-	name := ""
-	if len(inv.Positional) >= 4 {
-		resourceArg = inv.Positional[3]
+	verb := positional[0]
+	arg := positional[1]
+	if strings.HasPrefix(arg, "/") {
+		// 非资源 URL 不在发布脚本的使用范围内：不臆造授权结论。
+		fmt.Fprintf(os.Stderr, "fake kubectl: 不支持非资源 URL 的权限检查 %q\n", arg)
+		return 1
 	}
-	if len(inv.Positional) >= 5 {
-		name = inv.Positional[4]
+	resourceType, name := arg, ""
+	if slash := strings.Index(arg, "/"); slash >= 0 {
+		resourceType, name = arg[:slash], arg[slash+1:]
 	}
+	group, resource := fakestate.SplitResource(resourceType)
+	// 子资源只能由 --subresource 指定；它在 RBAC 里表现为 "resource/subresource"。
 	if inv.Subresource != "" {
-		resourceArg = strings.TrimSuffix(resourceArg, "/"+inv.Subresource) + "/" + inv.Subresource
+		resource = resource + "/" + inv.Subresource
 	}
-	group, resource := fakestate.SplitResource(resourceArg)
-	if inv.Namespace == "" && !inv.AllNamespaces {
-		inv.Namespace = namespace
-	}
-	if inv.AllNamespaces {
+	// 命名空间：集群级资源没有命名空间（真实 kubectl 会对非命名空间资源给出
+	// "resource 'x' is not namespace scoped" 警告并清空它）；-A 为跨命名空间。
+	if inv.AllNamespaces || fakestate.IsClusterScoped(resource) {
 		inv.Namespace = ""
+	} else if inv.Namespace == "" {
+		inv.Namespace = namespace
 	}
 	return mutateAck(dir, func(st *fakestate.State) (int, func() int) {
 		decision, err := fakestate.Authorize(st, verb, group, resource, inv.Namespace, name)

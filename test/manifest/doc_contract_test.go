@@ -409,13 +409,15 @@ func docLoadRBACDir(t *testing.T) ([]string, []docRBACDocument) {
 
 // docPermission 是脚本声明的单条权限。
 //
-// T2-06.1.4 的格式是 `"verb|group|resource|scope|callers@Lline"`：
+// T2-06.1.4 的格式是 `"verb|group|resource|scope|callers@Lline"`；
+// T2-06.1.5 追加可选的 `|resourceName`（受 RBAC resourceNames 限制的对象）：
 //   - group 为 `core` 表示 core/v1（RBAC 里写 `""`）；
 //   - scope 为 `namespace` / `cluster`：决定它只能被 Role 还是 ClusterRole 授予；
-//   - callers 是使用该权限的函数名（`@L<line>` 是脚本里的行号）。
+//   - callers 是使用该权限的函数名（`@L<line>` 是脚本里的行号）；
+//   - resourceName 为空表示不限制对象名（预检不带名字）。
 //
 // 基线（T2-06.1.3）的格式是 `"<verb> <resource.group>"`，没有 scope/行号。
-// 两种都支持：不允许因为脚本改了声明格式就让文档契约静默失效。
+// 三种都支持：不允许因为脚本改了声明格式就让文档契约静默失效。
 type docPermission struct {
 	verb     string
 	group    string
@@ -447,7 +449,7 @@ func docScriptRequiredPermissions(t *testing.T, script string) []docPermission {
 		}
 		var out []docPermission
 		legacy := regexp.MustCompile(`^"([a-z]+) ([^"|]+)"$`)
-		structured := regexp.MustCompile(`^"([a-z]+)\|([^"|]*)\|([^"|]+)\|([a-z]*)\|?([^"|]*)"$`)
+		structured := regexp.MustCompile(`^"([a-z]+)\|([^"|]*)\|([^"|]+)\|([a-z]*)\|([^"|]*)(?:\|([^"|]*))?"$`)
 		for _, line := range strings.Split(block[1], "\n") {
 			trimmed := strings.TrimSpace(line)
 			if trimmed == "" || strings.HasPrefix(trimmed, "#") {
@@ -661,6 +663,58 @@ func TestDocRBACManifestsAndPermissions(t *testing.T) {
 
 	namespaces := sortedKeys(roleNamespaces)
 	t.Logf("RBAC 清单 %v；Role 命名空间 %v；脚本声明 %d 项权限", files, namespaces, len(required))
+}
+
+// ---------------------------------------------------------------------------
+// 4.1 对象级预检的文档契约（T2-06.1.5 / F-01）
+// ---------------------------------------------------------------------------
+
+// TestDocExplainsObjectScopedPreflight 锁死 F-01 的文档事实：
+//
+//   - 受 resourceNames 限制的 Lease 权限必须写成 TYPE/NAME；
+//   - 不带对象名的 `auth can-i get/update leases...` 不得再出现在自检清单里
+//     （它在真实集群上恒为 no，会把「有权限」误报成缺失）；
+//   - 子资源必须写成 --subresource，而不是位置参数 pods/log；
+//   - create 不能带对象名。
+func TestDocExplainsObjectScopedPreflight(t *testing.T) {
+	manual := docRead(t, "docs/development/kubernetes.md")
+	section := docSection(t, manual, "### 13.1 授予发布权限", "## 14. 验证分级")
+	design := docRead(t, "docs/design/deploy-lock.md")
+	designSection := docSection(t, design, "## 12. ", "## 13. ")
+
+	for name, text := range map[string]string{
+		"docs/development/kubernetes.md §13.1": section,
+		"docs/design/deploy-lock.md §12":       designSection,
+	} {
+		for _, fragment := range []string{
+			"resourceNames",
+			"surgecart-deploy-lock",
+			"对象名",
+		} {
+			if !strings.Contains(text, fragment) {
+				t.Errorf("%s 缺少 %q：F-01 的语义（resourceNames 要求对象名）必须在文档里说清", name, fragment)
+			}
+		}
+	}
+
+	for _, fragment := range []string{
+		"leases.coordination.k8s.io/surgecart-deploy-lock",
+		"--subresource=log",
+	} {
+		if !strings.Contains(section, fragment) {
+			t.Errorf("docs/development/kubernetes.md §13.1 的自检清单缺少 %q：运维照抄会得到错误结论", fragment)
+		}
+	}
+
+	// 反向：自检清单不得再出现「不带对象名」的 leases get/update。
+	unnamed := regexp.MustCompile(`auth can-i\s+(get|update)\s+leases\.coordination\.k8s\.io\s+-n`)
+	if match := unnamed.FindString(section); match != "" {
+		t.Errorf("docs/development/kubernetes.md §13.1 仍出现无对象名的检查 %q：受 resourceNames 限制的权限必须带对象名", match)
+	}
+	// 位置参数 pods/log 不是子资源。
+	if strings.Contains(section, "can-i get    pods/log") || strings.Contains(section, "can-i get pods/log") {
+		t.Error("docs/development/kubernetes.md §13.1 仍用位置参数 pods/log 检查子资源：kubectl 会把它解析成「名为 log 的 Pod」")
+	}
 }
 
 // ---------------------------------------------------------------------------

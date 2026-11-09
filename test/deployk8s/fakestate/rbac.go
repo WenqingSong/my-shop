@@ -25,7 +25,11 @@ import (
 //     不再有第二套判定逻辑。
 //
 // 边界：这不是 RBAC 授权器的完整实现（不处理 aggregationRule、RoleBinding 的
-// subject 匹配、resourceNames 的通配）。它只覆盖 deploy-k8s.sh 用到的子集。
+// subject 匹配、authorizer 链上的其它授权器）。它只覆盖 deploy-k8s.sh 用到的子集。
+//
+// resourceNames（T2-06.1.5 / F-01）按真实 ResourceNameMatches 建模：
+// 未指定对象名的检查、错误的对象名、以及 create/list/watch/deletecollection
+// 都不匹配受限规则。Fake 不允许为了让现有测试通过而放宽这条语义。
 
 // Decision 是授权判定的结果。
 type Decision string
@@ -46,7 +50,12 @@ const (
 //   - Resources：支持子资源 "pods/log"；子资源必须**显式**列出（只有 "pods" 的规则
 //     不授予 "pods/log"，与 RBAC 一致）；"*" 表示全部资源；
 //   - Verbs：get / list / create / update / patch / delete / deletecollection / "*"；
-//   - ResourceNames：空 = 全部对象名；非空 = 仅这些对象名；
+//   - ResourceNames：空 = 不限制对象名；非空 = 只授予这些**具体对象**。语义与
+//     真实 RBAC 的 ResourceNameMatches 一致（T2-06.1.5 / F-01）：
+//     · 请求必须带对象名，且与列表中的某一项**精确相等**（不支持 "*" 通配）；
+//     · 没带对象名的请求（`auth can-i get leases`、list/watch/deletecollection 等
+//     集合请求）**不匹配**受限制的规则；
+//     · create 的对象名在授权时不可知，因此 resourceNames 规则**不授予** create。
 //   - Namespaces：空 = 全部命名空间；非空 = 仅这些命名空间（由 Role 的
 //     metadata.namespace 填充）；
 //   - Effect：""/"allow" = 允许；"deny" = 拒绝（只用于兼容旧的 Denied 写法，
@@ -69,13 +78,16 @@ const ruleSourceLegacy = "legacy"
 
 func (r Rule) denies() bool { return strings.EqualFold(r.Effect, "deny") }
 
-// SplitResource 把 kubectl 里常见的资源写法归一为 (group, resource)。
+// SplitResource 把 RBAC 资源写法归一为 (group, resource)。
 //
 //	"leases.coordination.k8s.io" → ("coordination.k8s.io", "leases")
 //	"jobs.batch"                 → ("batch", "jobs")
 //	"pods"                       → ("", "pods")
-//	"pods/log"                   → ("", "pods/log")
-//	"leases.coordination.k8s.io/surgecart-deploy-lock" → 同上，最后一个 "/" 之后是名字
+//	"pods/log"                   → ("", "pods/log")（子资源）
+//
+// 注意：`TYPE/NAME`（例如 `leases.coordination.k8s.io/surgecart-deploy-lock`）**不**
+// 由本函数拆分。kubectl 用 `SplitN(arg, "/", 2)` 把第一个 "/" 之后的内容当作
+// **对象名**（不是子资源），这一步属于命令行语义，在 fakekubectl 里完成。
 func SplitResource(arg string) (group, resource string) {
 	arg = strings.TrimSpace(arg)
 	if arg == "" {
@@ -90,6 +102,20 @@ func SplitResource(arg string) (group, resource string) {
 		return arg[dot+1:], arg[:dot] + suffix
 	}
 	return "", arg + suffix
+}
+
+// VerbSupportsResourceName 判断动词是否能被 RBAC 的 resourceNames 限制。
+//
+// 与真实 RBAC 一致（见 Rule.ResourceNames 注释）：create / list / watch /
+// deletecollection 没有可用于授权的对象名，因此受 resourceNames 限制的规则
+// 对它们一律不匹配。
+func VerbSupportsResourceName(verb string) bool {
+	switch verb {
+	case "get", "update", "patch", "delete":
+		return true
+	default:
+		return false
+	}
 }
 
 // splitSubresource 把 "pods/log" 拆成 ("pods", "log")。
@@ -113,7 +139,7 @@ func (r Rule) ruleMatches(verb, group, resource, namespace, name string) bool {
 	}
 	// 命名空间：规则为空 = 全部。Role 级规则（Namespaces 非空）**不能**授予集群级资源
 	// （namespaces/nodes/selfsubjectaccessreviews…）：那需要 ClusterRole。
-	if len(r.Namespaces) > 0 && isClusterScoped(resource) {
+	if len(r.Namespaces) > 0 && IsClusterScoped(resource) {
 		return false
 	}
 	if len(r.Namespaces) > 0 {
@@ -129,29 +155,40 @@ func (r Rule) ruleMatches(verb, group, resource, namespace, name string) bool {
 		}
 	}
 	if len(r.ResourceNames) > 0 {
-		// 真实写请求总是带 name，此时严格匹配；can-i 不带名字（name==""）时，
-		// 只要规则覆盖该 (verb, resource) 就算允许 —— 否则 resourceNames 限定的
-		// 最小权限示例会让 `auth can-i get leases` 恒为 no，预检失去意义。
-		if name != "" {
-			ok := false
-			for _, n := range r.ResourceNames {
-				if n == name || n == "*" {
-					ok = true
-					break
-				}
+		// 真实 RBAC 的 ResourceNameMatches：
+		//
+		//	if len(rule.ResourceNames) == 0 { return true }
+		//	return has(rule.ResourceNames, requestedName)
+		//
+		// 因此：
+		//   1. 请求必须带对象名（name != ""）；`auth can-i get leases` 这类
+		//      未指定对象的检查**不匹配**受限规则（T2-06.1.5 / F-01 的根因就是
+		//      旧实现把空对象名当成「放行」）；
+		//   2. 对象名必须精确相等 —— resourceNames 不支持 "*" 通配
+		//      （K8s 只在 apiGroups/resources/verbs 支持通配）；
+		//   3. 只有能带对象名的动词才可能匹配：create 的对象名在授权时不可知，
+		//      list/watch/deletecollection 是集合请求，都不匹配。
+		if !VerbSupportsResourceName(verb) || name == "" {
+			return false
+		}
+		ok := false
+		for _, n := range r.ResourceNames {
+			if n == name {
+				ok = true
+				break
 			}
-			if !ok {
-				return false
-			}
+		}
+		if !ok {
+			return false
 		}
 	}
 	return true
 }
 
-// isClusterScoped 判断资源是否集群级（只有 ClusterRole 能授权）。
+// IsClusterScoped 判断资源是否集群级（只有 ClusterRole 能授权）。
 //
 // 只列本仓库用到的子集；未知资源按 namespaced 处理（保守：Role 规则仍然有效）。
-func isClusterScoped(resource string) bool {
+func IsClusterScoped(resource string) bool {
 	switch resource {
 	case "namespaces", "nodes", "persistentvolumes", "clusterroles", "clusterrolebindings",
 		"selfsubjectaccessreviews", "selfsubjectrulesreviews", "subjectaccessreviews",
@@ -191,6 +228,11 @@ func matchResourceToken(tokens []string, resource string) bool {
 //   - 任一条 Effect="deny" 的规则命中 → Forbidden；
 //   - 否则某条 allow 规则命中 → Allowed；
 //   - 否则 → Forbidden。
+//
+// name 是「请求指向的具体对象名」：空字符串表示**没有指定对象**（集合请求或
+// 未指定对象的 auth can-i）。受 resourceNames 限制的规则只在 name 精确命中时
+// 才允许（见 Rule.ResourceNames），这一点必须与真实 RBAC 一致 —— 否则
+// `auth can-i` 的预检结论会与真实写入相反（T2-06.1.5 / F-01）。
 func Authorize(state *State, verb, group, resource, namespace, name string) (Decision, error) {
 	if state == nil {
 		return DecisionForbidden, nil

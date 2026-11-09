@@ -36,6 +36,9 @@ type permission struct {
 	resource string
 	scope    string
 	callSite string
+	// name 是可选的第 6 字段：非空表示交付的 RBAC 用 resourceNames 把该权限
+	// 限定到这一个对象，预检必须用 `TYPE/NAME` 的对象级形式（T2-06.1.5 / F-01）。
+	name string
 }
 
 func (p permission) String() string {
@@ -46,6 +49,9 @@ func (p permission) String() string {
 	scope := p.scope
 	if scope == "" {
 		scope = "any"
+	}
+	if p.name != "" {
+		return fmt.Sprintf("%s %s/%s (%s, %s)", p.verb, p.resource, p.name, group, scope)
 	}
 	return fmt.Sprintf("%s %s (%s, %s)", p.verb, p.resource, group, scope)
 }
@@ -73,16 +79,18 @@ var requiredPermissionsPattern = regexp.MustCompile(`(?s)REQUIRED_PERMISSIONS=\(
 //
 // 格式契约（任何违反都让测试失败，不给「宽松解析」留后门）：
 //
-//	"<verb>|<group>|<resource>|<scope>|<call site>"
+//	"<verb>|<group>|<resource>|<scope>|<call site>[|<resourceName>]"
 //
-// 5 个字段必须全部存在；group 用 core 表示 core/v1；scope 只能是 namespace/cluster。
+// 5 个必填字段 + 1 个可选字段；group 用 core 表示 core/v1；scope 只能是
+// namespace/cluster；resourceName 只允许出现在能按对象名授权的动词上
+// （get/update/patch/delete），否则预检会与真实 RBAC 得出相反结论。
 func requiredPermissions(t *testing.T, script string) []permission {
 	t.Helper()
 	block := requiredPermissionsPattern.FindStringSubmatch(script)
 	if block == nil {
 		t.Fatal("scripts/deploy-k8s.sh 缺少 REQUIRED_PERMISSIONS：权限契约的唯一事实来源不能缺失")
 	}
-	entryPattern := regexp.MustCompile(`^"([^"|]+)\|([^"|]*)\|([^"|]+)\|([^"|]+)\|([^"|]*)"$`)
+	entryPattern := regexp.MustCompile(`^"([^"|]+)\|([^"|]*)\|([^"|]+)\|([^"|]+)\|([^"|]*)(?:\|([^"|]*))?"$`)
 	var out []permission
 	seen := map[string]bool{}
 	for _, line := range strings.Split(block[1], "\n") {
@@ -92,9 +100,12 @@ func requiredPermissions(t *testing.T, script string) []permission {
 		}
 		match := entryPattern.FindStringSubmatch(trimmed)
 		if match == nil {
-			t.Fatalf("REQUIRED_PERMISSIONS 里的条目格式无法解析: %q（期望 \"<verb>|<group>|<resource>|<scope>|<call site>\"）", trimmed)
+			t.Fatalf("REQUIRED_PERMISSIONS 里的条目格式无法解析: %q（期望 \"<verb>|<group>|<resource>|<scope>|<call site>[|<resourceName>]\"）", trimmed)
 		}
-		entry := permission{verb: match[1], group: match[2], resource: match[3], scope: match[4], callSite: match[5]}
+		entry := permission{
+			verb: match[1], group: match[2], resource: match[3], scope: match[4],
+			callSite: match[5], name: match[6],
+		}
 		if entry.group == "" {
 			t.Fatalf("REQUIRED_PERMISSIONS 条目 %q 的 group 为空：core/v1 必须显式写成 core（空字段会让解析模糊）", trimmed)
 		}
@@ -107,6 +118,14 @@ func requiredPermissions(t *testing.T, script string) []permission {
 		}
 		if entry.callSite == "" {
 			t.Fatalf("REQUIRED_PERMISSIONS 条目 %q 缺少调用点：无法证明这条权限真的被使用", trimmed)
+		}
+		if entry.name != "" {
+			switch entry.verb {
+			case "get", "update", "patch", "delete":
+			default:
+				t.Fatalf("REQUIRED_PERMISSIONS 条目 %q 给 %q 指定了对象名：resourceNames 只对 get/update/patch/delete 生效（create 的对象名在授权时不可知）",
+					trimmed, entry.verb)
+			}
 		}
 		if seen[entry.key()] {
 			t.Fatalf("REQUIRED_PERMISSIONS 出现重复条目: %q", trimmed)
@@ -254,9 +273,17 @@ func containsAny(values []string, want, wildcard string) bool {
 	return false
 }
 
-// grants 判断某个权限是否被授予。lockName 用于校验 resourceNames 限定，
+// grants 判断某个权限是否被授予。
+//
 // nameScoped 表示该资源在脚本里是「按名称操作」的（只有 leases 属于这一类）。
-func (g grantIndex) grants(entry permission, lockName string, nameScoped bool) (bool, string) {
+//
+// resourceNames 语义（T2-06.1.5 / F-01）：受 resourceNames 限制的规则**只**授予
+// 「带该对象名」的请求。因此：
+//   - 规则有 resourceNames 而预检条目没有对象名 → 不授予（真实集群返回 no）；
+//   - 对象名不在 resourceNames 里 → 不授予；
+//   - 规则没有 resourceNames → 不限制对象名（预检带不带名字都被授予）。
+func (g grantIndex) grants(entry permission, nameScoped bool) (bool, string) {
+	restrictedSkipped := ""
 	for _, doc := range g.docs {
 		for _, rule := range doc.Rules {
 			if !containsAny(rule.APIGroups, entry.group, "*") {
@@ -268,18 +295,35 @@ func (g grantIndex) grants(entry permission, lockName string, nameScoped bool) (
 			if !containsAny(rule.Verbs, entry.verb, "*") {
 				continue
 			}
-			if len(rule.ResourceNames) > 0 {
-				if !nameScoped {
-					return false, fmt.Sprintf("%s 对 %s 用 resourceNames 限定了对象名，但脚本对它是按标签/列表访问的", doc.Metadata.Name, entry.resource)
-				}
-				if !containsAny(rule.ResourceNames, lockName, "") {
-					continue
-				}
+			if len(rule.ResourceNames) == 0 {
+				return true, ""
 			}
-			return true, ""
+			if !nameScoped {
+				return false, fmt.Sprintf("%s 对 %s 用 resourceNames 限定了对象名，但脚本对它是按标签/列表访问的",
+					doc.Metadata.Name, entry.resource)
+			}
+			if entry.name == "" {
+				restrictedSkipped = fmt.Sprintf(
+					"%s 的 %s 规则用 resourceNames=%v 限定了对象，但 REQUIRED_PERMISSIONS 的 %s %s 预检没有带对象名：真实集群上这个检查恒为 no（F-01）",
+					doc.Metadata.Name, entry.resource, rule.ResourceNames, entry.verb, entry.resource)
+				continue
+			}
+			if containsString(rule.ResourceNames, entry.name) {
+				return true, ""
+			}
 		}
 	}
-	return false, ""
+	return false, restrictedSkipped
+}
+
+// containsString 是精确匹配（resourceNames 不支持通配）。
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 // ---------------------------------------------------------------------------
@@ -589,9 +633,9 @@ func TestDeliveredRBACMatchesRequiredPermissions(t *testing.T) {
 		var granted bool
 		var why string
 		if entry.scope == "cluster" {
-			granted, why = clusterGrants.grants(entry, lockName[1], nameScoped)
+			granted, why = clusterGrants.grants(entry, nameScoped)
 		} else {
-			granted, why = nsGrants.grants(entry, lockName[1], nameScoped)
+			granted, why = nsGrants.grants(entry, nameScoped)
 		}
 		if why != "" {
 			t.Fatalf("%s：%s", path, why)
@@ -725,6 +769,225 @@ func TestDeliveredRBACMatchesRequiredPermissions(t *testing.T) {
 	}
 	if !strings.Contains(subjects[0], "REPLACE_WITH_") {
 		t.Logf("提示：%s 的 subjects 已替换为真实身份（%s）", path, subjects[0])
+	}
+}
+
+// resourceNamesMirrorViolations 返回「RBAC 的 resourceNames」与「预检对象名」之间的
+// 全部不一致项（空切片 = 一致）。
+//
+// 抽成纯函数是为了让反向契约用例（TestResourceNamesContractDetectsWeakenedManifest）
+// 能在**人为削弱**的清单副本上证明这套断言真的会失败，而不是永远为真。
+func resourceNamesMirrorViolations(entries []permission, docs []rbacDocument, lockName string) []string {
+	var problems []string
+
+	// 1) 预检带对象名 ⇒ 清单必须用 resourceNames 限制到该对象。
+	for _, entry := range entries {
+		if entry.name == "" {
+			continue
+		}
+		granted := false
+		for _, doc := range docs {
+			if doc.Kind != "Role" && doc.Kind != "ClusterRole" {
+				continue
+			}
+			scope := "cluster"
+			if doc.Kind == "Role" {
+				scope = "namespace"
+			}
+			if scope != entry.scope {
+				continue
+			}
+			for _, rule := range doc.Rules {
+				if !containsAny(rule.APIGroups, entry.group, "*") ||
+					!containsAny(rule.Resources, entry.resource, "*") ||
+					!containsAny(rule.Verbs, entry.verb, "*") {
+					continue
+				}
+				if containsString(rule.ResourceNames, entry.name) {
+					granted = true
+				}
+			}
+		}
+		if !granted {
+			problems = append(problems, fmt.Sprintf(
+				"%s %s 的预检带对象名 %q，但交付的 RBAC 没有用 resourceNames 限制到它（预检与清单不一致）",
+				entry.verb, entry.resource, entry.name))
+		}
+	}
+
+	// 2) 清单用 resourceNames 限制 ⇒ 预检必须带同样的对象名（operator-only 除外）。
+	operatorOnly := map[string]bool{}
+	for _, doc := range docs {
+		if doc.Kind != "Role" && doc.Kind != "ClusterRole" {
+			continue
+		}
+		raw := strings.TrimSpace(doc.Metadata.Annotations["deploy-lock.surgecart.io/operator-only-verbs"])
+		for _, item := range strings.Split(raw, ",") {
+			if item = strings.TrimSpace(item); item != "" {
+				operatorOnly[item] = true
+			}
+		}
+	}
+	declared := permissionSet(entries)
+	for _, doc := range docs {
+		if doc.Kind != "Role" && doc.Kind != "ClusterRole" {
+			continue
+		}
+		scope := "cluster"
+		if doc.Kind == "Role" {
+			scope = "namespace"
+		}
+		for _, rule := range doc.Rules {
+			if len(rule.ResourceNames) == 0 {
+				continue
+			}
+			for _, group := range rule.APIGroups {
+				for _, resource := range rule.Resources {
+					for _, verb := range rule.Verbs {
+						if operatorOnly[resource+":"+verb] || !verbCanBeNameScoped(verb) {
+							continue
+						}
+						key := permission{verb: verb, group: group, resource: resource, scope: scope}.key()
+						entry, ok := declared[key]
+						if !ok {
+							// 未声明的授权由 TestDeliveredRBACMatchesRequiredPermissions 的
+							// 过度授权检查负责，这里不重复判。
+							continue
+						}
+						if entry.name == "" {
+							problems = append(problems, fmt.Sprintf(
+								"%s 用 resourceNames=%v 限制了 %s 的 %s，但预检没有带对象名：真实集群上该检查恒为 no（F-01）",
+								doc.Metadata.Name, rule.ResourceNames, resource, verb))
+							continue
+						}
+						if !containsString(rule.ResourceNames, entry.name) {
+							problems = append(problems, fmt.Sprintf(
+								"%s 的 resourceNames=%v 与预检对象名 %q 不一致",
+								doc.Metadata.Name, rule.ResourceNames, entry.name))
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 3) Lease 的对象名必须等于脚本里的 LOCK_NAME（防止两处漂移）。
+	for _, entry := range entries {
+		if entry.resource != "leases" || entry.name == "" {
+			continue
+		}
+		if entry.name != lockName {
+			problems = append(problems, fmt.Sprintf(
+				"leases 的 %s 预检对象名 %q 与 LOCK_NAME=%q 不一致：预检检查的不是发布锁",
+				entry.verb, entry.name, lockName))
+		}
+	}
+	return problems
+}
+
+// TestResourceNamesAreMirroredByPreflight 是 T2-06.1.5 的核心**双向**契约：
+//
+//	交付 RBAC 的 resourceNames  ↔  REQUIRED_PERMISSIONS 的第 6 字段
+//
+// 这是「删除/改错 resourceNames → 相关预检必须失败」的静态一半（动态一半见
+// test/deployk8s 的 TestWrongLeaseResourceName*）。
+func TestResourceNamesAreMirroredByPreflight(t *testing.T) {
+	script := readScript(t)
+	entries := requiredPermissions(t, script)
+	docs := loadRBAC(t, rbacPath(t))
+	lockName := regexp.MustCompile(`(?m)^LOCK_NAME="([^"]+)"`).FindStringSubmatch(script)
+	if lockName == nil {
+		t.Fatal("scripts/deploy-k8s.sh 缺少 LOCK_NAME")
+	}
+	for _, problem := range resourceNamesMirrorViolations(entries, docs, lockName[1]) {
+		t.Errorf("%s：%s", rbacPath(t), problem)
+	}
+}
+
+// TestResourceNamesContractDetectsWeakenedManifest 是反向契约的**负控**：
+// 把交付清单里的 resourceNames 删除、或改成错误名称，契约必须报错。
+//
+// 没有这一条，「契约测试通过」可能只是因为断言本身恒真。
+func TestResourceNamesContractDetectsWeakenedManifest(t *testing.T) {
+	script := readScript(t)
+	entries := requiredPermissions(t, script)
+	docs := loadRBAC(t, rbacPath(t))
+	lockName := regexp.MustCompile(`(?m)^LOCK_NAME="([^"]+)"`).FindStringSubmatch(script)
+	if lockName == nil {
+		t.Fatal("scripts/deploy-k8s.sh 缺少 LOCK_NAME")
+	}
+	if problems := resourceNamesMirrorViolations(entries, docs, lockName[1]); len(problems) != 0 {
+		t.Fatalf("交付清单本身就有 %d 处不一致，负控失去意义：%v", len(problems), problems)
+	}
+
+	cases := []struct {
+		name   string
+		mutate func(*rbacRule) bool
+	}{
+		{
+			name: "删除 resourceNames",
+			mutate: func(rule *rbacRule) bool {
+				rule.ResourceNames = nil
+				return true
+			},
+		},
+		{
+			name: "改成错误的 Lease 名称",
+			mutate: func(rule *rbacRule) bool {
+				rule.ResourceNames = []string{"another-pipeline-lock"}
+				return true
+			},
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			mutated := cloneRBACDocs(docs)
+			patched := false
+			for docIndex := range mutated {
+				for ruleIndex := range mutated[docIndex].Rules {
+					rule := &mutated[docIndex].Rules[ruleIndex]
+					if !containsAny(rule.Resources, "leases", "") || len(rule.ResourceNames) == 0 {
+						continue
+					}
+					patched = tc.mutate(rule) || patched
+				}
+			}
+			if !patched {
+				t.Fatal("没有找到可修改的 leases resourceNames 规则：负控的前提不成立")
+			}
+			if problems := resourceNamesMirrorViolations(entries, mutated, lockName[1]); len(problems) == 0 {
+				t.Fatalf("%s 之后契约仍然通过：反向契约没有区分能力", tc.name)
+			}
+		})
+	}
+}
+
+// cloneRBACDocs 深拷贝解析结果，避免负控修改污染其它断言。
+func cloneRBACDocs(docs []rbacDocument) []rbacDocument {
+	out := make([]rbacDocument, len(docs))
+	for i, doc := range docs {
+		out[i] = doc
+		out[i].Rules = make([]rbacRule, len(doc.Rules))
+		for j, rule := range doc.Rules {
+			out[i].Rules[j] = rbacRule{
+				APIGroups:     append([]string(nil), rule.APIGroups...),
+				Resources:     append([]string(nil), rule.Resources...),
+				Verbs:         append([]string(nil), rule.Verbs...),
+				ResourceNames: append([]string(nil), rule.ResourceNames...),
+			}
+		}
+	}
+	return out
+}
+
+// verbCanBeNameScoped 与 fakestate.VerbSupportsResourceName 同义（本包不依赖运行时）。
+func verbCanBeNameScoped(verb string) bool {
+	switch verb {
+	case "get", "update", "patch", "delete":
+		return true
+	default:
+		return false
 	}
 }
 

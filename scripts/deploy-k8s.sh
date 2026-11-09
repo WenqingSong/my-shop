@@ -11,7 +11,9 @@
 #      迁移等待上限与 Job activeDeadlineSeconds 的时间关系
 #   2. 权限预检（REQUIRED_PERMISSIONS：集群级 → 命名空间级）+ 命名空间引导：
 #      全部权限判定发生在**第一次写请求之前**；只有命名空间确实不存在时才做幂等创建
-#      （审计 A-1/A-2/A-5：namespaces 是集群级资源，Role 无法授予；权限判定不得晚于写）
+#      （审计 A-1/A-2/A-5：namespaces 是集群级资源，Role 无法授予；权限判定不得晚于写）。
+#      受 resourceNames 限制的权限（Lease 的 get/update）必须按对象名检查：
+#      `auth can-i <verb> leases.coordination.k8s.io/<LOCK_NAME>`（T2-06.1.5 / F-01）
 #   4. 获取发布锁 coordination.k8s.io/v1 Lease/surgecart-deploy-lock（原子 create + resourceVersion CAS）
 #      接管已释放/已过期的锁之前，必须核验上一轮关联的 Migration Job（T2-06.1.1 / AUD-01）
 #   5. 锁内复检：Secret 就绪 + 版本降级保护（当前 Deployment 版本 vs 本次目标版本）
@@ -347,7 +349,12 @@ usage() {
 权限预检在**任何写请求之前**执行；缺少任何一项都以退出码 3 失败，且不发起工作负载变更。
 
   命名空间级（Role + RoleBinding，命名空间取自 Application 清单）
-    leases.coordination.k8s.io   get / create / update   （读锁 / 原子创建 / PUT+CAS 续租·接管·释放）
+    leases.coordination.k8s.io   get / create / update
+                                 （读锁 / 原子创建 / PUT+CAS 续租·接管·释放。
+                                   get 与 update 在清单里被 resourceNames 限定到
+                                   Lease surgecart-deploy-lock，预检必须用对象级写法：
+                                   auth can-i get leases.coordination.k8s.io/surgecart-deploy-lock。
+                                   create 不能带对象名 —— resourceNames 对 create 无效）
     jobs.batch                   get / list / create / patch（核验上一轮 / 创建本轮迁移 Job）
     pods                         get / list              （Pod 生命周期门禁）
     pods/log                     get                     （迁移失败时读 Job 日志）
@@ -362,6 +369,16 @@ usage() {
     selfsubjectaccessreviews.authorization.k8s.io  create （`kubectl auth can-i` 自身是 SSAR）
 
   不授予 delete/deletecollection：脚本永不删除 Job / Pod / Lease / Deployment。
+
+  对象级预检（T2-06.1.5 / F-01）：
+    RBAC 的 resourceNames 只对「带对象名的请求」生效。因此受它限制的权限必须用
+      kubectl auth can-i <verb> <type>/<name>
+    检查；不带对象名的 can-i 在这类规则上恒为 no（真实集群会直接判定无权限）。
+    - 只有 get/update/patch/delete 能带对象名；create 的对象名在授权时不可知，
+      list/watch/deletecollection 是集合请求，都不能带；
+    - 子资源只能用 --subresource 表达：kubectl auth can-i get pods --subresource=log。
+      位置参数 `pods/log` 会被 kubectl 解析成「名为 log 的 Pod」，不是子资源。
+    - 需要 kubectl >= 1.24（--subresource）。
 
 前置条件：
   - 已安装 kubectl，且 kubeconfig 指向目标集群；
@@ -1297,17 +1314,18 @@ require_lock_owned_server_side() {
 }
 
 # ---------------------------------------------------------------------------
-# 权限契约（T2-06.1.4：审计 A-1 / A-2 / A-5 / A-8 / A-9 / D-3）
+# 权限契约（T2-06.1.4：审计 A-1 / A-2 / A-5 / A-8 / A-9 / D-3；
+#             T2-06.1.5：审计 F-01 —— resourceNames 的对象级预检）
 #
-# REQUIRED_PERMISSIONS 是「脚本实际需要的 (verb, group, resource, scope)」的
+# REQUIRED_PERMISSIONS 是「脚本实际需要的 (verb, group, resource, scope, name)」的
 # **唯一事实来源**，替换 T2-06.1.3 的 LEASE_PERMISSION_CHECKS。旧表只有 7 项
 # （leases get/create/update + jobs get/list + pods get/list），漏掉了
 # namespaces、secrets、deployments、pods/log、configmaps、services、pvc 以及
 # 全部写动词 create/patch —— 按它授权的身份在首次发布时必然失败（审计 A-1/A-2）。
 #
-# 稳定格式（5 个竖线分隔字段，禁止在字段内使用 "|"）：
+# 稳定格式（5 个必填字段 + 1 个可选字段，禁止在字段内使用 "|"）：
 #
-#   <verb>|<group>|<resource>|<scope>|<call site>
+#   <verb>|<group>|<resource>|<scope>|<call site>|<resourceName>
 #
 #   verb     ：get / list / create / patch / update
 #              （`kubectl replace` 才是 update；RBAC 里不存在 apply 这个 verb）
@@ -1316,11 +1334,27 @@ require_lock_owned_server_side() {
 #   scope    ：namespace（可以写在 Role 里）| cluster（必须是 ClusterRole，
 #              写进 Role 完全无效 —— 这正是审计 A-1 的根因）
 #   call site：调用点（函数名；Lnnnn 只是定位提示，会随改动漂移，函数名才是契约）
+#   resourceName：**可选**。非空表示该权限在交付的 RBAC 里被 `resourceNames`
+#              限定到这一个对象，预检必须做**对象级检查**：
+#
+#                kubectl auth can-i get leases.coordination.k8s.io/surgecart-deploy-lock -n surgecart
+#
+#              真实 RBAC 的 ResourceNameMatches 只有在「请求带对象名且精确命中」
+#              时才返回 true；不带对象名的 can-i 对受 resourceNames 限制的规则
+#              **恒为 no**。T2-06.1.4 的缺陷（F-01）正是预检不带名字 + fake 对空
+#              对象名特殊放行，于是 Fake 通过、真实集群拒绝。
+#
+#              只有 get/update/patch/delete 允许填这个字段：
+#                - create 的对象名在授权时不可知，RBAC 的 resourceNames 无法限制它
+#                  （交付清单里 create 是另一条不带 resourceNames 的规则）；
+#                - list/watch/deletecollection 是集合请求，没有对象名。
+#              validate_permission_table 在发出任何 can-i 之前检查这条不变量。
 #
 # 谁在读这张表：
 #   - check_required_permissions（本文件）：逐项 `kubectl auth can-i` 预检；
 #   - test/manifest/rbac_test.go：与 RBAC 清单做**双向**比对
-#     （脚本用到的必须被授权；被授权但脚本不用的报「过度授权」）；
+#     （脚本用到的必须被授权；被授权但脚本不用的报「过度授权」；
+#       RBAC 的 resourceNames 与第 6 字段必须一一对应）；
 #   - test/deployk8s/rbac_test.go：逐条删掉一项 → 发布必须 fail-closed；
 #   - docs/development/kubernetes.md（Agent D）：授权说明。
 #
@@ -1331,13 +1365,20 @@ require_lock_owned_server_side() {
 # ---------------------------------------------------------------------------
 REQUIRED_PERMISSIONS=(
   # --- 发布锁 leases（coordination.k8s.io）--------------------------------
+  # 交付的 Role 用 resourceNames 把 get/update/patch 限定到 LOCK_NAME，
+  # 因此这两条预检**必须**带对象名（第 6 字段）。不带名字的
+  # `auth can-i get leases.coordination.k8s.io` 在真实集群上是 no（F-01）。
+  #
   # lease_read：读 holderIdentity / renewTime / resourceVersion / 迁移记录注解
-  "get|coordination.k8s.io|leases|namespace|lease_read@L755"
-  # lease_create：首次获取锁（原子 create；AlreadyExists 表示已被占用）
+  "get|coordination.k8s.io|leases|namespace|lease_read@L755|surgecart-deploy-lock"
+  # lease_create：首次获取锁（原子 create；AlreadyExists 表示已被占用）。
+  # create 的对象名在授权时不可知，RBAC 无法用 resourceNames 限制它，
+  # 所以这里**不能**带对象名（交付清单里 create 是独立的不受限规则）。
   "create|coordination.k8s.io|leases|namespace|lease_create@L789"
   # lease_takeover / lease_renew / lease_release / migration_record_write：
-  # `kubectl replace` = PUT + metadata.resourceVersion 做 CAS
-  "update|coordination.k8s.io|leases|namespace|lease_takeover,lease_renew,lease_release,migration_record_write@L805,L847,L904,L1968"
+  # `kubectl replace` = PUT + metadata.resourceVersion 做 CAS。
+  # 同样受 resourceNames 限制，必须按对象名检查。
+  "update|coordination.k8s.io|leases|namespace|lease_takeover,lease_renew,lease_release,migration_record_write@L805,L847,L904,L1968|surgecart-deploy-lock"
 
   # --- 迁移 Job（batch）--------------------------------------------------
   # job_probe：按名称读取 Job 条件 / uid / deletionTimestamp
@@ -1356,6 +1397,9 @@ REQUIRED_PERMISSIONS=(
   # scan_migration_pods / verify_release：按 component 标签与发布 selector 列表扫描
   "list|core|pods|namespace|scan_migration_pods,verify_release@L1645,L3040"
   # 失败诊断：`kubectl logs job/<name>`（审计 A-8：以前失败被 `|| true` 吞掉）
+  # 子资源（pods/log）在 `auth can-i` 里只能用 `--subresource=log` 表达：
+  # 位置参数 `pods/log` 会被 kubectl 解析成「名为 log 的 Pod」（TYPE/NAME 语法），
+  # 于是既没检查子资源、又会被 pods 的普通 get 授权误判为 yes（T2-06.1.5）。
   "get|core|pods/log|namespace|print_job_logs@L1261"
 
   # --- 前置条件读取（core/v1 / apps）-------------------------------------
@@ -1418,6 +1462,100 @@ permission_ref() {
   else
     printf '%s.%s' "${resource}" "${group}"
   fi
+}
+
+# permission_verb_is_name_scoped <verb>
+#
+# 只有「按对象名寻址」的动词才受 RBAC `resourceNames` 约束：
+#   - get / update / patch / delete：请求带 name，ResourceNameMatches 才可能为真；
+#   - create：对象尚不存在，授权时拿不到名字 —— resourceNames 对它**无效**；
+#   - list / watch / deletecollection：集合请求，没有对象名。
+# 因此 `kubectl auth can-i` 的对象级检查（TYPE/NAME）只对这些动词有意义。
+permission_verb_is_name_scoped() {
+  case "$1" in
+    get|update|patch|delete) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# permission_subresource_of <resource>：`pods/log` → `log`，其余为空。
+permission_subresource_of() {
+  if [[ "$1" == */* ]]; then
+    printf '%s' "${1#*/}"
+  fi
+}
+
+# permission_resource_base <resource>：`pods/log` → `pods`，其余原样。
+permission_resource_base() {
+  printf '%s' "${1%%/*}"
+}
+
+# permission_display_ref <group> <resource> [name]：错误信息里展示的授权对象。
+#
+#   leases.coordination.k8s.io + leases + surgecart-deploy-lock
+#     → leases.coordination.k8s.io/surgecart-deploy-lock
+#   core + pods/log + ""  → pods/log
+permission_display_ref() {
+  local group="$1" resource="$2" name="$3" ref
+  ref="$(permission_ref "${group}" "${resource}")"
+  if [[ -n "${name}" ]]; then
+    printf '%s/%s' "${ref}" "${name}"
+  else
+    printf '%s' "${ref}"
+  fi
+}
+
+# permission_probe_target <group> <resource> [name]：`auth can-i` 的位置参数。
+#
+# kubectl 的解析规则（`kubectl auth can-i VERB [TYPE | TYPE/NAME | NONRESOURCEURL]`）：
+#   1. TYPE 部分可以是 `leases` 或 `leases.coordination.k8s.io`（快捷名/组名会被解析）；
+#   2. TYPE 之后**第一个** "/" 之后的内容是**对象名**（SplitN(arg, "/", 2)），
+#      不是子资源 —— `pods/log` 会被 kubectl 当成「名为 log 的 Pod」；
+#   3. 子资源只能由 `--subresource` 指定（见 permission_subresource_of）。
+# 所以这里只输出 TYPE 或 TYPE/NAME，子资源由调用方单独加 flag。
+permission_probe_target() {
+  local group="$1" resource="$2" name="$3" ref
+  ref="$(permission_ref "${group}" "$(permission_resource_base "${resource}")")"
+  if [[ -n "${name}" ]]; then
+    printf '%s/%s' "${ref}" "${name}"
+  else
+    printf '%s' "${ref}"
+  fi
+}
+
+# validate_permission_table：在发出**任何** auth can-i 之前校验权限表本身。
+#
+# 两类错误都会让「预检结论 ≠ 真实 RBAC 结论」，必须 fail-closed（调用方退出 3）：
+#   1. scope 只能是 namespace / cluster（拼错会让规则被静默跳过）；
+#   2. 只有 get/update/patch/delete 允许携带对象名（第 6 字段）：
+#      create 的对象名在授权时不可知、list/watch/deletecollection 是集合请求，
+#      给它们带名字会得到与真实写入相反的结论。
+validate_permission_table() {
+  local entry verb group resource scope site name
+  local -a fields
+  for entry in "${REQUIRED_PERMISSIONS[@]}"; do
+    # 字段数只能是 5 或 6：多余字段会被 `read` 静默吞进最后一个变量，
+    # 从而改变语义（例如把 "lock|extra" 当成对象名）。
+    IFS='|' read -r -a fields <<< "${entry}"
+    if (( ${#fields[@]} < 5 || ${#fields[@]} > 6 )); then
+      log_error "权限表自检失败：条目 ${entry} 有 ${#fields[@]} 个字段，期望 5 或 6 个（<verb>|<group>|<resource>|<scope>|<call site>[|<resourceName>]）。"
+      return 1
+    fi
+    IFS='|' read -r verb group resource scope site name <<< "${entry}"
+    if [[ -z "${verb}" || -z "${resource}" ]]; then
+      log_error "权限表自检失败：条目 ${entry} 缺少 verb/resource。"
+      return 1
+    fi
+    if [[ "${scope}" != "namespace" && "${scope}" != "cluster" ]]; then
+      log_error "权限表自检失败：条目 ${entry} 的 scope 只能是 namespace 或 cluster（实际 ${scope:-<空>}）。"
+      return 1
+    fi
+    if [[ -n "${name}" ]] && ! permission_verb_is_name_scoped "${verb}"; then
+      log_error "权限表自检失败：条目 ${entry} 给 ${verb} 指定了对象名 ${name}。Kubernetes RBAC 的 resourceNames 只对 get/update/patch/delete 生效：create 的对象名在授权时不可知，list/watch/deletecollection 是集合请求。"
+      return 1
+    fi
+  done
+  return 0
 }
 
 # 作用域的中文描述：错误信息必须让读者知道「缺的是命名空间级还是集群级」。
@@ -1530,27 +1668,40 @@ print_job_logs() {
   return 0
 }
 
-# permission_probe <verb> <resource-ref> <scope>
+# permission_probe <verb> <group> <resource> <scope> [name]
 #
 # 结果写入 PERMISSION_STATE：allowed | denied | unknown。
 #   - allowed：`auth can-i` 返回 "yes" + 0
 #   - denied ：`auth can-i` 返回 "no"  + 非 0（明确的 Forbidden / 无绑定）
 #   - unknown：其他情况（SSAR 无法完成、HTTP 5xx、超时、kubectl 报错）
 #
+# 对象级检查（T2-06.1.5 / F-01）：name 非空时必须用 TYPE/NAME 形式，
+# 因为 `resourceNames` 限定的规则只在请求带对象名时匹配（真实 RBAC 的
+# ResourceNameMatches）。不带名字的 can-i 对这类规则**恒为 no**，用它做预检
+# 会让「按交付清单授权的身份」在真实集群上被判成无权限。
+# 子资源（pods/log）改用 `--subresource=<sub>`，不能写进 TYPE。
+#
 # 为什么必须区分 denied 与 unknown：两者都要 fail-closed，但把「API 不可用」说成
-# 「权限被拒绝」会把排查方向引到错误的 RBAC 绑定上（审计 F-01 / A-9 的同类问题）。
+# 「权限被拒绝」会把排查方向引到错误的 RBAC 绑定上（审计 A-9 的同类问题）。
 permission_probe() {
-  local verb="$1" ref="$2" scope="$3" out err rc=0
+  local verb="$1" group="$2" resource="$3" scope="$4" name="${5:-}"
+  local out err rc=0 target sub
+  local -a probe_args
   err="${TMP_DIR}/auth-can-i.err"
   PERMISSION_STATE="unknown"
   PERMISSION_DETAIL=""
-  if [[ "${scope}" == "cluster" ]]; then
-    # 集群级资源不能带 -n。SelfSubjectAccessReview 只做授权判定，
-    # 不校验命名空间是否存在 —— 这是「预检可以先于命名空间创建」的依据。
-    out="$("${KUBECTL[@]}" auth can-i "${verb}" "${ref}" 2>"${err}")" || rc=$?
-  else
-    out="$("${KUBECTL[@]}" auth can-i "${verb}" "${ref}" -n "${NAMESPACE}" 2>"${err}")" || rc=$?
+  target="$(permission_probe_target "${group}" "${resource}" "${name}")"
+  sub="$(permission_subresource_of "${resource}")"
+  probe_args=("auth" "can-i" "${verb}" "${target}")
+  if [[ -n "${sub}" ]]; then
+    probe_args+=("--subresource=${sub}")
   fi
+  if [[ "${scope}" == "namespace" ]]; then
+    probe_args+=("-n" "${NAMESPACE}")
+  fi
+  # 集群级资源不能带 -n。SelfSubjectAccessReview 只做授权判定，
+  # 不校验命名空间是否存在 —— 这是「预检可以先于命名空间创建」的依据。
+  out="$("${KUBECTL[@]}" "${probe_args[@]}" 2>"${err}")" || rc=$?
   out="$(printf '%s' "${out}" | tr -d '\r' | tr '\n' ' ')"
   out="${out# }"
   out="${out% }"
@@ -1572,7 +1723,7 @@ permission_probe() {
 # 逐项预检并**立即**输出每一项的判定（不留到最后统一报，避免只报第一条）。
 # 省略 entry 时检查该作用域在 REQUIRED_PERMISSIONS 里的全部条目。
 probe_permission_scope() {
-  local scope="$1" entry verb group resource entry_scope site ref
+  local scope="$1" entry verb group resource entry_scope site name ref
   shift || true
   PERMISSION_DENIED_COUNT=0
   PERMISSION_UNKNOWN_COUNT=0
@@ -1582,16 +1733,18 @@ probe_permission_scope() {
   local entries=("$@")
   if (( ${#entries[@]} == 0 )); then
     for entry in "${REQUIRED_PERMISSIONS[@]}"; do
-      IFS='|' read -r verb group resource entry_scope site <<< "${entry}"
+      IFS='|' read -r verb group resource entry_scope site name <<< "${entry}"
       if [[ "${entry_scope}" == "${scope}" ]]; then
         entries+=("${entry}")
       fi
     done
   fi
   for entry in "${entries[@]}"; do
-    IFS='|' read -r verb group resource entry_scope site <<< "${entry}"
-    ref="$(permission_ref "${group}" "${resource}")"
-    permission_probe "${verb}" "${ref}" "${entry_scope}"
+    IFS='|' read -r verb group resource entry_scope site name <<< "${entry}"
+    # 展示用的对象名与 can-i 的位置参数不是一回事：pods/log 展示成子资源，
+    # 但传给 kubectl 的是 `pods --subresource=log`（见 permission_probe）。
+    ref="$(permission_display_ref "${group}" "${resource}" "${name}")"
+    permission_probe "${verb}" "${group}" "${resource}" "${entry_scope}" "${name}"
     PERMISSION_PROBED=$(( PERMISSION_PROBED + 1 ))
     case "${PERMISSION_STATE}" in
       allowed)
@@ -1599,12 +1752,12 @@ probe_permission_scope() {
       denied)
         PERMISSION_DENIED_COUNT=$(( PERMISSION_DENIED_COUNT + 1 ))
         PERMISSION_DENIED_ENTRIES+=("${entry}")
-        log_error "当前身份在$(permission_scope_label "${entry_scope}")缺少 ${ref} 的 ${verb} 权限（Forbidden：auth can-i 明确返回 no；调用点 ${site}）。"
+        log_error "当前身份在 $(permission_scope_label "${entry_scope}") 缺少 ${ref} 的 ${verb} 权限（Forbidden：auth can-i 明确返回 no；调用点 ${site}）。"
         ;;
       *)
         PERMISSION_UNKNOWN_COUNT=$(( PERMISSION_UNKNOWN_COUNT + 1 ))
         PERMISSION_UNKNOWN_ENTRIES+=("${entry}")
-        log_error "无法确认当前身份在$(permission_scope_label "${entry_scope}")是否有 ${ref} 的 ${verb} 权限（查询失败，**不是**「被拒绝」）：${PERMISSION_DETAIL:-未知错误}"
+        log_error "无法确认当前身份在 $(permission_scope_label "${entry_scope}") 是否有 ${ref} 的 ${verb} 权限（查询失败，**不是**「被拒绝」）：${PERMISSION_DETAIL:-未知错误}"
         if [[ "${resource}" == "selfsubjectaccessreviews" ]]; then
           log_error "  权限预检本身就是一次 SelfSubjectAccessReview：无法确认时，最常见的原因是当前身份缺少 create selfsubjectaccessreviews.authorization.k8s.io（内置 system:basic-user 通常已授予）。"
         fi
@@ -1624,11 +1777,12 @@ report_permission_failures() {
     fi
     log_error "授权示例：kubectl apply -f manifest/kubernetes/examples/deploy-lock/rbac.yaml"
     log_error "自检：${KUBECTL[*]} auth can-i --list -n ${NAMESPACE}"
+    log_error "对象级自检（受 resourceNames 限制的 Lease 必须带对象名）：${KUBECTL[*]} auth can-i get leases.coordination.k8s.io/${LOCK_NAME} -n ${NAMESPACE}"
     return 1
   fi
   if (( PERMISSION_UNKNOWN_COUNT > 0 )); then
     log_error "权限预检无法完成（auth can-i 查询失败）：不能假定「有权限」，按 fail-closed 处理。"
-    log_error "自检：${KUBECTL[*]} auth can-i get leases.coordination.k8s.io -n ${NAMESPACE}"
+    log_error "自检：${KUBECTL[*]} auth can-i get leases.coordination.k8s.io/${LOCK_NAME} -n ${NAMESPACE}"
     return 1
   fi
   return 0
@@ -1717,6 +1871,12 @@ ensure_namespace() {
 # ---------------------------------------------------------------------------
 check_required_permissions() {
   local phase_unknown=()
+
+  # ---- 阶段 0：权限表自检（在任何 can-i 之前；表坏了就不能相信预检结论）----
+  if ! validate_permission_table; then
+    log_error "权限预检无法完成（权限表自检失败）：按 fail-closed 处理，本次发布不执行任何变更。"
+    exit 3
+  fi
 
   # ---- 阶段 1：集群级权限（任何写操作之前）----
   probe_permission_scope cluster

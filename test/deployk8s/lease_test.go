@@ -284,8 +284,11 @@ func TestLeasePermissionDeniedFailsBeforeMigration(t *testing.T) {
 
 	res.requireCode(t, 3)
 	res.requireNoSuccess(t)
-	// F-01：权限预检必须能区分「明确被拒绝（Forbidden）」与「无法确认」。
-	res.requireContains(t, "缺少 leases.coordination.k8s.io 的 update 权限", "Forbidden")
+	// F-01：权限预检必须能区分「明确被拒绝（Forbidden）」与「无法确认」，
+	// 并且受 resourceNames 限制的 Lease 权限必须**按对象名**检查（T2-06.1.5）。
+	res.requireContains(t,
+		"缺少 leases.coordination.k8s.io/"+knownLeaseName+" 的 update 权限",
+		"Forbidden")
 	res.requireNotContains(t, "无法确认")
 	f.requireNoEvent(t, "apply.migration")
 	f.requireNoEvent(t, "apply.application")

@@ -111,3 +111,24 @@ bash scripts/test-deploy-k8s.sh   exit=0   ok test/deployk8s 49.295s
 |---|---|---|
 | `AUD-02`（缺少 fencing token） | **NOT_CLOSED** | 本任务未实现服务端 fencing |
 | `AUD-05`（已发出的请求无法撤销） | **NOT_CLOSED** | 已由故障注入实验直接观测到跨接管写入 |
+
+## 8. 补充说明（T2-06.1.5 更正）
+
+> 本文件原件保留。T2-06.1.4 FINAL AUDIT 判定的 **S1 阻断缺陷 F-01** 指出：本文件 §5
+> 第 4 条与 §6 的「A-5 在 fake 层闭环」结论**不能**推广到真实 RBAC。
+
+问题：交付的 Role 用 `resourceNames` 把 leases 的 `get`/`update` 限定到
+`surgecart-deploy-lock`，而脚本预检调用的是不带对象名的
+`kubectl auth can-i get leases.coordination.k8s.io`；Fake 的 `ruleMatches` 又对空对象名
+特殊放行。于是「Fake 通过、真实集群恒为 no」，交付的 RBAC 实际上无法支撑发布。
+
+更正：
+
+- 预检改为对象级：`auth can-i get leases.coordination.k8s.io/surgecart-deploy-lock`
+  （`create` 不带对象名；`pods/log` 改用 `--subresource=log`）；
+- Fake 按真实 `ResourceNameMatches` 语义修正（空对象名/错误对象名/create/list 均不匹配）；
+- `TestWritePathDeniedByResourceNamesFailsAfterPreflight` 被
+  `TestWrongLeaseResourceNameFailsAtPreflight{,ForUpdate}` 取代（原用例依赖 Fake 的缺陷）；
+- 新增 `test/deployk8s/rbac_resource_names_test.go` 与 `test/manifest` 的双向契约 + 负控。
+
+真实集群上的 `auth can-i` / SSAR 结果仍然 **NOT_VERIFIED**。

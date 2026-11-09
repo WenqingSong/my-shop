@@ -35,14 +35,26 @@ type requiredPermission struct {
 	Resource string
 	Scope    string // namespace | cluster
 	CallSite string
+	// Name 是可选的第 6 字段：非空表示该权限在交付 RBAC 里受 resourceNames 限制，
+	// 预检必须用 `TYPE/NAME` 的对象级写法（T2-06.1.5 / F-01）。
+	Name string
 }
 
-// ref 返回 `kubectl auth can-i` 接受的写法（非 core group 带 group 后缀）。
+// ref 返回 `kubectl auth can-i` 接受的资源写法（非 core group 带 group 后缀）。
 func (p requiredPermission) ref() string {
 	if p.Group == "" {
 		return p.Resource
 	}
 	return p.Resource + "." + p.Group
+}
+
+// objectRef 是**错误信息里展示**的授权对象：
+// 非空 Name 时追加 "/<name>"（受 resourceNames 限制的权限必须让读者看到具体对象）。
+func (p requiredPermission) objectRef() string {
+	if p.Name == "" {
+		return p.ref()
+	}
+	return p.ref() + "/" + p.Name
 }
 
 // shortResource 是 fake 的 Denied 使用的写法：fake 按第一个 "." 截断 group，
@@ -63,7 +75,9 @@ func requiredPermissionsFromScript(t *testing.T) []requiredPermission {
 	if block == nil {
 		t.Fatal("scripts/deploy-k8s.sh 缺少 REQUIRED_PERMISSIONS：本文件的权限矩阵会失去意义")
 	}
-	entryPattern := regexp.MustCompile(`^"([^"|]+)\|([^"|]*)\|([^"|]+)\|([^"|]+)\|([^"|]*)"$`)
+	// 5 个必填字段 + 1 个可选字段（resourceName）。可选字段存在时不能为空以外
+	// 的形式被吞掉：多一个 "|" 就无法解析（严格失败，不静默降级）。
+	entryPattern := regexp.MustCompile(`^"([^"|]+)\|([^"|]*)\|([^"|]+)\|([^"|]+)\|([^"|]*)(?:\|([^"|]*))?"$`)
 	var out []requiredPermission
 	for _, line := range strings.Split(block[1], "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -78,9 +92,21 @@ func requiredPermissionsFromScript(t *testing.T) []requiredPermission {
 		if group == "core" {
 			group = ""
 		}
-		out = append(out, requiredPermission{
-			Verb: match[1], Group: group, Resource: match[3], Scope: match[4], CallSite: match[5],
-		})
+		entry := requiredPermission{
+			Verb: match[1], Group: group, Resource: match[3], Scope: match[4],
+			CallSite: match[5], Name: match[6],
+		}
+		// 与脚本的 validate_permission_table 同一条不变量：
+		// create/list/watch/deletecollection 不能带对象名（真实 RBAC 无此语义）。
+		if entry.Name != "" {
+			switch entry.Verb {
+			case "get", "update", "patch", "delete":
+			default:
+				t.Fatalf("REQUIRED_PERMISSIONS 条目 %q 给 %q 指定了对象名：resourceNames 只对 get/update/patch/delete 生效",
+					trimmed, entry.Verb)
+			}
+		}
+		out = append(out, entry)
 	}
 	if len(out) == 0 {
 		t.Fatal("REQUIRED_PERMISSIONS 为空")
@@ -118,7 +144,7 @@ func TestEveryRequiredPermissionIsEnforced(t *testing.T) {
 			res.requireCode(t, 3)
 			res.requireNoSuccess(t)
 			res.requireContains(t,
-				"缺少 "+entry.ref()+" 的 "+entry.Verb+" 权限",
+				"缺少 "+entry.objectRef()+" 的 "+entry.Verb+" 权限",
 				"Forbidden",
 			)
 			// 权限不足时不得开始迁移/应用（工作负载变更）。

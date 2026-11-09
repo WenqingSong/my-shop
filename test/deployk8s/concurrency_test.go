@@ -673,20 +673,41 @@ func requireRBACManifestContract(t *testing.T, paths []string) {
 		st.Permissions = fakestate.Permissions{Rules: rules}
 	})
 
-	// 正例：脚本预检的 7 个 (verb, resource) 必须全部允许（pods 的 get/list 曾漏过 → F-01）。
-	for _, pair := range [][2]string{
-		{"get", "leases.coordination.k8s.io"},
-		{"create", "leases.coordination.k8s.io"},
-		{"update", "leases.coordination.k8s.io"},
-		{"get", "jobs.batch"},
-		{"list", "jobs.batch"},
-		{"get", "pods"},
-		{"list", "pods"},
+	// 正例：脚本预检的 (verb, TYPE[/NAME]) 必须全部允许（pods 的 get/list 曾漏过 → F-01）。
+	//
+	// leases 的 get/update 在交付清单里受 resourceNames 限制到 LOCK_NAME，因此
+	// **必须**带对象名：不带名字的 can-i 在真实 RBAC 上恒为 no（T2-06.1.5）。
+	// pods/log 是子资源，只能用 --subresource 表达（位置参数 pods/log 是「名为 log 的 Pod」）。
+	for _, args := range [][]string{
+		{"auth", "can-i", "get", "leases.coordination.k8s.io/" + knownLeaseName, "-n", "surgecart"},
+		{"auth", "can-i", "create", "leases.coordination.k8s.io", "-n", "surgecart"},
+		{"auth", "can-i", "update", "leases.coordination.k8s.io/" + knownLeaseName, "-n", "surgecart"},
+		{"auth", "can-i", "get", "jobs.batch", "-n", "surgecart"},
+		{"auth", "can-i", "list", "jobs.batch", "-n", "surgecart"},
+		{"auth", "can-i", "get", "pods", "-n", "surgecart"},
+		{"auth", "can-i", "list", "pods", "-n", "surgecart"},
+		{"auth", "can-i", "get", "pods", "--subresource=log", "-n", "surgecart"},
 	} {
-		res := runFake(t, dir, "auth", "can-i", pair[0], pair[1], "-n", "surgecart")
+		res := runFake(t, dir, args...)
 		res.requireCode(t, 0)
 		if got := strings.TrimSpace(res.stdout); got != "yes" {
-			t.Fatalf("auth can-i %s %s = %q，期望 yes", pair[0], pair[1], got)
+			t.Fatalf("%v = %q，期望 yes", args, got)
+		}
+	}
+
+	// 反向契约（F-01）：受 resourceNames 限制的规则**不得**被无对象名或错误对象名的
+	// 检查命中。这两条正是 T2-06.1.4 的错误实现会判成 yes 的调用。
+	for _, args := range [][]string{
+		{"auth", "can-i", "get", "leases.coordination.k8s.io", "-n", "surgecart"},
+		{"auth", "can-i", "update", "leases.coordination.k8s.io", "-n", "surgecart"},
+		{"auth", "can-i", "patch", "leases.coordination.k8s.io", "-n", "surgecart"},
+		{"auth", "can-i", "get", "leases.coordination.k8s.io/another-pipeline-lock", "-n", "surgecart"},
+		{"auth", "can-i", "update", "leases.coordination.k8s.io/another-pipeline-lock", "-n", "surgecart"},
+	} {
+		res := runFake(t, dir, args...)
+		res.requireCode(t, 1)
+		if got := strings.TrimSpace(res.stdout); got != "no" {
+			t.Fatalf("%v = %q，期望 no（resourceNames 只授予指定对象）", args, got)
 		}
 	}
 
@@ -789,18 +810,24 @@ func trimRuleVerb(t *testing.T, rules []fakestate.Rule, group, resource, verb st
 	return out
 }
 
-// TestAuthCanISupportsNamespaceAndSubresource 覆盖 `auth can-i` 的参数语义：
-// -n 真正参与判定、`<resource>/<subresource>` 与 `--subresource=` 等价、
-// 子资源必须显式授权（只有 "pods" 的规则不授予 "pods/log"）。
-func TestAuthCanISupportsNamespaceAndSubresource(t *testing.T) {
+// TestAuthCanISupportsNamespaceSubresourceAndResourceName 覆盖 `auth can-i` 的
+// 参数语义，且**必须与真实 kubectl 一致**（T2-06.1.5 / F-01、B-7）：
+//
+//	TYPE/NAME  → NAME 是**对象名**（kubectl 的 SplitN(arg,"/",2)）
+//	pods/log   → 名为 "log" 的 Pod，**不是** pods/log 子资源
+//	子资源      → 只能由 --subresource 指定
+//	-n         → 参与判定；资源本身是集群级时命名空间为空
+func TestAuthCanISupportsNamespaceSubresourceAndResourceName(t *testing.T) {
 	t.Parallel()
 	dir := newFakeStateDir(t, func(st *fakestate.State) {
-		st.Permissions = fakestate.Permissions{Rules: []fakestate.Rule{{
-			APIGroups:  []string{""},
-			Resources:  []string{"pods/log"},
-			Verbs:      []string{"get"},
-			Namespaces: []string{"surgecart"},
-		}}}
+		st.Permissions = fakestate.Permissions{Rules: []fakestate.Rule{
+			// 子资源：pods/log（必须显式列出，pods 的规则不隐含它）。
+			{APIGroups: []string{""}, Resources: []string{"pods/log"}, Verbs: []string{"get"},
+				Namespaces: []string{"surgecart"}},
+			// 对象级：只允许名为 named-pod 的 Pod。
+			{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"},
+				ResourceNames: []string{"named-pod"}, Namespaces: []string{"surgecart"}},
+		}}
 	})
 
 	cases := []struct {
@@ -808,14 +835,21 @@ func TestAuthCanISupportsNamespaceAndSubresource(t *testing.T) {
 		code int
 		want string
 	}{
-		{args: []string{"auth", "can-i", "get", "pods/log", "-n", "surgecart"}, code: 0, want: "yes"},
+		// 子资源只能用 --subresource 表达。
 		{args: []string{"auth", "can-i", "get", "pods", "--subresource=log", "-n", "surgecart"}, code: 0, want: "yes"},
-		// 子资源必须显式授权：pods 本体没有规则。
+		// TYPE/NAME：对象名精确匹配才允许。
+		{args: []string{"auth", "can-i", "get", "pods/named-pod", "-n", "surgecart"}, code: 0, want: "yes"},
+		{args: []string{"auth", "can-i", "get", "pods/other-pod", "-n", "surgecart"}, code: 1, want: "no"},
+		// 没有对象名的检查不匹配 resourceNames 规则。
 		{args: []string{"auth", "can-i", "get", "pods", "-n", "surgecart"}, code: 1, want: "no"},
+		// 位置参数 pods/log 是「名为 log 的 Pod」，不是子资源：上面的 pods 规则
+		// 只允许 named-pod，因此这里必须 no（旧 fake 会错误地返回 yes）。
+		{args: []string{"auth", "can-i", "get", "pods/log", "-n", "surgecart"}, code: 1, want: "no"},
 		// 命名空间参与判定。
-		{args: []string{"auth", "can-i", "get", "pods/log", "-n", "default"}, code: 1, want: "no"},
-		// 未声明的动词默认拒绝。
-		{args: []string{"auth", "can-i", "list", "pods/log", "-n", "surgecart"}, code: 1, want: "no"},
+		{args: []string{"auth", "can-i", "get", "pods", "--subresource=log", "-n", "default"}, code: 1, want: "no"},
+		{args: []string{"auth", "can-i", "get", "pods/named-pod", "-n", "default"}, code: 1, want: "no"},
+		// 未声明的动词默认拒绝（子资源同样逐动词判定）。
+		{args: []string{"auth", "can-i", "list", "pods", "--subresource=log", "-n", "surgecart"}, code: 1, want: "no"},
 	}
 	for _, tc := range cases {
 		res := runFake(t, dir, tc.args...)
@@ -823,6 +857,14 @@ func TestAuthCanISupportsNamespaceAndSubresource(t *testing.T) {
 		if got := strings.TrimSpace(res.stdout); got != tc.want {
 			t.Fatalf("%v = %q，期望 %q", tc.args, got, tc.want)
 		}
+	}
+
+	// 真实 kubectl 只接受两个位置参数（VERB + TYPE[/NAME]）。
+	// 旧 fake 会把第三个位置参数当对象名（`can-i get pods foo`），必须改为报错。
+	extra := runFake(t, dir, "auth", "can-i", "get", "pods", "named-pod", "-n", "surgecart")
+	extra.requireCode(t, 1)
+	if strings.TrimSpace(extra.stdout) == "yes" {
+		t.Fatalf("第三个位置参数必须被拒绝（真实 kubectl: verb resource/resourceName），实际输出 %q", extra.stdout)
 	}
 }
 

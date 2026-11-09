@@ -13,24 +13,19 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/test/deployk8s/fakestate"
 )
 
-// 本文件验证审计 A-5 的**写路径**授权（不是 `auth can-i` 的自述）：
+// 本文件验证「**只**授予交付清单里的权限，发布能完整运行」，以及写路径 /
+// 预检路径在资源名不匹配时必须 fail-closed。
 //
-//	缺权限 / 授权范围不匹配 → 真实写请求（create / replace / apply）必须被拒绝，
-//	而不是「预检说没权限」或者「预检说有权限、写入随便过」。
+// T2-06.1.5 / F-01 的关键变化：交付的 Role 用 `resourceNames` 把 leases 的
+// get/update/patch 限定到 `surgecart-deploy-lock`。真实 RBAC 的
+// ResourceNameMatches 要求请求带对象名，因此：
 //
-// 为什么要单独一层：`kubectl auth can-i` 只回答「理论上能不能」，它与真实写入之间
-// 可能存在差异（resourceNames 限定、admission webhook、策略漂移、凭据过期）。
-// 如果 fake 只在 auth can-i 上做权限判断，那么「缺任一权限 → 真实写路径失败」这条
-// 断言永远无法被证伪。
+//   - 预检必须用 `auth can-i get leases.coordination.k8s.io/<lock> -n <ns>`；
+//   - 不带对象名的预检在真实集群上恒为 no（旧 fake 却返回 yes —— 这是 F-01）；
+//   - 对象名写错时，预检阶段就必须失败（不是等到 replace 被 403）。
 //
-// 依赖：Agent C 的 fakestate 写路径授权（INTERFACE_CONTRACT.md §1.1 Authorize /
-// §1.3 写路径强制授权，v1.2 起 apply 对已存在对象先按 patch 授权）。
-//
-// 这三个用例是**硬断言**：写路径不执行授权、或 apply 仍按 update 授权，都会直接
-// 失败（不是 Skip）。审计要求：不允许把「未验证」说成已验证。
-//
-// 实现方式：直接改写 fake 的 state.json，把 `permissions.rules` 换成真实规则。
-// 这样不依赖 fakestate 的 Go API（C 还在演进），也不需要修改 Agent C 的文件。
+// 因此本文件的用例不仅断言退出码，还断言**授权对象**、**API 调用次数**与
+// **最终资源状态**（锁是否释放、迁移记录、应用是否落地）。
 
 // ---------------------------------------------------------------------------
 // 工具：按真实 RBAC 清单生成 fake 的权限规则
@@ -155,7 +150,7 @@ func injectRules(t *testing.T, f *fixture, rules []map[string]any) bool {
 //
 // 真实 kubectl apply 对已存在对象发送 PATCH，因此交付 RBAC 里没有 update；
 // fake 若按 update 授权，就会返回 `cannot update resource "<r>"`。这种情况下失败
-// 的原因在接口而不在交付清单，用例必须 Skip 并指名分歧，而不是去加过度的 update 权限。
+// 的原因在接口而不在交付清单，用例必须直接失败并指名分歧，而不是去加过度的 update 权限。
 func applyVerbMismatch(output string) string {
 	matches := regexp.MustCompile(`cannot update resource "([^"]+)"`).FindAllStringSubmatch(output, -1)
 	if len(matches) == 0 {
@@ -173,67 +168,67 @@ func applyVerbMismatch(output string) string {
 }
 
 // ---------------------------------------------------------------------------
-// 用例 1：预检通过、写路径被拒（resourceNames 收紧）
+// 工具：授权调用的断言
 // ---------------------------------------------------------------------------
-//
-// 这是「预检 ≠ 真实授权」最贴近现实的场景：RBAC 把 leases 的 update 限定到另一个
-// 资源名。`auth can-i update leases`（name 为空）仍然返回 yes，但真实
-// `replace -f lease-record.yaml`（name=surgecart-deploy-lock）必须被拒绝。
-// 一旦如此，脚本必须在写入迁移记录失败时 fail-closed，且不 apply 迁移清单。
-func TestWritePathDeniedByResourceNamesFailsAfterPreflight(t *testing.T) {
-	t.Parallel()
-	f := newFixture(t, fixtureOptions{})
 
-	rules := deliveredRBACRules(t)
-	// 把 leases 的规则收窄到一个**不存在**的 Lease 名：
-	// 预检（name=""）通过，真实写入（name=surgecart-deploy-lock）被拒。
-	patched := false
-	for _, rule := range rules {
-		resources, _ := rule["resources"].([]string)
-		if len(resources) != 1 || resources[0] != "leases" {
-			continue
+// authCalls 返回所有 `auth can-i ...` 调用的尾部（从 "auth" 开始），用于断言
+// 「预检到底检查了哪个对象」——只看退出码无法发现 F-01 这类缺陷。
+func authCalls(f *fixture) []string {
+	var out []string
+	for _, call := range f.calls() {
+		if idx := strings.Index(call, " auth can-i "); idx >= 0 {
+			out = append(out, strings.TrimSpace(call[idx+1:]))
 		}
-		if _, ok := rule["resourceNames"]; !ok {
-			continue // create 规则本来就没有 resourceNames
+	}
+	return out
+}
+
+// requireAuthCall 断言存在一条包含 want 的 can-i 调用。
+func (f *fixture) requireAuthCall(t *testing.T, want string) {
+	t.Helper()
+	for _, call := range authCalls(f) {
+		if strings.Contains(call, want) {
+			return
 		}
-		rule["resourceNames"] = []string{"another-pipeline-lock"}
-		patched = true
 	}
-	if !patched {
-		t.Fatal("交付的 RBAC 里没有带 resourceNames 的 leases 规则：本用例的前提不成立")
-	}
-	if !injectRules(t, f, rules) {
-		t.Fatalf("%s", writeEnforcementMissing("预检通过但写入被拒"))
-	}
+	t.Fatalf("缺少授权检查 %q；实际 can-i 调用:\n%s", want, strings.Join(authCalls(f), "\n"))
+}
 
-	res := runDeploy(t, f, "--migration-timeout", "10", "--rollout-timeout", "10")
-
-	if res.code == 0 {
-		t.Fatalf("%s\n--- stdout ---\n%s\n--- stderr ---\n%s",
-			writeEnforcementMissing("预检通过但写入被拒"), res.stdout, res.stderr)
+// requireNoAuthCall 断言不存在包含 unwanted 的 can-i 调用。
+func (f *fixture) requireNoAuthCall(t *testing.T, unwanted string) {
+	t.Helper()
+	for _, call := range authCalls(f) {
+		if strings.Contains(call, unwanted) {
+			t.Fatalf("不应出现授权检查 %q（它会给出与真实 RBAC 不同的结论）；实际 can-i 调用:\n%s",
+				unwanted, strings.Join(authCalls(f), "\n"))
+		}
 	}
-	res.requireNoSuccess(t)
-	res.requireContains(t,
-		"权限预检通过",    // 证明失败发生在预检之后
-		"Forbidden", // 真实 API 拒绝
-		"leases",    // 指向被拒的资源
-	)
-	f.requireNoEvent(t, "apply.migration")
-	f.requireNoEvent(t, "apply.application")
+}
+
+// requireNoAuthDenied 断言预检期间没有出现任何 denied / unknown。
+func (f *fixture) requireNoAuthDenied(t *testing.T) {
+	t.Helper()
+	for _, prefix := range []string{"auth.denied", "auth.error", "auth.forbidden"} {
+		if count := f.countEvents(prefix); count != 0 {
+			t.Fatalf("成功的发布不应出现 %s 事件（%d 次）；事件序列:\n%s",
+				prefix, count, strings.Join(f.events(), "\n"))
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
-// 用例 2：只载入交付的 RBAC → 完整发布必须成功（升级路径）
+// T1 / T2：只载入交付的 RBAC → 首次发布 / 后续升级必须成功
 // ---------------------------------------------------------------------------
+
+// TestDeliveredRBACOnlyUpgradeSucceeds（T2）是「仅授予交付的 RBAC 权限，升级发布
+// 能完整运行」的证据。
 //
-// 这是「仅授予交付的 RBAC 权限，发布能完整运行」的**权限层面**证据：
-// permissions 里只有 RBAC 清单解析出的规则，没有任何 allow-all 兜底。
-//
-// 已知分歧（已 message agent-c-fake）：C 的 fake 对「apply 已存在的对象」用
-// verb=update 授权，而真实 kubectl apply 用 PATCH（GET → create 或 patch，从不 PUT）。
-// 若因此在本用例里看到 `cannot update resource "deployments"`，说明分歧仍在，
-// 用例 Skip 并指向该分歧，而不是去给 RBAC 加上脚本根本不用的 update 权限
-// （那会让「最小权限」失去意义，也会被反向契约测试判成过度授权）。
+// 断言四层事实，缺一不可：
+//  1. 退出码 0 + DEPLOY_K8S_SUCCESS；
+//  2. 授权对象：Lease 的 get/update 按**对象名**检查（create 不带名字，
+//     pods/log 走 --subresource）——这正是 F-01 的修复点；
+//  3. API 调用次数：迁移/应用各 apply 一次、锁只获取一次、零 denied/unknown；
+//  4. 最终资源状态：锁已释放、迁移记录 COMPLETE、应用已落地、命名空间仍在。
 func TestDeliveredRBACOnlyUpgradeSucceeds(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, fixtureOptions{})
@@ -243,25 +238,70 @@ func TestDeliveredRBACOnlyUpgradeSucceeds(t *testing.T) {
 
 	res := runDeploy(t, f, "--migration-timeout", "10", "--rollout-timeout", "10")
 
-	if res.code == 0 {
-		res.requireSuccess(t)
-		return
+	if res.code != 0 {
+		if reason := applyVerbMismatch(res.output()); reason != "" {
+			t.Fatalf("fake 仍把 apply 已存在对象按 update 授权（真实 kubectl apply 用 patch）。被拒对象：%s\n--- stdout ---\n%s\n--- stderr ---\n%s",
+				reason, res.stdout, res.stderr)
+		}
+		t.Fatalf("只载入交付的 RBAC 时发布失败（退出码 %d）：交付的授权不足以支撑真实写路径\n--- stdout ---\n%s\n--- stderr ---\n%s",
+			res.code, res.stdout, res.stderr)
 	}
-	if reason := applyVerbMismatch(res.output()); reason != "" {
-		t.Fatalf("fake 仍把 apply 已存在对象按 update 授权（真实 kubectl apply 用 patch）。被拒对象：%s；"+
-			"Interface 契约 §1.3 v1.2 要求「先 patch，再退回 update」。\n--- stdout ---\n%s\n--- stderr ---\n%s",
-			reason, res.stdout, res.stderr)
+	res.requireSuccess(t)
+
+	// 2) 授权对象。
+	f.requireAuthCall(t, "auth can-i get leases.coordination.k8s.io/"+knownLeaseName+" -n surgecart")
+	f.requireAuthCall(t, "auth can-i update leases.coordination.k8s.io/"+knownLeaseName+" -n surgecart")
+	f.requireAuthCall(t, "auth can-i create leases.coordination.k8s.io -n surgecart")
+	// create 不能带对象名（resourceNames 对 create 无效）。
+	f.requireNoAuthCall(t, "auth can-i create leases.coordination.k8s.io/")
+	// 受 resourceNames 限制的 get/update 不得再出现无对象名形式（F-01）。
+	f.requireNoAuthCall(t, "auth can-i get leases.coordination.k8s.io -n")
+	f.requireNoAuthCall(t, "auth can-i update leases.coordination.k8s.io -n")
+	// 子资源必须走 --subresource；位置参数 pods/log 会被 kubectl 当成「名为 log 的 Pod」。
+	f.requireAuthCall(t, "auth can-i get pods --subresource=log -n surgecart")
+	f.requireNoAuthCall(t, "auth can-i get pods/log")
+	f.requireNoAuthDenied(t)
+
+	// 3) API 调用次数。
+	if got := f.countEvents("apply.migration"); got != 1 {
+		t.Fatalf("迁移清单必须 apply 恰好 1 次，实际 %d 次；事件:\n%s", got, strings.Join(f.events(), "\n"))
 	}
-	t.Fatalf("只载入交付的 RBAC 时发布失败（退出码 %d）：交付的授权不足以支撑真实写路径\n--- stdout ---\n%s\n--- stderr ---\n%s",
-		res.code, res.stdout, res.stderr)
+	if got := f.countEvents("apply.application"); got != 1 {
+		t.Fatalf("应用清单必须 apply 恰好 1 次，实际 %d 次；事件:\n%s", got, strings.Join(f.events(), "\n"))
+	}
+	if got := f.countEvents("lease.acquire"); got != 1 {
+		t.Fatalf("发布锁必须只获取 1 次，实际 %d 次；事件:\n%s", got, strings.Join(f.events(), "\n"))
+	}
+	if got := f.countEvents("lease.release"); got != 1 {
+		t.Fatalf("发布锁必须只释放 1 次，实际 %d 次；事件:\n%s", got, strings.Join(f.events(), "\n"))
+	}
+
+	// 4) 最终资源状态。
+	state := f.state()
+	if state.Lease == nil {
+		t.Fatal("发布结束后 Lease 对象必须仍然存在（释放 ≠ 删除）")
+	}
+	if state.Lease.HolderIdentity != "" {
+		t.Fatalf("发布成功后必须释放锁（holderIdentity 为空），实际 %q", state.Lease.HolderIdentity)
+	}
+	if recordState, job, uid := f.leaseRecord(); recordState != "MIGRATION_COMPLETE" || job == "" || uid == "" {
+		t.Fatalf("最终迁移记录应为 MIGRATION_COMPLETE 且保留 job/uid，实际 state=%q job=%q uid=%q",
+			recordState, job, uid)
+	}
+	if !state.Applied {
+		t.Fatal("发布成功后应用清单必须已经落地（state.Applied=false）")
+	}
+	if !state.MigrationApplied {
+		t.Fatal("发布成功后迁移 Job 必须已经 apply（state.MigrationApplied=false）")
+	}
+	if !state.NamespaceExists {
+		t.Fatal("升级发布不得删除命名空间")
+	}
 }
 
-// ---------------------------------------------------------------------------
-// 用例 3：只载入交付的 RBAC → 首次发布（空命名空间）必须成功
-// ---------------------------------------------------------------------------
-//
-// 覆盖审计 A-1 的完整路径：命名空间不存在 → 集群级 ClusterRole（namespaces get/create）
-// → 创建命名空间 → 锁 → 迁移 → 应用。这是旧示例（只有 Role）必然 403 的那条路径。
+// TestDeliveredRBACOnlyFirstDeploySucceeds（T1）覆盖审计 A-1 的完整路径：
+// 命名空间不存在 → 集群级 ClusterRole（namespaces get/create）→ 创建命名空间
+// → 锁 → 迁移 → 应用。
 func TestDeliveredRBACOnlyFirstDeploySucceeds(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, fixtureOptions{firstDeploy: true})
@@ -272,19 +312,170 @@ func TestDeliveredRBACOnlyFirstDeploySucceeds(t *testing.T) {
 
 	res := runDeploy(t, f, "--migration-timeout", "10", "--rollout-timeout", "10")
 
-	if res.code == 0 {
-		res.requireSuccess(t)
-		if !f.state().NamespaceExists {
-			t.Fatal("首次发布必须创建命名空间")
+	if res.code != 0 {
+		if reason := applyVerbMismatch(res.output()); reason != "" {
+			t.Fatalf("fake 仍把 apply 已存在对象按 update 授权（同 TestDeliveredRBACOnlyUpgradeSucceeds），被拒对象：%s", reason)
 		}
-		return
+		if strings.Contains(res.output(), "缺少 namespaces 的") {
+			t.Fatalf("交付的 RBAC 仍然缺少集群级 namespaces 权限（审计 A-1 未闭环）：\n%s", res.output())
+		}
+		t.Fatalf("只载入交付的 RBAC 时首次发布失败（退出码 %d）\n--- stdout ---\n%s\n--- stderr ---\n%s",
+			res.code, res.stdout, res.stderr)
 	}
-	if reason := applyVerbMismatch(res.output()); reason != "" {
-		t.Fatalf("fake 仍把 apply 已存在对象按 update 授权（同 TestDeliveredRBACOnlyUpgradeSucceeds），被拒对象：%s", reason)
+	res.requireSuccess(t)
+
+	// 授权对象：首次部署同样必须按对象名检查 Lease，且集群级权限不带 -n。
+	f.requireAuthCall(t, "auth can-i get leases.coordination.k8s.io/"+knownLeaseName+" -n surgecart")
+	f.requireAuthCall(t, "auth can-i update leases.coordination.k8s.io/"+knownLeaseName+" -n surgecart")
+	f.requireAuthCall(t, "auth can-i get namespaces")
+	f.requireAuthCall(t, "auth can-i create namespaces")
+	f.requireNoAuthCall(t, "auth can-i get leases.coordination.k8s.io -n")
+	f.requireNoAuthDenied(t)
+
+	// API 调用次数与顺序：命名空间引导发生在锁之前，迁移/应用各一次。
+	if got := f.countEvents("apply.namespace"); got != 1 {
+		t.Fatalf("首次发布必须创建命名空间恰好 1 次，实际 %d 次；事件:\n%s", got, strings.Join(f.events(), "\n"))
 	}
-	if strings.Contains(res.output(), "缺少 namespaces 的") {
-		t.Fatalf("交付的 RBAC 仍然缺少集群级 namespaces 权限（审计 A-1 未闭环）：\n%s", res.output())
+	if got := f.countEvents("apply.migration"); got != 1 {
+		t.Fatalf("迁移清单必须 apply 恰好 1 次，实际 %d 次", got)
 	}
-	t.Fatalf("只载入交付的 RBAC 时首次发布失败（退出码 %d）\n--- stdout ---\n%s\n--- stderr ---\n%s",
-		res.code, res.stdout, res.stderr)
+	if got := f.countEvents("apply.application"); got != 1 {
+		t.Fatalf("应用清单必须 apply 恰好 1 次，实际 %d 次", got)
+	}
+	f.requireEventOrder(t, "apply.namespace", "lease.acquire", "apply.migration", "apply.application")
+
+	// 最终资源状态。
+	state := f.state()
+	if !state.NamespaceExists {
+		t.Fatal("首次发布必须创建命名空间")
+	}
+	if state.Lease == nil || state.Lease.HolderIdentity != "" {
+		t.Fatalf("首次发布成功后锁必须已释放，实际: %+v", state.Lease)
+	}
+	if recordState, _, _ := f.leaseRecord(); recordState != "MIGRATION_COMPLETE" {
+		t.Fatalf("首次发布的迁移记录应为 MIGRATION_COMPLETE，实际 %q", recordState)
+	}
+	if !state.Applied {
+		t.Fatal("首次发布必须落地应用清单")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T6 / T8 / T9：resourceNames 写成错误对象名 → 预检阶段失败，零资源写
+// ---------------------------------------------------------------------------
+//
+// 交付的 Role 把 leases 的 get/update/patch 限定到 LOCK_NAME。把它改成另一个
+// 名字后：
+//   - 真实 RBAC 会拒绝针对 LOCK_NAME 的对象级 SSAR —— 预检必须在这里失败；
+//   - 不能等到 `replace` 才 403（那意味着带着未知/错误权限已经进入了发布流程）；
+//   - 失败必须是 fail-closed 且**零**资源写请求（不建锁、不迁移、不应用）。
+func TestWrongLeaseResourceNameFailsAtPreflight(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, fixtureOptions{})
+
+	rules := deliveredRBACRules(t)
+	patched := 0
+	for _, rule := range rules {
+		resourceNames, ok := rule["resourceNames"]
+		if !ok {
+			continue
+		}
+		names, _ := resourceNames.([]string)
+		if len(names) != 1 || names[0] != knownLeaseName {
+			continue
+		}
+		rule["resourceNames"] = []string{"another-pipeline-lock"}
+		patched++
+	}
+	if patched == 0 {
+		t.Fatal("交付的 RBAC 里没有把 leases 的 resourceNames 限定到 LOCK_NAME：本用例的前提不成立")
+	}
+	if !injectRules(t, f, rules) {
+		t.Fatalf("%s", writeEnforcementMissing("错误 Lease 名称"))
+	}
+
+	res := runDeploy(t, f, "--migration-timeout", "10", "--rollout-timeout", "10")
+
+	res.requireCode(t, 3)
+	res.requireNoSuccess(t)
+	// 预检必须**针对具体对象**报错（否则运维不知道该改哪个 Lease）。
+	res.requireContains(t,
+		"缺少 leases.coordination.k8s.io/"+knownLeaseName+" 的 get 权限",
+		"Forbidden",
+		"权限不足",
+	)
+	// 失败必须发生在预检，而不是运行期的 replace。
+	res.requireNotContains(t, "权限预检通过")
+	res.requireNotContains(t, "DEPLOY_K8S_SUCCESS")
+	// 零资源写：不建锁、不迁移、不应用、不发日志请求。
+	requireNoResourceMutations(t, f)
+	state := f.state()
+	if state.Lease != nil {
+		t.Fatalf("预检失败时不得创建 Lease，实际: %+v", state.Lease)
+	}
+	if state.Applied || state.MigrationApplied {
+		t.Fatalf("预检失败时不得 apply 任何清单（applied=%v migration=%v）", state.Applied, state.MigrationApplied)
+	}
+	for _, prefix := range []string{"apply.migration", "apply.application", "lease.acquire"} {
+		f.requireNoEvent(t, prefix)
+	}
+}
+
+// TestWrongLeaseResourceNameFailsAtPreflightForUpdate 单独确认 update 的对象级
+// 预检也在生效：把 get/update/patch 规则拆成两条，只把 update 的 resourceNames
+// 改名 —— get 仍然通过，失败必须由 update 的检查触发（调用点 lease_takeover/...）。
+func TestWrongLeaseResourceNameFailsAtPreflightForUpdate(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, fixtureOptions{})
+
+	rules := deliveredRBACRules(t)
+	next := make([]map[string]any, 0, len(rules)+1)
+	replaced := false
+	for _, rule := range rules {
+		resourceNames, hasNames := rule["resourceNames"]
+		verbs, _ := rule["verbs"].([]string)
+		names, _ := resourceNames.([]string)
+		if hasNames && len(verbs) == 3 && contains(verbs, "get") && contains(verbs, "update") &&
+			len(names) == 1 && names[0] == knownLeaseName {
+			// 同一条规则同时授予 get/update/patch；拆成「get 正确」+「update/patch 错误」，
+			// 这样才能证明失败确实来自 update 的对象级检查。
+			getRule := map[string]any{
+				"apiGroups":     rule["apiGroups"],
+				"resources":     rule["resources"],
+				"verbs":         []string{"get"},
+				"resourceNames": []string{knownLeaseName},
+			}
+			updateRule := map[string]any{
+				"apiGroups":     rule["apiGroups"],
+				"resources":     rule["resources"],
+				"verbs":         []string{"update", "patch"},
+				"resourceNames": []string{"another-pipeline-lock"},
+			}
+			if ns, ok := rule["namespaces"]; ok {
+				getRule["namespaces"] = ns
+				updateRule["namespaces"] = ns
+			}
+			next = append(next, getRule, updateRule)
+			replaced = true
+			continue
+		}
+		next = append(next, rule)
+	}
+	if !replaced {
+		t.Fatal("未能替换 leases 的 get/update/patch 规则：本用例的前提不成立")
+	}
+	if !injectRules(t, f, next) {
+		t.Fatalf("%s", writeEnforcementMissing("错误 Lease 名称（update）"))
+	}
+
+	res := runDeploy(t, f, "--migration-timeout", "10", "--rollout-timeout", "10")
+
+	res.requireCode(t, 3)
+	res.requireContains(t,
+		"缺少 leases.coordination.k8s.io/"+knownLeaseName+" 的 update 权限",
+		"Forbidden",
+	)
+	// get 仍然被授权（证明失败来自 update 这一条，不是 get 连带失败）。
+	res.requireNotContains(t, "缺少 leases.coordination.k8s.io/"+knownLeaseName+" 的 get 权限")
+	requireNoResourceMutations(t, f)
 }

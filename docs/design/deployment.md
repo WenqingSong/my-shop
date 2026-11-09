@@ -239,6 +239,9 @@ Nginx 是面向外部的唯一 HTTP 入口，职责为纯反向代理（无 Lua/
         集群级（ClusterRole）：namespaces get/create + selfsubjectaccessreviews create
         命名空间级（Role）：leases / jobs / pods / pods-log / secrets / deployments /
                             configmaps / services / pvc —— 逐项 auth can-i
+        leases 的 get/update 受 resourceNames 限制，必须按对象名检查
+          （auth can-i get leases.coordination.k8s.io/surgecart-deploy-lock）；
+          create 不能带对象名；pods/log 只能用 --subresource=log（T2-06.1.5 / F-01）
         区分「Forbidden（明确拒绝）」与「无法确认（SSAR 失败）」，两者都退出 3
     → 命名空间引导（仅在确认不存在且集群级权限齐备时；幂等）
     → 获取发布锁 Lease/surgecart-deploy-lock（原子 create + resourceVersion CAS；
