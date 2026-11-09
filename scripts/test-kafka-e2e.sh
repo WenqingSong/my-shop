@@ -7,7 +7,9 @@
 #   - DB Scanner ↔ Kafka 模式切换（重启生效，停旧启新）；
 #   - Publisher/Consumer 重启后 Outbox 恢复；
 #   - Publisher 与 Consumer 同时运行时关闭；
-#   - 可选故障注入：Kafka 停机恢复、MySQL 停机恢复（B4_E2E_FAULTS=1，默认开启）。
+#   - 可选故障注入：Kafka 停机恢复、MySQL 停机恢复（B4_E2E_FAULTS=1，默认开启）；
+#   - T2-02：Kafka 停机期间 /health 与 /ready 仍 200、flashsale_consumer_joined 归 0、
+#     flashsale_outbox_backlog_pending 反映真实积压，恢复后重新加入并收敛。
 #
 # 隔离保证：
 #   - 使用专用数据库（默认 my_shop_kafka_e2e）与专用 Redis DB（默认 6），测试前重建、测试后删除；

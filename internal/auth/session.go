@@ -12,6 +12,8 @@ import (
 
 	"github.com/gogf/gf/v2/database/gredis"
 	"github.com/gogf/gf/v2/frame/g"
+
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 )
 
 const (
@@ -106,11 +108,11 @@ func SessionKey(sid string) string {
 // SessionTTL 返回会话 TTL（秒），默认 3600，必须大于 0。
 // 可经 auth.session.ttl 配置或 AUTH_SESSION_TTL 环境变量覆盖。
 func SessionTTL(ctx context.Context) (int64, error) {
-	v, err := g.Cfg().GetEffective(ctx, "auth.session.ttl", defaultSessionTTL)
+	raw, err := config.Int(ctx, config.KeyAuthSessionTTL)
 	if err != nil {
-		return 0, fmt.Errorf("读取 auth.session.ttl: %w", err)
+		return 0, err
 	}
-	ttl := v.Int64()
+	ttl := int64(raw)
 	if ttl <= 0 {
 		return 0, errors.New("auth.session.ttl 必须大于 0")
 	}

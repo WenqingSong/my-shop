@@ -1,0 +1,30 @@
+# 集群内 HTTP Service。
+#
+# 边界：
+#   - 默认 ClusterIP，不创建 Ingress / NodePort：本仓库没有真实域名、Ingress Controller
+#     与 TLS 方案，虚构生产入口配置会制造「看起来能对外、实际不可用」的假象；
+#   - 只暴露应用 HTTP 端口 8000（命名端口 http），不暴露 /metrics 之外的额外管理端口
+#     （/metrics 与应用同端口，是否开启由 FLASH_SALE_METRICS_ENABLED 决定）；
+#   - 30000+ 的 NodePort 与 LoadBalancer 类型由环境叠加，不在 base 中预设。
+apiVersion: v1
+kind: Service
+metadata:
+  name: surgecart
+  labels:
+    app.kubernetes.io/name: surgecart
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: surgecart
+spec:
+  type: ClusterIP
+  # selector 必须与 Deployment 的 Pod 模板标签子集一致（由 scripts/test-k8s-manifest.sh 断言）。
+  selector:
+    app.kubernetes.io/name: surgecart
+    app.kubernetes.io/component: backend
+  ports:
+    # targetPort 引用容器的命名端口 http，避免 Service 与容器端口号两处维护。
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP
+  # 应用无会话粘滞需求（会话在 Redis/JWT），保持默认无粘滞。
+  sessionAffinity: None

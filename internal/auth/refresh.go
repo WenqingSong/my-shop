@@ -9,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/gogf/gf/v2/frame/g"
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 )
 
 const (
@@ -50,11 +50,11 @@ func HashRefreshToken(plaintext string) string {
 // RefreshTTL 返回 refresh token 绝对有效期（秒），默认 30 天，必须大于 0。
 // 可经 auth.refresh.ttl 配置或 AUTH_REFRESH_TTL 环境变量覆盖。
 func RefreshTTL(ctx context.Context) (int64, error) {
-	v, err := g.Cfg().GetEffective(ctx, "auth.refresh.ttl", defaultRefreshTTL)
+	raw, err := config.Int(ctx, config.KeyAuthRefreshTTL)
 	if err != nil {
-		return 0, fmt.Errorf("读取 auth.refresh.ttl: %w", err)
+		return 0, err
 	}
-	ttl := v.Int64()
+	ttl := int64(raw)
 	if ttl <= 0 {
 		return 0, errors.New("auth.refresh.ttl 必须大于 0")
 	}

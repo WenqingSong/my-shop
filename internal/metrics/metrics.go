@@ -11,11 +11,14 @@ package metrics
 import (
 	"context"
 	"net/http"
+	"sync"
 	"time"
 
-	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/glog"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 )
 
 // 结果标签取值（与 Contract 的 success/queued/gate_rejected/rate_limited/queue_full/error 枚举一致，
@@ -84,8 +87,9 @@ var (
 	}, []string{"interface", "result"})
 
 	// B2 Outbox Publisher 指标：只做进程内观测计数，不是业务事实。
-	// 未发布数量与最老待发布年龄需要查库，不在此处用 Gauge 回调（避免抓取时阻塞 DB），
-	// 由 OutboxPublisher.Backlog 提供统计接口，供后续 Prometheus 采集或健康检查接入。
+	// 待发布数量需要查库，绝不在 /metrics 抓取路径上直接查库（会让 scrape 被 DB 拖死）：
+	// 由后台采样器周期性调用 OutboxPublisher.Backlog，把结果写入
+	// flashsale_outbox_backlog_pending（见 outboxBacklogPending）。
 	outboxClaimed = prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: "flashsale",
 		Name:      "outbox_claimed_total",
@@ -164,7 +168,75 @@ var (
 		Help:      "Kafka 业务 Consumer 单条消息处理耗时（按处置结果）。",
 		Buckets:   histogramBuckets,
 	}, []string{"result"})
+
+	// T2-02-B：Consumer Group 成员资格（Gauge，无标签）。
+	// 1 = 有可靠证据证明已加入消费组（franz-go OnPartitionsAssigned 回调），
+	// 0 = 未加入（初始化/Run 退出/重建期间/Shutdown/分区撤销或成员资格丢失）。
+	// 语义边界：只适用于 flash_sale.dispatch_mode=kafka；db_scanner 模式下不导出该序列，
+	// 避免把一个恒为 0 的「未加入」假信号误读成 Kafka 故障。
+	consumerJoined = newObservableGauge("consumer_joined",
+		"Kafka Consumer 是否已加入消费组：1=已加入（OnPartitionsAssigned 已回调），0=未加入。仅 dispatch_mode=kafka 导出。")
+
+	// T2-02-C：Outbox 待发布积压（Gauge，无标签）。
+	// 统计口径 = OutboxPublisher.Backlog：status=queued 且 published_at IS NULL
+	// （含正在退避、以及已被领取但尚未成功发布的记录）。
+	// 它不是 Kafka Consumer Lag，也不是「已发布但尚未完成订单处理」的消息数。
+	// 只由后台采样器写入，/metrics 抓取不查库；仅 dispatch_mode=kafka 导出。
+	outboxBacklogPending = newObservableGauge("outbox_backlog_pending",
+		"Outbox 中等待发布的秒杀请求数（status=queued 且 published_at IS NULL，含退避中与租约中的记录）。仅 dispatch_mode=kafka 导出。")
 )
+
+// observableGauge 是「被显式观测后才导出」的 Gauge。
+//
+// 为什么要这样：prometheus.NewGauge 注册后即使从未 Set 也会导出 0，
+// 而 db_scanner 模式根本没有 Kafka Consumer / Outbox Publisher——导出 0 会让
+// 「指标不适用」被误读成「Consumer 未加入 / 积压为 0」。这里用 observed 标记
+// 把「不适用」表达为「该序列不存在」，只在 kafka 模式（真正观测过）后才导出。
+//
+// 并发安全：回调来自 franz-go 消费组协程，采样来自后台采样协程，
+// 抓取来自 /metrics handler，读写全部经 RWMutex。
+type observableGauge struct {
+	desc *prometheus.Desc
+
+	mu       sync.RWMutex
+	observed bool
+	value    float64
+}
+
+// newObservableGauge 构造一个未观测（不导出）的 Gauge。
+func newObservableGauge(name, help string) *observableGauge {
+	return &observableGauge{desc: prometheus.NewDesc("flashsale_"+name, help, nil, nil)}
+}
+
+// Describe 实现 prometheus.Collector；无标签，因此只描述一条指标。
+func (g *observableGauge) Describe(ch chan<- *prometheus.Desc) {
+	ch <- g.desc
+}
+
+// Collect 实现 prometheus.Collector：未被观测过时不导出任何序列。
+func (g *observableGauge) Collect(ch chan<- prometheus.Metric) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	if !g.observed {
+		return
+	}
+	ch <- prometheus.MustNewConstMetric(g.desc, prometheus.GaugeValue, g.value)
+}
+
+// set 标记为已观测并写入当前值。
+func (g *observableGauge) set(value float64) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.observed = true
+	g.value = value
+}
+
+// observedValue 返回 (是否已观测, 当前值)，用于测试与白盒断言。
+func (g *observableGauge) observedValue() (bool, float64) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.observed, g.value
+}
 
 func init() {
 	prometheus.MustRegister(
@@ -173,16 +245,21 @@ func init() {
 		outboxRetried, outboxMarkSkipped, outboxPublishDuration,
 		consumerRecords, consumerProcessed, consumerRetries, consumerDLQ,
 		consumerCommitFailures, consumerRestarts, consumerProcessingDuration,
+		consumerJoined, outboxBacklogPending,
 	)
 }
 
-// Enabled 读取指标开关（flash_sale.metrics.enabled，默认关闭）。
+// Enabled 读取指标开关（flash_sale.metrics.enabled / FLASH_SALE_METRICS_ENABLED，默认关闭）。
+//
+// 配置非法时返回 false 并显式记录错误（不静默）：启动期的 config.Validate 已把非法值
+// 拦成启动失败，此处只是运行期兜底，避免把指标采集故障扩散为业务请求失败。
 func Enabled(ctx context.Context) bool {
-	v, err := g.Cfg().GetEffective(ctx, "flash_sale.metrics.enabled", false)
-	if err != nil || v == nil {
+	enabled, err := config.Bool(ctx, config.KeyFlashSaleMetricsEnabled)
+	if err != nil {
+		glog.Errorf(ctx, "读取 %s 失败，按关闭处理: %v", config.KeyFlashSaleMetricsEnabled, err)
 		return false
 	}
-	return v.Bool()
+	return enabled
 }
 
 // ObserveOrder 记录一次秒杀下单请求（接口=order）。
@@ -303,6 +380,42 @@ func ObserveConsumerRestart(ctx context.Context) {
 		return
 	}
 	consumerRestarts.Inc()
+}
+
+// MarkConsumerJoined 记录 Kafka Consumer Group 成员资格状态（0/1）。
+//
+// 调用方与事件语义（franz-go v1.18.1）：
+//   - Consumer 客户端初始化：joined=false（此时只是客户端对象存在，不代表加入）；
+//   - kgo.OnPartitionsAssigned：joined=true（JoinGroup/SyncGroup 成功、分配已下发；
+//     即使分配为空集合也会回调，不能把「分区数为 0」当作未加入）；
+//   - kgo.OnPartitionsRevoked / OnPartitionsLost：joined=false（组会话结束或成员资格丢失）；
+//   - Consumer.Run 退出、重建期间、Runtime Shutdown：joined=false。
+//
+// 指标关闭时为空操作（不导出、不覆盖任何已观测值）。
+func MarkConsumerJoined(ctx context.Context, joined bool) {
+	if !Enabled(ctx) {
+		return
+	}
+	value := 0.0
+	if joined {
+		value = 1
+	}
+	consumerJoined.set(value)
+}
+
+// SetOutboxBacklogPending 写入 Outbox 待发布积压采样值（记录数）。
+//
+// 只能由后台采样器在「查询成功」后调用：查询失败必须保留上一次有效值，
+// 绝不能把积压错误地覆盖为 0（那会把 Kafka/MySQL 故障伪装成「积压已清空」）。
+// 指标关闭时为空操作。
+func SetOutboxBacklogPending(ctx context.Context, pending int64) {
+	if !Enabled(ctx) {
+		return
+	}
+	if pending < 0 {
+		pending = 0
+	}
+	outboxBacklogPending.set(float64(pending))
 }
 
 // Handler 返回 Prometheus 指标采集 handler（默认 registry 的文本格式）。

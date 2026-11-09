@@ -93,6 +93,34 @@ services:
     image: my-shop-app:local
     container_name: my-shop-app
     restart: unless-stopped
+    # ---------------------------------------------------------------------
+    # 容器运行安全加固（T2-04）
+    #
+    # 运行身份显式固定：与镜像 USER 一致，防止编排层或运维命令以 root 运行；
+    # K8s 侧对应 runAsUser/runAsGroup/runAsNonRoot。
+    # ---------------------------------------------------------------------
+    user: "10001:10001"
+    # 只读根文件系统：应用不需要修改镜像内容，写路径只有 /app/storage（持久化卷）
+    # 与 /tmp（tmpfs）。入口脚本只读执行 migrate/serve，不修改文件权限。
+    read_only: true
+    # 临时目录使用独立 tmpfs：只读根文件系统下仍可写，且 noexec/nosuid/nodev。
+    # 容器重建即清空，不承载业务数据。
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+    # 丢弃全部 Linux capabilities：应用监听 8000（非特权端口），不会执行 chown、
+    # 绑定低端口、修改网络栈或加载内核模块等需要 capability 的操作。
+    cap_drop:
+      - ALL
+    # 禁止通过 setuid/setgid 二进制提权；Docker 默认 seccomp profile 保持启用。
+    # 不使用 privileged / cap_add / host 网络 / host PID / Docker socket。
+    security_opt:
+      - no-new-privileges:true
+    # 容器终止预算（T2-03 冻结契约）：preStop 5s + HTTP drain 10s + runtime shutdown 30s
+    # + 安全余量 15s = 60s，与 manifest/config/config.yaml 的 lifecycle.termination_grace_period
+    # 及后续 Kubernetes terminationGracePeriodSeconds 同源。
+    # 覆盖 Compose 默认的 10s：`docker compose stop/down` 不会在第 10 秒提前 SIGKILL，
+    # 从而给 Publisher → Consumer → Producer → Scanner 的关闭顺序留出完整预算。
+    stop_grace_period: 60s
     # 依赖编排：mysql/redis 健康后才启动 app；应用内 waitForDependencies 再重试兜底。
     depends_on:
       mysql:
@@ -144,8 +172,10 @@ services:
     # 不映射宿主机端口：app 仅 Compose 网络内 app:8000 可达（Nginx 唯一对外入口的信任边界前提）。
     volumes:
       - app_storage:/app/storage
-    # /health 为 liveness：serve 仅在 bootstrap（依赖/schema/seed/七牛）全部通过后才监听端口，
-    # 可响应即代表依赖已就绪、schema 已就绪，无需独立 readiness 端点。
+    # /health 为 liveness：只表示进程存活，不访问 MySQL/Redis/Kafka（T2-02 冻结语义）。
+    # Compose 无 Service 摘流机制，故此处不使用 /ready：DB/Redis 抖动不应触发 restart。
+    # 该 healthcheck 与镜像内 HEALTHCHECK 保持同值（scripts/test-container.sh 断言一致）；
+    # Kubernetes 忽略镜像 HEALTHCHECK，改用 livenessProbe / readinessProbe。
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8000/health"]
       interval: 10s

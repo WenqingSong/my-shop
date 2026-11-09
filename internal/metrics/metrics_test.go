@@ -324,3 +324,132 @@ func TestObserveDisabledIsNoOp(t *testing.T) {
 		t.Fatalf("disabled observe should be no-op: before=%v after=%v", before, after)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// T2-02：Consumer Group 成员资格与 Outbox 积压（Gauge）
+// ---------------------------------------------------------------------------
+
+const (
+	metricConsumerJoined           = "flashsale_consumer_joined"
+	metricOutboxBacklogPending     = "flashsale_outbox_backlog_pending"
+	observableGaugeNameConsumer    = "consumer_joined"
+	observableGaugeNameBacklogName = "outbox_backlog_pending"
+)
+
+// gaugeValue 返回指定 Gauge 的值；规则与 counterValue 对称。
+func gaugeValue(t *testing.T, name string, labels map[string]string) float64 {
+	t.Helper()
+	m := findMetric(gatherFamily(t, name), labels)
+	if m == nil || m.GetGauge() == nil {
+		return -1
+	}
+	return m.GetGauge().GetValue()
+}
+
+// TestObservableGaugeNotExportedBeforeObservation 覆盖 T2-02-B/C 的适用范围语义：
+// 未被观测过（db_scanner 模式）时该序列完全不导出，而不是导出一个恒为 0 的假信号；
+// 一旦观测，导出为 Gauge 且无任何标签（低基数）。
+func TestObservableGaugeNotExportedBeforeObservation(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		collect  *observableGauge
+		fullName string
+	}{
+		{"consumer_joined", newObservableGauge(observableGaugeNameConsumer, "help"), metricConsumerJoined},
+		{"outbox_backlog_pending", newObservableGauge(observableGaugeNameBacklogName, "help"), metricOutboxBacklogPending},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reg := prometheus.NewRegistry()
+			if err := reg.Register(tc.collect); err != nil {
+				t.Fatalf("register: %v", err)
+			}
+			families, err := reg.Gather()
+			if err != nil {
+				t.Fatalf("gather: %v", err)
+			}
+			for _, f := range families {
+				if f.GetName() == tc.fullName {
+					t.Fatalf("未观测时不得导出 %s（db_scanner 模式不应出现该序列）", tc.fullName)
+				}
+			}
+
+			tc.collect.set(0)
+			families, err = reg.Gather()
+			if err != nil {
+				t.Fatalf("gather after set: %v", err)
+			}
+			if len(families) != 1 {
+				t.Fatalf("导出指标 family 数=%d want 1", len(families))
+			}
+			fam := families[0]
+			if fam.GetName() != tc.fullName {
+				t.Fatalf("指标名=%q want %q", fam.GetName(), tc.fullName)
+			}
+			if fam.GetType() != dto.MetricType_GAUGE {
+				t.Fatalf("指标类型=%v want GAUGE", fam.GetType())
+			}
+			if fam.GetHelp() == "" {
+				t.Fatal("HELP 说明不得为空")
+			}
+			if len(fam.GetMetric()) != 1 {
+				t.Fatalf("无标签 Gauge 只能有 1 条序列，实际 %d", len(fam.GetMetric()))
+			}
+			if labels := labelsOf(fam.GetMetric()[0]); len(labels) != 0 {
+				t.Fatalf("不得引入标签（高基数风险），实际 %v", labels)
+			}
+			if got := fam.GetMetric()[0].GetGauge().GetValue(); got != 0 {
+				t.Fatalf("初始值=%v want 0", got)
+			}
+		})
+	}
+}
+
+// TestConsumerJoinedMetricTransitions 覆盖 T2-02-B 状态机在指标上的投影：
+// 加入 → 1，退出/撤销 → 0；且关闭指标后不再改写已有值（符合 FLASH_SALE_METRICS_ENABLED 语义）。
+func TestConsumerJoinedMetricTransitions(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("FLASH_SALE_METRICS_ENABLED", "true")
+
+	MarkConsumerJoined(ctx, false)
+	if got := gaugeValue(t, metricConsumerJoined, nil); got != 0 {
+		t.Fatalf("初始化后指标=%v want 0（Consumer 尚未加入消费组）", got)
+	}
+	MarkConsumerJoined(ctx, true)
+	if got := gaugeValue(t, metricConsumerJoined, nil); got != 1 {
+		t.Fatalf("加入消费组后指标=%v want 1", got)
+	}
+	MarkConsumerJoined(ctx, false)
+	if got := gaugeValue(t, metricConsumerJoined, nil); got != 0 {
+		t.Fatalf("成员资格丢失后指标=%v want 0", got)
+	}
+
+	// 指标关闭：不得改写已观测值（不能伪造「状态未变」的假象，也不能清空）。
+	MarkConsumerJoined(ctx, true)
+	t.Setenv("FLASH_SALE_METRICS_ENABLED", "false")
+	MarkConsumerJoined(ctx, false)
+	if got := gaugeValue(t, metricConsumerJoined, nil); got != 1 {
+		t.Fatalf("指标关闭后 Mark 必须为空操作，实际=%v want 1", got)
+	}
+}
+
+// TestOutboxBacklogMetricReflectsSampleAndFreezesOnFailure 覆盖 T2-02-C：
+// 采样成功即导出实际积压；采样失败（调用方不调用 Set）时保留上一次有效值，绝不能变成 0。
+func TestOutboxBacklogMetricReflectsSampleAndFreezesOnFailure(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("FLASH_SALE_METRICS_ENABLED", "true")
+
+	SetOutboxBacklogPending(ctx, 3)
+	if got := gaugeValue(t, metricOutboxBacklogPending, nil); got != 3 {
+		t.Fatalf("积压指标=%v want 3", got)
+	}
+	// 采样失败路径：调用方只记录错误、不调用 Set，指标必须保持 3。
+	// 直接断言状态，避免依赖「谁忘了调用」的实现细节。
+	set, value := outboxBacklogPending.observedValue()
+	if !set || value != 3 {
+		t.Fatalf("采样失败后指标状态=(%v,%v) want (true,3)", set, value)
+	}
+	SetOutboxBacklogPending(ctx, 0)
+	if got := gaugeValue(t, metricOutboxBacklogPending, nil); got != 0 {
+		t.Fatalf("积压清零后指标=%v want 0", got)
+	}
+}

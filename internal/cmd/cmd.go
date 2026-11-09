@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/os/gcmd"
 
 	"cnb.cool/go-cloud-devops/my-shop/internal/boot"
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/health"
 	"cnb.cool/go-cloud-devops/my-shop/internal/logx"
 	"cnb.cool/go-cloud-devops/my-shop/internal/metrics"
@@ -18,6 +19,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
 	"cnb.cool/go-cloud-devops/my-shop/internal/service"
 	"cnb.cool/go-cloud-devops/my-shop/internal/storage"
+	"cnb.cool/go-cloud-devops/my-shop/internal/termination"
 	"cnb.cool/go-cloud-devops/my-shop/internal/worker"
 )
 
@@ -50,7 +52,7 @@ var (
 	migrateCmd = gcmd.Command{
 		Name:  "migrate",
 		Usage: "my-shop migrate <up|force|version>",
-		Brief: "管理数据库 migration（显式执行，serve 不自动执行）",
+		Brief: "管理数据库 migration（独立执行：不启动 HTTP/Redis/Kafka，serve 不自动执行）",
 	}
 
 	migrateUpCmd = gcmd.Command{
@@ -123,17 +125,8 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 		return err
 	}
 
-	// 秒杀后台组件不得直接继承信号 ctx（B4.1）：
-	// 若父 ctx 由 signal.NotifyContext 派生，SIGTERM 会在信号到达瞬间同时取消
-	// Publisher / Consumer / Scanner，绕过 runtime.Shutdown 的「Publisher → Consumer →
-	// Producer → Scanner」顺序编排，并让正在进行的 PublishBatch 被就地中断
-	// （已领取的 Outbox 记录只能等租约到期后重发）。
-	// 因此运行期使用脱离取消信号的 ctx，由 HTTP Server 完成优雅 drain 后、serve 返回时
-	// 统一调用 runtime.Shutdown 编排关闭顺序。启动阶段收到 SIGTERM 仍由默认信号语义
-	// 立即终止进程（GoFrame 的 HTTP 信号处理器在 s.Run 内注册，覆盖运行期）。
-	//
-	// WithoutCancel 保留 ctx 中的值（如链路标识），只剥离取消传播。
-	runtimeCtx := context.WithoutCancel(ctx)
+	// 秒杀后台组件不得直接继承信号 ctx（B4.1），由 runtimeContext 剥离取消传播。
+	runtimeCtx := runtimeContext(ctx)
 
 	// 秒杀链路装配：dispatch_mode 决定唯一消费入口（db_scanner 或 kafka），
 	// 两者严格互斥。Kafka 模式下 Producer / Outbox Publisher / Consumer 在此真正启动；
@@ -151,6 +144,20 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 			})
 		}
 	}()
+
+	// 终止预算契约（T2-03）：termination_grace_period 必须覆盖
+	// preStop + HTTP drain + Runtime 关闭 + 安全余量。
+	// 预算不足即启动失败：否则进程会在终止宽限期结束时被 SIGKILL，关闭顺序随之失效。
+	// HTTP drain 与 Runtime 关闭预算都取自实际生效配置（而非默认常量），避免日志与行为漂移。
+	drainTimeout, err := boot.ServerGracefulTimeout(ctx)
+	if err != nil {
+		return err
+	}
+	budget, err := termination.Load(ctx, drainTimeout, runtime.ShutdownTimeout())
+	if err != nil {
+		return err
+	}
+	budget.LogStartup(ctx)
 
 	s := g.Server()
 	// 初始化本地图片存储：seed 轮播图占位图，并将 banner 目录映射为静态路由 /storage/banners。
@@ -172,17 +179,39 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 		RegisterFrontendRoutes(root)
 		RegisterAdminRoutes(root)
 	})
-	s.Run()
-	// s.Run() 返回后（HTTP 已完成优雅 drain），由 defer 中的 runtime.Shutdown 停止后台组件并收尾。
-	// 该日志是进程级关闭时序的显式证据：它必须早于 runtime 的关闭步骤日志。
-	logx.Info(ctx, "http_server_stopped", "HTTP Server 已退出（优雅 drain 结束），开始关闭秒杀后台组件", nil)
-	return nil
+	// 测试构建可注入额外路由（生产构建为空实现，不包含任何测试入口）。
+	applyServeLifecycleHook(s)
+
+	// serveHTTP 返回后（HTTP 已完成有界 drain、或在预算内强制关闭并确认停止），
+	// 由 defer 中的 runtime.Shutdown 停止后台组件并收尾。
+	addr, err := boot.ServerAddress(ctx)
+	if err != nil {
+		return err
+	}
+	return serveHTTP(ctx, s, addr, budget.HTTPDrainTimeout)
+}
+
+// runtimeContext 返回脱离信号取消的后台运行期 ctx（B4.1 语义）。
+//
+// 若把 signal.NotifyContext 派生出的 ctx 直接交给 Runtime，SIGTERM 会在信号到达瞬间
+// 同时取消 Publisher / Consumer / Scanner，绕过 runtime.Shutdown 的
+// 「Publisher → Consumer → Producer → Scanner」顺序编排，并让正在进行的 PublishBatch
+// 被就地中断（已领取的 Outbox 记录只能等租约到期后重发）。
+//
+// WithoutCancel 保留 ctx 中的值（如链路标识），只剥离取消传播；
+// 运行期统一由 HTTP drain 结束后调用的 runtime.Shutdown 控制关闭顺序。
+func runtimeContext(ctx context.Context) context.Context {
+	return context.WithoutCancel(ctx)
 }
 
 // configureBannerStorage 初始化轮播图图片的本地存储：seed 3 张占位图，并将 banner 目录
 // 映射为 /storage/banners 静态路由（LocalStorage 为 V1 唯一实现，后续可替换 MinIO/OSS/S3）。
 func configureBannerStorage(ctx context.Context, s *ghttp.Server) error {
-	local := storage.NewLocal(storageRoot(ctx))
+	root, err := config.String(ctx, config.KeyStorageLocalRoot)
+	if err != nil {
+		return err
+	}
+	local := storage.NewLocal(root)
 	if _, err := local.PrepareBannerPlaceholders(ctx); err != nil {
 		return err
 	}
@@ -201,24 +230,28 @@ func registerMetricsRoute(ctx context.Context, s *ghttp.Server) {
 	})
 }
 
-// storageRoot 读取本地存储根目录（环境变量 STORAGE_LOCAL_ROOT 可覆盖），默认 ./storage。
-func storageRoot(ctx context.Context) string {
-	v, err := g.Cfg().GetEffective(ctx, "storage.local.root", "./storage")
-	if err != nil || v == nil {
-		return "./storage"
-	}
-	return v.String()
-}
-
 // migrateUp 执行所有未应用 migration。
+//
+// 执行顺序固定：前置配置校验 → 建立迁移专用连接 → 迁移 → 关闭连接 → 退出。
+// migrate 子命令不调用 boot.Bootstrap：不启动 HTTP Server / FlashSale Runtime /
+// Kafka Consumer / Publisher / 后台 Scanner，也不连接 Redis。
 func migrateUp(ctx context.Context, _ *gcmd.Parser) error {
+	if err := migrations.Preflight(ctx); err != nil {
+		return err
+	}
 	return migrations.Up(ctx)
 }
 
 // migrateForce 标记指定版本已应用（不执行 SQL）。
+//
+// 风险操作：不执行、不校验、不修复任何 DDL，只改 schema_migrations。
+// 仅用于 baseline 接管与 dirty 的人工恢复，禁止自动化流程调用。
 func migrateForce(ctx context.Context, parser *gcmd.Parser) error {
 	version, err := migrateForceVersion(parser)
 	if err != nil {
+		return err
+	}
+	if err := migrations.Preflight(ctx); err != nil {
 		return err
 	}
 	return migrations.Force(ctx, version)
@@ -226,6 +259,9 @@ func migrateForce(ctx context.Context, parser *gcmd.Parser) error {
 
 // migrateVersion 只读打印当前版本与 dirty 状态。
 func migrateVersion(ctx context.Context, _ *gcmd.Parser) error {
+	if err := migrations.Preflight(ctx); err != nil {
+		return err
+	}
 	current, dirty, latest, err := migrations.Status(ctx)
 	if err != nil {
 		return err

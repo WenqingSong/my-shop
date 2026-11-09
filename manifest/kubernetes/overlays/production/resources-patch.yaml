@@ -1,0 +1,23 @@
+# 生产资源规格。
+#
+# 数值来源：单副本 Go 服务（HTTP + 订单取消扫描 + 秒杀对账/消费扫描）的保守估算，
+# 尚未经过目标集群的真实压测，属于「不省略 requests、limit 留余量」的下界配置。
+# 上线后应按实际 CPU/内存观测调整（requests 过低会导致节点超卖，limit 过低会 OOMKill）。
+#
+# 容器按 name 匹配合并，其余字段（探针、环境变量、挂载）保持 base 定义不变。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: surgecart
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi

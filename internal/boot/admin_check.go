@@ -6,6 +6,8 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/os/glog"
+
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 )
 
 // CheckSuperAdminCondition 校验超级管理员创建条件，供 `my-shop admin check` / `make up` 启动前预检调用。
@@ -17,6 +19,11 @@ import (
 // admins 表不存在（尚未迁移）经 superAdminExists 视为「不存在」；其它数据库错误 fail-closed。
 // 错误信息只指认键名/依赖名，不泄漏密码值、内部路径或堆栈。
 func CheckSuperAdminCondition(ctx context.Context) error {
+	// 与该命令同样会建立数据库连接的严格校验：Kubernetes 严格模式下漏配环境变量时，
+	// 预检命令也必须在连接之前失败，而不是连到本机 localhost。
+	if err := ValidateConfig(ctx); err != nil {
+		return err
+	}
 	if err := applyDatabaseConfig(ctx); err != nil {
 		return gerror.Wrap(err, "应用数据库配置")
 	}
@@ -30,7 +37,10 @@ func CheckSuperAdminCondition(ctx context.Context) error {
 		return nil
 	}
 
-	password := cfgString(ctx, "admin.super.password", "")
+	password, err := config.String(ctx, config.KeyAdminSuperPassword)
+	if err != nil {
+		return err
+	}
 	if password == "" {
 		return errors.New("未配置超级管理员初始密码 admin.super.password（ADMIN_SUPER_PASSWORD）；数据库尚无超级管理员，首次启动需创建，请先在 .env 中填写后再重试")
 	}

@@ -24,9 +24,13 @@ import (
 	productv1 "cnb.cool/go-cloud-devops/my-shop/api/product/v1"
 	skuv1 "cnb.cool/go-cloud-devops/my-shop/api/sku/v1"
 	"cnb.cool/go-cloud-devops/my-shop/internal/codes"
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 	"cnb.cool/go-cloud-devops/my-shop/internal/logx"
 	"cnb.cool/go-cloud-devops/my-shop/internal/service"
 )
+
+// defaultPayTimeoutSeconds 是 order.pay_timeout 的代码默认值（秒）。
+const defaultPayTimeoutSeconds int64 = 900
 
 // 订单状态（DB TINYINT，见 docs/design/order.md 状态机）。
 const (
@@ -940,12 +944,22 @@ func generateOrderNo() string {
 }
 
 // payTimeout 返回支付超时时长（秒，默认 900），不硬编码。
+//
+// 配置非法时记录 Error 级日志并按代码默认值处理：该值在创建订单的 SQL 片段中内联使用，
+// 调用签名不携带 error；启动期的 config.Validate 已把非法配置拦成启动失败。
 func payTimeout(ctx context.Context) int64 {
-	v := g.Cfg().MustGet(ctx, "order.pay_timeout", 900).Int64()
-	if v <= 0 {
-		return 900
+	seconds, err := config.Int64(ctx, config.KeyOrderPayTimeout)
+	if err != nil {
+		logx.Error(ctx, "order_config_read_failed", "读取订单支付超时失败，按代码默认值处理", logx.Fields{
+			"config_key": string(config.KeyOrderPayTimeout),
+			"error":      err.Error(),
+		})
+		return defaultPayTimeoutSeconds
 	}
-	return v
+	if seconds <= 0 {
+		return defaultPayTimeoutSeconds
+	}
+	return seconds
 }
 
 // duplicateKeyName 从错误链中提取 MySQL 唯一约束冲突（1062）的键名，非重复键错误返回空串。

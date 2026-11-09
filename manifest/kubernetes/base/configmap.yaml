@@ -1,0 +1,67 @@
+# 应用运行期非敏感配置（ConfigMap）。
+#
+# 覆盖范围：只写「生产部署必须显式固定」的项，不复制 T2-01 的 63 项契约。
+# 未列出的项使用 internal/config 注册表中的代码默认值（与 manifest/config/config.yaml 一致），
+# 从而让 ConfigMap 只承担「部署差异」而不是「配置镜像」。
+#
+# 键名必须与 internal/config/contract.go 完全一致，否则环境变量不会生效
+# （校验见 scripts/test-k8s-manifest.sh）。
+#
+# 敏感值（DATABASE_DEFAULT_PASS / REDIS_DEFAULT_PASS / AUTH_JWT_SECRET /
+# ADMIN_SUPER_PASSWORD / QINIU_ACCESS_KEY / QINIU_SECRET_KEY）不在此处，
+# 只来自 Secret（examples/secrets/）。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: surgecart-config
+  labels:
+    app.kubernetes.io/name: surgecart
+    app.kubernetes.io/part-of: surgecart
+    app.kubernetes.io/component: backend
+data:
+  # ---------- HTTP 服务 ----------
+  # 容器监听所有网卡，Service targetPort 使用命名端口 http（containerPort 8000）。
+  SERVER_ADDRESS: ":8000"
+  # T2-03 冻结预算：HTTP drain 段（与 internal/termination 契约同源）。
+  SERVER_GRACEFUL_TIMEOUT: "10"
+
+  # ---------- 终止预算（T2-03，禁止单方面调整）----------
+  # preStop 5s 由 Deployment 的 lifecycle.preStop 实际执行；
+  # 这里的值用于进程内预算自检与启动日志，二者必须一致（否则启动 fail-fast）。
+  LIFECYCLE_PRE_STOP_DELAY: "5s"
+  # 必须等于 Deployment 的 terminationGracePeriodSeconds。
+  LIFECYCLE_TERMINATION_GRACE_PERIOD: "60s"
+  # Runtime 关闭段（Publisher → Consumer → Producer → Scanner），预算 30s。
+  FLASH_SALE_SHUTDOWN_TIMEOUT: "30s"
+
+  # ---------- 就绪/存活探针 ----------
+  # /ready 依赖探测超时 1s + 结果缓存 3s；探针 timeoutSeconds 必须大于二者之和的下界。
+  READINESS_PROBE_TIMEOUT: "1"
+  READINESS_CACHE_TTL: "3"
+
+  # ---------- 启动 ----------
+  # MySQL/Redis 连通性重试总超时（秒）；startupProbe 的时间窗必须覆盖它。
+  STARTUP_DEPENDENCY_TIMEOUT: "30"
+
+  # ---------- Redis ----------
+  # 生产 overlay 覆盖为实际外部地址；base 值仅供构建，不指向本机。
+  REDIS_DEFAULT_ADDRESS: "redis.surgecart.svc.cluster.local:6379"
+  REDIS_DEFAULT_DB: "0"
+
+  # ---------- 本地文件存储 ----------
+  # 与 Deployment 的 PVC 挂载点一致；只读根文件系统下这是唯一持久可写目录
+  # （/tmp 为内存型 emptyDir，不承载业务数据）。
+  STORAGE_LOCAL_ROOT: "/app/storage"
+
+  # ---------- 七牛对象存储（非敏感项）----------
+  # AK/SK 来自 Secret；region 有稳定默认值，bucket/domain 属于环境专属值，
+  # 由 overlays/production/configmap-patch.yaml 提供。
+  QINIU_REGION: "z2"
+
+  # ---------- 秒杀消费入口 ----------
+  # 默认 db_scanner：不依赖 Kafka 集群即可启动，是本仓库已验证的消费路径。
+  # 切换到 kafka 需要在 overlay 中同时提供 FLASH_SALE_KAFKA_BROKERS / TOPIC /
+  # DLQ_TOPIC / CONSUMER_GROUP 并把本项改为 kafka（见 docs/development/kubernetes.md §6）。
+  # 注意：Kafka 状态不参与 /health 与 /ready 判定（T2-02 冻结语义）。
+  FLASH_SALE_DISPATCH_MODE: "db_scanner"
+  FLASH_SALE_KAFKA_ENABLED: "false"

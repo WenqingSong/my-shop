@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -316,6 +317,48 @@ func (p *lifecycleProc) killIfAlive() {
 	case <-p.done:
 	case <-time.After(5 * time.Second):
 	}
+}
+
+// lifecycleAssertNoResidualBinary 断言没有残留的同二进制进程（按 /proc/<pid>/cmdline 的 argv[0] 精确匹配）。
+// 关闭测试不得依赖 kill -9 收尾：残留进程意味着关闭流程泄漏或测试收尾失真。
+func lifecycleAssertNoResidualBinary(t *testing.T, bin string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var pids []string
+	for time.Now().Before(deadline) {
+		pids = lifecycleFindProcessesByBinary(bin)
+		if len(pids) == 0 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("存在残留 serve 子进程: %v", pids)
+}
+
+// lifecycleFindProcessesByBinary 扫描 /proc 找出 argv[0] 等于指定二进制的进程 PID。
+func lifecycleFindProcessesByBinary(bin string) []string {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil
+	}
+	pids := make([]string, 0, 2)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if _, err := strconv.Atoi(entry.Name()); err != nil {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "cmdline"))
+		if err != nil || len(raw) == 0 {
+			continue
+		}
+		args := strings.Split(strings.TrimRight(string(raw), "\x00"), "\x00")
+		if len(args) > 0 && args[0] == bin {
+			pids = append(pids, entry.Name())
+		}
+	}
+	return pids
 }
 
 // waitHealth 轮询真实 HTTP /health 直到 200 且 code=0。

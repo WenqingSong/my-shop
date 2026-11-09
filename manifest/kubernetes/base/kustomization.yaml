@@ -1,0 +1,25 @@
+# Application 基础层（base）。
+#
+# 职责：只声明与「运行环境无关」的资源。环境差异（镜像版本、副本数、资源规格、
+# 外部数据库/Redis 地址、七牛 bucket/domain）全部由 overlays/<env> 提供。
+#
+# 构建入口（本文件不可直接发布）：
+#   kubectl kustomize manifest/kubernetes/overlays/production > application.yaml
+#
+# 与 Migration 的关系：两者共享 ../shared（Namespace + 数据库连接配置），
+# 但部署入口相互独立——Application 清单中没有任何 Job，Migration 清单中没有任何
+# Deployment/Service。发布顺序由 scripts/deploy-k8s.sh 强制（先迁移后应用）。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # 与 Migration 共用的集群级资源（命名空间、数据库连接配置）。
+  - ../shared
+  # 应用自身的非敏感运行期配置（不含数据库连接参数）。
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml
+  - storage.yaml
+
+# 所有命名空间级资源统一落到 surgecart（Namespace 对象本身由 kustomize 跳过）。
+namespace: surgecart

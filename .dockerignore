@@ -1,6 +1,9 @@
 # =============================================================================
-# 构建上下文排除清单（后端镜像仅需 Go 源码、go.mod/go.sum、config.yaml 与 entrypoint）。
-# 核心目标（INV-003）：.env、运行数据与真实凭据绝不进入构建上下文。
+# 构建上下文排除清单（T2-04）
+#
+# 生产镜像只需要：Go 源码（主包及其 internal 依赖）、go.mod/go.sum、
+# manifest/config/config.yaml、scripts/docker-entrypoint.sh。
+# 核心目标：.env、运行数据、真实凭据、测试产物与构建工具绝不进入构建上下文。
 # =============================================================================
 
 # 本地环境变量（真实凭据，绝不进镜像/上下文）
@@ -11,6 +14,9 @@
 # 编译产物与运行时临时目录（宿主机遗留）
 bin/
 tmp/
+logs/
+coverage.out
+*.test
 
 # 本地文件存储运行数据（banner 占位图等，容器内由 app_storage 卷承载）
 storage/
@@ -30,5 +36,16 @@ docs/
 .agent/
 *.md
 
-# 测试源码（不参与后端镜像构建）
+# 测试文件不参与生产二进制编译；test/serveproc 仅被 lifecycle-verify 目标使用，
+# 因此 test/ 目录本身保留在上下文中。
 *_test.go
+
+# 容器专项测试的运行时产物（证书、编译出的 mock 二进制）
+test/container/.artifacts/
+
+# 与镜像构建无关的编排/流水线文件
+nginx/
+prometheus/
+docker-compose*.yml
+.cnb.yml
+Makefile

@@ -14,15 +14,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/gogf/gf/v2/container/gvar"
-	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/os/genv"
-
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 	"cnb.cool/go-cloud-devops/my-shop/internal/logic/flashsale"
 	"cnb.cool/go-cloud-devops/my-shop/internal/logx"
 	"cnb.cool/go-cloud-devops/my-shop/internal/metrics"
@@ -57,6 +53,14 @@ const (
 	consumerRestartResetAfter  = time.Minute
 	// defaultConsumerCloseTimeout 约束单次 Consumer.Close（离组可能因 Broker 不可达而等待）。
 	defaultConsumerCloseTimeout = 5 * time.Second
+
+	// outboxBacklogSampleInterval 是 flashsale_outbox_backlog_pending 的采样周期。
+	// 关键约束：/metrics 抓取路径绝不直接查库（抓取频率由 Prometheus 决定，不能被 DB 拖住），
+	// 由本循环固定节奏查询一次（一次覆盖索引 COUNT + 至多一次单行回表）。
+	// 复用现有运行机制、不新增配置项：5s 足够让积压变化在常规 15~30s 抓取间隔内可见。
+	outboxBacklogSampleInterval = 5 * time.Second
+	// outboxBacklogSampleTimeout 是单次采样的查询预算，必须小于采样周期，避免慢查询堆积。
+	outboxBacklogSampleTimeout = 3 * time.Second
 )
 
 // flashSalePublisherConfig 是 Outbox 后台发布循环的参数。
@@ -79,6 +83,21 @@ type outboxRunner interface {
 	PublishBatch(ctx context.Context, limit int) (flashsale.OutboxStats, error)
 }
 
+// outboxBacklogReader 是积压采样依赖的最小能力，由 flashsale.OutboxPublisher.Backlog 实现。
+//
+// 复用现有实现而不是另写一套 SQL：指标口径必须与 Publisher 领取口径一致
+// （status=queued 且 published_at IS NULL），否则「积压」会与真实待发布集合漂移。
+type outboxBacklogReader interface {
+	Backlog(ctx context.Context) (flashsale.OutboxBacklog, error)
+}
+
+// outboxBackend 是 Kafka 模式下 Outbox 组件必须同时具备的两种能力。
+// 装配期用组合接口表达，缺能力即编译失败，而不是运行期静默跳过采样。
+type outboxBackend interface {
+	outboxRunner
+	outboxBacklogReader
+}
+
 // consumerRunner 是 Consumer 监督循环依赖的最小能力。
 type consumerRunner interface {
 	Run(ctx context.Context) error
@@ -94,7 +113,7 @@ type flashSaleRuntimeDeps struct {
 
 	newProducer        func(kafkamq.Config) (mq.Publisher, error)
 	newConsumerClient  func(kafkamq.Config) (flashsale.RebalanceConsumer, error)
-	newOutbox          func(mq.Publisher, string, flashsale.OutboxOptions) (outboxRunner, error)
+	newOutbox          func(mq.Publisher, string, flashsale.OutboxOptions) (outboxBackend, error)
 	newEventConsumer   func(flashsale.RebalanceConsumer, mq.Publisher, flashsale.RequestConsumer, flashsale.ConsumerOptions) (consumerRunner, error)
 	newRequestConsumer func() flashsale.RequestConsumer
 
@@ -103,9 +122,10 @@ type flashSaleRuntimeDeps struct {
 	startConsumeScanner func(ctx context.Context, wg *sync.WaitGroup)
 
 	// 测试注入的可调时长；为零时使用生产默认值。
-	consumerRestartBase  time.Duration
-	consumerRestartMax   time.Duration
-	consumerCloseTimeout time.Duration
+	consumerRestartBase   time.Duration
+	consumerRestartMax    time.Duration
+	consumerCloseTimeout  time.Duration
+	backlogSampleInterval time.Duration
 }
 
 // defaultFlashSaleRuntimeDeps 返回生产装配使用的依赖。
@@ -118,7 +138,7 @@ func defaultFlashSaleRuntimeDeps() flashSaleRuntimeDeps {
 		newConsumerClient: func(cfg kafkamq.Config) (flashsale.RebalanceConsumer, error) {
 			return kafkamq.NewConsumer(cfg)
 		},
-		newOutbox: func(pub mq.Publisher, topic string, opts flashsale.OutboxOptions) (outboxRunner, error) {
+		newOutbox: func(pub mq.Publisher, topic string, opts flashsale.OutboxOptions) (outboxBackend, error) {
 			return flashsale.NewOutboxPublisher(pub, topic, opts)
 		},
 		newEventConsumer: func(
@@ -154,9 +174,12 @@ type FlashSaleRuntime struct {
 
 	publisherCancel context.CancelFunc
 	consumerCancel  context.CancelFunc
+	// backlogCancel 停止积压采样循环；采样是只读操作，退出顺序独立于发布/消费。
+	backlogCancel context.CancelFunc
 
 	publisherWG sync.WaitGroup
 	consumerWG  sync.WaitGroup
+	backlogWG   sync.WaitGroup
 	scannerWG   sync.WaitGroup
 
 	producer mq.Publisher
@@ -168,9 +191,10 @@ type FlashSaleRuntime struct {
 	publisherPollInterval time.Duration
 	publisherErrorBackoff time.Duration
 
-	consumerRestartBase  time.Duration
-	consumerRestartMax   time.Duration
-	consumerCloseTimeout time.Duration
+	consumerRestartBase   time.Duration
+	consumerRestartMax    time.Duration
+	consumerCloseTimeout  time.Duration
+	backlogSampleInterval time.Duration
 
 	shutdownOnce sync.Once
 	shutdownErr  error
@@ -210,6 +234,7 @@ func startFlashSaleRuntime(ctx context.Context, deps flashSaleRuntimeDeps) (*Fla
 		consumerRestartBase:   deps.consumerRestartBase,
 		consumerRestartMax:    deps.consumerRestartMax,
 		consumerCloseTimeout:  deps.consumerCloseTimeout,
+		backlogSampleInterval: deps.backlogSampleInterval,
 	}
 	rt.applyTimingDefaults()
 
@@ -278,6 +303,11 @@ func (r *FlashSaleRuntime) startKafka(ctx context.Context, deps flashSaleRuntime
 		r.runOutboxPublisher(pubCtx, outbox)
 	}()
 
+	// Consumer 初始化即视为「未加入消费组」：此刻只有客户端对象，
+	// 真正的加入证据来自 franz-go 的 OnPartitionsAssigned 回调。
+	// 显式置 0 让指标在 kafka 模式下从启动第一刻就有确定的初始语义。
+	metrics.MarkConsumerJoined(ctx, false)
+
 	// Consumer：监督循环负责意外退出后的有界重建，并在退出前关闭当前客户端。
 	consCtx, consCancel := context.WithCancel(ctx)
 	r.consumerCancel = consCancel
@@ -288,22 +318,39 @@ func (r *FlashSaleRuntime) startKafka(ctx context.Context, deps flashSaleRuntime
 		r.superviseConsumer(consCtx, deps, consumer, client)
 	}()
 
+	// Outbox 积压采样：独立可取消 ctx + 独立 WaitGroup，纳入 Shutdown 管理。
+	// 采样只读、有界（单次 3s 预算 < 5s 周期），失败不影响发布与消费。
+	backlogCtx, backlogCancel := context.WithCancel(ctx)
+	r.backlogCancel = backlogCancel
+	r.backlogWG.Add(1)
+	go func() {
+		defer r.backlogWG.Done()
+		r.runOutboxBacklogSampler(backlogCtx, outbox)
+	}()
+
 	// 订单超时取消与 Redis 对账与分发模式无关：两种模式都必须继续运行。
 	deps.startOrderCancel(ctx, &r.scannerWG)
 	deps.startReconcile(ctx, &r.scannerWG)
 
 	logx.Info(ctx, "flashsale_runtime_started", "秒杀链路以 Kafka 模式启动", logx.Fields{
-		"mode":              r.mode,
-		"brokers":           strings.Join(r.kafkaConfig.Brokers, ","),
-		"topic":             r.kafkaConfig.Topic,
-		"dlq_topic":         r.kafkaConfig.DLQTopic,
-		"consumer_group":    r.kafkaConfig.ConsumerGroup,
-		"publisher_batch":   r.publisherBatchSize,
-		"poll_interval":     r.publisherPollInterval.String(),
-		"publisher_backoff": r.publisherErrorBackoff.String(),
-		"shutdown_budget":   r.shutdownTimeout.String(),
+		"mode":                    r.mode,
+		"brokers":                 strings.Join(r.kafkaConfig.Brokers, ","),
+		"topic":                   r.kafkaConfig.Topic,
+		"dlq_topic":               r.kafkaConfig.DLQTopic,
+		"consumer_group":          r.kafkaConfig.ConsumerGroup,
+		"publisher_batch":         r.publisherBatchSize,
+		"poll_interval":           r.publisherPollInterval.String(),
+		"publisher_backoff":       r.publisherErrorBackoff.String(),
+		"backlog_sample_interval": r.backlogSampleInterval.String(),
+		"shutdown_budget":         r.shutdownTimeout.String(),
 	})
 	return nil
+}
+
+// ShutdownTimeout 返回运行期统一关闭预算（flash_sale.shutdown_timeout 的生效值）。
+// serve 用它计算容器终止预算契约，保证日志与校验使用同一个生效值而非默认常量。
+func (r *FlashSaleRuntime) ShutdownTimeout() time.Duration {
+	return r.shutdownTimeout
 }
 
 // applyTimingDefaults 补齐测试未注入的时长参数。
@@ -326,6 +373,9 @@ func (r *FlashSaleRuntime) applyTimingDefaults() {
 	if r.consumerCloseTimeout > r.shutdownTimeout {
 		// 单次客户端关闭不能单独突破统一关闭预算。
 		r.consumerCloseTimeout = r.shutdownTimeout
+	}
+	if r.backlogSampleInterval <= 0 {
+		r.backlogSampleInterval = outboxBacklogSampleInterval
 	}
 }
 
@@ -365,6 +415,53 @@ func (r *FlashSaleRuntime) runOutboxPublisher(ctx context.Context, outbox outbox
 	}
 }
 
+// runOutboxBacklogSampler 周期性把 Outbox 待发布积压写入 Gauge。
+//
+// 设计约束（T2-02-C）：
+//   - /metrics 抓取不查库：所有 DB 访问都收敛到这里，抓取只读进程内 Gauge；
+//   - 有界：单次查询 3s 预算 < 5s 周期，且循环内同步执行，不会并发堆积查询；
+//   - 可退出：ctx 取消立即返回，由 Shutdown 的 backlogWG 等待，不留无法退出的 goroutine；
+//   - 失败不改写：查询失败只记录日志，保留上一次有效值（绝不把积压伪造成 0）；
+//   - 与业务隔离：只读 Backlog 查询，不写业务表、不影响发布/消费。
+func (r *FlashSaleRuntime) runOutboxBacklogSampler(ctx context.Context, outbox outboxBacklogReader) {
+	ticker := time.NewTicker(r.backlogSampleInterval)
+	defer ticker.Stop()
+	defer logx.Info(context.Background(), "flashsale_outbox_backlog_sampler_exited", "秒杀 Outbox 积压采样循环已退出", nil)
+
+	// 先采样一次：让指标在启动后尽快具备确定值，而不是等一个完整周期。
+	r.sampleOutboxBacklog(ctx, outbox)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			r.sampleOutboxBacklog(ctx, outbox)
+		}
+	}
+}
+
+// sampleOutboxBacklog 执行一次有界采样。
+func (r *FlashSaleRuntime) sampleOutboxBacklog(ctx context.Context, outbox outboxBacklogReader) {
+	// 指标关闭时不产生任何额外 DB 负载（启用状态由 T2-01 统一配置读取）。
+	if !metrics.Enabled(ctx) {
+		return
+	}
+	queryCtx, cancel := context.WithTimeout(ctx, outboxBacklogSampleTimeout)
+	backlog, err := outbox.Backlog(queryCtx)
+	cancel()
+	if err != nil {
+		if ctx.Err() != nil {
+			// 关闭期间取消导致的失败不是故障，不刷错误日志。
+			return
+		}
+		logx.Warning(ctx, "flashsale_outbox_backlog_sample_failed", "秒杀 Outbox 积压采样失败，保留上一次有效值", logx.Fields{
+			"error": err.Error(),
+		})
+		return
+	}
+	metrics.SetOutboxBacklogPending(ctx, backlog.Pending)
+}
+
 // superviseConsumer 监督 Consumer.Run，并在意外退出后按有界指数退避重建。
 //
 // 关键不变量：
@@ -397,6 +494,9 @@ func (r *FlashSaleRuntime) superviseConsumer(
 
 		startedAt := time.Now()
 		runErr := current.Run(ctx)
+		// Run 返回即不再有消费组会话：无论正常关闭还是意外退出，成员资格都必须归零。
+		// 这里不依赖客户端回调是否已经触发，避免「Run 已退出但指标仍为 1」的窗口。
+		metrics.MarkConsumerJoined(ctx, false)
 		if ctx.Err() != nil {
 			// 主动关闭：Run 已返回（含 AllowRebalance 的 defer），关闭客户端后退出。
 			closeConsumerClientBounded(client, r.consumerCloseTimeout)
@@ -468,6 +568,19 @@ func (r *FlashSaleRuntime) shutdown() error {
 		"budget": r.shutdownTimeout.String(),
 	})
 
+	// 积压采样只读且独立：先停它，避免关闭过程中继续发起新的 DB 查询。
+	if r.backlogCancel != nil {
+		r.backlogCancel()
+		stopped := waitGroupUntil(&r.backlogWG, deadline)
+		if !stopped {
+			errs = append(errs, r.shutdownTimeoutError("Outbox 积压采样"))
+		}
+		logx.Info(context.Background(), "flashsale_outbox_backlog_sampler_stopped", "秒杀 Outbox 积压采样已停止", logx.Fields{
+			"elapsed_ms": time.Since(started).Milliseconds(),
+			"timed_out":  !stopped,
+		})
+	}
+
 	if r.publisherCancel != nil {
 		r.publisherCancel()
 		stopped := waitGroupUntil(&r.publisherWG, deadline)
@@ -491,6 +604,9 @@ func (r *FlashSaleRuntime) shutdown() error {
 			"timed_out":  !stopped,
 		})
 	}
+	// Shutdown 结束时消费组成员的成员资格必然为 0：即使关闭超时残留了收尾协程，
+	// 也不允许指标继续声称「已加入」。
+	metrics.MarkConsumerJoined(context.Background(), false)
 
 	// Producer 最后关闭：Consumer 的死信投递依赖它；此时消费循环已停止，不会再有新 Publish。
 	// 这里不清空 r.producer：若 Consumer 监督循环因超时仍在收尾，读取该字段不会与写并发；
@@ -639,10 +755,10 @@ func closeConsumerClientBounded(client flashsale.RebalanceConsumer, timeout time
 
 // loadFlashSaleRuntimeConfig 读取 mode / kafka / publisher / shutdown 配置。
 //
-// 读取方式与其他 flash_sale 配置一致：环境变量优先，配置文件用不做键归一化的 cfg.Get
-// （GoFrame 的 GetEffective 会把 flash_sale 归一化成 flash.sale，见 mq/kafka/config.go）。
+// 读取方式统一走 internal/config：环境变量 > config.yaml > 代码默认值，
+// 文件读取不做键归一化（GoFrame 的 GetEffective 会把 flash_sale 归一化成 flash.sale）。
 func loadFlashSaleRuntimeConfig(ctx context.Context) (flashSaleRuntimeConfig, error) {
-	mode, err := readFlashSaleString(ctx, "flash_sale.dispatch_mode", flashSaleModeDBScanner)
+	mode, err := config.String(ctx, config.KeyFlashSaleDispatchMode)
 	if err != nil {
 		return flashSaleRuntimeConfig{}, err
 	}
@@ -650,19 +766,19 @@ func loadFlashSaleRuntimeConfig(ctx context.Context) (flashSaleRuntimeConfig, er
 	if err != nil {
 		return flashSaleRuntimeConfig{}, fmt.Errorf("读取 flash_sale.kafka 配置: %w", err)
 	}
-	batch, err := readFlashSaleInt(ctx, "flash_sale.kafka.publisher.batch_size", defaultFlashSalePublisherBatchSize)
+	batch, err := config.Int(ctx, config.KeyFlashSaleKafkaPublisherBatchSize)
 	if err != nil {
 		return flashSaleRuntimeConfig{}, err
 	}
-	poll, err := readFlashSaleDuration(ctx, "flash_sale.kafka.publisher.poll_interval", defaultFlashSalePublisherPollInterval)
+	poll, err := config.Duration(ctx, config.KeyFlashSaleKafkaPublisherPollInterval)
 	if err != nil {
 		return flashSaleRuntimeConfig{}, err
 	}
-	backoff, err := readFlashSaleDuration(ctx, "flash_sale.kafka.publisher.error_backoff", defaultFlashSalePublisherErrorBackoff)
+	backoff, err := config.Duration(ctx, config.KeyFlashSaleKafkaPublisherErrorBackoff)
 	if err != nil {
 		return flashSaleRuntimeConfig{}, err
 	}
-	shutdown, err := readFlashSaleDuration(ctx, "flash_sale.shutdown_timeout", defaultFlashSaleShutdownTimeout)
+	shutdown, err := config.Duration(ctx, config.KeyFlashSaleShutdownTimeout)
 	if err != nil {
 		return flashSaleRuntimeConfig{}, err
 	}
@@ -726,61 +842,4 @@ func resolveFlashSaleRuntimeConfig(cfg flashSaleRuntimeConfig) (flashSaleRuntime
 		cfg.ShutdownTimeout = defaultFlashSaleShutdownTimeout
 	}
 	return cfg, nil
-}
-
-// lookupFlashSaleConfig 读取单个配置项：环境变量优先，其次配置文件。
-func lookupFlashSaleConfig(ctx context.Context, key string) (*gvar.Var, error) {
-	envKey := strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
-	if v := genv.Get(envKey); v != nil {
-		return v, nil
-	}
-	return g.Cfg().Get(ctx, key)
-}
-
-func readFlashSaleString(ctx context.Context, key, def string) (string, error) {
-	v, err := lookupFlashSaleConfig(ctx, key)
-	if err != nil {
-		return "", fmt.Errorf("读取配置项 %s: %w", key, err)
-	}
-	if v == nil {
-		return def, nil
-	}
-	text := strings.TrimSpace(v.String())
-	if text == "" {
-		return def, nil
-	}
-	return text, nil
-}
-
-func readFlashSaleInt(ctx context.Context, key string, def int) (int, error) {
-	text, err := readFlashSaleString(ctx, key, "")
-	if err != nil {
-		return 0, err
-	}
-	if text == "" {
-		return def, nil
-	}
-	n, err := strconv.Atoi(text)
-	if err != nil {
-		return 0, fmt.Errorf("配置项 %s 需要整数，实际为 %q", key, text)
-	}
-	return n, nil
-}
-
-func readFlashSaleDuration(ctx context.Context, key string, def time.Duration) (time.Duration, error) {
-	text, err := readFlashSaleString(ctx, key, "")
-	if err != nil {
-		return 0, err
-	}
-	if text == "" {
-		return def, nil
-	}
-	d, err := time.ParseDuration(text)
-	if err != nil {
-		return 0, fmt.Errorf("配置项 %s 需要 Go duration（如 200ms/2s），实际为 %q", key, text)
-	}
-	if d <= 0 {
-		return 0, fmt.Errorf("配置项 %s 必须大于 0，实际为 %s", key, d)
-	}
-	return d, nil
 }

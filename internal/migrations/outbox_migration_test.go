@@ -194,10 +194,10 @@ func rollbackOutboxMigration(t *testing.T, _ *sql.DB) {
 		t.Fatalf("new migrate: %v", err)
 	}
 	if err := m.Steps(-1); err != nil {
-		closeMigrate(m)
+		closeMigrate(context.Background(), m)
 		t.Fatalf("回滚 Outbox migration: %v", err)
 	}
-	closeMigrate(m)
+	closeMigrate(context.Background(), m)
 }
 
 // TestOutboxClaimQueryUsesIndex 覆盖 B2-1 的索引设计验证：

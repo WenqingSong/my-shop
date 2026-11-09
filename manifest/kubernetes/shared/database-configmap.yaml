@@ -1,0 +1,33 @@
+# 数据库连接的非敏感配置（ConfigMap）——Application 与 Migration Job 共用。
+#
+# 为什么共用：数据库类型/端口/用户/库名/字符集对两个入口是同一份事实，
+# 维护两份 ConfigMap 必然漂移（例如迁移连 A 库、应用连 B 库）。
+# 敏感值（DATABASE_DEFAULT_PASS）不在这里，只来自 Secret surgecart-db-credentials。
+#
+# 严格模式：DEPLOYMENT_REQUIRE_EXTERNAL_ENDPOINTS=true 时，应用启动与 migrate 前置校验
+# 都要求 DATABASE_DEFAULT_HOST / DATABASE_DEFAULT_NAME 由环境变量显式提供且非回环地址。
+# 生产 overlay 会把 DATABASE_DEFAULT_HOST 覆盖为实际外部地址（托管数据库域名或集群内
+# Service DNS），base 中的值只是可构建的占位默认，不指向本机。
+#
+# 键名与 internal/config/contract.go 的契约注册表完全一致（docs/development/configuration.md）。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: surgecart-database-config
+  labels:
+    app.kubernetes.io/name: surgecart
+    app.kubernetes.io/part-of: surgecart
+    app.kubernetes.io/component: database
+data:
+  # T2-01 冻结的严格模式开关：缺失地址/库名时在连接数据库之前失败，
+  # 不会静默回退到容器内 localhost。
+  DEPLOYMENT_REQUIRE_EXTERNAL_ENDPOINTS: "true"
+
+  DATABASE_DEFAULT_TYPE: "mysql"
+  # 生产部署必须覆盖为实际外部地址（见 overlays/production/configmap-patch.yaml）。
+  DATABASE_DEFAULT_HOST: "mysql.surgecart.svc.cluster.local"
+  DATABASE_DEFAULT_PORT: "3306"
+  DATABASE_DEFAULT_USER: "surgecart"
+  DATABASE_DEFAULT_NAME: "my_shop"
+  DATABASE_DEFAULT_CHARSET: "utf8mb4"
+  DATABASE_DEFAULT_DEBUG: "false"

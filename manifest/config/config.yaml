@@ -2,9 +2,36 @@
 server:
   # HTTP 监听地址，可通过环境变量 SERVER_ADDRESS 覆盖，例如 ":8080"
   address: ":8000"
-  # 优雅关闭 HTTP drain 超时（秒）：SIGINT/SIGTERM 后停收新连接、等待在途请求完成的最长时间，
-  # 超时后强制退出。对应环境变量 SERVER_GRACEFUL_TIMEOUT。
+  # 优雅关闭 HTTP drain 超时（秒）：SIGINT/SIGTERM 后停收新连接、等待在途请求完成的最长时间。
+  # 应用按该值设置 drain 定时器；超时后不再等待，继续执行秒杀后台组件关闭。
+  # 对应环境变量 SERVER_GRACEFUL_TIMEOUT，属于 T2-03 冻结终止预算的 http_drain_timeout 段。
   graceful_timeout: 10
+
+# 部署期配置（T2-01 统一配置契约）。
+# 对应环境变量：DEPLOYMENT_REQUIRE_EXTERNAL_ENDPOINTS。
+deployment:
+  # Kubernetes 严格配置模式开关，默认 false（保持本地开发兼容）。
+  # 为 true 时，启动会在建立任何数据库/Redis 连接之前校验：DATABASE_DEFAULT_HOST、
+  # DATABASE_DEFAULT_NAME、REDIS_DEFAULT_ADDRESS 必须由环境变量显式提供（不能只靠本文件
+  # 或代码默认值），且不得指向 localhost / 127.0.0.1 / ::1 等回环地址；
+  # 任一不满足即启动失败并指出缺失的环境变量名。
+  # 后续 T2-06 的 Kubernetes ConfigMap 必须设置 DEPLOYMENT_REQUIRE_EXTERNAL_ENDPOINTS=true。
+  require_external_endpoints: false
+
+# 容器终止预算（T2-03 冻结契约）。
+# 预算关系：termination_grace_period >= pre_stop_delay + http_drain_timeout
+#           + runtime_shutdown_timeout + safety_margin
+# 即 60s >= 5s + 10s + 30s + 15s。
+#
+# preStop 的耗时同样计入 termination_grace_period，不是额外的 5 秒。
+# 同一组数值必须与 docker-compose.yml 的 app.stop_grace_period 以及后续 Kubernetes 清单的
+# terminationGracePeriodSeconds / preStop 保持一致；一致性由 internal/termination 的契约测试断言。
+# 对应环境变量：LIFECYCLE_PRE_STOP_DELAY / LIFECYCLE_TERMINATION_GRACE_PERIOD。
+lifecycle:
+  # Kubernetes preStop 钩子时长（摘流窗口）：端点摘除传播完成后再发送 SIGTERM。
+  pre_stop_delay: "5s"
+  # 容器终止宽限期：Compose stop_grace_period 与 K8s terminationGracePeriodSeconds 的同一事实源。
+  termination_grace_period: "60s"
 
 # 就绪探针（readiness）配置：/ready 探测 DB 与 Redis 连通性，fail-closed。
 # 对应环境变量：READINESS_PROBE_TIMEOUT / READINESS_CACHE_TTL

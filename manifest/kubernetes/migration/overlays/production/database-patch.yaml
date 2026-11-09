@@ -1,0 +1,15 @@
+# 生产迁移使用的数据库地址。
+#
+# 必须与 Application overlay 的 database-patch.yaml 完全一致：
+# 两个入口指向不同数据库会导致「迁移在 A 库、应用连 B 库」，
+# 而应用启动时的 schema 校验只会在 B 库报「未迁移」，症状与迁移失败高度混淆。
+#
+# 迁移只需要数据库：这里不提供 REDIS_DEFAULT_ADDRESS，也不注入 JWT / 超管 / 七牛凭据。
+# 严格模式校验沿用 T2-05 的专用逻辑（config.ValidateMigration）：
+# 要求 DATABASE_DEFAULT_HOST / NAME 由环境变量提供且非回环，但不要求 Redis。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: surgecart-database-config
+data:
+  DATABASE_DEFAULT_HOST: "REPLACE_WITH_MYSQL_HOST"

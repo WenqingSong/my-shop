@@ -1,0 +1,14 @@
+# 共享层：Application 与 Migration 两个部署入口都引用它。
+#
+# 只放「两个入口必须看到同一份事实」的资源：
+#   - Namespace（同一命名空间，不重复创建）
+#   - 数据库连接的非敏感配置（避免两处维护同一组 DB 参数而漂移）
+#
+# 这里刻意不放任何 Secret：Secret 由部署环境创建（examples/secrets/ 只有模板），
+# Kustomize 构建产物中永远不出现凭据。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - database-configmap.yaml

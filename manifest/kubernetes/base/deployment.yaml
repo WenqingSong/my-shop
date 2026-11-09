@@ -1,0 +1,191 @@
+# 应用 Deployment（T2-06）。
+#
+# 定位：只声明「与环境无关」的部分。镜像版本、副本数、资源规格、外部依赖地址
+# 由 overlays/production 覆盖；base 自身不可直接发布（镜像 tag 为 unreleased）。
+#
+# 安全上下文完整继承 T2-04：非 root（10001:10001）、只读根文件系统、
+# capabilities 全丢弃、禁止提权、seccomp RuntimeDefault、不挂载 ServiceAccount Token。
+# 可写路径只有两个显式挂载：/tmp（内存型 emptyDir）与 /app/storage（PVC）。
+#
+# 终止预算完整继承 T2-03 / T2-03.1：
+#   terminationGracePeriodSeconds 60
+#     = preStop 5（摘流窗口，计入宽限期）+ HTTP drain 10 + Runtime shutdown 30 + 安全余量 15
+# 预留（preStop sleep）与进程内 SIGTERM 处理是两段独立职责：
+# Kubernetes 先执行 preStop，结束后才向 PID 1 发送 SIGTERM；
+# 进程侧不再实现第二套关闭机制，仍由 internal/cmd 的 drain + Runtime.Shutdown 编排。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: surgecart
+  labels:
+    app.kubernetes.io/name: surgecart
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: surgecart
+    # 发布版本标记（T2-06.1）：值等于本次发布的 Git 短 SHA。
+    # 由 overlays/production/version-patch.yaml 覆盖；base 的 unreleased 表示「不可发布」。
+    app.kubernetes.io/version: "unreleased"
+spec:
+  # 单副本：本地文件存储（storage.local.root）不是共享存储，多 Pod 会各自写不同副本的
+  # /app/storage；在提供共享对象存储之前不宣称多副本安全（docs/development/kubernetes.md §7）。
+  replicas: 1
+
+  # selector 不可变，且必须与 Pod 模板标签一致；overlay 不得修改这两处，
+  # 否则下一次 apply 会因 selector 不可变被 API Server 拒绝。
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: surgecart
+      app.kubernetes.io/component: backend
+
+  # Recreate：PVC 是 ReadWriteOnce，旧 Pod 未释放卷时新 Pod 无法挂载
+  # （多节点集群会卡在 Multi-Attach）。滚动更新在此存储模型下不可行，
+  # 代价是发布期间短暂不可用，由 docs/development/kubernetes.md §7 记录。
+  strategy:
+    type: Recreate
+
+  revisionHistoryLimit: 5
+
+  # 启动需要依赖重试 + schema 校验 + seed + 七牛校验，10 分钟内可观测失败。
+  progressDeadlineSeconds: 600
+
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: surgecart
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: surgecart
+        # 版本的事实来源（T2-06.1）：
+        #   - 该标签随 Pod 复制，发布脚本据此判断「当前 Deployment 是哪个 commit」；
+        #   - 发布成功判定同时校验该标签与镜像，缺一不可；
+        #   - 覆盖规则见 overlays/production/version-patch.yaml（必须等于镜像 tag）。
+        app.kubernetes.io/version: "unreleased"
+    spec:
+      # 应用不访问 Kubernetes API。
+      automountServiceAccountToken: false
+      # 不注入 <service>_<port> 形式的 Service 环境变量，避免配置面被集群内 Service 污染。
+      enableServiceLinks: false
+
+      # T2-03 冻结值：必须 >= preStop 5 + HTTP drain 10 + Runtime 30 + 安全余量 15。
+      terminationGracePeriodSeconds: 60
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        # PVC 挂载后由 kubelet 授权给 10001（存储卷需要可写）。
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: app
+          # 由 overlays 通过 kustomize images 覆盖为不可变短 SHA；禁止 latest。
+          image: docker.cnb.cool/framework-station/my-shop:unreleased
+          # 镜像 tag 不可变，节点上有该 tag 时无需每次回源。
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            # 命名端口：Service targetPort 与探针都引用 http，避免端口号在多处漂移。
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+
+          # 配置边界：非敏感项来自 ConfigMap，凭据只来自 Secret。
+          # 数据库配置与迁移 Job 共用同一 ConfigMap/Secret，保证两个入口连同一个库。
+          envFrom:
+            - configMapRef:
+                name: surgecart-database-config
+            - configMapRef:
+                name: surgecart-config
+            - secretRef:
+                name: surgecart-db-credentials
+            - secretRef:
+                name: surgecart-app-credentials
+
+          env:
+            # 显式声明一次：ConfigMap 漏配时也不会回退到「非严格」模式。
+            # 环境变量优先级高于 envFrom，两者同时存在时以此为准。
+            - name: DEPLOYMENT_REQUIRE_EXTERNAL_ENDPOINTS
+              value: "true"
+
+          # 启动保护：/health 不依赖外部组件，但在 HTTP Server 开始监听前不存在。
+          # 启动耗时上界 = 依赖重试 STARTUP_DEPENDENCY_TIMEOUT(30s) + schema 校验/seed/
+          # 七牛 GetBucketInfo。2s × 30 = 60s 覆盖该上界；期间 liveness 不生效，
+          # 因此「启动慢」不会变成「反复重启」，超过 60s 才按启动失败处理。
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 2
+            timeoutSeconds: 1
+            failureThreshold: 30
+
+          # 存活探针（T2-02 冻结语义）：只回答「进程是否存活」。
+          # 不访问 MySQL/Redis/Kafka，Consumer 未加入 Group、Outbox 积压都不会导致重启。
+          # 10s × 3 = 30s 容忍窗口；实现是进程内常量响应，3s 超时远大于正常耗时，
+          # 只有在进程卡死（例如死锁）时才可能连续失败。
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          # 就绪探针（T2-02 冻结语义）：MySQL PingMaster + Redis PING，fail-closed。
+          # 依赖探测超时 1s、结果缓存 3s，因此 3s 的 timeoutSeconds 足够；
+          # 5s × 2 = 10s 摘流窗口，与 preStop 5s 的传播窗口同一量级。
+          # Kafka 不在判定集合内：Kafka 抖动只表现为异步延迟，不应摘流 HTTP 入口。
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+            successThreshold: 1
+
+          # 摘流窗口：Endpoint 摘除是异步的，先等 5s 再让进程收到 SIGTERM，
+          # 减少「请求已路由到即将退出 Pod」的窗口。该 sleep 计入 60s 宽限期。
+          # /bin/sh 与 sleep 均由 Alpine busybox 提供（T2-04 运行镜像），不引入额外二进制。
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"]
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+          # 初始规格：请求量按单副本估算，limit 留出 GC 与突发余量。
+          # 生产 overlay 提供更贴近实际观测值的规格，二者都不省略 requests（避免 BestEffort 被优先驱逐）。
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+          volumeMounts:
+            # 只读根文件系统下唯一的内存型临时目录（Go 运行期临时文件）。
+            - name: tmp
+              mountPath: /tmp
+            # 业务持久化目录：storage.local.root 指向此处（轮播图占位图等）。
+            - name: storage
+              mountPath: /app/storage
+
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
+        # 单副本 + RWO：PVC 由 storage.yaml 定义，StorageClass 由集群提供
+        # （base 不指定 storageClassName，使用集群默认；无默认时见 overlay 注释）。
+        - name: storage
+          persistentVolumeClaim:
+            claimName: surgecart-storage

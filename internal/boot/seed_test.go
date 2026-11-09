@@ -10,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"golang.org/x/crypto/bcrypt"
 
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
 )
 
@@ -79,8 +80,9 @@ func TestSeedSuperAdminIdempotent(t *testing.T) {
 	if n := superAdminCount(t, ctx); n != 1 {
 		t.Fatalf("expected 1 super admin after first seed, got %d", n)
 	}
-	if u := superAdminUsername(t, ctx); u != defaultSuperUsername {
-		t.Fatalf("expected default super admin username %q, got %q", defaultSuperUsername, u)
+	defaultUsername := config.MustSpecOf(config.KeyAdminSuperUsername).DefaultText()
+	if u := superAdminUsername(t, ctx); u != defaultUsername {
+		t.Fatalf("expected default super admin username %q, got %q", defaultUsername, u)
 	}
 	hash1 := superAdminHash(t, ctx)
 	if err := bcrypt.CompareHashAndPassword([]byte(hash1), []byte(testSuperPassword)); err != nil {

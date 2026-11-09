@@ -27,7 +27,20 @@ go test -race -count=1 -run 'TestCircuitBreakerStateMachine' ./internal/logic/fl
 # B4：模式装配、Consumer 监督循环、关闭预算与 goroutine 回收。
 log_info "go test -race（F-03 逐条结果快照 + B4 秒杀装配/生命周期）"
 go test -race -count=1 -run 'TestProducerPublishResults' ./internal/mq/kafka/...
-go test -race -count=1 -run 'TestResolveFlashSaleRuntimeConfig|TestFlashSaleRuntime|TestScannersStopOnContextCancel' ./internal/worker/...
+go test -race -count=1 -run 'TestResolveFlashSaleRuntimeConfig|TestFlashSaleRuntime|TestScannersStopOnContextCancel|TestFlashSaleRuntimeOutboxBacklogSampler|TestFlashSaleRuntimeDBScannerModeSkipsBacklogSampling|TestFlashSaleRuntimeBacklogSamplingDisabledWithMetrics' ./internal/worker/...
+
+# T2-02：消费组成员资格状态机（回调来自 franz-go 管理协程，Run 退出从监督协程置 0）
+# 与 Gauge 的条件导出（回调/采样/抓取三方并发读写，必须无数据竞争）。
+log_info "go test -race（T2-02 Consumer Group 状态机与健康/积压指标）"
+go test -race -count=1 -run 'TestConsumerGroupJoined' ./internal/mq/kafka/...
+go test -race -count=1 ./internal/metrics/...
+
+# T2-03.1：HTTP drain 预算、强制关闭连接跟踪与关闭控制器（纯内存，不连接 DB/Redis）。
+# 覆盖 trackedListener 的 Accept/ForceClose 并发路径：强制关闭后不得再放行新连接。
+log_info "go test -race（HTTP drain 预算与强制关闭路径）"
+go test -race -count=1 \
+  -run 'TestRuntimeContextDetachesSignalCancellation|TestForceCloseWindow|TestTrackedListener|TestStopHTTPServer' \
+  ./internal/cmd/...
 
 # ---------------------------------------------------------------------------
 # Outbox 并发可靠性 Race 门禁（F-14）

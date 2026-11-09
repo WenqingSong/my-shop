@@ -6,9 +6,9 @@ package e2e
 import (
 	"context"
 
-	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
 
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 	"cnb.cool/go-cloud-devops/my-shop/internal/metrics"
 	"cnb.cool/go-cloud-devops/my-shop/internal/storage"
 )
@@ -29,19 +29,14 @@ func registerMetricsRoute(ctx context.Context, s *ghttp.Server) {
 // 映射为 /storage/banners 静态路由（与生产 serve 同款）。迁移后无法访问 cmd 包未导出函数，
 // 故在此复制等价逻辑。
 func configureBannerStorage(ctx context.Context, s *ghttp.Server) error {
-	local := storage.NewLocal(storageRoot(ctx))
+	root, err := config.String(ctx, config.KeyStorageLocalRoot)
+	if err != nil {
+		return err
+	}
+	local := storage.NewLocal(root)
 	if _, err := local.PrepareBannerPlaceholders(ctx); err != nil {
 		return err
 	}
 	s.AddStaticPath(storage.BannerURLPrefix, local.BannerDir())
 	return nil
-}
-
-// storageRoot 读取本地存储根目录（环境变量 STORAGE_LOCAL_ROOT 可覆盖），默认 ./storage。
-func storageRoot(ctx context.Context) string {
-	v, err := g.Cfg().GetEffective(ctx, "storage.local.root", "./storage")
-	if err != nil || v == nil {
-		return "./storage"
-	}
-	return v.String()
 }

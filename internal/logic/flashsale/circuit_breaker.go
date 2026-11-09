@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gogf/gf/v2/frame/g"
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 )
 
 // breakerState 熔断器状态。
@@ -38,20 +38,12 @@ func newCircuitBreaker() *circuitBreaker {
 
 // circuitBreakerEnabled 读取熔断开关（flash_sale.circuit_breaker.enabled，默认关闭）。
 func circuitBreakerEnabled(ctx context.Context) bool {
-	v, err := g.Cfg().GetEffective(ctx, "flash_sale.circuit_breaker.enabled", false)
-	if err != nil || v == nil {
-		return false
-	}
-	return v.Bool()
+	return flashSaleBool(ctx, config.KeyFlashSaleCircuitBreakerEnabled, false)
 }
 
 // circuitBreakerFailureThreshold 连续失败阈值（<=0 回退默认 5）。
 func circuitBreakerFailureThreshold(ctx context.Context) int {
-	v, err := g.Cfg().GetEffective(ctx, "flash_sale.circuit_breaker.failure_threshold", 5)
-	if err != nil || v == nil {
-		return 5
-	}
-	if n := v.Int(); n > 0 {
+	if n := flashSaleInt(ctx, config.KeyFlashSaleCircuitBreakerFailureThreshold, 5); n > 0 {
 		return n
 	}
 	return 5
@@ -59,11 +51,7 @@ func circuitBreakerFailureThreshold(ctx context.Context) int {
 
 // circuitBreakerOpenTimeout 熔断打开后的持续时间（秒，<=0 回退默认 10）。
 func circuitBreakerOpenTimeout(ctx context.Context) time.Duration {
-	v, err := g.Cfg().GetEffective(ctx, "flash_sale.circuit_breaker.open_timeout_seconds", int64(10))
-	if err != nil || v == nil {
-		return 10 * time.Second
-	}
-	if n := v.Int64(); n > 0 {
+	if n := flashSaleInt64(ctx, config.KeyFlashSaleCircuitBreakerOpenTimeout, 10); n > 0 {
 		return time.Duration(n) * time.Second
 	}
 	return 10 * time.Second
@@ -71,11 +59,7 @@ func circuitBreakerOpenTimeout(ctx context.Context) time.Duration {
 
 // circuitBreakerHalfOpenMaxProbes Half-Open 阶段允许放行的最大探测数（<=0 回退默认 1）。
 func circuitBreakerHalfOpenMaxProbes(ctx context.Context) int {
-	v, err := g.Cfg().GetEffective(ctx, "flash_sale.circuit_breaker.half_open_max_probes", 1)
-	if err != nil || v == nil {
-		return 1
-	}
-	if n := v.Int(); n > 0 {
+	if n := flashSaleInt(ctx, config.KeyFlashSaleCircuitBreakerHalfOpenProbes, 1); n > 0 {
 		return n
 	}
 	return 1

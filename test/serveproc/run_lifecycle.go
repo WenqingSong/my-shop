@@ -9,15 +9,18 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	_ "github.com/gogf/gf/contrib/drivers/mysql/v2"
 	_ "github.com/gogf/gf/contrib/nosql/redis/v2"
 
+	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/os/gctx"
 	qstorage "github.com/qiniu/go-sdk/v7/storage"
 
 	"cnb.cool/go-cloud-devops/my-shop/internal/cmd"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic"
+	"cnb.cool/go-cloud-devops/my-shop/internal/logx"
 )
 
 // run 装配与生产 main.go 一致，仅在显式提供测试 endpoint 时改写七牛 UC 解析地址。
@@ -36,6 +39,15 @@ func run() {
 	if ucHost != "" {
 		qstorage.SetUcHosts(ucHost)
 		fmt.Fprintf(os.Stderr, "serve_lifecycle: 七牛 UC endpoint 指向本地 Mock %s（真实校验逻辑不变）\n", ucHost)
+	}
+	// T2-03.1：注入一个阻塞 30s 且忽略请求取消的 handler，用于验证 HTTP drain 超时后
+	// 的强制关闭路径。该路由只存在于 -tags serve_lifecycle 的测试二进制中。
+	cmd.ServeLifecycleHook = func(s *ghttp.Server) {
+		s.BindHandler("GET:/__lifecycle/block", func(r *ghttp.Request) {
+			logx.Info(r.Context(), "lifecycle_block_handler_entered", "阻塞 handler 已进入（忽略请求取消，用于验证 drain 超时）", nil)
+			time.Sleep(30 * time.Second)
+			r.Response.Write("late-response-after-force-close")
+		})
 	}
 	cmd.Main.Run(gctx.GetInitCtx())
 }

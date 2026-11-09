@@ -8,8 +8,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gogf/gf/v2/frame/g"
 	gojwt "github.com/golang-jwt/jwt/v5"
+
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 )
 
 const (
@@ -38,14 +39,13 @@ type Claims struct {
 // Secret 读取并校验 JWT 签名密钥（auth.jwt.secret / AUTH_JWT_SECRET）。
 // 空或过短返回错误，用于启动时 fail-fast 与运行时读取。
 func Secret(ctx context.Context) ([]byte, error) {
-	v, err := g.Cfg().GetEffective(ctx, "auth.jwt.secret")
+	secret, err := config.String(ctx, config.KeyAuthJWTSecret)
 	if err != nil {
-		return nil, fmt.Errorf("读取 auth.jwt.secret: %w", err)
+		return nil, err
 	}
-	if v == nil || v.String() == "" {
+	if secret == "" {
 		return nil, errors.New("未配置 auth.jwt.secret")
 	}
-	secret := v.String()
 	if len(secret) < minSecretLength {
 		return nil, fmt.Errorf("auth.jwt.secret 长度至少为 %d 字节", minSecretLength)
 	}

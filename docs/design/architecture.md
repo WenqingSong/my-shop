@@ -171,18 +171,20 @@ SurgeCart 基于 GoFrame v2 提供 HTTP API，MySQL 保存交易与身份数据�
 
 关键语义：
 
-- 多阶段构建（Go 1.23 静态编译 → alpine + tzdata + ca-certificates），非 root 运行（`uid=10001`）。
+- 多阶段构建（Go 1.27.3 静态编译 → alpine 3.24 + tzdata + ca-certificates），非 root 运行（`uid=10001`）、只读根文件系统、`cap_drop: ALL` 与 `no-new-privileges`；二进制/配置由 root 只读持有，仅 `/app/storage` 与 `/tmp`（tmpfs）可写。详见 `docs/development/container-security.md`。
 - 敏感凭据（JWT secret、MySQL/Redis 密码、七牛 AK/SK/bucket/domain、超管密码）仅经环境变量注入，无内置默认回退，缺失 fail-fast；`config.yaml` 敏感字段保持空值。
-- 启动生命周期：entrypoint `migrate up`（幂等 + `GET_LOCK` 串行）→ `serve`（依赖重试 → schema 就绪只读校验 → seed → 七牛校验 → 扫描器 → 路由）。
-- 持久化：`mysql_data` / `redis_data` / `app_storage` 三个 named volume。
-- 优雅停机：`SIGINT/SIGTERM` 取消根 ctx → 扫描器停止领取新任务、在途单事务回滚或完成 → HTTP drain（`server.graceful_timeout`）→ 进程退出。
+- 启动生命周期：Compose 本地 entrypoint `migrate up`（幂等 + `GET_LOCK` 串行）→ `serve`（依赖重试 → schema 就绪只读校验 → seed → 七牛校验 → 扫描器 → 路由）。
+- **迁移与应用解耦（T2-05）**：生产由独立 Kubernetes Job 执行 `/app/my-shop migrate up`，应用镜像默认入口是 `serve`、不做任何 DDL。`migrate` 子命令只依赖 MySQL：不启动 HTTP/Redis/Kafka/Publisher/Consumer/Scanner，配置校验（含严格模式）在建立连接之前完成。并发由 MySQL 会话级 `GET_LOCK` 保护（等待 10s 超时即明确失败，可由 Job 重试），失败进入 `dirty` 且不自动 `force`。发布顺序为「镜像 → 迁移 Job → Deployment」，Job 未成功不得更新应用版本；`serve` 的只读 schema 校验是最后防线。详见 `docs/development/migrations.md`。
+- **Kubernetes 部署体系（T2-06）**：`manifest/kubernetes/` 由 Kustomize 管理，两个**独立**部署入口——`overlays/production`（Namespace/ConfigMap/PVC/Deployment/Service）与 `migration/overlays/production`（Namespace/数据库 ConfigMap/版本化 Job）。ConfigMap 只承载非敏感配置，Secret 由部署环境创建（仓库只有模板）；Migration 只注入数据库凭据。发布顺序由 `scripts/deploy-k8s.sh` 强制：构建 → 迁移 Job 完成 → 才允许更新 Deployment → 等待 Available/Ready。探针沿用 T2-02 语义（`/health` 存活、`/ready` 仅 MySQL+Redis），终止预算沿用 T2-03（60s = 5+10+30+15），安全上下文沿用 T2-04（非 root 10001、只读根文件系统、capabilities 全丢）。详见 `docs/development/kubernetes.md`。
+- 持久化：`mysql_data` / `redis_data` / `app_storage` 三个 named volume；Kubernetes 侧为单副本 + RWO PVC（`surgecart-storage`），本地存储目录不跨 Pod 共享。
+- 优雅停机：`SIGINT/SIGTERM` → HTTP 停收新连接并在 `server.graceful_timeout`（10s，9s 优雅 + 1s 强制关闭窗口）内有界 drain；超时强制关闭 listener/连接并确认停止后才进入 Publisher → Consumer → Producer → Scanner 顺序关闭（`flash_sale.shutdown_timeout`，30s）→ 进程退出；容器终止宽限期 60s = preStop 5s + drain 10s + runtime 30s + 安全余量 15s（见 `docs/design/deployment.md` §4.1）。
 
 ### 4.2 CI/CD
 
 CNB CI（`.cnb.yml`）：
 
 - **`pull_request` → `pr-check`**：`docker compose up -d mysql redis` → `make test` → `make test-race`。
-- **`push` → `main-ci`**（单 job 顺序 stage）：依赖启动 → `make test` → `make test-race` → `go build` → `docker build`（短 SHA 标签 + `latest` 标签，同源同 digest）→ `docker push`（先短 SHA 后 `latest`）→ 原仓库专属的 GitHub 镜像同步。
+- **`push` → `main-ci`**（单 job 顺序 stage）：依赖启动 → 安装 kubectl 客户端（T2-06：`make test` 内的 Kustomize 构建校验只做离线构建，不连集群）→ `make test` → `make test-race` → `go build` → `docker build`（短 SHA 标签 + `latest` 标签，同源同 digest）→ `docker push`（先短 SHA 后 `latest`）→ 原仓库专属的 GitHub 镜像同步。
 - `make test-race` 分两段：熔断器状态机（纯内存）+ Outbox 并发/租约/token/人工修复竞态（`go test -race -p 1`，使用一次性隔离库 `my_shop_outbox_race`，测试结束即删除；缺少 MySQL 或用例未实际执行都会失败而非跳过）。
 - 制品库：`docker.cnb.cool/framework-station/my-shop`（由 CNB 内置变量派生），凭据用 CNB 内置 token，流水线不出现硬编码密码。
 - 回滚用历史短 SHA 标签，`latest` 不作为回滚锚点。
@@ -192,12 +194,14 @@ CNB CI（`.cnb.yml`）：
 ### 4.3 Prometheus
 
 - 指标仅覆盖秒杀域（`flashsale_*`：`flashsale_requests_total`、`flashsale_request_duration_seconds`），按 `interface/result` 低基数维度区分，用于 QPS / 成功率 / 拒绝率 / p95 / p99。
+- 异步链路状态指标（T2-02，无标签 Gauge，仅 `dispatch_mode=kafka` 导出）：`flashsale_consumer_joined`（是否已加入消费组，证据是 franz-go `OnPartitionsAssigned` 回调）、`flashsale_outbox_backlog_pending`（MySQL Outbox 中待发布的记录数，由进程内 5s 采样器写入，抓取路径不查库）。
+- 健康检查与 Kafka 解耦（T2-02 冻结）：`/health` 只表示进程存活，`/ready` 只判定 MySQL + Redis；Kafka 故障不摘流 HTTP，异步侧状态靠指标观测，详见 `docs/development/kafka.md` §10.12。
 - 默认关闭；`FLASH_SALE_METRICS_ENABLED=true`（`flash_sale.metrics.enabled`）时才暴露 `GET /metrics`（Prometheus 文本格式，位于统一 JSON 响应包装之外）。
 - 抓取目标为 Compose DNS 名 `app:8000`（不经 Nginx、不经宿主机端口）；`prometheus/prometheus.yml` 附带 p95/p99 recording rule（`promtool check rules` 校验）。Nginx 公共入口对 `/metrics` 返回 404。
 
 ## 5. 当前边界
 
-- **无 K8s 部署**：容器化已落地（非 root、`/health` liveness、`/ready` readiness、优雅退出），但不产出 Deployment/Pod/HPA/Service/Ingress 等编排清单；`/ready` 仅作为未来 K8s readinessProbe 目标，尚未形成已验证的 Kubernetes 部署结论。
+- **K8s 编排已交付但未在真实集群验证**：T2-06 交付单副本 Deployment/Service/ConfigMap/Secret 引用/PVC 与独立 Migration Job 的 Kustomize 体系（`/ready` 作为 readinessProbe 目标），构建与字段由自动化断言覆盖；Ingress/HTTPS/TLS、HPA、多副本仍无（存储模型与域名/证书方案未确定）。调度、滚动更新、PVC 绑定与 preStop/SIGTERM 时序均为 NOT_VERIFIED，不得表述为「已在生产集群运行」。
 - **无真实支付**：普通订单支付为 Mock，不接入真实支付机构、无资金链路；秒杀订单下单即成交，不走普通订单的支付/取消流程。
 - **无外部 MQ**：秒杀异步队列使用 MySQL 出队表（`FOR UPDATE SKIP LOCKED` + 状态原子更新 + 重试/死信/对账），未引入 RabbitMQ/Kafka 等外部消息中间件。
 - **单实例部署**：后台扫描器与秒杀消费的多实例并发安全已由「条件状态更新 + RowsAffected」「FOR UPDATE SKIP LOCKED」保证，但当前仅声明单实例部署，多实例负载均衡/高可用不在已验证范围。
@@ -208,6 +212,7 @@ CNB CI（`.cnb.yml`）：
 | 领域 | 设计文档 |
 | --- | --- |
 | 部署 / 容器 / 网络 | `docs/design/deployment.md` |
+| Kubernetes 部署体系（Kustomize / 发布顺序） | `docs/development/kubernetes.md` |
 | IAM / 会话 | `docs/design/iam.md` |
 | RBAC | `docs/design/rbac.md` |
 | 商品 | `docs/design/product.md` |
@@ -229,7 +234,8 @@ CNB CI（`.cnb.yml`）：
 | 点赞 | `docs/design/like.md` |
 | 对象存储 | `docs/design/storage.md` |
 | 错误码 | `docs/design/error-codes.md` |
-| 数据库迁移 | `docs/design/migration.md` |
+| 数据库迁移（机制） | `docs/design/migration.md` |
+| 数据库迁移（运维 / K8s Job） | `docs/development/migrations.md` |
 | 历史数据迁移 | `docs/design/legacy-data-migration.md` |
 
 项目级长期设计以 `docs/design/*` 为权威；历史任务决策与验收证据在 `.agent/tasks/*`，不应仅凭旧任务清单判断当前功能状态。

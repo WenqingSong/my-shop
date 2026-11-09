@@ -9,11 +9,11 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/glog"
 	"golang.org/x/crypto/bcrypt"
+
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 )
 
 const (
-	// defaultSuperUsername 是超级管理员的默认用户名（非机密）。
-	defaultSuperUsername = "admin"
 	// adminStatusEnabled 表示管理员启用状态。
 	adminStatusEnabled = 1
 )
@@ -102,11 +102,17 @@ func seedPermissions(ctx context.Context) error {
 // 并发场景（多实例同时启动）下「先查再写」存在竞争窗口，真正兜底的是
 // admins.username 唯一约束：并发 insert 命中 1062 视为「已被其他实例创建」，跳过。
 func seedSuperAdmin(ctx context.Context) error {
-	username := cfgString(ctx, "admin.super.username", defaultSuperUsername)
+	username, err := config.String(ctx, config.KeyAdminSuperUsername)
+	if err != nil {
+		return err
+	}
 	if username == "" {
 		return errors.New("超级管理员用户名不能为空（admin.super.username / ADMIN_SUPER_USERNAME）")
 	}
-	password := cfgString(ctx, "admin.super.password", "")
+	password, err := config.String(ctx, config.KeyAdminSuperPassword)
+	if err != nil {
+		return err
+	}
 
 	exists, err := superAdminExists(ctx)
 	if err != nil {

@@ -18,22 +18,14 @@ import (
 
 	go_mysql "github.com/go-sql-driver/mysql"
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/glog"
 
 	migrate "github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database"
 	migrate_mysql "github.com/golang-migrate/migrate/v4/database/mysql"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
-)
 
-// 数据库配置默认值，与 internal/boot/boot.go 保持一致（开发环境默认值）。
-// 真实值由 manifest/config/config.yaml 或环境变量覆盖。
-const (
-	defaultDBHost    = "127.0.0.1"
-	defaultDBPort    = "3306"
-	defaultDBUser    = "root"
-	defaultDBName    = "my_shop"
-	defaultDBCharset = "utf8mb4"
+	"cnb.cool/go-cloud-devops/my-shop/internal/config"
 )
 
 // migrationDir 是内嵌文件系统中存放迁移文件的子目录。
@@ -48,40 +40,123 @@ var embeddedMigrations embed.FS
 // 测试可替换为自定义 FS 以注入额外/非法迁移（仅测试内部使用）。
 var migrationFS fs.FS = embeddedMigrations
 
+// Preflight 执行 migrate 子命令的启动前配置校验。
+//
+// 必须在任何数据库连接建立之前调用（cmd 层的 migrate 子命令已保证顺序）：
+//   - 逐项解析 database.default.*，非法 bool/int 不会静默回退；
+//   - 数据库密码必须显式注入，不回退任何内置默认值；
+//   - Kubernetes 严格模式下 DATABASE_DEFAULT_HOST / DATABASE_DEFAULT_NAME 必须由
+//     环境变量显式提供且不得是回环地址。
+//
+// 与 serve 的 ValidateConfig 差异仅为「不要求 Redis 地址」——migration 不连接 Redis。
+func Preflight(ctx context.Context) error {
+	if err := config.ValidateMigration(ctx); err != nil {
+		return gerror.Wrap(err, "migration 前置校验失败")
+	}
+	return nil
+}
+
 // Up 按版本升序执行所有未应用的 migration。
 // 已全部应用时返回 nil（幂等，不视为错误）。
+//
+// 并发安全：golang-migrate 的 MySQL driver 在独立连接上执行
+// `SELECT GET_LOCK(<db:schema_migrations 派生 id>, 10)`，整个 Up 期间持有该会话级锁；
+// 另一个进程/实例只会等待最多 10s，随后返回 database.ErrLocked（可安全重试）。
+// 连接断开（Pod 被删除、进程被杀）时 MySQL 自动释放锁，不会永久阻塞后续迁移。
 func Up(ctx context.Context) error {
+	logMigrationTarget(ctx)
+
 	m, err := newMigrate(ctx)
 	if err != nil {
-		return err
+		return setupError(ctx, err)
 	}
-	defer closeMigrate(m)
+	defer closeMigrate(ctx, m)
 
 	if err := m.Up(); err != nil {
 		if errors.Is(err, migrate.ErrNoChange) {
-			glog.Info(ctx, "没有待执行的 migration")
+			glog.Info(ctx, "没有待执行的 migration（数据库已是内嵌迁移的最新版本）")
 			return nil
 		}
-		return gerror.Wrap(err, "执行 migration 失败")
+		return migrationError(ctx, err)
 	}
-	glog.Info(ctx, "migration 执行完成")
+	glog.Info(ctx, "migration 执行完成，dirty=false")
 	return nil
 }
 
 // Force 标记指定版本为已应用（dirty 置 false），不执行任何 SQL。
 // 用于已有环境 baseline 接管，以及 dirty 状态的人工恢复。
+//
+// 该操作不校验、不修复实际 schema：把 version 标记为已应用后，后续 migrate up
+// 会跳过该版本。误用会让数据库记录与真实结构不一致，因此只能由人工在评估后执行。
 func Force(ctx context.Context, version uint) error {
+	logMigrationTarget(ctx)
+
 	m, err := newMigrate(ctx)
 	if err != nil {
-		return err
+		return setupError(ctx, err)
 	}
-	defer closeMigrate(m)
+	defer closeMigrate(ctx, m)
 
 	if err := m.Force(int(version)); err != nil {
-		return gerror.Wrapf(err, "force 版本 %d 失败", version)
+		return forceError(ctx, version, err)
 	}
-	glog.Infof(ctx, "已强制标记版本 %d 为已应用", version)
+	glog.Infof(ctx, "已强制标记版本 %d 为已应用（未执行任何 SQL，也未校验实际 schema）", version)
 	return nil
+}
+
+// migrationError 把 golang-migrate 的失败翻译成可操作的运维语义。
+//
+// 两类可预期的失败必须与「真正的 SQL/DDL 失败」区分开，否则运维会在锁冲突或
+// dirty 状态下误以为迁移内容有错：
+//   - 数据库级锁被占用：本次未执行任何 DDL，可安全重试（K8s Job 由 backoffLimit 重试）；
+//   - dirty：上一次迁移失败留下了中间态，禁止自动继续、禁止自动 force。
+//
+// 原始错误仍然通过 %w 保留，便于日志与排障；ERR 文本不含数据库密码。
+func migrationError(ctx context.Context, err error) error {
+	var dirty migrate.ErrDirty
+	if errors.As(err, &dirty) {
+		return gerror.Wrapf(err,
+			"数据库处于 dirty 状态（版本 %d 的 migration 曾执行失败）：已拒绝继续执行，也不会自动 force；"+
+				"请人工核对实际 schema（MySQL DDL 隐式提交，失败时可能已部分生效）后再执行 `my-shop migrate force <version>`",
+			dirty.Version,
+		)
+	}
+	if err := lockError(ctx, err); err != nil {
+		return err
+	}
+	return gerror.Wrap(err, "执行 migration 失败")
+}
+
+// forceError 包装 force 失败，并保留锁冲突的语义。
+func forceError(ctx context.Context, version uint, err error) error {
+	if lockErr := lockError(ctx, err); lockErr != nil {
+		return gerror.Wrapf(lockErr, "force 版本 %d 未做任何修改", version)
+	}
+	return gerror.Wrapf(err, "force 版本 %d 失败（未执行任何 SQL）", version)
+}
+
+// setupError 处理迁移实例初始化阶段的失败。
+//
+// 注意：golang-migrate 的 MySQL driver 在 WithInstance 阶段就会通过 GET_LOCK
+// 保护 schema_migrations 的首次创建（ensureVersionTable）。因此并发保护的
+// 「等待 10s 后失败」可能发生在初始化阶段而不是 m.Up() 阶段，两处都必须翻译锁语义。
+func setupError(ctx context.Context, err error) error {
+	if lockErr := lockError(ctx, err); lockErr != nil {
+		return lockErr
+	}
+	return err
+}
+
+// lockError 识别数据库级 migration 锁被占用的错误；非锁错误返回 nil。
+func lockError(ctx context.Context, err error) error {
+	if !errors.Is(err, database.ErrLocked) {
+		return nil
+	}
+	glog.Warning(ctx, "migration_lock_timeout", "等待数据库级 migration 锁超时，本次未执行任何 DDL")
+	return gerror.Wrap(err,
+		"未获取到数据库级 migration 锁：另一个 migration 正在执行（GET_LOCK 等待 10s 超时）；"+
+			"本次未执行任何 DDL，可安全重试",
+	)
 }
 
 // Status 只读返回当前 migration 状态：
@@ -146,9 +221,31 @@ func newMigrate(ctx context.Context) (*migrate.Migrate, error) {
 	return m, nil
 }
 
-// closeMigrate 关闭 migration 实例（释放 source 与数据库连接），忽略关闭错误。
-func closeMigrate(m *migrate.Migrate) {
-	_, _ = m.Close()
+// closeMigrate 关闭 migration 实例：释放 iofs source、迁移专用连接与 sql.DB。
+//
+// 关闭失败不能改变迁移结果，但必须留痕：连接未关闭会让 GET_LOCK 会话级锁
+// 一直持有到进程退出，后续 Job 只能等到 10s 超时后失败。
+func closeMigrate(ctx context.Context, m *migrate.Migrate) {
+	sourceErr, dbErr := m.Close()
+	if sourceErr != nil {
+		glog.Warningf(ctx, "migration source 关闭失败: %v", sourceErr)
+	}
+	if dbErr != nil {
+		glog.Warningf(ctx, "migration 数据库连接关闭失败: %v", dbErr)
+	}
+}
+
+// logMigrationTarget 输出迁移目标（host:port/db），便于在 Job 日志中确认连的是哪个库。
+// 只输出地址与库名，不输出用户名与密码。
+func logMigrationTarget(ctx context.Context) {
+	host, hostErr := config.String(ctx, config.KeyDatabaseDefaultHost)
+	port, portErr := config.String(ctx, config.KeyDatabaseDefaultPort)
+	name, nameErr := config.String(ctx, config.KeyDatabaseDefaultName)
+	if hostErr != nil || portErr != nil || nameErr != nil {
+		// 配置错误由 Preflight 与 buildDSN 返回更准确的错误，这里不覆盖主错误。
+		return
+	}
+	glog.Infof(ctx, "migration 目标：%s", net.JoinHostPort(host, port)+"/"+name)
 }
 
 // buildDSN 从 database.default.* 配置构造 MySQL DSN，启用 multiStatements 以支持
@@ -156,24 +253,47 @@ func closeMigrate(m *migrate.Migrate) {
 // 密码无内置默认回退：缺失（config 空且无 DATABASE_DEFAULT_PASS）时 fail-fast，
 // 不回退 "root" 等默认密码（docs/design/migration.md §5）。
 func buildDSN(ctx context.Context) (string, error) {
-	pass := cfgString(ctx, "database.default.pass", "")
+	read := &dbConfigReader{ctx: ctx}
+	pass := read.value(config.KeyDatabaseDefaultPass)
+	user := read.value(config.KeyDatabaseDefaultUser)
+	host := read.value(config.KeyDatabaseDefaultHost)
+	port := read.value(config.KeyDatabaseDefaultPort)
+	name := read.value(config.KeyDatabaseDefaultName)
+	charset := read.value(config.KeyDatabaseDefaultCharset)
+	if err := read.err; err != nil {
+		return "", err
+	}
 	if pass == "" {
 		return "", gerror.New("未配置 database.default.pass（DATABASE_DEFAULT_PASS）：数据库密码无内置默认值，必须显式注入")
 	}
 	cfg := go_mysql.NewConfig()
-	cfg.User = cfgString(ctx, "database.default.user", defaultDBUser)
+	cfg.User = user
 	cfg.Passwd = pass
 	cfg.Net = "tcp"
-	cfg.Addr = net.JoinHostPort(
-		cfgString(ctx, "database.default.host", defaultDBHost),
-		cfgString(ctx, "database.default.port", defaultDBPort),
-	)
-	cfg.DBName = cfgString(ctx, "database.default.name", defaultDBName)
-	cfg.Params = map[string]string{
-		"charset": cfgString(ctx, "database.default.charset", defaultDBCharset),
-	}
+	cfg.Addr = net.JoinHostPort(host, port)
+	cfg.DBName = name
+	cfg.Params = map[string]string{"charset": charset}
 	cfg.MultiStatements = true
 	return cfg.FormatDSN(), nil
+}
+
+// dbConfigReader 顺序读取 database.default.* 并保留首个错误，
+// 避免在同一段 DSN 构造里重复写 if err != nil。
+type dbConfigReader struct {
+	ctx context.Context
+	err error
+}
+
+// value 读取字符串配置项，失败时记录首个错误。
+func (r *dbConfigReader) value(key config.Key) string {
+	if r.err != nil {
+		return ""
+	}
+	value, err := config.String(r.ctx, key)
+	if err != nil {
+		r.err = err
+	}
+	return value
 }
 
 // latestVersion 返回内嵌迁移文件的最高版本号（按数字升序取最大值）。
@@ -211,17 +331,4 @@ func parseVersion(name string) (uint, error) {
 func isTableNotExist(err error) bool {
 	var mysqlErr *go_mysql.MySQLError
 	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1146
-}
-
-// cfgString 从 GoFrame 配置读取字符串，支持环境变量覆盖，读取失败时回退默认值。
-func cfgString(ctx context.Context, key, def string) string {
-	v, err := g.Cfg().GetEffective(ctx, key, def)
-	if err != nil {
-		glog.Warningf(ctx, "读取配置 %q 失败: %v", key, err)
-		return def
-	}
-	if v == nil {
-		return def
-	}
-	return v.String()
 }

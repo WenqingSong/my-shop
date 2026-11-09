@@ -1,0 +1,29 @@
+# 版本化 Job 层：唯一职责是给迁移 Job 加「发布版本后缀」和镜像版本。
+#
+# 为什么需要这一层：Kubernetes Job 的 spec.template 是不可变字段，同一个 Job 名称
+# 在下一次发布时无法原地更新（`kubectl apply` 会报 field is immutable）。
+# 本层让每个发布版本产生一个**新名称**的 Job（如 surgecart-migrate-a1b2c3d4），
+# 因此：
+#   - 不同版本可以并存，`kubectl apply` 永不撞上不可变字段；
+#   - 多流水线并发时不会互相删除 Job，真正的互斥仍由数据库 GET_LOCK 保证；
+#   - 历史 Job 由 ttlSecondsAfterFinished（24h）自动清理，排障窗口内仍可 kubectl logs。
+#
+# 后缀必须是 DNS-1123 合法字符（小写字母/数字/'-'），发布标签用短 SHA 天然满足。
+# 该值与 images.newTag 必须一致，且与 Application overlay 的镜像版本一致：
+# scripts/test-k8s-manifest.sh 会从构建产物断言三者相同。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../../base
+
+namespace: surgecart
+
+# 版本后缀：每次发布替换为真实短 SHA（例如 -a1b2c3d4）。0000000 是占位值，
+# scripts/deploy-k8s.sh 会拒绝发布占位版本。
+nameSuffix: "-0000000"
+
+# 迁移镜像必须与同一次发布的应用镜像完全相同（同一 commit 的产物）。
+images:
+  - name: docker.cnb.cool/framework-station/my-shop
+    newTag: "0000000"

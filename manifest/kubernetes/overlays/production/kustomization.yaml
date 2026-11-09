@@ -1,0 +1,51 @@
+# 生产 Overlay（Application 部署入口）。
+#
+#   kubectl kustomize manifest/kubernetes/overlays/production
+#   kubectl apply -k manifest/kubernetes/overlays/production
+#
+# 该入口只产出应用侧资源：Namespace、ConfigMap、PVC、Deployment、Service。
+# 它不包含任何 Job —— 数据库迁移有独立入口
+# （manifest/kubernetes/migration/overlays/production），发布顺序由 scripts/deploy-k8s.sh 强制。
+#
+# 每次发布必须同时更新三处版本号（三者由 scripts/test-k8s-manifest.sh 断言一致）：
+#   1. 本文件的 images.newTag
+#   2. migration/overlays/production/job/kustomization.yaml 的 nameSuffix
+#   3. overlays/production/version-patch.yaml 的 app.kubernetes.io/version（标签）
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+namespace: surgecart
+
+# 不可变镜像：短 SHA（CNB_COMMIT_SHORT）或 digest，禁止 latest / unreleased。
+# 0000000 是占位值，scripts/deploy-k8s.sh 会拒绝发布，必须先替换为真实发布标签。
+images:
+  - name: docker.cnb.cool/framework-station/my-shop
+    newTag: "0000000"
+
+patches:
+  # 发布版本标记：app.kubernetes.io/version 必须等于上面的 images.newTag（T2-06.1）。
+  # 它是发布降级保护的事实来源：脚本读取上一版 Deployment 的该标签判断版本先后。
+  - path: version-patch.yaml
+  # 环境专属：外部数据库地址（与迁移入口保持同值）。
+  - path: database-patch.yaml
+  # 环境专属：外部 Redis 地址、七牛 bucket/domain。
+  - path: configmap-patch.yaml
+  # 副本数（当前固定 1，原因见 patch 内注释）。
+  - path: replicas-patch.yaml
+  # 资源 requests/limits。
+  - path: resources-patch.yaml
+
+# 存储：base 的 PVC 不指定 storageClassName，使用集群默认 StorageClass。
+# 若集群没有默认 StorageClass（PVC 会一直 Pending），由集群管理员提供名称后取消注释：
+#
+# patches:
+#   - target:
+#       kind: PersistentVolumeClaim
+#       name: surgecart-storage
+#     patch: |-
+#       - op: add
+#         path: /spec/storageClassName
+#         value: REPLACE_WITH_STORAGE_CLASS
