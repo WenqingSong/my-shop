@@ -1,0 +1,31 @@
+# 本地环境专属的非敏感配置。
+#
+# 只放「随账号/环境变化」的项；其余（数据库地址、Redis 地址、Kafka brokers、探针参数、
+# 秒杀消费模式）全部沿用 base 的集群内默认值，避免同一事实出现两份。
+#
+# 七牛空间名与访问域名不是凭据，但属于账号专属信息，因此与 production overlay 一样
+# 只提交占位符：真实值由部署时从本机 .env 注入（不进入仓库）。
+# 保持 REPLACE_WITH_* 时应用会在启动校验阶段 fail-fast，不会带着错误配置冒充成功。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: surgecart-config
+data:
+  QINIU_BUCKET: "REPLACE_WITH_QINIU_BUCKET"
+  QINIU_DOMAIN: "REPLACE_WITH_QINIU_DOMAIN"
+
+  # ---------- 秒杀消费入口（T3-02 实测选择）----------
+  # base 的默认值是 db_scanner（不依赖 Kafka 也能启动）。本地集群已经具备可用的
+  # Kafka（T3-01 验收），且本项目秒杀改造的主路径就是 Kafka，因此本地 overlay 显式
+  # 切到 kafka：两种模式都已实测通过（见 T3-02 报告），这里固定为发布态。
+  #
+  # 约束（由启动期校验强制，写错即 fail-fast）：
+  #   - dispatch_mode=kafka 必须同时 kafka_enabled=true，否则拒绝启动；
+  #   - topic / dlq_topic / consumer_group 必须与 infrastructure 的 Topic 初始化 Job
+  #     使用同一组名字（同源于 ConfigMap/surgecart-kafka-config），避免验证过的话题
+  #     与运行时话题不是同一个。
+  FLASH_SALE_DISPATCH_MODE: "kafka"
+  FLASH_SALE_KAFKA_ENABLED: "true"
+  FLASH_SALE_KAFKA_TOPIC: "surgecart.flashsale.order.requested.v1"
+  FLASH_SALE_KAFKA_DLQ_TOPIC: "surgecart.flashsale.order.requested.v1.dlq"
+  FLASH_SALE_KAFKA_CONSUMER_GROUP: "surgecart-flashsale-order-worker-v1"
