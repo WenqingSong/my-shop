@@ -80,7 +80,11 @@ kustomize_ok() { has kubectl && kubectl kustomize "${ROOT_DIR}/manifest/kubernet
 # 这不是「资源不足」问题：受限的嵌套容器环境里会直接 operation not permitted。
 docker_allows_privileged() {
   local output
-  if output="$(docker run --rm --privileged --network none --entrypoint /bin/true "${PROBE_IMAGE}" 2>&1)"; then
+  # MSYS2_ARG_CONV_EXCL='*'：Git Bash(Windows) 会把容器内路径 /bin/true 改写成
+  # D:/.../Git/usr/bin/true，导致 docker 报 "exec: ... no such file or directory"，
+  # 把「Docker 允许特权容器」误判成「特权不可用」。该调用不含宿主机路径参数，
+  # 因此关掉这一条命令的参数转换是安全的；Linux/macOS 上该变量无副作用。
+  if output="$(MSYS2_ARG_CONV_EXCL='*' docker run --rm --privileged --network none --entrypoint /bin/true "${PROBE_IMAGE}" 2>&1)"; then
     return 0
   fi
   PROBE_ERROR="${output}"

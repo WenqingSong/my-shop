@@ -714,6 +714,16 @@ func TestVerificationJobsProveProtocols(t *testing.T) {
 		t.Fatal("Job/verify-kafka 必须断言 broker 广播地址就是 Service DNS")
 	}
 
+	// 回读消息必须用固定字符串匹配（grep -F）：MARKER 的结尾是 `$$`（Kubernetes 不会展开，
+	// 容器内也不展开），把它当正则时尾部的 $ 会被解释成行尾锚点，导致「消息确实存在」
+	// 被误判成「没消费到」。这是 T3-01 在真实 kind 集群上暴露的行为差异。
+	if !strings.Contains(kafkaScript, `grep -qxF "${MARKER}" /tmp/consumed.txt`) {
+		t.Fatal("Job/verify-kafka 必须用固定字符串（grep -F）比对消费到的 MARKER：MARKER 含 $ 时正则会误判")
+	}
+	if strings.Contains(kafkaScript, `grep -qx "${MARKER}"`) {
+		t.Fatal("Job/verify-kafka 不得用正则比对 MARKER：$ 会被当成行尾锚点")
+	}
+
 	// 验证 Job 不得设置 ttlSecondsAfterFinished：日志要在失败时可供排查。
 	for _, doc := range verify.byKind("Job") {
 		if dig(doc, "spec", "ttlSecondsAfterFinished") != nil {

@@ -86,7 +86,9 @@ spec:
                 --from-beginning \
                 --timeout-ms 20000 > /tmp/consumed.txt 2>/dev/null || true
               echo "[verify-kafka] 已消费 $(wc -l < /tmp/consumed.txt) 条"
-              grep -qx "${MARKER}" /tmp/consumed.txt || {
+              # -F：MARKER 里含有 `$`（见上面的 $$），作为正则会被当成行尾锚点，
+              # 于是「消息确实存在」会被误判成「没消费到」。这里必须是固定字符串匹配。
+              grep -qxF "${MARKER}" /tmp/consumed.txt || {
                 echo "[verify-kafka] 未消费到刚生产的消息 ${MARKER}" >&2
                 exit 1
               }
