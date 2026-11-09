@@ -531,8 +531,9 @@ bash scripts/k8s-infra.sh verify
 | 基线 HEAD | `9f66495576cabdd5f700edf863401f33285219c1` |
 | 工作分支 | `feat/k8s-t2-07-local-cluster-dependencies` |
 | 实现提交 | `b6913208071a5038da8f830c1cc4bcb494c94d20`（`b691320`，25 个文件） |
-| 报告提交 | 本文件所在的提交（`git log --oneline -1` 可读，父提交为上行的实现提交） |
-| 远端 SHA | `git rev-parse origin/feat/k8s-t2-07-local-cluster-dependencies`（推送后与本地 HEAD 相同） |
+| 报告提交 | `287d3d1ea95ad564bba1981dc76069369716dd7a`（`287d3d1`，本文件首次提交） |
+| SHA 回填提交 | 见 `git log --oneline -1`（仅把上两行 SHA 写进报告，无代码变更） |
+| 远端 SHA | 推送后与本地 HEAD 相同；核验：`git rev-parse origin/feat/k8s-t2-07-local-cluster-dependencies` |
 
 推送后核验命令：
 
