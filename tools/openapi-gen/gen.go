@@ -11,11 +11,11 @@ import (
 // 契约基线（B1-01 冻结的 HEAD）。
 const contractBaseline = "82243c0fbce614e03c4ff57dcc829b5f68fb08f2"
 
-// 142 条常驻 API 的期望分布（B1-01 §3.1）。
+// 常驻 API 的期望分布：B1-01 §3.1 的 142 条 + B1-04-05 一级分销新增 8 条（前台 4、后台 4）。
 const (
-	expectedTotal    = 142
-	expectedFrontend = 67
-	expectedAdmin    = 73
+	expectedTotal    = 150
+	expectedFrontend = 71
+	expectedAdmin    = 77
 	expectedHealth   = 2
 )
 
@@ -24,8 +24,8 @@ var codesByValue = map[int]*ErrorCode{}
 // pathFileOrder 固定分域视图文件的输出顺序。
 var pathFileOrder = []string{
 	"iam", "admin", "categories", "product", "sku", "inventory", "address",
-	"cart", "order", "refund", "coupon", "flashsale", "banner", "recommendation",
-	"article", "review", "favorite", "like", "upload", "dashboard", "health",
+	"cart", "order", "refund", "coupon", "distribution", "flashsale", "banner",
+	"recommendation", "article", "review", "favorite", "like", "upload", "dashboard", "health",
 }
 
 // tagDescriptions 是 tag 的稳定说明与展示顺序。
@@ -47,6 +47,7 @@ var tagDescriptions = []struct {
 	{"订单", "订单创建、支付、取消、收货与后台管理"},
 	{"退款", "退款申请、撤销、审核、执行与审计"},
 	{"优惠券", "优惠券模板管理与用户领取"},
+	{"分销", "一级推荐关系与订单佣金（只做一级，不含提现与结算）"},
 	{"秒杀", "秒杀活动管理与下单"},
 	{"轮播图", "轮播图查询与后台管理"},
 	{"推荐位", "推荐位查询与后台管理"},

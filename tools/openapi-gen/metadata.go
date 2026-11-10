@@ -112,6 +112,16 @@ var enumRegistry = map[string]enumDef{
 	"CouponTemplate.status": intEnum(0, 1).
 		withLabels("0", "已停止新领取", "1", "正常可领取"),
 
+	// 一级分销（佣金状态 DB 10/20/30）
+	"DistributionCommission.status": strEnum("pending", "settled", "reversed").
+		withLabels("pending", "待结算（DB 10）", "settled", "已结算（DB 20）", "reversed", "已冲回（DB 30，终态）"),
+	"DistributionCommissionStatsItem.status": strEnum("pending", "settled", "reversed").
+		withLabels("pending", "待结算", "settled", "已结算", "reversed", "已冲回"),
+	"ListCommissionsRequest.status": strEnum("", "pending", "settled", "reversed").
+		withLabels("", "全部", "pending", "待结算", "settled", "已结算", "reversed", "已冲回"),
+	"AdminListCommissionsRequest.status": strEnum("", "pending", "settled", "reversed").
+		withLabels("", "全部", "pending", "待结算", "settled", "已结算", "reversed", "已冲回"),
+
 	// 秒杀
 	"FlashSaleActivity.status": strEnum("enabled", "disabled").
 		withLabels("enabled", "启用", "disabled", "禁用"),

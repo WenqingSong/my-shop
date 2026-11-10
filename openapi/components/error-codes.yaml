@@ -132,6 +132,21 @@ codes:
     http_status: 409
     message: 优惠券不可用
     domain: coupon
+  - code: 20003
+    constant: CodeDistributionAlreadyBound
+    http_status: 409
+    message: 已绑定推荐人，不可变更
+    domain: distribution
+  - code: 20002
+    constant: CodeDistributionReferrerUnavailable
+    http_status: 404
+    message: 推荐人不存在或不可用
+    domain: distribution
+  - code: 20001
+    constant: CodeDistributionSelfReferral
+    http_status: 400
+    message: 不能绑定自己为推荐人
+    domain: distribution
   - code: 11001
     constant: CodeFavoriteProductUnavailable
     http_status: 409
@@ -206,6 +221,7 @@ codes:
       - categories
       - coupon
       - dashboard
+      - distribution
       - favorite
       - flashsale
       - iam
@@ -215,7 +231,6 @@ codes:
       - product
       - recommendation
       - refund
-      - region
       - review
       - sku
   - code: 1001
@@ -231,6 +246,7 @@ codes:
       - categories
       - coupon
       - dashboard
+      - distribution
       - favorite
       - flashsale
       - iam
@@ -238,7 +254,6 @@ codes:
       - order
       - product
       - refund
-      - region
       - review
       - sku
   - code: 2002
@@ -270,7 +285,6 @@ codes:
     domain: common
     reused_by_domains:
       - flashsale
-      - region
   - code: 0
     constant: CodeOK
     http_status: 200
@@ -322,13 +336,6 @@ codes:
     domain: iam
     reused_by_domains:
       - admin
-  - code: 2016
-    constant: CodePhoneExists
-    http_status: 409
-    message: 手机号已被使用
-    domain: unknown
-    reused_by_domains:
-      - iam
   - code: 4007
     constant: CodeProductCategoryDisabled
     http_status: 400
@@ -540,6 +547,7 @@ codes:
     domain: common
     reused_by_domains:
       - admin
+      - distribution
       - iam
   - code: 17002
     constant: CodeUploadConfigInvalid

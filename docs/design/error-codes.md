@@ -46,6 +46,7 @@
 | 17 | 17000-17999 | object-storage-upload | ACTIVE |
 | 18 | 18000-18999 | order-refund-v1 | ACTIVE |
 | 19 | 19000-19999 | coupon-v1 | ACTIVE |
+| 20 | 20000-20999 | distribution-v1 | RESERVED |
 
 （本表为长期设计快照；分配状态与未来 RESERVED/ACTIVE/RELEASED 变化以 `.agent/registry/error-codes.md` 为唯一权威。）
 

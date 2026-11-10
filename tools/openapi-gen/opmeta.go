@@ -48,6 +48,7 @@ var opMetaByKey = map[string]*opMeta{
 	"POST /admin/refunds/:id/execute":   {KnownIssues: []*OMap{d1Issue()}},
 	"POST /admin/refunds/:id/close":     {KnownIssues: []*OMap{d1Issue()}},
 	"POST /admin/roles/:id/permissions": {KnownIssues: []*OMap{d1Issue()}, NullData: true},
+	"POST /distribution/referral":       {KnownIssues: []*OMap{d1Issue()}},
 
 	// ---- data 为 null 的成功响应（controller 显式 return nil, nil）----
 	"POST /logout":                                       {NullData: true},
@@ -71,10 +72,15 @@ var opMetaByKey = map[string]*opMeta{
 	"GET /my/reviews":                     {Pagination: "clamp"},
 	"GET /favorites":                      {Pagination: "clamp"},
 	"GET /admin/inventories/:sku_id/logs": {Pagination: "clamp"},
+	"GET /distribution/subordinates":      {Pagination: "clamp"},
+	"GET /distribution/commissions":       {Pagination: "clamp"},
 
 	// ---- 分页：形态 B（严格校验）----
-	"GET /admin/orders":  {Pagination: "strict"},
-	"GET /admin/refunds": {Pagination: "strict"},
+	"GET /admin/orders":                     {Pagination: "strict"},
+	"GET /admin/refunds":                    {Pagination: "strict"},
+	"GET /admin/distributions/referrals":    {Pagination: "strict"},
+	"GET /admin/distributions/distributors": {Pagination: "strict"},
+	"GET /admin/distributions/commissions":  {Pagination: "strict"},
 
 	// ---- 幂等：body 字段（现状，未支持 Header）----
 	"POST /orders": {

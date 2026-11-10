@@ -522,6 +522,11 @@ func (s *sRefund) Execute(ctx context.Context, adminID int64, req *v1.ExecuteReq
 			if affected, _ := result.RowsAffected(); affected == 0 {
 				return codes.New(codes.CodeRefundInvalidStatusTransition)
 			}
+			// 一级分销冲回：与退款成功、订单 20→70、库存恢复同事务提交。
+			// 条件更新 status ∈ (10,20) 保证只冲一次；订单无佣金时 0 行 no-op，不伪造记录。
+			if e := service.Distribution().ReverseOrderCommissionInTx(ctx, tx, req.Id, r.OrderId); e != nil {
+				return e
+			}
 			return s.insertAudit(ctx, tx, req.Id, auditActionExecuteSuccess, operatorTypeAdmin, adminID, username, before, refundStatusRefundSucceeded, reason)
 		})
 		if err != nil {

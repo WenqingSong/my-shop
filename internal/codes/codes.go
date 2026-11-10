@@ -149,6 +149,11 @@ const (
 	CodeCouponClaimUnavailable Code = 19005 // 未开始/已结束/已停止，不可领取 → 409
 	CodeCouponClaimSoldOut     Code = 19006 // 发放总量已满 → 409
 	CodeCouponUnavailable      Code = 19007 // 下单用券：已使用/被占用/不在使用期/未达门槛 → 409
+
+	// 一级分销域（Distribution）20000-20999。
+	CodeDistributionSelfReferral        Code = 20001 // 绑定自己为推荐人 → 400
+	CodeDistributionReferrerUnavailable Code = 20002 // 推荐人不存在或已禁用 → 404
+	CodeDistributionAlreadyBound        Code = 20003 // 已绑定其他推荐人，不可改绑 → 409
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -266,6 +271,10 @@ var codeTable = map[Code]codeInfo{
 	CodeCouponClaimUnavailable: {http.StatusConflict, "优惠券暂不可领取"},
 	CodeCouponClaimSoldOut:     {http.StatusConflict, "优惠券已领完"},
 	CodeCouponUnavailable:      {http.StatusConflict, "优惠券不可用"},
+
+	CodeDistributionSelfReferral:        {http.StatusBadRequest, "不能绑定自己为推荐人"},
+	CodeDistributionReferrerUnavailable: {http.StatusNotFound, "推荐人不存在或不可用"},
+	CodeDistributionAlreadyBound:        {http.StatusConflict, "已绑定推荐人，不可变更"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。

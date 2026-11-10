@@ -86,7 +86,7 @@
 ## 5. 一致性模型与失败语义
 
 - 事实来源：单一 MySQL。`orders`（订单状态）、`inventories`/`inventory_logs`（库存）、`refund_requests`（退款状态）、`refund_audits`（审计）同库；无 MQ、无跨系统事务。
-- 成功语义：申请 = 写 `refund_requests`（`uk_active` 兜底）+ 审计，不碰订单/库存；审核 = 仅推进退款状态 + 审计；执行成功 = 单事务「订单 `20→70` + 库存恢复 + 退款状态 60 + 审计」；执行失败 = 退款状态 30 + 审计，订单/库存不变；关闭 = 退款状态 70 + 审计，订单/库存不变。
+- 成功语义：申请 = 写 `refund_requests`（`uk_active` 兜底）+ 审计，不碰订单/库存；审核 = 仅推进退款状态 + 审计；执行成功 = 单事务「订单 `20→70` + 库存恢复 + 退款状态 60 + 佣金冲回 + 审计」；执行失败 = 退款状态 30 + 审计，订单/库存不变；关闭 = 退款状态 70 + 审计，订单/库存不变。
 - 并发互斥：申请与发货用「同一 `orders` 行 `SELECT ... FOR UPDATE`」串行化；退款成功与发货用「订单 `status=20` 条件更新」行锁闸门；杜绝「已发货 + 申请中退款」「已发货 + 退款成功」及「退款=60 但订单=30」中间态。
 - 幂等与重复：重复执行成功 → 退款状态条件更新 0 行（已 60）→ 幂等返回；订单闸门 0 行（已 70）→ 不再恢复库存。
 - 部分完成：无跨系统，所有写为单事务，无中间态残留。
@@ -120,6 +120,10 @@
 - 库存恢复复用 `IInventory.IncreaseInTx`（「只补偿一次」不变量由订单状态条件更新闸门保证）。
 - 发货互斥：订单模块 `Ship` 在事务内检查有效退款申请（`service.Refund().HasActiveRequestInTx`），存在即拒绝。
 - 订单状态流水：退款成功推进订单 `paid→refunded` 时，B1-04 需在 `order_status_logs` 记一条 `refund` 流水（当前未写入，见 `order.md` §2.4）。
+- 一级分销：退款成功事务内调用 `IDistribution.ReverseOrderCommissionInTx(ctx, tx, refundID, orderID)`，
+  把该订单佣金 `10/20 → 30` 并写 `reversed_amount/reversed_at/refund_id/reversal_reason`；
+  `WHERE status IN (10,20)` + `uk_refund_id` 保证同一退款单只冲一次，无佣金时 no-op。佣金不回写退款单与订单，
+  详见 `distribution.md`。
 - 钱包：当前 Mock 退款**不产生资金流水**（`wallet_transactions` 无用例）。B1-04 引入余额支付后，退款成功需在退款事务内写一条退款入账流水（`biz_type='refund'`、`biz_id=refund_requests.id`、确定性幂等键），见 `wallet.md`。
 - 建表经 golang-migrate 迁移（`20261001000020_refund.up.sql`），见 `migration.md`。
 

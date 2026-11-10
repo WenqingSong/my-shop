@@ -12,6 +12,7 @@ import (
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/categories"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/coupon"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/dashboard"
+	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/distribution"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/favorite"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/flashsale"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/health"
