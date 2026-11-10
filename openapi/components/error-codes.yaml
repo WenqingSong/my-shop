@@ -215,6 +215,7 @@ codes:
       - product
       - recommendation
       - refund
+      - region
       - review
       - sku
   - code: 1001
@@ -237,6 +238,7 @@ codes:
       - order
       - product
       - refund
+      - region
       - review
       - sku
   - code: 2002
@@ -268,6 +270,7 @@ codes:
     domain: common
     reused_by_domains:
       - flashsale
+      - region
   - code: 0
     constant: CodeOK
     http_status: 200
@@ -319,6 +322,13 @@ codes:
     domain: iam
     reused_by_domains:
       - admin
+  - code: 2016
+    constant: CodePhoneExists
+    http_status: 409
+    message: 手机号已被使用
+    domain: unknown
+    reused_by_domains:
+      - iam
   - code: 4007
     constant: CodeProductCategoryDisabled
     http_status: 400

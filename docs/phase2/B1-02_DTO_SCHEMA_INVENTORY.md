@@ -13,11 +13,11 @@
 
 | 指标 | 数值 |
 |---|---|
-| DTO 结构体总数 | 321 |
-| Request 结构体 | 142 |
-| Response 结构体 | 141 |
-| 业务实体结构体 | 38 |
-| 已登记 API | 142 |
+| DTO 结构体总数 | 328 |
+| Request 结构体 | 145 |
+| Response 结构体 | 144 |
+| 业务实体结构体 | 39 |
+| 已登记 API | 145 |
 | OperationId 唯一性 | 通过（生成期强制校验） |
 | 无法确认的字段 | 0（遇到未登记类型直接失败，不猜测） |
 
@@ -51,14 +51,14 @@
 
 | Schema | Go 类型 | 类型 | 字段数 | 金额字段 | 枚举字段 | 时间字段 | 可空字段 |
 |---|---|---|---|---|---|---|---|
-| `Address` | `address.Address` | Entity | 10 | - | - | `created_at`<br>`updated_at` | `created_at`<br>`updated_at` |
-| `AddressCreateRequest` | `address.CreateReq` | Request | 7 | - | - | - | `is_default` |
+| `Address` | `address.Address` | Entity | 13 | - | - | `created_at`<br>`updated_at` | `province_id`<br>`city_id`<br>`district_id`<br>`created_at`<br>`updated_at` |
+| `AddressCreateRequest` | `address.CreateReq` | Request | 10 | - | - | - | `province_id`<br>`city_id`<br>`district_id`<br>`is_default` |
 | `AddressCreateResponse` | `address.CreateRes` | Response | 1 | - | - | - | - |
 | `AddressListRequest` | `address.ListReq` | Request | 0 | - | - | - | - |
 | `AddressListResponse` | `address.ListRes` | Response | 1 | - | - | - | - |
 | `AddressDetailRequest` | `address.DetailReq` | Request | 1 | - | - | - | - |
 | `AddressDetailResponse` | `address.DetailRes` | Response | 1 | - | - | - | - |
-| `AddressUpdateRequest` | `address.UpdateReq` | Request | 8 | - | - | - | `recipient_name`<br>`phone`<br>`province`<br>`city`<br>`district`<br>`detail`<br>`is_default` |
+| `AddressUpdateRequest` | `address.UpdateReq` | Request | 11 | - | - | - | `recipient_name`<br>`phone`<br>`province_id`<br>`city_id`<br>`district_id`<br>`province`<br>`city`<br>`district`<br>`detail`<br>`is_default` |
 | `AddressUpdateResponse` | `address.UpdateRes` | Response | 1 | - | - | - | - |
 | `AddressDeleteRequest` | `address.DeleteReq` | Request | 1 | - | - | - | - |
 | `AddressDeleteResponse` | `address.DeleteRes` | Response | 0 | - | - | - | - |
@@ -230,7 +230,9 @@
 | `UserRefreshRequest` | `iam.RefreshReq` | Request | 1 | - | - | - | - |
 | `UserRefreshResponse` | `iam.RefreshRes` | Response | 4 | - | - | - | - |
 | `UserMeRequest` | `iam.MeReq` | Request | 0 | - | - | - | - |
-| `UserMeResponse` | `iam.MeRes` | Response | 2 | - | - | - | - |
+| `UserMeResponse` | `iam.MeRes` | Response | 5 | - | - | - | `phone` |
+| `UserUpdateMeRequest` | `iam.UpdateMeReq` | Request | 3 | - | - | - | `nickname`<br>`avatar_url`<br>`phone` |
+| `UserUpdateMeResponse` | `iam.UpdateMeRes` | Response | 1 | - | - | - | - |
 | `UserLogoutRequest` | `iam.LogoutReq` | Request | 0 | - | - | - | - |
 | `UserLogoutResponse` | `iam.LogoutRes` | Response | 0 | - | - | - | - |
 | `UserSession` | `iam.Session` | Entity | 5 | - | - | - | - |
@@ -348,6 +350,11 @@
 | `RefundExecuteResponse` | `refund.ExecuteRes` | Response | 1 | - | - | - | - |
 | `RefundCloseRequest` | `refund.CloseReq` | Request | 2 | - | - | - | - |
 | `RefundCloseResponse` | `refund.CloseRes` | Response | 1 | - | - | - | - |
+| `Region` | `region.Region` | Entity | 4 | - | - | - | - |
+| `RegionListRequest` | `region.ListReq` | Request | 1 | - | - | - | - |
+| `RegionListResponse` | `region.ListRes` | Response | 1 | - | - | - | - |
+| `RegionDetailRequest` | `region.DetailReq` | Request | 1 | - | - | - | - |
+| `RegionDetailResponse` | `region.DetailRes` | Response | 4 | - | - | - | `province`<br>`city`<br>`district` |
 | `ReviewItem` | `review.ReviewItem` | Entity | 7 | - | - | `created_at` | `created_at` |
 | `Review` | `review.Review` | Entity | 9 | - | `status` | `created_at` | `created_at` |
 | `ReviewListRequest` | `review.ListReq` | Request | 3 | - | - | - | - |
@@ -522,11 +529,20 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 
 | Schema | 字段 |
 |---|---|
+| `Address` | `province_id` |
+| `Address` | `city_id` |
+| `Address` | `district_id` |
 | `Address` | `created_at` |
 | `Address` | `updated_at` |
+| `AddressCreateRequest` | `province_id` |
+| `AddressCreateRequest` | `city_id` |
+| `AddressCreateRequest` | `district_id` |
 | `AddressCreateRequest` | `is_default` |
 | `AddressUpdateRequest` | `recipient_name` |
 | `AddressUpdateRequest` | `phone` |
+| `AddressUpdateRequest` | `province_id` |
+| `AddressUpdateRequest` | `city_id` |
+| `AddressUpdateRequest` | `district_id` |
 | `AddressUpdateRequest` | `province` |
 | `AddressUpdateRequest` | `city` |
 | `AddressUpdateRequest` | `district` |
@@ -596,6 +612,10 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 | `FlashSaleUpdateRequest` | `end_time` |
 | `FlashSaleGetOrderResultResponse` | `order` |
 | `FlashSaleRequestAudit` | `created_at` |
+| `UserMeResponse` | `phone` |
+| `UserUpdateMeRequest` | `nickname` |
+| `UserUpdateMeRequest` | `avatar_url` |
+| `UserUpdateMeRequest` | `phone` |
 | `Inventory` | `created_at` |
 | `Inventory` | `updated_at` |
 | `InventoryLog` | `operator_admin_id` |
@@ -647,6 +667,9 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 | `RefundAdminListRequest` | `order_id` |
 | `RefundAdminListRequest` | `user_id` |
 | `RefundAudit` | `created_at` |
+| `RegionDetailResponse` | `province` |
+| `RegionDetailResponse` | `city` |
+| `RegionDetailResponse` | `district` |
 | `ReviewItem` | `created_at` |
 | `Review` | `created_at` |
 | `Sku` | `created_at` |

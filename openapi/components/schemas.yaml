@@ -3,11 +3,14 @@
 # 生成命令：go run ./tools/openapi-gen -repo .
 Address:
   type: object
-  description: Address 收货地址结构，创建/查询/更新复用。
+  description: Address 收货地址结构，创建/查询/更新复用。 地区同时返回自由文本与结构化 id：province_id/city_id/district_id 为 null 表示该地址未关联地区字典。
   required:
     - id
     - recipient_name
     - phone
+    - province_id
+    - city_id
+    - district_id
     - province
     - city
     - district
@@ -27,15 +30,30 @@ Address:
     phone:
       type: string
       description: 手机号
+    province_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 省级地区 id；null 表示未关联
+    city_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 市级地区 id；null 表示未关联
+    district_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 区/县级地区 id；null 表示未关联
     province:
       type: string
-      description: 省（自由文本）
+      description: 省（展示文本；结构化时取自地区字典）
     city:
       type: string
-      description: 市（自由文本）
+      description: 市（展示文本；结构化时取自地区字典）
     district:
       type: string
-      description: 区（自由文本）
+      description: 区（展示文本；结构化时取自地区字典）
     detail:
       type: string
       description: 详细地址
@@ -58,7 +76,7 @@ Address:
       description: 更新时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
 AddressCreateRequest:
   type: object
-  description: CreateReq 创建地址请求。请求体不含也不接受 user_id，归属取自已认证 Principal。
+  description: CreateReq 创建地址请求。请求体不含也不接受 user_id，归属取自已认证 Principal。 地区二选一：传 province_id/city_id/district_id（三个必须同时传且为正数）走结构化模式， 服务端校验父子层级并以字典名称覆盖文本；否则走 province/city/district 自由文本模式。
   properties:
     recipient_name:
       type: string
@@ -66,15 +84,30 @@ AddressCreateRequest:
     phone:
       type: string
       description: 手机号，格式 ^1[3-9]\d{9}$
+    province_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 省级地区 id（与 city_id/district_id 同时提供）
+    city_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 市级地区 id（与 province_id/district_id 同时提供）
+    district_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 区/县级地区 id（与 province_id/city_id 同时提供）
     province:
       type: string
-      description: 省（自由文本，非空）
+      description: 省（自由文本；结构化模式下可省略，以字典为准）
     city:
       type: string
-      description: 市（自由文本，非空）
+      description: 市（自由文本；结构化模式下可省略，以字典为准）
     district:
       type: string
-      description: 区（自由文本，非空）
+      description: 区（自由文本；结构化模式下可省略，以字典为准）
     detail:
       type: string
       description: 详细地址，trim 后 1~255 字符
@@ -122,7 +155,7 @@ AddressDetailResponse:
     - $ref: '#/Address'
 AddressUpdateRequest:
   type: object
-  description: UpdateReq 更新本人地址请求。请求体不含也不接受 user_id。
+  description: UpdateReq 更新本人地址请求。请求体不含也不接受 user_id。 地区语义：三个 id 都省略 = 不修改；都传正数 = 切换为结构化并以字典名覆盖文本； 都传 0 = 清空地区 id（文本字段仍按本请求或保留原值）；只传其中一部分 = 400。 仅修改文本而未传 id 时，视为显式切换回文本模式，地区 id 同步清空。
   required:
     - id
   properties:
@@ -139,15 +172,30 @@ AddressUpdateRequest:
     phone:
       type: [string, "null"]
       description: 手机号
+    province_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 省级地区 id；与另外两个 id 同传，传 0 表示清空
+    city_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 市级地区 id；与另外两个 id 同传，传 0 表示清空
+    district_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 区/县级地区 id；与另外两个 id 同传，传 0 表示清空
     province:
       type: [string, "null"]
-      description: 省（自由文本）
+      description: 省（自由文本；未传 id 时修改文本会清空地区 id）
     city:
       type: [string, "null"]
-      description: 市（自由文本）
+      description: 市（自由文本；未传 id 时修改文本会清空地区 id）
     district:
       type: [string, "null"]
-      description: 区（自由文本）
+      description: 区（自由文本；未传 id 时修改文本会清空地区 id）
     detail:
       type: [string, "null"]
       description: 详细地址
@@ -2993,6 +3041,9 @@ UserMeResponse:
   required:
     - id
     - username
+    - nickname
+    - avatar_url
+    - phone
   properties:
     id:
       type: integer
@@ -3002,6 +3053,33 @@ UserMeResponse:
     username:
       type: string
       description: 当前用户名
+    nickname:
+      type: string
+      description: 昵称；空串表示未设置
+    avatar_url:
+      type: string
+      description: 头像地址；空串表示未设置
+    phone:
+      type: [string, "null"]
+      description: 手机号；null 表示未设置
+UserUpdateMeRequest:
+  type: object
+  description: UpdateMeReq 修改当前登录用户资料请求。不接受 user_id，归属恒为已认证 Principal。 字段省略表示不修改；空串表示主动清空（nickname/avatar_url 清为空串，phone 清为 NULL）。
+  properties:
+    nickname:
+      type: [string, "null"]
+      description: 昵称；空串表示清空，省略表示不修改；trim 后 ≤32 字符
+    avatar_url:
+      type: [string, "null"]
+      description: 头像地址；空串表示清空，省略表示不修改；非空时须为 http/https URL 且 ≤512 字符
+    phone:
+      type: [string, "null"]
+      description: 手机号；空串表示清空为未设置，省略表示不修改；格式 ^1[3-9]\d{9}$
+UserUpdateMeResponse:
+  type: object
+  description: UpdateMeRes 修改当前登录用户资料响应（返回更新后的完整资料）。
+  allOf:
+    - $ref: '#/UserMeResponse'
 UserLogoutRequest:
   type: object
   description: LogoutReq 登出当前会话请求。sid 来自当前 token，不接受客户端指定。
@@ -5177,6 +5255,87 @@ RefundCloseResponse:
   description: CloseRes 关闭退款响应。
   allOf:
     - $ref: '#/Refund'
+Region:
+  type: object
+  description: Region 地区字典项（只读）。
+  required:
+    - id
+    - parent_id
+    - level
+    - name
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 地区 id（沿用历史 city_id）
+    parent_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 父级地区 id；省级为 0
+    level:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 层级：1=省、2=市、3=区/县
+    name:
+      type: string
+      description: 地区名称
+RegionListRequest:
+  type: object
+  description: ListReq 查询地区列表：parent_id 为 0（或缺省）返回省级；传父级 id 返回其直接下级。
+  properties:
+    parent_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: query
+      default: 0
+      description: 父级地区 id；0 或缺省返回省级列表
+RegionListResponse:
+  type: object
+  description: ListRes 地区列表响应。
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/Region'}, {type: "null"}]
+      description: 地区列表（按 id 升序）
+RegionDetailRequest:
+  type: object
+  description: DetailReq 查询单个地区及其完整三级链路。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 地区 id
+RegionDetailResponse:
+  type: object
+  description: DetailRes 地区详情：province/city/district 对应 1/2/3 级，链上不存在的层级为 null。
+  allOf:
+    - $ref: '#/Region'
+  required:
+    - province
+    - city
+    - district
+  properties:
+    province:
+      oneOf: [{$ref: '#/Region'}, {type: "null"}]
+      description: 省级地区；level=1 时为自身
+    city:
+      oneOf: [{$ref: '#/Region'}, {type: "null"}]
+      description: 市级地区；level>=2 时存在
+    district:
+      oneOf: [{$ref: '#/Region'}, {type: "null"}]
+      description: 区/县级地区；level=3 时为自身
 ReviewItem:
   type: object
   description: ReviewItem 公开评价条目（仅 status=published，供商品详情页公开列表）。

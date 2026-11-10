@@ -29,15 +29,30 @@
               phone:
                 type: string
                 description: 手机号，格式 ^1[3-9]\d{9}$
+              province_id:
+                type: [integer, "null"]
+                format: int64
+                x-go-type: int64
+                description: 省级地区 id（与 city_id/district_id 同时提供）
+              city_id:
+                type: [integer, "null"]
+                format: int64
+                x-go-type: int64
+                description: 市级地区 id（与 province_id/district_id 同时提供）
+              district_id:
+                type: [integer, "null"]
+                format: int64
+                x-go-type: int64
+                description: 区/县级地区 id（与 province_id/city_id 同时提供）
               province:
                 type: string
-                description: 省（自由文本，非空）
+                description: 省（自由文本；结构化模式下可省略，以字典为准）
               city:
                 type: string
-                description: 市（自由文本，非空）
+                description: 市（自由文本；结构化模式下可省略，以字典为准）
               district:
                 type: string
-                description: 区（自由文本，非空）
+                description: 区（自由文本；结构化模式下可省略，以字典为准）
               detail:
                 type: string
                 description: 详细地址，trim 后 1~255 字符
@@ -214,15 +229,30 @@
               phone:
                 type: [string, "null"]
                 description: 手机号
+              province_id:
+                type: [integer, "null"]
+                format: int64
+                x-go-type: int64
+                description: 省级地区 id；与另外两个 id 同传，传 0 表示清空
+              city_id:
+                type: [integer, "null"]
+                format: int64
+                x-go-type: int64
+                description: 市级地区 id；与另外两个 id 同传，传 0 表示清空
+              district_id:
+                type: [integer, "null"]
+                format: int64
+                x-go-type: int64
+                description: 区/县级地区 id；与另外两个 id 同传，传 0 表示清空
               province:
                 type: [string, "null"]
-                description: 省（自由文本）
+                description: 省（自由文本；未传 id 时修改文本会清空地区 id）
               city:
                 type: [string, "null"]
-                description: 市（自由文本）
+                description: 市（自由文本；未传 id 时修改文本会清空地区 id）
               district:
                 type: [string, "null"]
-                description: 区（自由文本）
+                description: 区（自由文本；未传 id 时修改文本会清空地区 id）
               detail:
                 type: [string, "null"]
                 description: 详细地址
