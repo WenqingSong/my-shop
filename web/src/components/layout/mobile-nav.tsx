@@ -1,7 +1,8 @@
-import { Menu } from 'lucide-react'
+import { Menu, ShoppingCart } from 'lucide-react'
 import { Link } from 'react-router'
 
 import { useAuthStatus, useLogout } from '@/auth/use-auth'
+import { useCartCount } from '@/hooks/use-cart'
 import {
   Dialog,
   DialogClose,
@@ -12,6 +13,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { useUiStore } from '@/stores/ui-store'
+import { cn } from '@/utils/cn'
 
 const navigationItems = [
   { to: '/', label: '首页' },
@@ -27,6 +29,7 @@ export function MobileNav() {
   const setOpen = useUiStore((state) => state.setMobileNavOpen)
   const { status, user } = useAuthStatus()
   const logout = useLogout()
+  const cartCount = useCartCount()
 
   const handleLogout = () => {
     setOpen(false)
@@ -57,12 +60,23 @@ export function MobileNav() {
             </DialogClose>
           ))}
 
-          <span
-            aria-disabled="true"
-            className="cursor-not-allowed rounded-md px-3 py-2.5 text-sm text-muted-foreground"
-          >
-            购物车（W3 开放）
-          </span>
+          <DialogClose asChild>
+            <Link
+              to="/cart"
+              className={cn(linkClass, 'flex items-center justify-between gap-2')}
+              aria-label={cartCount > 0 ? `购物车，${String(cartCount)} 件商品` : '购物车'}
+            >
+              <span className="inline-flex items-center gap-2">
+                <ShoppingCart className="size-4" aria-hidden="true" />
+                购物车
+              </span>
+              {cartCount > 0 ? (
+                <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-promo px-1.5 py-0.5 text-[11px] font-semibold leading-none tabular-nums text-primary-foreground">
+                  {cartCount > 99 ? '99+' : cartCount}
+                </span>
+              ) : null}
+            </Link>
+          </DialogClose>
 
           <div className="mt-2 border-t border-border px-1 pt-2">
             {status === 'loading' ? (

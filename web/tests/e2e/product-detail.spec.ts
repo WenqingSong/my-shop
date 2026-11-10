@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 
 test.describe('商品详情与 SKU 选择', () => {
-  test('展示商品信息、规格、库存说明与未开放的购物车入口', async ({ page }) => {
+  test('展示商品信息、规格与加购入口（未登录时引导登录）', async ({ page }) => {
     await page.goto('/products/1')
 
     await expect(page).toHaveTitle(/星海 X1 Pro/)
@@ -9,18 +9,21 @@ test.describe('商品详情与 SKU 选择', () => {
       page.getByRole('heading', { level: 1, name: '星海 X1 Pro 5G 手机 12GB+256GB' }),
     ).toBeVisible()
 
-    const pricePanel = page.getByText('当前价格').locator('..')
+    const pricePanel = page.getByText('商品起售价').locator('..')
     await expect(pricePanel).toContainText('4,299')
 
     await expect(page.getByRole('group', { name: '商品规格' })).toBeVisible()
-    await expect(page.getByText('已选规格：标准款')).toBeVisible()
+    // 后端要求 sku_id 必填：页面默认未选择规格。
+    await expect(page.getByText('请选择商品规格')).toBeVisible()
     await expect(page.getByText('库存状态')).toBeVisible()
-    await expect(page.getByRole('button', { name: '加入购物车' })).toBeDisabled()
-    await expect(page.getByText(/购物车功能尚未开放/)).toBeVisible()
+    await expect(page.getByRole('button', { name: '登录后加入购物车' })).toBeVisible()
   })
 
   test('切换 SKU 后价格与已选规格同步更新', async ({ page }) => {
     await page.goto('/products/1')
+
+    await page.getByRole('button', { name: /标准款/ }).click()
+    await expect(page.getByText('已选规格：标准款')).toBeVisible()
 
     const pricePanel = page.getByText('当前价格').locator('..')
     await expect(pricePanel).toContainText('4,299')

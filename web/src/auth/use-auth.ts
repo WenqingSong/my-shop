@@ -121,6 +121,7 @@ export function useLogout() {
         queryClient.removeQueries({ queryKey: queryKeys.auth.all })
         queryClient.removeQueries({ queryKey: queryKeys.addresses.all })
         queryClient.removeQueries({ queryKey: queryKeys.favorites.all })
+        queryClient.removeQueries({ queryKey: queryKeys.cart.all })
       }
     },
     onSuccess: () => {

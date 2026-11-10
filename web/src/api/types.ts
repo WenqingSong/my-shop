@@ -150,6 +150,40 @@ export interface Address {
 }
 
 /**
+ * 购物车条目（api/cart/v1/cart.go CartItem）。
+ *
+ * 商品/SKU/库存信息由后端 LEFT JOIN 实时返回，前端不自行判断可购性与库存：
+ * - SKU 被删除：product_id / current_price / stock 为 null，product_name/sku_name 为空串；
+ * - available=false 时按 unavailable_reason 区分 sku_deleted / disabled / off_shelf；
+ * - insufficient 表示「购物车数量 > 当前库存」，由后端计算（无库存记录视为 0）；
+ * - price_changed 表示当前 SKU 价与加购时快照价不一致，加购快照价不锁价。
+ */
+export interface CartItem {
+  id: number
+  sku_id: number
+  quantity: number
+  /** 服务端持久化的勾选状态（默认 true）。 */
+  selected: boolean
+  /** 加购时的 SKU 价格快照（整数分），不参与成交价计算。 */
+  price_snapshot: number
+  product_id: number | null
+  product_name: string
+  product_main_image: string
+  sku_name: string
+  /** 当前 SKU 价格（整数分）；SKU 被删除时为 null。 */
+  current_price: number | null
+  price_changed: boolean
+  available: boolean
+  /** 空串表示可购；sku_deleted / disabled / off_shelf。 */
+  unavailable_reason: string
+  /** 当前库存；SKU 被删除时为 null。 */
+  stock: number | null
+  insufficient: boolean
+  created_at: string | null
+  updated_at: string | null
+}
+
+/**
  * 收藏条目（api/favorite/v1/favorite.go）。
  * 商品信息为服务端实时联查快照；商品删除时 product_name/main_image 为空、
  * product_price 为 null，available=false。

@@ -28,6 +28,8 @@ export function useAuthCacheReset(): void {
       queryClient.removeQueries({ queryKey: queryKeys.auth.all })
       queryClient.removeQueries({ queryKey: queryKeys.addresses.all })
       queryClient.removeQueries({ queryKey: queryKeys.favorites.all })
+      // 购物车是账号私有数据：会话结束后必须删除，避免下一个账号沿用上一账号的列表与徽标。
+      queryClient.removeQueries({ queryKey: queryKeys.cart.all })
     }
 
     previousHasSession.current = hasSession

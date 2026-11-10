@@ -1,4 +1,4 @@
-import { http, HttpResponse } from 'msw'
+import { delay, http, HttpResponse } from 'msw'
 
 import type { Product } from '@/api/types'
 import {
@@ -9,6 +9,14 @@ import {
   rotateMockRefreshToken,
   startMockSession,
 } from '@/mocks/data/auth'
+import {
+  addMockCartItem,
+  deleteMockCartItem,
+  getMockCartRequestDelay,
+  listMockCart,
+  updateMockCartQuantity,
+  updateMockCartSelected,
+} from '@/mocks/data/cart'
 import {
   createMockAddress,
   deleteMockAddress,
@@ -199,6 +207,100 @@ export const handlers = [
     }
 
     return HttpResponse.json(ok(null))
+  }),
+
+  // 购物车：与 internal/cmd/routes_frontend.go 的 /cart 路由一一对应，全部需要登录。
+  http.get(`${API}/cart`, ({ request }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    return HttpResponse.json(ok({ items: listMockCart(user.id) }))
+  }),
+
+  http.post(`${API}/cart/items`, async ({ request }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    const body = await readJsonObject(request)
+    const skuId = Number(body.sku_id)
+    // 后端 quantity 可缺省（默认 1）；前端始终显式传整数。
+    const quantity = body.quantity === undefined ? 1 : Number(body.quantity)
+
+    if (!Number.isSafeInteger(quantity)) {
+      return fail(400, 8002, '数量非法')
+    }
+
+    const result = addMockCartItem(user.id, skuId, quantity)
+
+    return result.ok
+      ? HttpResponse.json(ok(result.item))
+      : fail(result.status, result.code, result.message)
+  }),
+
+  http.put(`${API}/cart/items/:id`, async ({ request, params }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    const body = await readJsonObject(request)
+    const quantity = Number(body.quantity)
+
+    if (!Number.isSafeInteger(quantity)) {
+      return fail(400, 8002, '数量非法')
+    }
+
+    // 仅 Mock：可注入响应延迟，用于验证连续修改数量时的请求竞争处理。
+    const wait = getMockCartRequestDelay()
+
+    if (wait > 0) {
+      await delay(wait)
+    }
+
+    const result = updateMockCartQuantity(user.id, Number(params.id), quantity)
+
+    return result.ok
+      ? HttpResponse.json(ok(result.item))
+      : fail(result.status, result.code, result.message)
+  }),
+
+  http.put(`${API}/cart/items/:id/selected`, async ({ request, params }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    const body = await readJsonObject(request)
+
+    if (typeof body.selected !== 'boolean') {
+      return fail(400, 1001, '参数错误')
+    }
+
+    const result = updateMockCartSelected(user.id, Number(params.id), body.selected)
+
+    return result.ok
+      ? HttpResponse.json(ok(result.item))
+      : fail(result.status, result.code, result.message)
+  }),
+
+  http.delete(`${API}/cart/items/:id`, ({ request, params }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    const result = deleteMockCartItem(user.id, Number(params.id))
+
+    return result.ok ? HttpResponse.json(ok({})) : fail(result.status, result.code, result.message)
   }),
 
   http.get(`${API}/addresses`, ({ request }) => {

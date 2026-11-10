@@ -6,6 +6,7 @@ import { resetRefreshStateForTests } from '@/auth/refresh-session'
 import { clearAuthTokens } from '@/auth/token-store'
 import { resetMockAddresses } from '@/mocks/data/addresses'
 import { resetMockAuthState } from '@/mocks/data/auth'
+import { resetMockCart } from '@/mocks/data/cart'
 import { resetMockFavorites } from '@/mocks/data/favorites'
 import { server } from '@/mocks/server'
 
@@ -31,6 +32,7 @@ afterEach(() => {
   resetMockAuthState()
   resetMockAddresses()
   resetMockFavorites()
+  resetMockCart()
 })
 
 afterAll(() => {

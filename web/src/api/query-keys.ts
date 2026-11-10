@@ -50,6 +50,15 @@ export const queryKeys = {
     all: ['addresses'] as const,
     list: () => ['addresses', 'list'] as const,
   },
+  /**
+   * 购物车：后端只有「整份列表」接口（GET /cart），没有分页与计数接口。
+   * 因此 Header 徽标与购物车页面共用同一个 key，天然复用同一份缓存，
+   * 不会为了展示数量额外发一次请求。
+   */
+  cart: {
+    all: ['cart'] as const,
+    list: () => ['cart', 'list'] as const,
+  },
   favorites: {
     all: ['favorites'] as const,
     lists: () => ['favorites', 'list'] as const,

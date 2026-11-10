@@ -12,6 +12,7 @@ import { NotFoundPage } from '@/pages/not-found-page'
 import {
   AccountOverviewPage,
   AddressesPage,
+  CartPage,
   FavoritesPage,
   LoginPage,
   ProductDetailPage,
@@ -43,6 +44,17 @@ export const routes: RouteObject[] = [
       {
         path: 'products/:id',
         element: withRouteLoading(<ProductDetailPage />),
+        errorElement: <RouteErrorPage />,
+      },
+      {
+        // 购物车所有接口都要求登录（internal/cmd/routes_frontend.go 的 Auth 分组），
+        // 因此路由层直接复用 RequireAuth：未登录跳 /login 并携带 /cart 作为回跳地址。
+        path: 'cart',
+        element: withRouteLoading(
+          <RequireAuth>
+            <CartPage />
+          </RequireAuth>,
+        ),
         errorElement: <RouteErrorPage />,
       },
       {

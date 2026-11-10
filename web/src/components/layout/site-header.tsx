@@ -1,35 +1,14 @@
-import { LayoutGrid, ShoppingCart } from 'lucide-react'
+import { LayoutGrid } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Link, NavLink } from 'react-router'
 
 import { PageContainer } from '@/components/common/page-container'
 import { BrandLogo } from '@/components/layout/brand-logo'
+import { CartEntry } from '@/components/layout/cart-entry'
 import { HeaderAuthControl } from '@/components/layout/header-auth'
 import { MobileNav } from '@/components/layout/mobile-nav'
 import { SearchBox } from '@/components/layout/search-box'
 import { cn } from '@/utils/cn'
-
-interface HeaderActionProps {
-  icon: ReactNode
-  label: string
-  hint: string
-}
-
-/** 尚未接入的阶段功能：保持布局占位、明确禁用原因，不制造死链。 */
-function HeaderAction({ icon, label, hint }: HeaderActionProps) {
-  return (
-    <button
-      type="button"
-      disabled
-      title={hint}
-      aria-label={`${label}（${hint}）`}
-      className="inline-flex shrink-0 cursor-not-allowed items-center gap-2 whitespace-nowrap rounded-md px-2 py-2 text-sm font-medium text-muted-foreground/80"
-    >
-      {icon}
-      <span className="hidden lg:inline">{label}</span>
-    </button>
-  )
-}
 
 function NavItem({ to, children, end = false }: { to: string; children: ReactNode; end?: boolean }) {
   return (
@@ -56,11 +35,7 @@ export function SiteHeader() {
         <BrandLogo className="shrink-0" />
         <SearchBox className="mx-auto hidden min-w-0 flex-1 md:flex md:max-w-[560px]" />
         <div className="ml-auto flex shrink-0 items-center gap-1 md:gap-2">
-          <HeaderAction
-            icon={<ShoppingCart className="size-5" aria-hidden="true" />}
-            label="购物车"
-            hint="购物车将在 W3 阶段开放"
-          />
+          <CartEntry showLabel />
           <span className="hidden h-6 w-px bg-border sm:block" aria-hidden="true" />
           <HeaderAuthControl />
         </div>

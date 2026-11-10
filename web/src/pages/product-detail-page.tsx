@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { ChevronRight, PackageCheck, ShoppingCart, Truck } from 'lucide-react'
+import { ChevronRight, PackageCheck, Truck } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useParams } from 'react-router'
 
@@ -12,6 +12,7 @@ import { ErrorState } from '@/components/common/error-state'
 import { PageContainer } from '@/components/common/page-container'
 import { PagePlaceholder } from '@/components/common/page-placeholder'
 import { PriceDisplay } from '@/components/common/price-display'
+import { AddToCartPanel } from '@/components/product/add-to-cart-panel'
 import { FavoriteButton } from '@/components/product/favorite-button'
 import { ProductGallery } from '@/components/product/product-gallery'
 import { ReviewSection } from '@/components/product/review-section'
@@ -60,7 +61,8 @@ function ProductDetailContent({
   product: ProductDetail
   categoryName?: string
 }) {
-  const [selectedSkuId, setSelectedSkuId] = useState<number | null>(product.skus[0]?.id ?? null)
+  // 规格不默认选中：后端要求 sku_id 必填，界面必须让用户显式选择后再加购。
+  const [selectedSkuId, setSelectedSkuId] = useState<number | null>(null)
   const selectedSku: Sku | null = product.skus.find((sku) => sku.id === selectedSkuId) ?? null
   const currentPrice = selectedSku?.price ?? product.price
 
@@ -109,11 +111,13 @@ function ProductDetailContent({
           </dl>
 
           <div className="mt-5 rounded-xl bg-primary-soft px-5 py-4">
-            <p className="text-xs text-muted-foreground">当前价格</p>
+            <p className="text-xs text-muted-foreground">
+              {selectedSku ? '当前价格' : '商品起售价'}
+            </p>
             <PriceDisplay value={currentPrice} size="lg" className="mt-1" />
-            {selectedSku ? (
-              <p className="mt-2 text-xs text-muted-foreground">已选规格：{selectedSku.name}</p>
-            ) : null}
+            <p className="mt-2 text-xs text-muted-foreground" aria-live="polite">
+              {selectedSku ? `已选规格：${selectedSku.name}` : '请选择商品规格'}
+            </p>
           </div>
 
           <section aria-labelledby="sku-heading" className="mt-6">
@@ -139,18 +143,16 @@ function ProductDetailContent({
             </div>
           </div>
 
-          <div className="mt-6 flex flex-wrap items-center gap-3">
+          <div className="mt-6 flex flex-wrap items-start gap-3">
             <FavoriteButton productId={product.id} />
-            <span title="购物车将在 W3 阶段开放" className="inline-block">
-              <Button size="lg" disabled aria-describedby="cart-availability">
-                <ShoppingCart aria-hidden="true" />
-                加入购物车
-              </Button>
-            </span>
           </div>
-          <p id="cart-availability" className="mt-2 text-xs leading-5 text-muted-foreground">
-            购物车功能尚未开放，当前可浏览商品、收藏与规格信息。
-          </p>
+
+          <section aria-labelledby="add-to-cart-heading" className="mt-4">
+            <h2 id="add-to-cart-heading" className="sr-only">
+              加入购物车
+            </h2>
+            <AddToCartPanel product={product} selectedSku={selectedSku} />
+          </section>
 
           <ul className="mt-6 space-y-2 border-t border-border pt-4 text-xs leading-5 text-muted-foreground">
             <li className="flex items-center gap-2">
