@@ -180,7 +180,9 @@ pnpm dev     # http://localhost:8848/console/
 - 代码提交：`a827674a75098a94ffd388bbfb212a79c95e9e69`
 - 提交信息：`feat(admin): initialize Vue admin frontend`
 - 变更范围：仅 `admin/**`（204 个文件），未修改 `internal/**`、`api/**`、`migrations/**`、`contracts/**`、`web/**`、`Dockerfile`、`docker-compose.yml`、`deploy/**`、`nginx/`、`prometheus/`、Kubernetes 清单、根目录 `.gitignore`。
-- 推送结果：见本报告提交后的推送记录（分支 `feat/phase2-admin-frontend`，普通 push，未 force）。
+- 推送结果：成功。`git push -u origin feat/phase2-admin-frontend` 以普通 push 创建远端分支
+  （`* [new branch] feat/phase2-admin-frontend -> feat/phase2-admin-frontend`），并已设置 upstream；
+  未使用 force push，未重写历史。
 
 ## 8. 尚未解决的问题
 
