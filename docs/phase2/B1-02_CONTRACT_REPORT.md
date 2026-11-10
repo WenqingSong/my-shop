@@ -72,6 +72,8 @@
 | `openapi/.spectral.yaml` | - | 契约专用 Spectral ruleset |
 | `tools/openapi-gen/*.go` | 12 个文件 | 生成器 + 校验器 + 单测 |
 | `scripts/contract-check.sh` | - | 契约门禁入口 |
+| `docs/phase2/B1-02_GPT6_REVIEW_HANDOFF.md` | 236 | GPT-6 独立审查交接材料（决策、证据、复现命令） |
+| `.agent/tasks/dev/openapi-contract.md` | 134 | 开发知识：契约维护流程、扩展字段约定、排障 |
 
 ### 2.2 修改文件
 
