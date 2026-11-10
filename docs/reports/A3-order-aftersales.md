@@ -213,8 +213,9 @@ A0/A1/A2 回归测试全部继续通过（同一 `pnpm test`）。
 
 ## 8. Git
 
-- 功能提交 SHA：`（提交后回填）`
-- 文档回填提交：本条提交
+- 功能提交 SHA：`e87c323d19c24350d9e121ac5897ba61d1fb8c50`
+  （`feat(admin): implement order and after-sales management`，27 files changed）
+- 文档回填提交：本条提交（`docs(admin): 记录 A3 提交与推送结果`）
 - 目标分支：`feat/phase2-admin-frontend`
 - 远端：`origin/feat/phase2-admin-frontend`
 - 提交前远端状态：`origin/feat/phase2-admin-frontend...HEAD = 0 0`
