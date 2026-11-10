@@ -13,6 +13,7 @@ type Address struct {
 	Province      string      `json:"province" dc:"省（自由文本）"`
 	City          string      `json:"city" dc:"市（自由文本）"`
 	District      string      `json:"district" dc:"区（自由文本）"`
+	RegionId      *int64      `json:"region_id" dc:"结构化地区 id（区/县级，regions.level=3）；null 表示历史地址或未使用结构化地区"`
 	Detail        string      `json:"detail" dc:"详细地址"`
 	IsDefault     bool        `json:"is_default" dc:"是否默认地址"`
 	CreatedAt     *gtime.Time `json:"created_at" dc:"创建时间"`
@@ -24,9 +25,10 @@ type CreateReq struct {
 	g.Meta        `path:"/addresses" method:"post" tags:"收货地址" summary:"创建收货地址"`
 	RecipientName string `json:"recipient_name" dc:"收货人姓名，trim 后 1~32 字符"`
 	Phone         string `json:"phone" dc:"手机号，格式 ^1[3-9]\\d{9}$"`
-	Province      string `json:"province" dc:"省（自由文本，非空）"`
-	City          string `json:"city" dc:"市（自由文本，非空）"`
-	District      string `json:"district" dc:"区（自由文本，非空）"`
+	Province      string `json:"province" dc:"省（自由文本；提供 region_id 时可省略，服务端以字典为准）"`
+	City          string `json:"city" dc:"市（自由文本；提供 region_id 时可省略，服务端以字典为准）"`
+	District      string `json:"district" dc:"区（自由文本；提供 region_id 时可省略，服务端以字典为准）"`
+	RegionId      *int64 `json:"region_id" dc:"结构化地区 id（区/县级，regions.level=3）；提供时省/市/区文本由字典填充"`
 	Detail        string `json:"detail" dc:"详细地址，trim 后 1~255 字符"`
 	IsDefault     *bool  `json:"is_default" dc:"是否默认地址；首条地址忽略此值自动置为默认"`
 }
@@ -63,9 +65,10 @@ type UpdateReq struct {
 	Id            int64   `json:"id" in:"path" v:"required" dc:"地址 id"`
 	RecipientName *string `json:"recipient_name" dc:"收货人姓名"`
 	Phone         *string `json:"phone" dc:"手机号"`
-	Province      *string `json:"province" dc:"省（自由文本）"`
+	Province      *string `json:"province" dc:"省（自由文本；未传 region_id 时修改文本会清空结构化地区引用）"`
 	City          *string `json:"city" dc:"市（自由文本）"`
 	District      *string `json:"district" dc:"区（自由文本）"`
+	RegionId      *int64  `json:"region_id" dc:"结构化地区 id（区/县级）；省略表示不修改，0 表示清空；非 0 时省/市/区文本以字典为准"`
 	Detail        *string `json:"detail" dc:"详细地址"`
 	IsDefault     *bool   `json:"is_default" dc:"是否默认地址"`
 }

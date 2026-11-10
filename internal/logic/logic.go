@@ -20,6 +20,10 @@ import (
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/like"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/order"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/product"
+	// B1-04-01 BEGIN：用户资料与地区字典
+	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/profile"
+	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/region"
+	// B1-04-01 END
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/recommendation"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/refund"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/review"

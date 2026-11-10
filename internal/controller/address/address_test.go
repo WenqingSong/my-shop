@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -107,9 +108,34 @@ func authHeader(token string) map[string]string {
 	return map[string]string{"Authorization": "Bearer " + token}
 }
 
+// safeTestDB 本任务专用独立测试库。测试会 DELETE users/addresses，
+// 必须在任何写操作前核实真实连接库名，绝不落到 my_shop / my_shop_b10304_verify。
+const safeTestDB = "my_shop_b104_test"
+
+// requireIsolatedTestDB 第一道隔离检查：只允许显式指定的独立测试库。
+func requireIsolatedTestDB(t *testing.T) {
+	t.Helper()
+	if got := os.Getenv("DATABASE_DEFAULT_NAME"); got != safeTestDB {
+		t.Fatalf("拒绝执行破坏性测试：DATABASE_DEFAULT_NAME=%q，必须显式设为独立测试库 %q", got, safeTestDB)
+	}
+}
+
+// requireActualDB 第二道隔离检查：核实真实连接库名，不依赖环境变量名称推断。
+func requireActualDB(t *testing.T) {
+	t.Helper()
+	v, err := g.DB().GetValue(context.Background(), "SELECT DATABASE()")
+	if err != nil {
+		t.Fatalf("查询当前数据库失败: %v", err)
+	}
+	if got := v.String(); got != safeTestDB {
+		t.Fatalf("拒绝执行破坏性测试：实际连接库为 %q，不是独立测试库 %q", got, safeTestDB)
+	}
+}
+
 // setupAddressServer 迁移 + Bootstrap + 清空 users/addresses + flush Redis，挂载真实路由，返回 base URL。
 func setupAddressServer(t *testing.T) string {
 	t.Helper()
+	requireIsolatedTestDB(t)
 	t.Setenv("AUTH_JWT_SECRET", testJWTSecret)
 	t.Setenv("ADMIN_SUPER_PASSWORD", testAdminPassword)
 	t.Setenv("REDIS_DEFAULT_DB", "4")
@@ -121,6 +147,7 @@ func setupAddressServer(t *testing.T) string {
 	if err := boot.Bootstrap(ctx); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
+	requireActualDB(t)
 	// 清空前台用户与地址表，保证每个用例从干净状态开始（不触碰后台 admins/RBAC seed）。
 	for _, table := range []string{"addresses", "users"} {
 		if _, err := g.DB().Exec(ctx, "DELETE FROM "+table); err != nil {

@@ -53,6 +53,7 @@ type address struct {
 	Province      string      `json:"province"`
 	City          string      `json:"city"`
 	District      string      `json:"district"`
+	RegionId      *int64      `json:"region_id"`
 	Detail        string      `json:"detail"`
 	IsDefault     int         `json:"is_default"`
 	CreatedAt     *gtime.Time `json:"created_at"`
@@ -70,15 +71,7 @@ func (s *sAddress) Create(ctx context.Context, userID int64, req *v1.CreateReq) 
 	if err != nil {
 		return nil, err
 	}
-	province, err := validateRegion(req.Province)
-	if err != nil {
-		return nil, err
-	}
-	city, err := validateRegion(req.City)
-	if err != nil {
-		return nil, err
-	}
-	district, err := validateRegion(req.District)
+	province, city, district, regionID, err := resolveAddressRegion(ctx, req.RegionId, req.Province, req.City, req.District)
 	if err != nil {
 		return nil, err
 	}
@@ -89,6 +82,11 @@ func (s *sAddress) Create(ctx context.Context, userID int64, req *v1.CreateReq) 
 
 	var created *address
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		// 先锁定用户行，串行化同一用户的默认地址变更（含「首条自动默认」的并发判定）。
+		if e := lockUserForDefault(ctx, tx, userID); e != nil {
+			return e
+		}
+
 		count, e := tx.Model("addresses").Ctx(ctx).Where("user_id", userID).Count()
 		if e != nil {
 			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("统计用户地址数量: %w", e))
@@ -108,6 +106,10 @@ func (s *sAddress) Create(ctx context.Context, userID int64, req *v1.CreateReq) 
 			}
 		}
 
+		var regionIDValue any
+		if regionID != nil {
+			regionIDValue = *regionID
+		}
 		id, e := tx.Model("addresses").Ctx(ctx).Data(g.Map{
 			"user_id":        userID,
 			"recipient_name": recipientName,
@@ -115,6 +117,7 @@ func (s *sAddress) Create(ctx context.Context, userID int64, req *v1.CreateReq) 
 			"province":       province,
 			"city":           city,
 			"district":       district,
+			"region_id":      regionIDValue,
 			"detail":         detail,
 			"is_default":     isDefault,
 		}).InsertAndGetId()
@@ -190,21 +193,50 @@ func (s *sAddress) Update(ctx context.Context, userID int64, req *v1.UpdateReq) 
 		}
 	}
 	province := old.Province
-	if req.Province != nil {
-		if province, err = validateRegion(*req.Province); err != nil {
-			return nil, err
-		}
-	}
 	city := old.City
-	if req.City != nil {
-		if city, err = validateRegion(*req.City); err != nil {
-			return nil, err
-		}
-	}
 	district := old.District
-	if req.District != nil {
-		if district, err = validateRegion(*req.District); err != nil {
-			return nil, err
+	regionID := old.RegionId
+
+	if req.RegionId != nil && *req.RegionId > 0 {
+		// 结构化模式：校验区县节点与省-市-区链路，省/市/区文本一律以字典为准，
+		// 忽略请求中可能伪造的地区文本。
+		chain, e := service.Region().ResolveDistrict(ctx, *req.RegionId)
+		if e != nil {
+			return nil, e
+		}
+		if province, e = validateRegion(chain.Province.Name); e != nil {
+			return nil, e
+		}
+		if city, e = validateRegion(chain.City.Name); e != nil {
+			return nil, e
+		}
+		if district, e = validateRegion(chain.District.Name); e != nil {
+			return nil, e
+		}
+		id := *req.RegionId
+		regionID = &id
+	} else {
+		if req.RegionId != nil && *req.RegionId < 0 {
+			return nil, codes.New(codes.CodeInvalidArgument)
+		}
+		// 显式 region_id=0，或修改了任一自由文本 → 退出结构化模式（region_id 置 NULL）。
+		if req.RegionId != nil || req.Province != nil || req.City != nil || req.District != nil {
+			regionID = nil
+		}
+		if req.Province != nil {
+			if province, err = validateRegion(*req.Province); err != nil {
+				return nil, err
+			}
+		}
+		if req.City != nil {
+			if city, err = validateRegion(*req.City); err != nil {
+				return nil, err
+			}
+		}
+		if req.District != nil {
+			if district, err = validateRegion(*req.District); err != nil {
+				return nil, err
+			}
 		}
 	}
 	detail := old.Detail
@@ -218,10 +250,19 @@ func (s *sAddress) Update(ctx context.Context, userID int64, req *v1.UpdateReq) 
 		isDefault = boolToInt(*req.IsDefault)
 	}
 
+	var regionIDValue any
+	if regionID != nil {
+		regionIDValue = *regionID
+	}
+
 	var updated *address
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		if isDefault == defaultFlag {
-			// 设默认：同事务先取消该用户其它默认地址，再置本地址为默认。
+			// 设默认：先锁定用户行，把「取消旧默认 + 置新默认」串行化，
+			// 避免并发设置时两个事务同时通过应用层检查（DB 唯一约束仍是最终防线）。
+			if e := lockUserForDefault(ctx, tx, userID); e != nil {
+				return e
+			}
 			if e := s.clearDefault(ctx, tx, userID, req.Id); e != nil {
 				return e
 			}
@@ -235,6 +276,7 @@ func (s *sAddress) Update(ctx context.Context, userID int64, req *v1.UpdateReq) 
 				"province":       province,
 				"city":           city,
 				"district":       district,
+				"region_id":      regionIDValue,
 				"detail":         detail,
 				"is_default":     isDefault,
 			}).Update(); e != nil {
@@ -271,6 +313,60 @@ func (s *sAddress) Delete(ctx context.Context, userID, id int64) error {
 	}
 	if n, _ := result.RowsAffected(); n == 0 {
 		return codes.New(codes.CodeAddressNotFound)
+	}
+	return nil
+}
+
+// resolveAddressRegion 解析地址地区：
+//   - 提供 region_id 时，校验其为存在的区/县级（level=3）且省-市-区链路完整，
+//     省/市/区文本一律取字典权威名称，不使用客户端提交的文本；
+//   - 未提供 region_id 时，沿用自由文本校验（兼容历史地址与旧客户端）。
+func resolveAddressRegion(ctx context.Context, regionID *int64, provinceText, cityText, districtText string) (string, string, string, *int64, error) {
+	if regionID != nil {
+		if *regionID <= 0 {
+			return "", "", "", nil, codes.New(codes.CodeInvalidArgument)
+		}
+		chain, err := service.Region().ResolveDistrict(ctx, *regionID)
+		if err != nil {
+			return "", "", "", nil, err
+		}
+		province, err := validateRegion(chain.Province.Name)
+		if err != nil {
+			return "", "", "", nil, err
+		}
+		city, err := validateRegion(chain.City.Name)
+		if err != nil {
+			return "", "", "", nil, err
+		}
+		district, err := validateRegion(chain.District.Name)
+		if err != nil {
+			return "", "", "", nil, err
+		}
+		id := *regionID
+		return province, city, district, &id, nil
+	}
+
+	province, err := validateRegion(provinceText)
+	if err != nil {
+		return "", "", "", nil, err
+	}
+	city, err := validateRegion(cityText)
+	if err != nil {
+		return "", "", "", nil, err
+	}
+	district, err := validateRegion(districtText)
+	if err != nil {
+		return "", "", "", nil, err
+	}
+	return province, city, district, nil, nil
+}
+
+// lockUserForDefault 在同一事务内对 users 行加排他锁，把同一用户的默认地址变更串行化。
+// addresses 的不同行之间无法互斥，因此借 users 行作为「每用户锁」；DB 唯一约束 uk_user_default
+// 仍是最终防线，两层保护共同保证「并发下每用户最多一个默认地址」。
+func lockUserForDefault(ctx context.Context, tx gdb.TX, userID int64) error {
+	if _, err := tx.Model("users").Ctx(ctx).Where("id", userID).LockUpdate().Value("id"); err != nil {
+		return codes.Wrap(codes.CodeInternalError, fmt.Errorf("锁定用户行: %w", err))
 	}
 	return nil
 }
@@ -320,6 +416,7 @@ func toAddress(r *address) *v1.Address {
 		Province:      r.Province,
 		City:          r.City,
 		District:      r.District,
+		RegionId:      r.RegionId,
 		Detail:        r.Detail,
 		IsDefault:     r.IsDefault == defaultFlag,
 		CreatedAt:     r.CreatedAt,

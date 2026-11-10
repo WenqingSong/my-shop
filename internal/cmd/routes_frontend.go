@@ -15,6 +15,10 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/like"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/order"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/product"
+	// B1-04-01 BEGIN：用户资料与地区字典
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/profile"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/region"
+	// B1-04-01 END
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/recommendation"
 	refundCtrl "cnb.cool/go-cloud-devops/my-shop/internal/controller/refund"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/review"
@@ -43,6 +47,10 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	likeCtrl := like.NewV1()
 	bannerCtrl := banner.NewV1()
 	recommendationCtrl := recommendation.NewV1()
+	// B1-04-01 BEGIN：用户资料与地区字典
+	profileCtrl := profile.NewV1()
+	regionCtrl := region.NewV1()
+	// B1-04-01 END
 	articleCtrl := article.NewV1()
 	uploadCtrlV1 := uploadCtrl.NewV1()
 	refundCtrlV1 := refundCtrl.NewV1()
@@ -69,10 +77,21 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	root.GET("/articles/:id", articleCtrl.Detail)
 	root.GET("/articles/:id/like/count", articleCtrl.LikeCount)
 
+	// B1-04-01 BEGIN：地区字典（公开只读；/regions/tree 先于 /regions/:id 注册）
+	root.GET("/regions", regionCtrl.List)
+	root.GET("/regions/tree", regionCtrl.Tree)
+	root.GET("/regions/:id", regionCtrl.Detail)
+	// B1-04-01 END
+
 	// 前台登录用户接口：/me、收货地址、购物车与会话管理均需要认证 + 会话有效性校验。
 	root.Group("/", func(user *ghttp.RouterGroup) {
 		user.Middleware(middleware.Auth)
 		user.GET("/me", iamCtrl.Me)
+
+		// B1-04-01 BEGIN：用户资料（仅登录用户，作用于本人数据）
+		user.GET("/profile", profileCtrl.Get)
+		user.PUT("/profile", profileCtrl.Update)
+		// B1-04-01 END
 
 		// 收货地址（仅登录用户，作用于本人数据）。
 		user.POST("/addresses", addressCtrl.Create)
