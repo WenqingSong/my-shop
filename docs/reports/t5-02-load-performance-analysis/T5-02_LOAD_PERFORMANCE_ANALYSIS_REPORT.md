@@ -415,9 +415,11 @@ docs/reports/t5-02-load-performance-analysis/raw/
 |---|---|
 | 分支 | `feat/k8s-t5-02-load-performance-analysis` |
 | 基线 | `feat/k8s-t5-01-k6-test-framework` @ `a069b9d9d8f0f24e74c1fe4be4d5723023a31505` |
-| 实现提交 | 待回填（§10.2） |
-| 远端 | 推送后回填 |
-| 工作区 | 推送后回填 |
+| 实现提交 | `f557fe4a1f0b5721fe8e225bb5672dded6a89c7e` |
+| 远端分支 | `origin/feat/k8s-t5-02-load-performance-analysis`（与本地一致） |
+| upstream | 已设置（`git push -u`） |
+| 工作区 | clean |
+| force push / 合并 main / 删除历史分支 | 均未执行 |
 
 10.1 变更清单：
 
@@ -429,4 +431,14 @@ docs/reports/t5-02-load-performance-analysis/raw/
 新增：docs/reports/t5-02-load-performance-analysis/（报告 + raw/ 6 个证据文件）
 ```
 
-10.2 提交与推送核验：由后续「报告回填」提交补齐（与 T4-03/T4-04/T5-01 一致的做法）。
+10.2 提交与推送核验：
+
+| 项 | 值 |
+|---|---|
+| 分支 tip（实现提交） | `f557fe4a1f0b5721fe8e225bb5672dded6a89c7e` |
+| 远端 SHA | 与本地一致（`git ls-remote origin refs/heads/feat/k8s-t5-02-load-performance-analysis`） |
+| 差异基线 | `a069b9d` → `f557fe4`：11 个文件、+1634/−13 |
+| 业务代码改动 | 无（仅 `test/k6/**`、`.agent/tasks/dev/**`、`docs/reports/t5-02-*/**`） |
+
+本节由后续「报告回填」提交补齐（与 T4-03/T4-04/T5-01 一致做法），回填只改元数据，
+不改任何实现或结论。
