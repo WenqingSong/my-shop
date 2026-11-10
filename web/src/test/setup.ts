@@ -2,6 +2,9 @@ import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll } from 'vitest'
 
+import { resetRefreshStateForTests } from '@/auth/refresh-session'
+import { clearAuthTokens } from '@/auth/token-store'
+import { resetMockAuthState } from '@/mocks/data/auth'
 import { server } from '@/mocks/server'
 
 beforeAll(() => {
@@ -20,6 +23,10 @@ beforeAll(() => {
 afterEach(() => {
   cleanup()
   server.resetHandlers()
+  // 认证状态是模块级内存，必须逐用例清理，避免登录态泄漏到下一个用例。
+  clearAuthTokens()
+  resetRefreshStateForTests()
+  resetMockAuthState()
 })
 
 afterAll(() => {

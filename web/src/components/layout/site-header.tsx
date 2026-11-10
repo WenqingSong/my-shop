@@ -1,9 +1,10 @@
-import { LayoutGrid, ShoppingCart, UserRound } from 'lucide-react'
+import { LayoutGrid, ShoppingCart } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Link, NavLink } from 'react-router'
 
 import { PageContainer } from '@/components/common/page-container'
 import { BrandLogo } from '@/components/layout/brand-logo'
+import { HeaderAuthControl } from '@/components/layout/header-auth'
 import { MobileNav } from '@/components/layout/mobile-nav'
 import { SearchBox } from '@/components/layout/search-box'
 import { cn } from '@/utils/cn'
@@ -61,11 +62,7 @@ export function SiteHeader() {
             hint="购物车将在 W3 阶段开放"
           />
           <span className="hidden h-6 w-px bg-border sm:block" aria-hidden="true" />
-          <HeaderAction
-            icon={<UserRound className="size-5" aria-hidden="true" />}
-            label="登录 / 注册"
-            hint="账号体系将在 W2 阶段接入"
-          />
+          <HeaderAuthControl />
         </div>
       </PageContainer>
 

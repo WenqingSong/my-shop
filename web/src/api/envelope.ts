@@ -52,3 +52,13 @@ export async function getData<T>(
   const payload = await apiClient.get<unknown>(path, options)
   return unwrapEnvelope<T>(payload)
 }
+
+/** POST 业务接口并解包统一响应（不含 401 自动刷新，认证类公开接口直接使用）。 */
+export async function postData<T>(
+  path: string,
+  body?: unknown,
+  options?: Omit<RequestOptions, 'method' | 'body'>,
+): Promise<T> {
+  const payload = await apiClient.post<unknown>(path, body, options)
+  return unwrapEnvelope<T>(payload)
+}

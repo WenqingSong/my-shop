@@ -18,6 +18,10 @@ export interface ProductListKeyParams {
 }
 
 export const queryKeys = {
+  auth: {
+    all: ['auth'] as const,
+    me: () => ['auth', 'me'] as const,
+  },
   categories: {
     all: ['categories'] as const,
     tree: () => ['categories', 'tree'] as const,

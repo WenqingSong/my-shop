@@ -1,12 +1,20 @@
 import { Suspense, type ReactNode } from 'react'
 import { createBrowserRouter, type RouteObject } from 'react-router'
 
+import { GuestOnly } from '@/auth/guest-only'
+import { RequireAuth } from '@/auth/require-auth'
 import { RouteErrorPage } from '@/components/common/route-error-page'
 import { RouteLoading } from '@/components/common/route-loading'
 import { RootLayout } from '@/layouts/root-layout'
 import { HomePage } from '@/pages/home-page'
 import { NotFoundPage } from '@/pages/not-found-page'
-import { ProductDetailPage, ProductsPage } from '@/router/lazy-pages'
+import {
+  AccountPage,
+  LoginPage,
+  ProductDetailPage,
+  ProductsPage,
+  RegisterPage,
+} from '@/router/lazy-pages'
 
 function withRouteLoading(element: ReactNode) {
   return <Suspense fallback={<RouteLoading />}>{element}</Suspense>
@@ -31,6 +39,33 @@ export const routes: RouteObject[] = [
       {
         path: 'products/:id',
         element: withRouteLoading(<ProductDetailPage />),
+        errorElement: <RouteErrorPage />,
+      },
+      {
+        path: 'login',
+        element: withRouteLoading(
+          <GuestOnly>
+            <LoginPage />
+          </GuestOnly>,
+        ),
+        errorElement: <RouteErrorPage />,
+      },
+      {
+        path: 'register',
+        element: withRouteLoading(
+          <GuestOnly>
+            <RegisterPage />
+          </GuestOnly>,
+        ),
+        errorElement: <RouteErrorPage />,
+      },
+      {
+        path: 'account',
+        element: withRouteLoading(
+          <RequireAuth>
+            <AccountPage />
+          </RequireAuth>,
+        ),
         errorElement: <RouteErrorPage />,
       },
       { path: '*', element: <NotFoundPage /> },

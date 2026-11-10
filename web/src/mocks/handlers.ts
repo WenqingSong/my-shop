@@ -2,6 +2,14 @@ import { http, HttpResponse } from 'msw'
 
 import type { Product } from '@/api/types'
 import {
+  createMockUser,
+  findMockUserByAccessToken,
+  findMockUserByUsername,
+  revokeMockSession,
+  rotateMockRefreshToken,
+  startMockSession,
+} from '@/mocks/data/auth'
+import {
   mockBanners,
   mockCategories,
   mockProductDetail,
@@ -34,6 +42,36 @@ function fail(status: number, code: number, message: string) {
   return HttpResponse.json({ code, message, data: null }, { status })
 }
 
+const MOCK_USERNAME_PATTERN = /^[a-zA-Z0-9]{3,24}$/
+const passwordEncoder = new TextEncoder()
+
+function isValidMockUsername(value: string): boolean {
+  return MOCK_USERNAME_PATTERN.test(value)
+}
+
+function isValidMockPassword(value: string): boolean {
+  const bytes = passwordEncoder.encode(value).length
+  return bytes >= 8 && bytes <= 24
+}
+
+function bearerToken(request: Request): string {
+  const header = request.headers.get('authorization') ?? ''
+  return header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : ''
+}
+
+async function readJsonObject(request: Request): Promise<Record<string, unknown>> {
+  try {
+    const body: unknown = await request.json()
+    return body && typeof body === 'object' ? (body as Record<string, unknown>) : {}
+  } catch {
+    return {}
+  }
+}
+
+function readString(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
 function positiveInt(value: string | null, fallback: number, max: number): number {
   if (!value || !/^\d+$/.test(value)) {
     return fallback
@@ -64,6 +102,78 @@ function compareProducts(a: Product, b: Product, field: SortField): number {
 }
 
 export const handlers = [
+  http.post(`${API}/register`, async ({ request }) => {
+    const body = await readJsonObject(request)
+    const username = readString(body.username)
+    const password = readString(body.password)
+
+    if (!isValidMockUsername(username) || !isValidMockPassword(password)) {
+      return fail(400, 1001, '参数错误')
+    }
+
+    if (findMockUserByUsername(username)) {
+      return fail(409, 2001, '用户名已存在')
+    }
+
+    return HttpResponse.json(ok(createMockUser(username, password)))
+  }),
+
+  http.post(`${API}/login`, async ({ request }) => {
+    const body = await readJsonObject(request)
+    const username = readString(body.username)
+    const password = readString(body.password)
+
+    if (!isValidMockUsername(username) || !isValidMockPassword(password)) {
+      return fail(400, 1001, '参数错误')
+    }
+
+    const user = findMockUserByUsername(username)
+
+    if (!user || user.password !== password) {
+      return fail(401, 2002, '用户名或密码错误')
+    }
+
+    const session = startMockSession(username)
+
+    if (!session) {
+      return fail(401, 2002, '用户名或密码错误')
+    }
+
+    return HttpResponse.json(ok(session.tokens))
+  }),
+
+  http.post(`${API}/refresh`, async ({ request }) => {
+    const body = await readJsonObject(request)
+    const token = readString(body.refresh_token)
+    const rotated = rotateMockRefreshToken(token)
+
+    if (!rotated) {
+      return fail(401, 2012, 'refresh token 无效')
+    }
+
+    return HttpResponse.json(ok(rotated.tokens))
+  }),
+
+  http.get(`${API}/me`, ({ request }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    return HttpResponse.json(ok(user))
+  }),
+
+  http.post(`${API}/logout`, ({ request }) => {
+    const token = bearerToken(request)
+
+    if (!revokeMockSession(token)) {
+      return fail(401, 1002, '未授权')
+    }
+
+    return HttpResponse.json(ok(null))
+  }),
+
   http.get(`${API}/categories`, () => HttpResponse.json(ok({ items: mockCategories }))),
 
   http.get(`${API}/banners`, () => HttpResponse.json(ok({ items: mockBanners }))),
