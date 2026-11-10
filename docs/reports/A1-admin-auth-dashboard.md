@@ -3,7 +3,7 @@
 - 阶段：A1（管理员认证 + Token 管理 + 路由守卫 + 基础角色权限 + 运营工作台）
 - 分支：`feat/phase2-admin-frontend`
 - 基线提交：`339b513c4a3460d15c555a24a8900296b72f5aed`（A0 文档交付完成）
-- 代码提交：见第 8 节
+- 代码提交：`b86402d8aba0fc3112172356654abe1d8493c8d0`
 - 开发知识文档：`.agent/tasks/dev/A1-admin-auth-dashboard.md`
 - 执行日期：2026-11-10
 
@@ -264,12 +264,12 @@
 
 ## 8. Git 提交与推送
 
-- 代码提交：`<待回填>`
+- 代码提交：`b86402d8aba0fc3112172356654abe1d8493c8d0`（46 个文件，+4180 / -333）
 - 提交信息：`feat(admin): implement admin authentication and dashboard`
 - 变更范围：仅 `admin/**`（未修改 `internal/**`、`api/**`、`migrations/**`、`contracts/**`、
   `web/**`、`Dockerfile`、`docker-compose.yml`、`deploy/**`、Nginx、Kubernetes、Prometheus）
 - 推送：普通 push 至 `feat/phase2-admin-frontend`，未使用 force push，未重写历史
-- 远端状态：`<待回填>`
+- 远端状态：`origin/feat/phase2-admin-frontend` = `b86402d`，与本地一致
 
 ## 9. A2 的启动条件
 
