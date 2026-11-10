@@ -1,0 +1,48 @@
+{
+  "experiment": "C-dup: 重复消息安全（活动 21 / SKU 19，总库存 20）",
+  "artifact_note": "本文件在 2026-11-10 19:5x 重建：原文件因 PowerShell ETS 序列化缺陷（Get-Content 返回的字符串携带 PSProvider 引用，ConvertTo-Json 展开对象图）膨胀到 230MB 且不可用。重建数据来源：MySQL 权威查询（get-FlashSaleDbState）、c1-dup-before.snapshot.json、exp-c-dup-replay-console.log，均为同一批真实实验事实，未修改任何数值。",
+  "replay_offsets": [94, 95, 96],
+  "replay_new_offsets": [117, 118, 119],
+  "replay_event_ids": [
+    "flashsale.requested:93",
+    "flashsale.requested:94",
+    "flashsale.requested:95"
+  ],
+  "duplicate_before": null,
+  "duplicate_after": 3,
+  "duplicate_metric_note": "before=null 表示序列尚不存在（该 Pod 于 10:15 重建，计数器从 0 开始且此前没有 duplicate 结果）；复投 3 条后 flashsale_consumer_processed_total{result=\"duplicate\"}=3。",
+  "db_before": {
+    "requests_total": "10",
+    "requests_queued": "0",
+    "requests_success": "10",
+    "requests_failed": "0",
+    "requests_dead": "0",
+    "requests_unpublished": "0",
+    "requests_retry_exhausted": "0",
+    "orders_total": "10",
+    "orders_distinct_users": "10",
+    "orders_dup_per_user": "0",
+    "orders_dup_no": "0",
+    "sku_total_stock": "20",
+    "sku_sold": "10",
+    "sku_remaining": "10",
+    "request_status_distribution": ["status=1 code=0 n=10"]
+  },
+  "db_after": {
+    "requests_total": "10",
+    "requests_queued": "0",
+    "requests_success": "10",
+    "requests_failed": "0",
+    "requests_dead": "0",
+    "requests_unpublished": "0",
+    "requests_retry_exhausted": "0",
+    "orders_total": "10",
+    "orders_distinct_users": "10",
+    "orders_dup_per_user": "0",
+    "orders_dup_no": "0",
+    "sku_total_stock": "20",
+    "sku_sold": "10",
+    "sku_remaining": "10",
+    "request_status_distribution": ["status=1 code=0 n=10"]
+  }
+}

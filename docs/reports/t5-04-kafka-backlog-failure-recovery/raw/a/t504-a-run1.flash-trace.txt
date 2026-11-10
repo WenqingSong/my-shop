@@ -1,0 +1,21 @@
+﻿[k6-run] docker run --rm -v D:/Wenqingsong/CodeProjects/codebuddy/k8s/test/k6:/scripts -v D:/Wenqingsong/CodeProjects/codebuddy/k8s/test/k6/results:/results -v D:/Wenqingsong/CodeProjects/codebuddy/k8s/test/k6/data:/data -w /scripts -e SURGECART_BASE_URL=http://host.docker.internal:18000 -e RUN_ID=t504-a-run1 -e SCENARIO=flashsale-order -e K6_SUMMARY_DIR=/results -e K6_TEST_PASSWORD=*** -e DATA_PREFIX=t504ae -e ACTIVITY_ID=16 -e SKU_ID=14 -e FLASH_USERS=20 -e FLASH_VERIFY=false -e FLASH_EXECUTOR=once -e FLASH_ITERATIONS=1 -e FLASH_VUS=20 -e FLASH_TRACE=true grafana/k6:0.54.0 run /scripts/scenarios/flashsale-order.js
+time="2026-11-10T09:34:41Z" level=info msg="FLASH_TRACE vu=17 user=t504aehw4mnuu17 key=t504-a-run1-k6-17-16 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T09:34:41Z" level=info msg="FLASH_TRACE vu=7 user=t504aehw4mnuu7 key=t504-a-run1-k6-7-2 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T09:34:41Z" level=info msg="FLASH_TRACE vu=5 user=t504aehw4mnuu5 key=t504-a-run1-k6-5-15 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T09:34:41Z" level=info msg="FLASH_TRACE vu=3 user=t504aehw4mnuu3 key=t504-a-run1-k6-3-8 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T09:34:41Z" level=info msg="FLASH_TRACE vu=8 user=t504aehw4mnuu8 key=t504-a-run1-k6-8-13 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T09:34:41Z" level=info msg="FLASH_TRACE vu=16 user=t504aehw4mnuu16 key=t504-a-run1-k6-16-10 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T09:34:41Z" level=info msg="FLASH_TRACE vu=15 user=t504aehw4mnuu15 key=t504-a-run1-k6-15-5 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T09:34:41Z" level=info msg="FLASH_TRACE vu=20 user=t504aehw4mnuu20 key=t504-a-run1-k6-20-4 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T09:34:41Z" level=info msg="FLASH_TRACE vu=4 user=t504aehw4mnuu4 key=t504-a-run1-k6-4-3 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T09:34:41Z" level=info msg="FLASH_TRACE vu=18 user=t504aehw4mnuu18 key=t504-a-run1-k6-18-0 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T09:34:41Z" level=info msg="FLASH_TRACE vu=12 user=t504aehw4mnuu12 key=t504-a-run1-k6-12-11 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T09:34:42Z" level=info msg="FLASH_TRACE vu=13 user=t504aehw4mnuu13 key=t504-a-run1-k6-13-7 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T09:34:42Z" level=info msg="FLASH_TRACE vu=2 user=t504aehw4mnuu2 key=t504-a-run1-k6-2-18 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T09:34:42Z" level=info msg="FLASH_TRACE vu=19 user=t504aehw4mnuu19 key=t504-a-run1-k6-19-12 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T09:34:42Z" level=info msg="FLASH_TRACE vu=10 user=t504aehw4mnuu10 key=t504-a-run1-k6-10-6 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T09:34:42Z" level=info msg="FLASH_TRACE vu=11 user=t504aehw4mnuu11 key=t504-a-run1-k6-11-1 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T09:34:42Z" level=info msg="FLASH_TRACE vu=14 user=t504aehw4mnuu14 key=t504-a-run1-k6-14-17 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T09:34:42Z" level=info msg="FLASH_TRACE vu=1 user=t504aehw4mnuu1 key=t504-a-run1-k6-1-9 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T09:34:42Z" level=info msg="FLASH_TRACE vu=6 user=t504aehw4mnuu6 key=t504-a-run1-k6-6-19 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T09:34:42Z" level=info msg="FLASH_TRACE vu=9 user=t504aehw4mnuu9 key=t504-a-run1-k6-9-14 http=200 code=0 outcome=accepted data_status=queued" source=console

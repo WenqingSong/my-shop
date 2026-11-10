@@ -1,0 +1,19 @@
+﻿{
+    "requests_total":  "20",
+    "requests_queued":  "20",
+    "requests_success":  "0",
+    "requests_failed":  "0",
+    "requests_dead":  "0",
+    "requests_unpublished":  "0",
+    "requests_retry_exhausted":  "0",
+    "orders_total":  "0",
+    "orders_distinct_users":  "0",
+    "orders_dup_per_user":  "0",
+    "orders_dup_no":  "0",
+    "sku_total_stock":  "20",
+    "sku_sold":  "0",
+    "sku_remaining":  "20",
+    "request_status_distribution":  [
+                                        "status=0 code=0 n=20"
+                                    ]
+}

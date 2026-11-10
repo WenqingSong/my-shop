@@ -1,0 +1,41 @@
+﻿=== 实验 B 结论 ===
+activity_id=18 requests=10 k6_exit=0
+kafka pod gone=True; kafka ready after restart=True
+backlog: before=0 during_last=10 after=0
+lag: before=0 during_last=NA after=0
+committed: before=72 after=82
+app probes during outage: /health=HTTP 200: {"code":0,"message":"OK","data":{"status":"ok","time":"2026-11-10 09:51:05"}}
+/ready=HTTP 200: {"code":0,"message":"OK","data":{"status":"ready"}}
+
+--- db during outage ---
+  requests_total = 10
+  requests_queued = 10
+  requests_success = 0
+  requests_failed = 0
+  requests_dead = 0
+  requests_unpublished = 10
+  requests_retry_exhausted = 0
+  orders_total = 0
+  orders_distinct_users = 0
+  orders_dup_per_user = 0
+  orders_dup_no = 0
+  sku_total_stock = 10
+  sku_sold = 0
+  sku_remaining = 10
+  request_status_distribution = status=0 code=0 n=10
+--- db final ---
+  requests_total = 10
+  requests_queued = 0
+  requests_success = 10
+  requests_failed = 0
+  requests_dead = 0
+  requests_unpublished = 0
+  requests_retry_exhausted = 0
+  orders_total = 10
+  orders_distinct_users = 10
+  orders_dup_per_user = 0
+  orders_dup_no = 0
+  sku_total_stock = 10
+  sku_sold = 10
+  sku_remaining = 0
+  request_status_distribution = status=1 code=0 n=10

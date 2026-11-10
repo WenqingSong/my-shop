@@ -1,0 +1,2 @@
+﻿Completed updating config for client surgecart-flashsale-consumer.
+Quota configs for client-id 'surgecart-flashsale-consumer' are consumer_byte_rate=1.0

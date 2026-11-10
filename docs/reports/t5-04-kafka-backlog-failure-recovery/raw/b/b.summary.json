@@ -1,0 +1,85 @@
+﻿{
+    "experiment":  "B: kafka broker outage \u0026 recovery",
+    "activity_id":  18,
+    "sku_id":  16,
+    "run_id":  "t504-b2-run1",
+    "requests_submitted":  10,
+    "k6_exit_code":  0,
+    "kafka_pod_gone":  true,
+    "kafka_ready_after_up":  true,
+    "app_probe_during":  {
+                             "/health":  "HTTP 200: {\"code\":0,\"message\":\"OK\",\"data\":{\"status\":\"ok\",\"time\":\"2026-11-10 09:51:05\"}}",
+                             "/ready":  "HTTP 200: {\"code\":0,\"message\":\"OK\",\"data\":{\"status\":\"ready\"}}"
+                         },
+    "outage_window":  {
+                          "end_utc":  "2026-11-10T09:52:02Z",
+                          "start_utc":  "2026-11-10T09:51:03Z"
+                      },
+    "recovery_window_start":  "2026-11-10T09:52:38Z",
+    "lag_before":  "0",
+    "lag_during_last":  "NA",
+    "backlog_before":  "0",
+    "backlog_during_last":  "10",
+    "backlog_after":  "0",
+    "lag_after":  "0",
+    "committed_before":  "72",
+    "committed_after":  "82",
+    "db_before":  {
+                      "requests_total":  "0",
+                      "requests_queued":  "0",
+                      "requests_success":  "0",
+                      "requests_failed":  "0",
+                      "requests_dead":  "0",
+                      "requests_unpublished":  "0",
+                      "requests_retry_exhausted":  "0",
+                      "orders_total":  "0",
+                      "orders_distinct_users":  "0",
+                      "orders_dup_per_user":  "0",
+                      "orders_dup_no":  "0",
+                      "sku_total_stock":  "10",
+                      "sku_sold":  "0",
+                      "sku_remaining":  "10",
+                      "request_status_distribution":  [
+
+                                                      ]
+                  },
+    "db_during_outage":  {
+                             "requests_total":  "10",
+                             "requests_queued":  "10",
+                             "requests_success":  "0",
+                             "requests_failed":  "0",
+                             "requests_dead":  "0",
+                             "requests_unpublished":  "10",
+                             "requests_retry_exhausted":  "0",
+                             "orders_total":  "0",
+                             "orders_distinct_users":  "0",
+                             "orders_dup_per_user":  "0",
+                             "orders_dup_no":  "0",
+                             "sku_total_stock":  "10",
+                             "sku_sold":  "0",
+                             "sku_remaining":  "10",
+                             "request_status_distribution":  [
+                                                                 "status=0 code=0 n=10"
+                                                             ]
+                         },
+    "db_final":  {
+                     "requests_total":  "10",
+                     "requests_queued":  "0",
+                     "requests_success":  "10",
+                     "requests_failed":  "0",
+                     "requests_dead":  "0",
+                     "requests_unpublished":  "0",
+                     "requests_retry_exhausted":  "0",
+                     "orders_total":  "10",
+                     "orders_distinct_users":  "10",
+                     "orders_dup_per_user":  "0",
+                     "orders_dup_no":  "0",
+                     "sku_total_stock":  "10",
+                     "sku_sold":  "10",
+                     "sku_remaining":  "0",
+                     "request_status_distribution":  [
+                                                         "status=1 code=0 n=10"
+                                                     ]
+                 },
+    "recovery_seconds":  18
+}

@@ -1,0 +1,34 @@
+﻿=== 实验 C 结论 ===
+dup activity=21: duplicate  -> 3
+  dup.db requests_total = 10
+  dup.db requests_queued = 0
+  dup.db requests_success = 10
+  dup.db requests_failed = 0
+  dup.db requests_dead = 0
+  dup.db requests_unpublished = 0
+  dup.db requests_retry_exhausted = 0
+  dup.db orders_total = 10
+  dup.db orders_distinct_users = 10
+  dup.db orders_dup_per_user = 0
+  dup.db orders_dup_no = 0
+  dup.db sku_total_stock = 20
+  dup.db sku_sold = 10
+  dup.db sku_remaining = 10
+  dup.db request_status_distribution = @{value=status=1 code=0 n=10; PSPath=C:\Users\ASUS\AppData\Local\Temp\tmpF0A9.tmp; PSParentPath=C:\Users\ASUS\AppData\Local\Temp; PSChildName=tmpF0A9.tmp; PSDrive=; PSProvider=; ReadCount=1}
+crash activity=22: committed 120 -> 130 (logEnd 130), lag now 0
+  crash.db requests_total = 10
+  crash.db requests_queued = 0
+  crash.db requests_success = 10
+  crash.db requests_failed = 0
+  crash.db requests_dead = 0
+  crash.db requests_unpublished = 0
+  crash.db requests_retry_exhausted = 0
+  crash.db orders_total = 10
+  crash.db orders_distinct_users = 10
+  crash.db orders_dup_per_user = 0
+  crash.db orders_dup_no = 0
+  crash.db sku_total_stock = 10
+  crash.db sku_sold = 10
+  crash.db sku_remaining = 0
+  crash.db request_status_distribution = @{value=status=1 code=0 n=10; PSPath=C:\Users\ASUS\AppData\Local\Temp\tmp5E12.tmp; PSParentPath=C:\Users\ASUS\AppData\Local\Temp; PSChildName=tmp5E12.tmp; PSDrive=; PSProvider=; ReadCount=1}
+NOT_VERIFIED: MySQL已提交但offset未提交的微秒级窗口无法精确复现，标记 NOT_VERIFIED；本实验证明其两侧（不丢/幂等）。

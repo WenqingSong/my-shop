@@ -1,0 +1,72 @@
+﻿=== T5-04 snapshot: a3-backlog-observed ===
+utc=2026-11-10T09:35:38Z cst=2026-11-10 17:35:38
+
+--- Kafka topic ETAs ---
+  partition=0 earliest=0 latest=62
+--- Kafka DLQ ETAs ---
+  partition=0 earliest=0 latest=10
+--- consumer group surgecart-flashsale-order-worker-v1 (lag_total=20) ---
+  {"group":"surgecart-flashsale-order-worker-v1","topic":"surgecart.flashsale.order.requested.v1","partition":0,"current":"42","logEnd":"62","lag":"20","consumerId":"surgecart-flashsale-consumer-68b86eab-03cd-4528-bad7-18e4a0c75888","host":"/10.244.0.25","clientId":"surgecart-flashsale-consumer"}
+--- client quota (client.id=surgecart-flashsale-consumer) ---
+  Quota configs for client-id 'surgecart-flashsale-consumer' are consumer_byte_rate=1.0
+--- MySQL ---
+  activities_total = 16
+  activity_skus_total = 16
+  orders_total = 24
+  requests_total = 53
+  requests_queued = 20
+  requests_success = 24
+  requests_failed = 9
+  requests_dead = 0
+  requests_unpublished = 1
+  requests_unpublished_queued = 0
+  requests_retry_pending = 0
+  requests_lease_active = 0
+  max_request_id = 62
+  max_order_id = 33
+  mysql_now = 2026-11-10 09:35:36
+  mysql_tz = SYSTEM
+--- Redis ---
+  dbsize = 132
+  flashsale:stock:* = 5
+  flashsale:bought:* = 40
+  flashsale:activity:* = 5
+  flashsale:null:* = 0
+  flashsale:soldout:* = 0
+--- Prometheus ---
+  kafka_consumer_lag = 20
+  outbox_backlog_pending = 0
+  outbox_oldest_age_seconds = 0
+  sampler_up_outbox = 1
+  sampler_up_kafka_lag = 1
+  consumer_joined = 1
+  consumer_records_total = 39
+  consumer_processed_success = 22
+  consumer_processed_failed = 9
+  consumer_processed_duplicate = 
+  consumer_processed_invalid = 8
+  consumer_processed_dead = 
+  consumer_processed_error = 
+  consumer_retries_total = 0
+  consumer_dlq_total = 8
+  consumer_commit_failures = 0
+  consumer_restarts_total = 0
+  outbox_published_total = 51
+  outbox_publish_failed_total = 
+  outbox_retried_total = 0
+  outbox_claimed_total = 51
+  outbox_lease_reclaimed = 0
+  http_requests_total = 41323
+--- Kubernetes ---
+  kafka deployment (spec/ready) = 1/1
+  NAME                        READY   STATUS      RESTARTS   AGE   IP            NODE                            NOMINATED NODE   READINESS GATES
+  kafka-6cc98894b9-h5gvc      1/1     Running     0          21h   10.244.0.10   surgecart-local-control-plane   <none>           <none>
+  mysql-87f8b688f-t854q       1/1     Running     0          21h   10.244.0.9    surgecart-local-control-plane   <none>           <none>
+  redis-5c44b5d69d-f66q6      1/1     Running     0          21h   10.244.0.11   surgecart-local-control-plane   <none>           <none>
+  surgecart-7d4d84b88-xn4tb   1/1     Running     0          14h   10.244.0.25   surgecart-local-control-plane   <none>           <none>
+  surgecart-migrate-7j8dm     0/1     Completed   0          20h   10.244.0.19   surgecart-local-control-plane   <none>           <none>
+  NAME                STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+  kafka-data          Bound    pvc-bfcf7704-058a-48bb-9cdf-ed31a53ba322   2Gi        RWO            standard       <unset>                 21h
+  mysql-data          Bound    pvc-201fd1b3-8f85-4e0e-bee4-bc02826d8c47   2Gi        RWO            standard       <unset>                 21h
+  redis-data          Bound    pvc-8e507535-d9dd-4175-888e-4e9d537e17f9   1Gi        RWO            standard       <unset>                 21h
+  surgecart-storage   Bound    pvc-da9498d8-903a-46f5-9f50-5f3663433856   5Gi        RWO            standard       <unset>                 20h

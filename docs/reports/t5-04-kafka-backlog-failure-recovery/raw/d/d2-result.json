@@ -1,0 +1,52 @@
+﻿{
+    "request_id":  124,
+    "dlq_latest_after":  22,
+    "dlq_messages":  [
+                         {
+                             "headers":  {
+                                             "dlq_reason":  "retry_exhausted",
+                                             "dlq_error":  "请求 124 技术失败重试预算已耗尽（最近错误码 500）",
+                                             "dlq_source_topic":  "surgecart.flashsale.order.requested.v1",
+                                             "dlq_source_partition":  "0",
+                                             "dlq_source_offset":  "135",
+                                             "dlq_retry_count":  "4"
+                                         },
+                             "key":  "23:21",
+                             "value":  "{\"event_id\":\"flashsale.requested:124\",\"event_type\":\"flashsale.order.requested\",\"schema_version\":1,\"request_id\":124,\"user_id\":289,\"activity_id\":23,\"sku_id\":21,\"idempotency_key\":\"t504-d2-run1-k6-1-0\",\"request_hash\":\"7a7bc9fd4bd59c511fb6c2b3f46154680f1ee0d750f8da8ff16a679b12a6b825\",\"occurred_at\":\"2026-11-10T11:11:16Z\"}"
+                         }
+                     ],
+    "final_request_row":  [
+                              "status=3 retry_count=4 last_error_code=500 flash_order_id=0 published_offset=135"
+                          ],
+    "dead_metric":  "instance=surgecart.surgecart.svc.cluster.local:8000,job=surgecart,result=dead=2",
+    "dlq_metric":  [
+                       "instance=surgecart.surgecart.svc.cluster.local:8000,job=surgecart,reason=parse_error=1",
+                       "instance=surgecart.surgecart.svc.cluster.local:8000,job=surgecart,reason=event_type=1",
+                       "instance=surgecart.surgecart.svc.cluster.local:8000,job=surgecart,reason=request_missing=1",
+                       "instance=surgecart.surgecart.svc.cluster.local:8000,job=surgecart,reason=schema_version=1",
+                       "instance=surgecart.surgecart.svc.cluster.local:8000,job=surgecart,reason=retry_exhausted=2"
+                   ],
+    "redis_keys_after":  [
+
+                         ],
+    "db_final":  {
+                     "requests_total":  "2",
+                     "requests_queued":  "0",
+                     "requests_success":  "0",
+                     "requests_failed":  "0",
+                     "requests_dead":  "2",
+                     "requests_unpublished":  "0",
+                     "requests_retry_exhausted":  "2",
+                     "orders_total":  "0",
+                     "orders_distinct_users":  "0",
+                     "orders_dup_per_user":  "0",
+                     "orders_dup_no":  "0",
+                     "sku_total_stock":  "5",
+                     "sku_sold":  "0",
+                     "sku_remaining":  "5",
+                     "request_status_distribution":  [
+                                                         "status=3 code=500 n=2"
+                                                     ]
+                 },
+    "finalized_from":  "interrupted-run (fault injection already applied)"
+}

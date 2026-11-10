@@ -1,0 +1,41 @@
+﻿[
+    {
+        "at_utc":  "2026-11-10T09:34:50Z",
+        "at_cst":  "2026-11-10 17:34:50",
+        "committed_offset":  "42",
+        "log_end_offset":  "62",
+        "broker_lag":  "20",
+        "topic_earliest":  "0",
+        "topic_latest":  "62",
+        "prom_lag":  "0",
+        "prom_backlog_pending":  "0",
+        "prom_consumer_joined":  "1",
+        "consumer_id":  "surgecart-flashsale-consumer-a8a07452-6940-47e3-a16e-9a0ef7028c02"
+    },
+    {
+        "at_utc":  "2026-11-10T09:35:01Z",
+        "at_cst":  "2026-11-10 17:35:01",
+        "committed_offset":  "42",
+        "log_end_offset":  "62",
+        "broker_lag":  "20",
+        "topic_earliest":  "0",
+        "topic_latest":  "62",
+        "prom_lag":  "20",
+        "prom_backlog_pending":  "0",
+        "prom_consumer_joined":  "1",
+        "consumer_id":  "surgecart-flashsale-consumer-a8a07452-6940-47e3-a16e-9a0ef7028c02"
+    },
+    {
+        "at_utc":  "2026-11-10T09:35:17Z",
+        "at_cst":  "2026-11-10 17:35:17",
+        "committed_offset":  "42",
+        "log_end_offset":  "62",
+        "broker_lag":  "20",
+        "topic_earliest":  "0",
+        "topic_latest":  "62",
+        "prom_lag":  "20",
+        "prom_backlog_pending":  "0",
+        "prom_consumer_joined":  "1",
+        "consumer_id":  "-"
+    }
+]

@@ -1,0 +1,15 @@
+﻿=== Prometheus 区间数据 2026-11-10T08:41:58Z ~ 2026-11-10T11:41:58Z step=30s ===
+kafka_consumer_lag : min=0 max=20 last=0 n=361
+outbox_backlog_pending : min=0 max=10 last=0 n=361
+outbox_oldest_age_seconds : min=0 max=28903.504 last=0 n=361
+sampler_up_outbox : min=1 max=1 last=1 n=361
+sampler_up_kafka_lag : min=0 max=1 last=1 n=361
+consumer_joined : min=0 max=1 last=1 n=361
+consumer_processed_total : min=10 max=104 last=16 n=347
+consumer_processed_invalid : min=1 max=13 last=4 n=219
+consumer_processed_duplicate : min=1 max=3 last=3 n=3
+consumer_processed_dead : min=1 max=2 last=2 n=125
+consumer_dlq_total : min=1 max=13 last=6 n=219
+outbox_published : min=0 max=101 last=2 n=361
+outbox_publish_failed : min=10 max=32 last=32 n=59
+http_requests : min=0.244 max=1.644 last=0.311 n=361
