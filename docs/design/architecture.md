@@ -68,6 +68,7 @@ SurgeCart 基于 GoFrame v2 提供 HTTP API，MySQL 保存交易与身份数据�
 | 库存 | SKU 库存查询、增减与流水；条件扣减防超卖；与订单/秒杀共享库存事实 | `controller/inventory`、`controller/sku`、`logic/inventory`、`logic/sku` |
 | 优惠券 | 优惠券模板管理与用户领券/查询（核销与订单的耦合边界见领域设计） | `controller/coupon`、`logic/coupon` |
 | 退款 | 退款申请、审核、执行、撤销、关闭与审计 | `controller/refund`、`logic/refund` |
+| 一级分销 | 一级推荐关系绑定、订单支付计佣、退款佣金冲回、用户端与后台只读查询（不含提现/结算） | `controller/distribution`、`logic/distribution` |
 | 秒杀 | Redis + Lua 准入、MySQL 出队表异步落单、崩溃重投、幂等库存收敛、死信修复、限流/排队上限/熔断/对账与指标 | `controller/flashsale`、`logic/flashsale`、`internal/metrics` |
 | CMS（内容与运营） | 轮播图、文章、推荐位、评价、数据大屏等运营/内容能力 | `controller/banner`、`controller/article`、`controller/recommendation`、`controller/review`、`controller/dashboard`、`logic/*` |
 | 对象存储 | 静态资源存储边界：本地文件（轮播图占位图）与七牛云直传凭证签发 | `internal/storage`、`controller/upload`、`logic/upload` |
@@ -224,6 +225,7 @@ CNB CI（`.cnb.yml`）：
 | 库存 | `docs/design/inventory.md` |
 | 优惠券 | `docs/design/coupon.md` |
 | 退款 | `docs/design/refund.md` |
+| 一级分销 | `docs/design/distribution.md` |
 | 秒杀 | `docs/design/flash-sale.md` |
 | 轮播图 | `docs/design/banner.md` |
 | 文章 | `docs/design/article.md` |

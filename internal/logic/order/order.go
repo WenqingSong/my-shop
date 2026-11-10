@@ -492,6 +492,12 @@ func (s *sOrder) Pay(ctx context.Context, userID, id int64) (*v1.PayRes, error) 
 					return e
 				}
 			}
+			// 一级分销计佣：与「订单 10→20」同事务提交。买家无直接推荐人或未配置比例时 no-op；
+			// 重复支付走上方幂等快路径不进本事务，uk_order_id 再兜底一次；计佣失败整体回滚，
+			// 不产生「订单已支付但佣金缺失/错账」的中间态（见 docs/design/distribution.md §3.2）。
+			if e := service.Distribution().AccrueOrderCommissionInTx(ctx, tx, id); e != nil {
+				return e
+			}
 			return nil
 		})
 		if err != nil {

@@ -9,6 +9,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/cart"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/coupon"
+	distributionCtrl "cnb.cool/go-cloud-devops/my-shop/internal/controller/distribution"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/favorite"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/flashsale"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
@@ -47,6 +48,7 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	uploadCtrlV1 := uploadCtrl.NewV1()
 	refundCtrlV1 := refundCtrl.NewV1()
 	couponCtrl := coupon.NewV1()
+	distributionCtrlV1 := distributionCtrl.NewV1()
 
 	// 前台公开接口：注册、登录、刷新、分类查询、商品查询、轮播图列表（无需 token）。
 	root.POST("/register", iamCtrl.Register)
@@ -140,6 +142,12 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 		// 优惠券（仅登录用户，作用于本人数据）。
 		user.POST("/coupons/:template_id/claim", couponCtrl.Claim)
 		user.GET("/my/coupons", couponCtrl.ListMine)
+
+		// 一级分销（仅登录用户，作用于本人数据；被推荐人恒取自已认证身份）。
+		user.POST("/distribution/referral", distributionCtrlV1.BindReferral)
+		user.GET("/distribution/me", distributionCtrlV1.MyInfo)
+		user.GET("/distribution/subordinates", distributionCtrlV1.ListSubordinates)
+		user.GET("/distribution/commissions", distributionCtrlV1.ListMyCommissions)
 
 		user.GET("/sessions", iamCtrl.ListSessions)
 		user.DELETE("/sessions/:sid", iamCtrl.RevokeSession)

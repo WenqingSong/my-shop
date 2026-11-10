@@ -117,6 +117,16 @@ order:
   # 超时未支付订单的后台扫描周期（秒）。
   cancel_scan_interval: 60
 
+# 一级分销配置（以下均为开发默认值，可通过环境变量覆盖）
+# 对应环境变量：DISTRIBUTION_COMMISSION_RATE_BP
+distribution:
+  # 一级佣金比例（万分比，500 = 5%）。
+  # 语义：commission_amount = floor(orders.total_amount × rate_bp / 10000)，整数分运算，不引入浮点。
+  # 默认 0 = 关闭计佣（未配置比例时不产生任何佣金事实）；> 10000 视为配置非法，
+  # 计佣失败会让订单支付事务整体回滚（fail-closed），不静默产生错误资金事实。
+  # 比例来源与基数口径见 docs/design/distribution.md §3.2。
+  commission_rate_bp: 0
+
 # 秒杀配置（以下均为开发默认值，可通过环境变量覆盖）
 # 对应环境变量：FLASH_SALE_RECONCILE_SCAN_INTERVAL / FLASH_SALE_CONSUME_SCAN_INTERVAL /
 #              FLASH_SALE_KAFKA_*

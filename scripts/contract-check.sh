@@ -94,7 +94,7 @@ log "3. 路由 ↔ OpenAPI 双向比对（真实 GoFrame 路由表）"
 # ---------------------------------------------------------------------------
 ROUTE_LOG="$(mktemp)"
 if go test ./internal/cmd/ -run 'TestRoute|TestContractPlannedNotRouted' -count=1 >"${ROUTE_LOG}" 2>&1; then
-  ok "142 条常驻路由与契约双向一致；planned 接口未被实现"
+  ok "150 条常驻路由与契约双向一致；planned 接口未被实现"
 else
   cat "${ROUTE_LOG}"
   bad "路由与契约比对失败"

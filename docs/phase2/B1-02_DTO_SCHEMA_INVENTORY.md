@@ -13,11 +13,11 @@
 
 | 指标 | 数值 |
 |---|---|
-| DTO 结构体总数 | 328 |
-| Request 结构体 | 145 |
-| Response 结构体 | 144 |
-| 业务实体结构体 | 39 |
-| 已登记 API | 145 |
+| DTO 结构体总数 | 343 |
+| Request 结构体 | 150 |
+| Response 结构体 | 149 |
+| 业务实体结构体 | 44 |
+| 已登记 API | 150 |
 | OperationId 唯一性 | 通过（生成期强制校验） |
 | 无法确认的字段 | 0（遇到未登记类型直接失败，不猜测） |
 
@@ -51,14 +51,14 @@
 
 | Schema | Go 类型 | 类型 | 字段数 | 金额字段 | 枚举字段 | 时间字段 | 可空字段 |
 |---|---|---|---|---|---|---|---|
-| `Address` | `address.Address` | Entity | 13 | - | - | `created_at`<br>`updated_at` | `province_id`<br>`city_id`<br>`district_id`<br>`created_at`<br>`updated_at` |
-| `AddressCreateRequest` | `address.CreateReq` | Request | 10 | - | - | - | `province_id`<br>`city_id`<br>`district_id`<br>`is_default` |
+| `Address` | `address.Address` | Entity | 10 | - | - | `created_at`<br>`updated_at` | `created_at`<br>`updated_at` |
+| `AddressCreateRequest` | `address.CreateReq` | Request | 7 | - | - | - | `is_default` |
 | `AddressCreateResponse` | `address.CreateRes` | Response | 1 | - | - | - | - |
 | `AddressListRequest` | `address.ListReq` | Request | 0 | - | - | - | - |
 | `AddressListResponse` | `address.ListRes` | Response | 1 | - | - | - | - |
 | `AddressDetailRequest` | `address.DetailReq` | Request | 1 | - | - | - | - |
 | `AddressDetailResponse` | `address.DetailRes` | Response | 1 | - | - | - | - |
-| `AddressUpdateRequest` | `address.UpdateReq` | Request | 11 | - | - | - | `recipient_name`<br>`phone`<br>`province_id`<br>`city_id`<br>`district_id`<br>`province`<br>`city`<br>`district`<br>`detail`<br>`is_default` |
+| `AddressUpdateRequest` | `address.UpdateReq` | Request | 8 | - | - | - | `recipient_name`<br>`phone`<br>`province`<br>`city`<br>`district`<br>`detail`<br>`is_default` |
 | `AddressUpdateResponse` | `address.UpdateRes` | Response | 1 | - | - | - | - |
 | `AddressDeleteRequest` | `address.DeleteReq` | Request | 1 | - | - | - | - |
 | `AddressDeleteResponse` | `address.DeleteRes` | Response | 0 | - | - | - | - |
@@ -193,6 +193,28 @@
 | `DashboardActivityStatus` | `dashboard.ActivityStatus` | Entity | 2 | - | - | - | - |
 | `DashboardRequestStatus` | `dashboard.RequestStatus` | Entity | 4 | - | - | - | - |
 | `DashboardFlashSalesResponse` | `dashboard.FlashSalesRes` | Response | 5 | - | - | - | `activity_status`<br>`request_status` |
+| `DistributionReferral` | `distribution.Referral` | Entity | 3 | - | - | `created_at` | `created_at` |
+| `DistributionCommission` | `distribution.Commission` | Entity | 15 | `base_amount`<br>`commission_amount`<br>`reversed_amount` | `status` | `settled_at`<br>`reversed_at`<br>`created_at`<br>`updated_at` | `settled_at`<br>`reversed_at`<br>`refund_id`<br>`created_at`<br>`updated_at` |
+| `DistributionCommissionSummary` | `distribution.CommissionSummary` | Entity | 6 | `pending_amount`<br>`settled_amount`<br>`reversed_amount` | - | - | - |
+| `DistributionSubordinate` | `distribution.Subordinate` | Entity | 3 | - | - | `bound_at` | `bound_at` |
+| `DistributionDistributor` | `distribution.Distributor` | Entity | 6 | `commission_amount`<br>`reversed_amount` | - | `first_bound_at` | `first_bound_at` |
+| `DistributionCommissionStatsItem` | `distribution.CommissionStatsItem` | Entity | 4 | `amount`<br>`reversed_amount` | `status` | - | - |
+| `DistributionBindReferralRequest` | `distribution.BindReferralReq` | Request | 1 | - | - | - | - |
+| `DistributionBindReferralResponse` | `distribution.BindReferralRes` | Response | 1 | - | - | - | - |
+| `DistributionMyInfoRequest` | `distribution.MyInfoReq` | Request | 0 | - | - | - | - |
+| `DistributionMyInfoResponse` | `distribution.MyInfoRes` | Response | 4 | - | - | - | `referrer` |
+| `DistributionListSubordinatesRequest` | `distribution.ListSubordinatesReq` | Request | 2 | - | - | - | `page`<br>`size` |
+| `DistributionListSubordinatesResponse` | `distribution.ListSubordinatesRes` | Response | 4 | - | - | - | - |
+| `DistributionListCommissionsRequest` | `distribution.ListCommissionsReq` | Request | 3 | - | - | - | `page`<br>`size` |
+| `DistributionListCommissionsResponse` | `distribution.ListCommissionsRes` | Response | 4 | - | - | - | - |
+| `DistributionAdminListReferralsRequest` | `distribution.AdminListReferralsReq` | Request | 4 | - | - | - | `page`<br>`size`<br>`user_id`<br>`referrer_user_id` |
+| `DistributionAdminListReferralsResponse` | `distribution.AdminListReferralsRes` | Response | 4 | - | - | - | - |
+| `DistributionAdminListDistributorsRequest` | `distribution.AdminListDistributorsReq` | Request | 2 | - | - | - | `page`<br>`size` |
+| `DistributionAdminListDistributorsResponse` | `distribution.AdminListDistributorsRes` | Response | 4 | - | - | - | - |
+| `DistributionAdminListCommissionsRequest` | `distribution.AdminListCommissionsReq` | Request | 6 | - | - | - | `page`<br>`size`<br>`order_id`<br>`buyer_user_id`<br>`beneficiary_user_id` |
+| `DistributionAdminListCommissionsResponse` | `distribution.AdminListCommissionsRes` | Response | 4 | - | - | - | - |
+| `DistributionAdminCommissionStatsRequest` | `distribution.AdminCommissionStatsReq` | Request | 0 | - | - | - | - |
+| `DistributionAdminCommissionStatsResponse` | `distribution.AdminCommissionStatsRes` | Response | 3 | `total_amount` | - | - | - |
 | `FavoriteItem` | `favorite.FavoriteItem` | Entity | 8 | - | `unavailable_reason` | `created_at` | `product_price`<br>`created_at` |
 | `FavoriteAddRequest` | `favorite.AddReq` | Request | 1 | - | - | - | - |
 | `FavoriteAddResponse` | `favorite.AddRes` | Response | 1 | - | - | - | - |
@@ -230,9 +252,7 @@
 | `UserRefreshRequest` | `iam.RefreshReq` | Request | 1 | - | - | - | - |
 | `UserRefreshResponse` | `iam.RefreshRes` | Response | 4 | - | - | - | - |
 | `UserMeRequest` | `iam.MeReq` | Request | 0 | - | - | - | - |
-| `UserMeResponse` | `iam.MeRes` | Response | 5 | - | - | - | `phone` |
-| `UserUpdateMeRequest` | `iam.UpdateMeReq` | Request | 3 | - | - | - | `nickname`<br>`avatar_url`<br>`phone` |
-| `UserUpdateMeResponse` | `iam.UpdateMeRes` | Response | 1 | - | - | - | - |
+| `UserMeResponse` | `iam.MeRes` | Response | 2 | - | - | - | - |
 | `UserLogoutRequest` | `iam.LogoutReq` | Request | 0 | - | - | - | - |
 | `UserLogoutResponse` | `iam.LogoutRes` | Response | 0 | - | - | - | - |
 | `UserSession` | `iam.Session` | Entity | 5 | - | - | - | - |
@@ -350,11 +370,6 @@
 | `RefundExecuteResponse` | `refund.ExecuteRes` | Response | 1 | - | - | - | - |
 | `RefundCloseRequest` | `refund.CloseReq` | Request | 2 | - | - | - | - |
 | `RefundCloseResponse` | `refund.CloseRes` | Response | 1 | - | - | - | - |
-| `Region` | `region.Region` | Entity | 4 | - | - | - | - |
-| `RegionListRequest` | `region.ListReq` | Request | 1 | - | - | - | - |
-| `RegionListResponse` | `region.ListRes` | Response | 1 | - | - | - | - |
-| `RegionDetailRequest` | `region.DetailReq` | Request | 1 | - | - | - | - |
-| `RegionDetailResponse` | `region.DetailRes` | Response | 4 | - | - | - | `province`<br>`city`<br>`district` |
 | `ReviewItem` | `review.ReviewItem` | Entity | 7 | - | - | `created_at` | `created_at` |
 | `Review` | `review.Review` | Entity | 9 | - | `status` | `created_at` | `created_at` |
 | `ReviewListRequest` | `review.ListReq` | Request | 3 | - | - | - | - |
@@ -392,6 +407,17 @@
 | `CouponAdminCreateRequest` | `threshold_amount` | int64 |
 | `CouponAdminCreateRequest` | `discount_amount` | int64 |
 | `DashboardOverviewResponse` | `today_order_amount` | int64 |
+| `DistributionCommission` | `base_amount` | int64 |
+| `DistributionCommission` | `commission_amount` | int64 |
+| `DistributionCommission` | `reversed_amount` | int64 |
+| `DistributionCommissionSummary` | `pending_amount` | int64 |
+| `DistributionCommissionSummary` | `settled_amount` | int64 |
+| `DistributionCommissionSummary` | `reversed_amount` | int64 |
+| `DistributionDistributor` | `commission_amount` | int64 |
+| `DistributionDistributor` | `reversed_amount` | int64 |
+| `DistributionCommissionStatsItem` | `amount` | int64 |
+| `DistributionCommissionStatsItem` | `reversed_amount` | int64 |
+| `DistributionAdminCommissionStatsResponse` | `total_amount` | int64 |
 | `FlashSaleActivitySku` | `flash_price` | int64 |
 | `FlashSaleOrder` | `flash_price` | int64 |
 | `Order` | `total_amount` | int64 |
@@ -419,6 +445,8 @@
 | `CouponTemplate` | `status` | int |
 | `UserCoupon` | `status` | string |
 | `DashboardStatusItem` | `status` | int |
+| `DistributionCommission` | `status` | string |
+| `DistributionCommissionStatsItem` | `status` | string |
 | `FavoriteItem` | `unavailable_reason` | string |
 | `FlashSaleActivity` | `status` | string |
 | `FlashSaleCreateOrderResponse` | `status` | string |
@@ -484,6 +512,13 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 | `CouponAdminCreateRequest` | `claim_end_time` | *gtime | request |
 | `CouponAdminCreateRequest` | `use_start_time` | *gtime | request |
 | `CouponAdminCreateRequest` | `use_end_time` | *gtime | request |
+| `DistributionReferral` | `created_at` | *gtime | response |
+| `DistributionCommission` | `settled_at` | *gtime | response |
+| `DistributionCommission` | `reversed_at` | *gtime | response |
+| `DistributionCommission` | `created_at` | *gtime | response |
+| `DistributionCommission` | `updated_at` | *gtime | response |
+| `DistributionSubordinate` | `bound_at` | *gtime | response |
+| `DistributionDistributor` | `first_bound_at` | *gtime | response |
 | `FavoriteItem` | `created_at` | *gtime | response |
 | `FlashSaleActivity` | `start_time` | *gtime | response |
 | `FlashSaleActivity` | `end_time` | *gtime | response |
@@ -529,20 +564,11 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 
 | Schema | 字段 |
 |---|---|
-| `Address` | `province_id` |
-| `Address` | `city_id` |
-| `Address` | `district_id` |
 | `Address` | `created_at` |
 | `Address` | `updated_at` |
-| `AddressCreateRequest` | `province_id` |
-| `AddressCreateRequest` | `city_id` |
-| `AddressCreateRequest` | `district_id` |
 | `AddressCreateRequest` | `is_default` |
 | `AddressUpdateRequest` | `recipient_name` |
 | `AddressUpdateRequest` | `phone` |
-| `AddressUpdateRequest` | `province_id` |
-| `AddressUpdateRequest` | `city_id` |
-| `AddressUpdateRequest` | `district_id` |
 | `AddressUpdateRequest` | `province` |
 | `AddressUpdateRequest` | `city` |
 | `AddressUpdateRequest` | `district` |
@@ -596,6 +622,30 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 | `CouponAdminCreateRequest` | `use_end_time` |
 | `DashboardFlashSalesResponse` | `activity_status` |
 | `DashboardFlashSalesResponse` | `request_status` |
+| `DistributionReferral` | `created_at` |
+| `DistributionCommission` | `settled_at` |
+| `DistributionCommission` | `reversed_at` |
+| `DistributionCommission` | `refund_id` |
+| `DistributionCommission` | `created_at` |
+| `DistributionCommission` | `updated_at` |
+| `DistributionSubordinate` | `bound_at` |
+| `DistributionDistributor` | `first_bound_at` |
+| `DistributionMyInfoResponse` | `referrer` |
+| `DistributionListSubordinatesRequest` | `page` |
+| `DistributionListSubordinatesRequest` | `size` |
+| `DistributionListCommissionsRequest` | `page` |
+| `DistributionListCommissionsRequest` | `size` |
+| `DistributionAdminListReferralsRequest` | `page` |
+| `DistributionAdminListReferralsRequest` | `size` |
+| `DistributionAdminListReferralsRequest` | `user_id` |
+| `DistributionAdminListReferralsRequest` | `referrer_user_id` |
+| `DistributionAdminListDistributorsRequest` | `page` |
+| `DistributionAdminListDistributorsRequest` | `size` |
+| `DistributionAdminListCommissionsRequest` | `page` |
+| `DistributionAdminListCommissionsRequest` | `size` |
+| `DistributionAdminListCommissionsRequest` | `order_id` |
+| `DistributionAdminListCommissionsRequest` | `buyer_user_id` |
+| `DistributionAdminListCommissionsRequest` | `beneficiary_user_id` |
 | `FavoriteItem` | `product_price` |
 | `FavoriteItem` | `created_at` |
 | `FlashSaleActivity` | `start_time` |
@@ -612,10 +662,6 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 | `FlashSaleUpdateRequest` | `end_time` |
 | `FlashSaleGetOrderResultResponse` | `order` |
 | `FlashSaleRequestAudit` | `created_at` |
-| `UserMeResponse` | `phone` |
-| `UserUpdateMeRequest` | `nickname` |
-| `UserUpdateMeRequest` | `avatar_url` |
-| `UserUpdateMeRequest` | `phone` |
 | `Inventory` | `created_at` |
 | `Inventory` | `updated_at` |
 | `InventoryLog` | `operator_admin_id` |
@@ -667,9 +713,6 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 | `RefundAdminListRequest` | `order_id` |
 | `RefundAdminListRequest` | `user_id` |
 | `RefundAudit` | `created_at` |
-| `RegionDetailResponse` | `province` |
-| `RegionDetailResponse` | `city` |
-| `RegionDetailResponse` | `district` |
 | `ReviewItem` | `created_at` |
 | `Review` | `created_at` |
 | `Sku` | `created_at` |

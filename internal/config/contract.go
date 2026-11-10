@@ -88,6 +88,9 @@ const (
 	KeyOrderPayTimeout         Key = "order.pay_timeout"
 	KeyOrderCancelScanInterval Key = "order.cancel_scan_interval"
 
+	// distribution.*（一级分销计佣比例）
+	KeyDistributionCommissionRateBP Key = "distribution.commission_rate_bp"
+
 	// flash_sale.*
 	KeyFlashSaleDispatchMode          Key = "flash_sale.dispatch_mode"
 	KeyFlashSaleShutdownTimeout       Key = "flash_sale.shutdown_timeout"
@@ -254,6 +257,9 @@ var specs = []Spec{
 	// ---------- order ----------
 	{KeyOrderPayTimeout, "ORDER_PAY_TIMEOUT", KindInt64, int64(900), false, "订单创建", "支付超时秒数"},
 	{KeyOrderCancelScanInterval, "ORDER_CANCEL_SCAN_INTERVAL", KindInt, 60, false, "订单超时取消扫描器", "扫描周期秒数"},
+
+	// ---------- distribution ----------
+	{KeyDistributionCommissionRateBP, "DISTRIBUTION_COMMISSION_RATE_BP", KindInt, 0, false, "订单支付事务内计佣（service.Distribution().AccrueOrderCommissionInTx）", "一级佣金比例（万分比，500=5%）；0=关闭计佣，>10000 视为配置非法"},
 
 	// ---------- flash_sale 基础 ----------
 	{KeyFlashSaleDispatchMode, "FLASH_SALE_DISPATCH_MODE", KindString, "db_scanner", false, "秒杀 Runtime 装配", "消费入口模式：db_scanner | kafka"},

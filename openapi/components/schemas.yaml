@@ -3,14 +3,11 @@
 # 生成命令：go run ./tools/openapi-gen -repo .
 Address:
   type: object
-  description: Address 收货地址结构，创建/查询/更新复用。 地区同时返回自由文本与结构化 id：province_id/city_id/district_id 为 null 表示该地址未关联地区字典。
+  description: Address 收货地址结构，创建/查询/更新复用。
   required:
     - id
     - recipient_name
     - phone
-    - province_id
-    - city_id
-    - district_id
     - province
     - city
     - district
@@ -30,30 +27,15 @@ Address:
     phone:
       type: string
       description: 手机号
-    province_id:
-      type: [integer, "null"]
-      format: int64
-      x-go-type: int64
-      description: 省级地区 id；null 表示未关联
-    city_id:
-      type: [integer, "null"]
-      format: int64
-      x-go-type: int64
-      description: 市级地区 id；null 表示未关联
-    district_id:
-      type: [integer, "null"]
-      format: int64
-      x-go-type: int64
-      description: 区/县级地区 id；null 表示未关联
     province:
       type: string
-      description: 省（展示文本；结构化时取自地区字典）
+      description: 省（自由文本）
     city:
       type: string
-      description: 市（展示文本；结构化时取自地区字典）
+      description: 市（自由文本）
     district:
       type: string
-      description: 区（展示文本；结构化时取自地区字典）
+      description: 区（自由文本）
     detail:
       type: string
       description: 详细地址
@@ -76,7 +58,7 @@ Address:
       description: 更新时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
 AddressCreateRequest:
   type: object
-  description: CreateReq 创建地址请求。请求体不含也不接受 user_id，归属取自已认证 Principal。 地区二选一：传 province_id/city_id/district_id（三个必须同时传且为正数）走结构化模式， 服务端校验父子层级并以字典名称覆盖文本；否则走 province/city/district 自由文本模式。
+  description: CreateReq 创建地址请求。请求体不含也不接受 user_id，归属取自已认证 Principal。
   properties:
     recipient_name:
       type: string
@@ -84,30 +66,15 @@ AddressCreateRequest:
     phone:
       type: string
       description: 手机号，格式 ^1[3-9]\d{9}$
-    province_id:
-      type: [integer, "null"]
-      format: int64
-      x-go-type: int64
-      description: 省级地区 id（与 city_id/district_id 同时提供）
-    city_id:
-      type: [integer, "null"]
-      format: int64
-      x-go-type: int64
-      description: 市级地区 id（与 province_id/district_id 同时提供）
-    district_id:
-      type: [integer, "null"]
-      format: int64
-      x-go-type: int64
-      description: 区/县级地区 id（与 province_id/city_id 同时提供）
     province:
       type: string
-      description: 省（自由文本；结构化模式下可省略，以字典为准）
+      description: 省（自由文本，非空）
     city:
       type: string
-      description: 市（自由文本；结构化模式下可省略，以字典为准）
+      description: 市（自由文本，非空）
     district:
       type: string
-      description: 区（自由文本；结构化模式下可省略，以字典为准）
+      description: 区（自由文本，非空）
     detail:
       type: string
       description: 详细地址，trim 后 1~255 字符
@@ -155,7 +122,7 @@ AddressDetailResponse:
     - $ref: '#/Address'
 AddressUpdateRequest:
   type: object
-  description: UpdateReq 更新本人地址请求。请求体不含也不接受 user_id。 地区语义：三个 id 都省略 = 不修改；都传正数 = 切换为结构化并以字典名覆盖文本； 都传 0 = 清空地区 id（文本字段仍按本请求或保留原值）；只传其中一部分 = 400。 仅修改文本而未传 id 时，视为显式切换回文本模式，地区 id 同步清空。
+  description: UpdateReq 更新本人地址请求。请求体不含也不接受 user_id。
   required:
     - id
   properties:
@@ -172,30 +139,15 @@ AddressUpdateRequest:
     phone:
       type: [string, "null"]
       description: 手机号
-    province_id:
-      type: [integer, "null"]
-      format: int64
-      x-go-type: int64
-      description: 省级地区 id；与另外两个 id 同传，传 0 表示清空
-    city_id:
-      type: [integer, "null"]
-      format: int64
-      x-go-type: int64
-      description: 市级地区 id；与另外两个 id 同传，传 0 表示清空
-    district_id:
-      type: [integer, "null"]
-      format: int64
-      x-go-type: int64
-      description: 区/县级地区 id；与另外两个 id 同传，传 0 表示清空
     province:
       type: [string, "null"]
-      description: 省（自由文本；未传 id 时修改文本会清空地区 id）
+      description: 省（自由文本）
     city:
       type: [string, "null"]
-      description: 市（自由文本；未传 id 时修改文本会清空地区 id）
+      description: 市（自由文本）
     district:
       type: [string, "null"]
-      description: 区（自由文本；未传 id 时修改文本会清空地区 id）
+      description: 区（自由文本）
     detail:
       type: [string, "null"]
       description: 详细地址
@@ -2272,6 +2224,606 @@ DashboardFlashSalesResponse:
       format: int64
       x-go-type: int64
       description: 秒杀成功订单数量（flash_sale_orders 行）
+DistributionReferral:
+  type: object
+  description: Referral 一级推荐关系（user_referrals 一行 = 一个下级的唯一上级）。
+  required:
+    - user_id
+    - referrer_user_id
+    - created_at
+  properties:
+    user_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 被推荐人（下级）用户 id
+    referrer_user_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 一级推荐人（直接上级）用户 id
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 绑定时间（关系建立后不可变更）；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+DistributionCommission:
+  type: object
+  description: Commission 订单佣金记录（金额均为整数分）。
+  required:
+    - id
+    - order_id
+    - buyer_user_id
+    - beneficiary_user_id
+    - base_amount
+    - rate_bp
+    - commission_amount
+    - status
+    - settled_at
+    - reversed_amount
+    - reversed_at
+    - refund_id
+    - reversal_reason
+    - created_at
+    - updated_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 佣金记录 id
+    order_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 订单 id（唯一索引，一个订单至多一条佣金）
+    buyer_user_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 买家用户 id 快照
+    beneficiary_user_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 受益推荐人用户 id 快照
+    base_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 计佣基数快照（整数分，= 订单实付金额 total_amount）
+    rate_bp:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 计佣比例快照（万分比，500 = 5%）
+    commission_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 佣金金额快照（整数分，向下取整）
+    status:
+      type: string
+      enum: [pending, settled, reversed]
+      x-enum-labels:
+        pending: 待结算（DB 10）
+        settled: 已结算（DB 20）
+        reversed: 已冲回（DB 30，终态）
+      description: 状态：pending（待结算）/settled（已结算）/reversed（已冲回，终态）
+    settled_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 结算时间（可空；本任务不实现结算）；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    reversed_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 已冲回金额（整数分；整单退款时等于 commission_amount）
+    reversed_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 冲回时间（可空）；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    refund_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 触发冲回的退款单 id（可空，唯一索引）
+    reversal_reason:
+      type: string
+      description: 冲回原因：refund/cancel，未冲回为空串
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    updated_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 更新时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+DistributionCommissionSummary:
+  type: object
+  description: CommissionSummary 当前用户作为受益推荐人的佣金汇总（按状态分组合计，金额整数分）。
+  required:
+    - pending_amount
+    - pending_count
+    - settled_amount
+    - settled_count
+    - reversed_amount
+    - reversed_count
+  properties:
+    pending_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 待结算佣金合计（整数分）
+    pending_count:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 待结算佣金笔数
+    settled_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 已结算佣金合计（整数分）
+    settled_count:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 已结算佣金笔数
+    reversed_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 已冲回佣金合计（整数分）
+    reversed_count:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 已冲回佣金笔数
+DistributionSubordinate:
+  type: object
+  description: Subordinate 直接下级（仅返回 id/用户名/绑定时间，不泄露其他用户资料）。
+  required:
+    - user_id
+    - username
+    - bound_at
+  properties:
+    user_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 下级用户 id
+    username:
+      type: string
+      description: 下级用户名
+    bound_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 绑定时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+DistributionDistributor:
+  type: object
+  description: Distributor 分销用户汇总（以推荐人为维度聚合直接下级与佣金）。
+  required:
+    - referrer_user_id
+    - subordinate_count
+    - commission_count
+    - commission_amount
+    - reversed_amount
+    - first_bound_at
+  properties:
+    referrer_user_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 推荐人用户 id
+    subordinate_count:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 直接下级人数
+    commission_count:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 佣金笔数
+    commission_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 佣金合计（整数分）
+    reversed_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 已冲回合计（整数分）
+    first_bound_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 最早绑定时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+DistributionCommissionStatsItem:
+  type: object
+  description: CommissionStatsItem 按佣金状态的统计项。
+  required:
+    - status
+    - count
+    - amount
+    - reversed_amount
+  properties:
+    status:
+      type: string
+      enum: [pending, settled, reversed]
+      x-enum-labels:
+        pending: 待结算
+        settled: 已结算
+        reversed: 已冲回
+      description: 状态：pending/settled/reversed
+    count:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 该状态佣金笔数
+    amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 该状态佣金合计（整数分）
+    reversed_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 该状态已冲回合计（整数分）
+DistributionBindReferralRequest:
+  type: object
+  description: BindReferralReq 绑定一级推荐人请求（被推荐人恒为当前登录用户，不接受请求体身份）。
+  required:
+    - referrer_user_id
+  properties:
+    referrer_user_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-go-validate: required
+      description: 推荐人（直接上级）用户 id，必须存在且启用，且不能是自己
+DistributionBindReferralResponse:
+  type: object
+  description: BindReferralRes 绑定推荐人响应：重复提交同一推荐人幂等返回既有关系。
+  allOf:
+    - $ref: '#/DistributionReferral'
+DistributionMyInfoRequest:
+  type: object
+  description: MyInfoReq 查询我的分销信息请求。
+  properties: {}
+  additionalProperties: false
+DistributionMyInfoResponse:
+  type: object
+  description: MyInfoRes 我的分销信息响应。
+  required:
+    - user_id
+    - referrer
+    - subordinate_count
+    - commission
+  properties:
+    user_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 当前用户 id
+    referrer:
+      oneOf: [{$ref: '#/DistributionReferral'}, {type: "null"}]
+      description: 我的上级推荐关系；未绑定为 null
+    subordinate_count:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 我的直接下级人数
+    commission:
+      $ref: '#/DistributionCommissionSummary'
+      description: 我作为受益人的佣金汇总
+DistributionListSubordinatesRequest:
+  type: object
+  description: ListSubordinatesReq 查询我的直接下级列表请求。
+  properties:
+    page:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 页码，默认 1；<1 或非整数归一为 1
+    size:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 每页数量，默认 20；<1 归一为 20，>100 截断为 100
+DistributionListSubordinatesResponse:
+  type: object
+  description: ListSubordinatesRes 直接下级列表响应（按绑定先后倒序）。
+  required:
+    - items
+    - total
+    - page
+    - size
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/DistributionSubordinate'}, {type: "null"}]
+      description: 直接下级列表
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 总记录数
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量
+DistributionListCommissionsRequest:
+  type: object
+  description: ListCommissionsReq 查询我的佣金记录请求。
+  properties:
+    page:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 页码，默认 1；<1 或非整数归一为 1
+    size:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 每页数量，默认 20；<1 归一为 20，>100 截断为 100
+    status:
+      type: string
+      description: 按状态过滤：pending/settled/reversed；空串为全部，非法值返回 400
+DistributionListCommissionsResponse:
+  type: object
+  description: ListCommissionsRes 佣金记录响应（按 id 倒序）。
+  required:
+    - items
+    - total
+    - page
+    - size
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/DistributionCommission'}, {type: "null"}]
+      description: 佣金记录列表
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 总记录数
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量
+DistributionAdminListReferralsRequest:
+  type: object
+  description: AdminListReferralsReq 后台分销关系分页查询请求（只读，持 distribution:referral_list）。
+  properties:
+    page:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 页码，默认 1；<1 或非整数返回 400
+    size:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 每页数量，默认 20、上限 100；越界或非整数返回 400
+    user_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 被推荐人（下级）用户 id，精确匹配；<=0 返回 400
+    referrer_user_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 推荐人用户 id，精确匹配；<=0 返回 400
+DistributionAdminListReferralsResponse:
+  type: object
+  description: AdminListReferralsRes 后台分销关系列表响应。
+  required:
+    - items
+    - total
+    - page
+    - size
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/DistributionReferral'}, {type: "null"}]
+      description: 分销关系列表（按 id 倒序）
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 总记录数
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量
+DistributionAdminListDistributorsRequest:
+  type: object
+  description: AdminListDistributorsReq 后台分销用户（推荐人维度）分页查询请求（只读，持 distribution:referral_list）。
+  properties:
+    page:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 页码，默认 1；<1 或非整数返回 400
+    size:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 每页数量，默认 20、上限 100；越界或非整数返回 400
+DistributionAdminListDistributorsResponse:
+  type: object
+  description: AdminListDistributorsRes 后台分销用户汇总响应（按推荐人 user_id 升序）。
+  required:
+    - items
+    - total
+    - page
+    - size
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/DistributionDistributor'}, {type: "null"}]
+      description: 分销用户汇总列表
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 推荐人总数
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量
+DistributionAdminListCommissionsRequest:
+  type: object
+  description: AdminListCommissionsReq 后台佣金记录分页查询请求（只读，持 distribution:commission_list）。
+  properties:
+    page:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 页码，默认 1；<1 或非整数返回 400
+    size:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 每页数量，默认 20、上限 100；越界或非整数返回 400
+    order_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 订单 id，精确匹配；<=0 返回 400
+    buyer_user_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 买家用户 id，精确匹配；<=0 返回 400
+    beneficiary_user_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 受益推荐人用户 id，精确匹配；<=0 返回 400
+    status:
+      type: string
+      description: 状态过滤：pending/settled/reversed；空串为全部，非法值返回 400
+DistributionAdminListCommissionsResponse:
+  type: object
+  description: AdminListCommissionsRes 后台佣金记录响应。
+  required:
+    - items
+    - total
+    - page
+    - size
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/DistributionCommission'}, {type: "null"}]
+      description: 佣金记录列表（按 id 倒序）
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 总记录数
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量
+DistributionAdminCommissionStatsRequest:
+  type: object
+  description: AdminCommissionStatsReq 后台佣金统计请求（只读，持 distribution:commission_list）。
+  properties: {}
+  additionalProperties: false
+DistributionAdminCommissionStatsResponse:
+  type: object
+  description: AdminCommissionStatsRes 后台佣金统计响应（固定返回 pending/settled/reversed 三项，无数据时为 0）。
+  required:
+    - items
+    - total_count
+    - total_amount
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/DistributionCommissionStatsItem'}, {type: "null"}]
+      description: 按状态统计（固定顺序 pending/settled/reversed）
+    total_count:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 佣金总笔数
+    total_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 佣金总金额（整数分）
 FavoriteItem:
   type: object
   description: FavoriteItem 收藏条目（列表与添加响应复用）。 商品信息（名称/主图/价格）不落库，查询时实时联查 products； 商品被下架/删除后收藏保留为软引用，available/unavailable_reason 动态标识其可用性。
@@ -3041,9 +3593,6 @@ UserMeResponse:
   required:
     - id
     - username
-    - nickname
-    - avatar_url
-    - phone
   properties:
     id:
       type: integer
@@ -3053,33 +3602,6 @@ UserMeResponse:
     username:
       type: string
       description: 当前用户名
-    nickname:
-      type: string
-      description: 昵称；空串表示未设置
-    avatar_url:
-      type: string
-      description: 头像地址；空串表示未设置
-    phone:
-      type: [string, "null"]
-      description: 手机号；null 表示未设置
-UserUpdateMeRequest:
-  type: object
-  description: UpdateMeReq 修改当前登录用户资料请求。不接受 user_id，归属恒为已认证 Principal。 字段省略表示不修改；空串表示主动清空（nickname/avatar_url 清为空串，phone 清为 NULL）。
-  properties:
-    nickname:
-      type: [string, "null"]
-      description: 昵称；空串表示清空，省略表示不修改；trim 后 ≤32 字符
-    avatar_url:
-      type: [string, "null"]
-      description: 头像地址；空串表示清空，省略表示不修改；非空时须为 http/https URL 且 ≤512 字符
-    phone:
-      type: [string, "null"]
-      description: 手机号；空串表示清空为未设置，省略表示不修改；格式 ^1[3-9]\d{9}$
-UserUpdateMeResponse:
-  type: object
-  description: UpdateMeRes 修改当前登录用户资料响应（返回更新后的完整资料）。
-  allOf:
-    - $ref: '#/UserMeResponse'
 UserLogoutRequest:
   type: object
   description: LogoutReq 登出当前会话请求。sid 来自当前 token，不接受客户端指定。
@@ -5255,87 +5777,6 @@ RefundCloseResponse:
   description: CloseRes 关闭退款响应。
   allOf:
     - $ref: '#/Refund'
-Region:
-  type: object
-  description: Region 地区字典项（只读）。
-  required:
-    - id
-    - parent_id
-    - level
-    - name
-  properties:
-    id:
-      type: integer
-      format: int64
-      x-go-type: int64
-      description: 地区 id（沿用历史 city_id）
-    parent_id:
-      type: integer
-      format: int64
-      x-go-type: int64
-      description: 父级地区 id；省级为 0
-    level:
-      type: integer
-      format: int64
-      x-go-type: int
-      description: 层级：1=省、2=市、3=区/县
-    name:
-      type: string
-      description: 地区名称
-RegionListRequest:
-  type: object
-  description: ListReq 查询地区列表：parent_id 为 0（或缺省）返回省级；传父级 id 返回其直接下级。
-  properties:
-    parent_id:
-      type: integer
-      format: int64
-      x-go-type: int64
-      x-in: query
-      default: 0
-      description: 父级地区 id；0 或缺省返回省级列表
-RegionListResponse:
-  type: object
-  description: ListRes 地区列表响应。
-  required:
-    - items
-  properties:
-    items:
-      type: array
-      items:
-        oneOf: [{$ref: '#/Region'}, {type: "null"}]
-      description: 地区列表（按 id 升序）
-RegionDetailRequest:
-  type: object
-  description: DetailReq 查询单个地区及其完整三级链路。
-  required:
-    - id
-  properties:
-    id:
-      type: integer
-      format: int64
-      x-go-type: int64
-      x-in: path
-      x-go-validate: required
-      description: 地区 id
-RegionDetailResponse:
-  type: object
-  description: DetailRes 地区详情：province/city/district 对应 1/2/3 级，链上不存在的层级为 null。
-  allOf:
-    - $ref: '#/Region'
-  required:
-    - province
-    - city
-    - district
-  properties:
-    province:
-      oneOf: [{$ref: '#/Region'}, {type: "null"}]
-      description: 省级地区；level=1 时为自身
-    city:
-      oneOf: [{$ref: '#/Region'}, {type: "null"}]
-      description: 市级地区；level>=2 时存在
-    district:
-      oneOf: [{$ref: '#/Region'}, {type: "null"}]
-      description: 区/县级地区；level=3 时为自身
 ReviewItem:
   type: object
   description: ReviewItem 公开评价条目（仅 status=published，供商品详情页公开列表）。

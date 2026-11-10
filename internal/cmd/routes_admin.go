@@ -8,6 +8,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/coupon"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/dashboard"
+	distributionController "cnb.cool/go-cloud-devops/my-shop/internal/controller/distribution"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/flashsale"
 	iamController "cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/inventory"
@@ -47,6 +48,7 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 	dashboardCtrl := dashboard.NewV1()
 	refundAdminCtrl := refundController.NewAdminV1()
 	couponAdminCtrl := coupon.NewAdminV1()
+	distributionAdminCtrl := distributionController.NewAdminV1()
 
 	// 后台公开接口：管理员登录（无需 token）。
 	root.POST("/admin/login", adminCtrl.Login)
@@ -185,5 +187,15 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 		require("coupon:create").POST("/admin/coupons", couponAdminCtrl.AdminCreate)
 		require("coupon:list").GET("/admin/coupons", couponAdminCtrl.AdminList)
 		require("coupon:stop").POST("/admin/coupons/:id/stop", couponAdminCtrl.AdminStop)
+
+		// 一级分销后台只读查询（AdminAuth + RequirePermission）：
+		//   - 关系与分销用户汇总持 distribution:referral_list；
+		//   - 佣金记录与佣金统计持 distribution:commission_list。
+		//   - stats 静态段登记在 /commissions 子路径下，不与任何 :id 路由冲突。
+		// 本任务不提供人工改佣金状态、改用户推荐关系等写接口（无业务依据）。
+		require("distribution:referral_list").GET("/admin/distributions/referrals", distributionAdminCtrl.AdminListReferrals)
+		require("distribution:referral_list").GET("/admin/distributions/distributors", distributionAdminCtrl.AdminListDistributors)
+		require("distribution:commission_list").GET("/admin/distributions/commissions", distributionAdminCtrl.AdminListCommissions)
+		require("distribution:commission_list").GET("/admin/distributions/commissions/stats", distributionAdminCtrl.AdminCommissionStats)
 	})
 }

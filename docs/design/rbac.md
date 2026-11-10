@@ -61,6 +61,7 @@ recommend:create/update/delete/item                  （4）
 dashboard:view                                       （1，运营数据大屏）
 user:read / user:status                              （2，用户状态管理：查询 / 禁用·启用）
 coupon:create/list/stop                              （3）
+distribution:referral_list / distribution:commission_list （2，关系+分销用户汇总 / 佣金记录+佣金统计）
 ```
 
 ## 3. 业务不变量

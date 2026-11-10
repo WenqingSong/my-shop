@@ -121,7 +121,7 @@
 ## 5. 一致性模型与失败语义
 
 - 事实来源：单一 MySQL。`orders`/`order_items`（订单事实）、`order_status_logs`（状态流水，只追加，当前未写入）、`inventories`（库存事实）、`inventory_logs`（库存流水，只追加）、`skus`（下单时价格/状态事实来源，读后快照）。Redis 仅会话；无 MQ、无跨系统事务。
-- 成功语义：创建成功 = orders + order_items + 库存扣减（+ 购物车条目删除）（+ 用券预占）同事务提交；取消成功 = 状态变更 + 库存恢复 + 券释放同事务；支付成功 = 状态推进 + 券核销同事务；退款成功 = 状态变更 + 库存恢复（不返券）；发货/收货成功 = 状态推进。
+- 成功语义：创建成功 = orders + order_items + 库存扣减（+ 购物车条目删除）（+ 用券预占）同事务提交；取消成功 = 状态变更 + 库存恢复 + 券释放同事务；支付成功 = 状态推进 + 券核销 + 一级分销计佣（`IDistribution.AccrueOrderCommissionInTx`，无推荐人/比例为 0 时 no-op）同事务；退款成功 = 状态变更 + 库存恢复 + 佣金冲回（不返券）；发货/收货成功 = 状态推进。
 - 原子性：下单与取消/退款均为单事务；库存变更复用 `IInventory` 的 tx 感知方法（`DeductInTx`/`IncreaseInTx`），Order 只协调外层事务、不复制扣减/增加业务规则。
 - 幂等与重复：幂等键重复（同 hash）→ 返回既有订单；支付/取消/退款重复 → 状态机 + 条件更新保证不重复改状态/不重复补偿。
 - 超时取消：后台 scanner（ticker，周期 `order.cancel_scan_interval`）扫描 `status=10 AND expire_at < now` 逐单原子取消；查询/支付入口懒取消兜底；多实例并发靠「条件状态 UPDATE + RowsAffected」原子闸门，仅迁移成功者补偿库存。
@@ -161,6 +161,9 @@
 - 优惠券：`orders.user_coupon_id` → `user_coupons.id`（软引用，快照）；预占/核销/释放经 `ICoupon` 与订单状态变更同事务，见 `coupon.md`。
 - 地址：快照自 `addresses`，下单后地址变更不影响订单。
 - 状态流水：`order_status_logs.order_id` → `orders.id`（软引用，无 FK，只追加）；写入时机与事务边界在 B1-04 与状态推进一起实现。
+- 一级分销：`POST /orders/:id/pay` 的事务内、订单置 `paid(20)` 后调用 `IDistribution.AccrueOrderCommissionInTx`，
+  以 `orders.total_amount` 为基数、配置 `distribution.commission_rate_bp` 为比例写入佣金；计佣失败整体回滚
+  （订单保持 10，可重试）。订单状态机与错误码不因分销改变，详见 `distribution.md`。
 - 钱包/积分：`wallet_transactions`/`user_points_logs` 通过 `biz_type` + `biz_id` 软关联订单（无 FK）；当前订单支付/退款**不读写钱包与积分**，余额支付、退款入账、积分抵扣/返还在 B1-04 实现，见 `wallet.md`、`member.md`、`pricing.md`。
 - 建表经 golang-migrate 迁移（`20261001000007_orders.up.sql`）；金额三列（`original_amount`/`discount_amount`/`user_coupon_id`）由 `20261001000022_order_coupon_amounts.up.sql` 增列并回填；运费/支付/履约字段与 `order_items.spec_text` 由 `20261110000004_order_shipping_payment.up.sql` 增列（无回填）；状态流水由 `20261110000005_order_status_logs.up.sql` 建表，见 `migration.md`。
 - 配置：`order.pay_timeout`（支付超时秒，默认 900）、`order.cancel_scan_interval`（扫描周期秒，默认 60）。

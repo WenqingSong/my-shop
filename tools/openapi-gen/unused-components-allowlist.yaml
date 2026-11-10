@@ -84,6 +84,15 @@ groups:
       - DashboardStatusRequest
       - DashboardTopRequest
       - DashboardTrendRequest
+      # B1-04-05 一级分销：8 条 API 的完整请求 DTO（请求体/查询参数按位置内联生成，同样不 $ref 完整 Req）。
+      - DistributionAdminCommissionStatsRequest
+      - DistributionAdminListCommissionsRequest
+      - DistributionAdminListDistributorsRequest
+      - DistributionAdminListReferralsRequest
+      - DistributionBindReferralRequest
+      - DistributionListCommissionsRequest
+      - DistributionListSubordinatesRequest
+      - DistributionMyInfoRequest
       - FavoriteAddRequest
       - FavoriteCheckRequest
       - FavoriteListRequest
