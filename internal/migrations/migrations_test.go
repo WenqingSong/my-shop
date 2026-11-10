@@ -14,11 +14,13 @@ import (
 // baselineVersion 是内嵌 baseline 迁移的版本号（14 位时间戳）。
 const baselineVersion = uint(20261001000001)
 
-// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + … + legacy_id_map + flash_sale_request_outbox）。
-const latestMigrationVersion = uint(20261001000024)
+// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + … + flash_sale_request_outbox + regions）。
+const latestMigrationVersion = uint(20261110000003)
 
-// businessTables 是 migration 应建立的 37 张业务表。
-// 注意顺序：order_items 通过外键引用 orders（ON DELETE CASCADE），故 order_items 排在 orders 之前；
+// businessTables 是 migration 应建立的 41 张业务表。
+// 注意顺序：sku_spec_values 通过外键引用 skus（ON DELETE CASCADE）与 product_spec_values（ON DELETE RESTRICT），
+// product_spec_values 引用 product_specs，product_specs 引用 products，故三者必须排在 skus/products 之前；
+// order_items 通过外键引用 orders（ON DELETE CASCADE），故 order_items 排在 orders 之前；
 // flash_sale_activity_skus 通过外键引用 flash_sale_activities（ON DELETE CASCADE），故排在它之前；
 // recommend_items 通过外键引用 recommend_positions（ON DELETE CASCADE），故排在它之前；
 // refresh_tokens/cart_items/favorites/flash_sale_orders/product_likes/banners 无外键、置前；addresses 通过外键引用 users（ON DELETE CASCADE），
@@ -27,6 +29,7 @@ const latestMigrationVersion = uint(20261001000024)
 // 即 inventories/inventory_logs 排在 skus 之前、skus 排在 products 之前、products 排在 categories 之前，
 // 否则 DROP TABLE 会因外键依赖失败。
 var businessTables = []string{
+	"regions", "sku_spec_values", "product_spec_values", "product_specs",
 	"legacy_id_map",
 	"user_coupons", "coupon_templates",
 	"article_favorites", "article_likes", "articles",
@@ -455,6 +458,9 @@ var expectedSchema = []tableSpec{
 			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
 			{Name: "username", Type: "varchar(24)"},
 			{Name: "password_hash", Type: "varchar(60)"},
+			{Name: "nickname", Type: "varchar(32)", Default: strPtr("")},
+			{Name: "avatar_url", Type: "varchar(512)", Default: strPtr("")},
+			{Name: "phone", Type: "varchar(20)", Nullable: true},
 			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
 			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
 			{Name: "status", Type: "tinyint", Default: strPtr("1")},
@@ -463,6 +469,7 @@ var expectedSchema = []tableSpec{
 		Indexes: []indexSpec{
 			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
 			{Name: "uk_username", Unique: true, Columns: []string{"username"}},
+			{Name: "uk_phone", Unique: true, Columns: []string{"phone"}},
 		},
 	},
 	{

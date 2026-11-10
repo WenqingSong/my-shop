@@ -16,12 +16,14 @@ SKU 在商品 SPU 之上建立「商品 1 — N SKU」关系，承载名称、�
 | --- | --- | --- |
 | `id` | BIGINT UNSIGNED | 主键，自增，全局唯一稳定引用键，删除后不重用 |
 | `product_id` | BIGINT UNSIGNED | 非空，FK → `products.id` `ON DELETE RESTRICT` |
-| `name` | VARCHAR(128) | 非空，trim 后校验 |
+| `name` | VARCHAR(128) | 非空，trim 后校验（保留为展示名，历史数据不改写） |
+| `image_url` | VARCHAR(512) | 非空默认 `''`，SKU 规格图；空表示回退 `products.main_image` |
 | `price` | INT UNSIGNED | 整数分，非空，业务上限 `0..99,999,999` |
 | `status` | TINYINT | 非空默认 1（`1=enabled`、`0=disabled`） |
+| `spec_signature` | CHAR(32) NULL | 规格组合指纹（32 位小写 hex）；NULL 表示无规格/历史 SKU |
 | `created_at`/`updated_at` | DATETIME | 默认 `CURRENT_TIMESTAMP` |
 
-索引：`idx_product_id`；唯一约束：`uk_product_name (product_id, name)`（同一商品下 name 唯一）；FK：`fk_skus_product`（`ON DELETE RESTRICT`）。
+索引：`idx_product_id`；唯一约束：`uk_product_name (product_id, name)`（同一商品下 name 唯一）、`uk_product_signature (product_id, spec_signature)`（同一商品下同一规格组合唯一，多个 NULL 允许）；FK：`fk_skus_product`（`ON DELETE RESTRICT`）。
 
 **不含 `stock`**：库存不进入 SKU 元数据。
 
@@ -38,11 +40,34 @@ SKU 状态为二态 `enabled`/`disabled`（不复用 SPU 三态），创建默�
 
 `skus.price`（SKU 售价）与 `products.price`（SPU 基础展示价）**独立**，无派生、无 `min_price`/`max_price` 自动同步。
 
+### 2.4 商品规格模型（`product_specs` / `product_spec_values` / `sku_spec_values`）
+
+规格为**商品级**定义（每个商品自定义规格组，不建全局规格字典），由 migration `20261110000001_product_spec` 建立：
+
+| 表 | 字段 | 约束/说明 |
+| --- | --- | --- |
+| `product_specs` | `id`、`product_id`、`name` VARCHAR(32)、`sort` INT、`created_at`/`updated_at` | `uk_product_spec_name (product_id, name)`；FK → `products.id` `ON DELETE CASCADE` |
+| `product_spec_values` | `id`、`spec_id`、`value` VARCHAR(32)、`sort` INT、`created_at`/`updated_at` | `uk_spec_value (spec_id, value)`；`uk_id_spec (id, spec_id)` 供复合外键引用；FK → `product_specs.id` `ON DELETE CASCADE` |
+| `sku_spec_values` | `sku_id`、`spec_id`、`spec_value_id` | PK `(sku_id, spec_id)`；`idx_spec_value (spec_value_id, spec_id)`；FK `sku_id` → `skus.id` `ON DELETE CASCADE`；复合 FK `(spec_value_id, spec_id)` → `product_spec_values(id, spec_id)` `ON DELETE RESTRICT` |
+
+**规格组合指纹（`skus.spec_signature`）**：把该 SKU 的规格值按 `spec_id` 升序排列，每项写成 `"<spec_id>:<spec_value_id>"`，
+以 `,` 连接后计算 MD5，取 32 位小写十六进制。示例：`1:11,2:21` → `MD5("1:11,2:21")`。
+指纹只用于「同一商品内组合去重」，作用域由 `product_id` 限定，不用于安全场景；实现时必须使用同一算法，
+否则同一组合会生成不同指纹而绕过唯一约束。
+
+**组合定位唯一 SKU**：请求携带 `product_id` + 规格值集合 → 计算指纹 → 按 `(product_id, spec_signature)` 命中
+`skus` 唯一索引；`sku_spec_values` 用于反向展示（SKU → 规格值）与「按规格值筛选」。
+
+**无规格/历史 SKU**：不写 `sku_spec_values`，`spec_signature` 保持 NULL，`image_url` 为空。唯一索引允许多个 NULL，
+因此存量 SKU 可继续读写，不需要回填。
+
 ## 3. 状态机与生命周期
 
 - 二态：`enabled` ↔ `disabled`，无迁移限制（非状态机迁移，是字段直接赋值）。
 - 创建：默认 `enabled`；非法 `status` 值在创建/更新被拒（5003）且无写入。
 - 删除：物理删除（不预留软删字段）；存在库存记录/流水时由 FK `ON DELETE RESTRICT` 兜底返回 5005（409）。稳定键由 `BIGINT UNSIGNED AUTO_INCREMENT` 保证不重用。
+- 规格生命周期：`product_specs`/`product_spec_values` 随商品级联删除；被 SKU 引用的规格值不可删除（`ON DELETE RESTRICT`），
+  删除 SKU 时其 `sku_spec_values` 级联清理。SKU 的 `spec_signature` 与关联行由应用层在同一事务内维护。
 
 ## 4. 业务不变量
 
@@ -54,6 +79,12 @@ SKU 状态为二态 `enabled`/`disabled`（不复用 SPU 三态），创建默�
 - INV-006（稳定引用键）：`skus.id` 全局唯一自增主键，删除后不重用。
 - INV-007（前台可见性）：前台详情仅对 `on_shelf` 商品返回 `skus`，且只含 `enabled` SKU；后台详情返回全部 SKU。
 - INV-008（同商品 name 唯一）：由 `uk_product_name` 复合唯一约束兜底，撞名 409 `5004`。
+- INV-009（规格组合唯一）：同一商品下同一规格组合至多一个 SKU，由 `uk_product_signature (product_id, spec_signature)` 兜底；
+  `spec_signature` 为 NULL 的行不受限制（历史/无规格 SKU 可多行）。
+- INV-010（历史 SKU 兼容）：无规格关联的 SKU 与迁移前完全等价——不写 `sku_spec_values`，`image_url` 为空串、
+  `spec_signature` 为 NULL；购物车、订单、库存、秒杀对 `skus.id` 的引用语义不变。
+- INV-011（规格值归属一致）：一个 SKU 在同一规格组下只能取一个值（PK `(sku_id, spec_id)`），且该值必须属于声明的规格组
+  （复合外键 `(spec_value_id, spec_id)`）；跨组错配的关联行在写入时被拒绝。
 
 ## 5. 一致性模型与失败语义
 
@@ -90,10 +121,18 @@ SKU 状态为二态 `enabled`/`disabled`（不复用 SPU 三态），创建默�
 - `skus.product_id` → `products.id`（FK `ON DELETE RESTRICT`）：商品删除前需先处理 SKU（当前无商品删除接口）。
 - 库存绑定 `sku_id`（非 `product_id`）：`inventories.sku_id` → `skus.id`，见 `inventory.md`。
 - `skus` 不含 `stock`，库存解耦；详情组合 SPU+SKU 由 `product.md` 的 `DetailRes`/`AdminDetailRes` 承载。
-- 建表经 golang-migrate 迁移（`20261001000003_skus.up.sql`），见 `migration.md`。
+- `product_specs.product_id` → `products.id`（`ON DELETE CASCADE`）；`product_spec_values.spec_id` → `product_specs.id`（`ON DELETE CASCADE`）；
+  `sku_spec_values` 同时引用 `skus.id`（CASCADE）与 `product_spec_values(id, spec_id)`（RESTRICT）。
+- 秒杀只读 `skus`/`products` 固定列，新增 `image_url`/`spec_signature` 不改变其读写结果；`inventories`、`inventory_logs`、
+  `flash_sale_*` 未随本批次变更，见 `flash-sale.md`、`inventory.md`。
+- 建表经 golang-migrate 迁移（`20261001000003_skus.up.sql`、`20261110000001_product_spec.up.sql`），见 `migration.md`。
 
 ## 9. Deferred / 已知留白
 
 - **订单引用 deferred rule**：物理删除 + 自增不重用，`skus.id` 为稳定引用键；订单模块引入 FK/应用层校验前，历史 SKU 被删后其 `id` 不被重用，但已存在订单若引用该 SKU 将失去关联——延后订单模块补齐。
 - 库存展示缺口：SKU V1 详情响应不含库存，前台库存展示需等待 `inventory.md` 提供基于 `sku_id` 的查询。
 - 前台详情仅返回 `enabled` SKU：若未来需要前台展示「已停用但历史可售」SKU 需回改规则（当前不处理）。
+- 规格能力当前只有**数据库结构**：`internal/logic/sku` 与 `api/sku/v1` 尚未读写规格表，`spec_signature` 的生成/校验、
+  规格组与规格值的维护接口、商品详情返回规格结构均属后续任务（见 `docs/dev/product-sku.md`）。
+- 历史数据不自动回填：存量 SKU 保持 `spec_signature=NULL` 且无规格关联；从遗留库补录规格需由迁移工具显式写入，
+  不得在迁移脚本中猜测组合。

@@ -13,7 +13,9 @@
 
 追踪表 `schema_migrations` 由 golang-migrate 自动创建；并发迁移串行化由 MySQL driver 默认 `GET_LOCK` 提供；迁移文件经 `//go:embed` 内嵌，运行时经 `iofs` source 挂载，不依赖工作目录。事实来源为单一 MySQL。
 
-不提供 `migrate down`（无回滚能力、无 `.down.sql`）。
+CLI **不提供 `down` 子命令**（只有 `up`/`force`/`version`）。历史批次多数只有 `.up.sql`；
+自 `20261001000024` 起按需提供 `.down.sql`（outbox 与 B1-03-01 的 product_spec/user_profile/regions），
+仅用于测试库验证与人工显式回滚，生产发布流程不执行 down。
 
 ### 1.1 独立执行（T2-05）
 
@@ -31,10 +33,11 @@
 
 ### 2.1 迁移文件
 
-- 目录：`internal/migrations/sql/`，文件命名 `{version}_{title}.up.sql`。
-- `version` 为 **14 位时间戳**（`YYYYMMDDHHMMSS`），数字升序即时间升序。
-- 仅提供 `.up.sql`，不提供 `.down.sql`。
-- DDL 不使用 `IF NOT EXISTS`（迁移只执行一次，由 `schema_migrations` 追踪）。
+- 目录：`internal/migrations/sql/`，文件命名 `{version}_{title}.up.sql`（回滚文件为 `{version}_{title}.down.sql`）。
+- `version` 为 **14 位时间戳**（`YYYYMMDDHHMMSS`），数字升序即时间升序；同一版本至多一组 up/down，版本号全局唯一。
+- `.up.sql` 必须提供；`.down.sql` 至少覆盖「新增表/新增列」的批次（如 `20261001000024` 与 B1-03-01 三个迁移），
+  其余历史批次无 down（回滚会因缺少 down 文件报错）。
+- DDL 不使用 `IF NOT EXISTS`（迁移只执行一次，由 `schema_migrations` 追踪）；down 中允许 `DROP ... IF EXISTS` 以容忍部分执行。
 
 当前迁移清单：
 
@@ -63,6 +66,10 @@
 | `20261001000021` | `coupon` | `coupon_templates` + `user_coupons`（优惠券模板 + 用户券两表） |
 | `20261001000022` | `order_coupon_amounts` | `orders` 增 `original_amount`/`discount_amount`/`user_coupon_id`（优惠券抵扣金额与用券回填） |
 | `20261001000023` | `legacy_id_map` | `legacy_id_map`（历史数据旧 ID→新 ID 映射表） |
+| `20261001000024` | `flash_sale_request_outbox` | `flash_sale_order_requests` 增 Outbox 发布状态列 + `idx_outbox_claim`（含 down） |
+| `20261110000001` | `product_spec` | `product_specs` + `product_spec_values` + `sku_spec_values`；`skus` 增 `image_url`/`spec_signature` + `uk_product_signature`（含 down） |
+| `20261110000002` | `user_profile` | `users` 增 `nickname`/`avatar_url`/`phone` + `uk_phone`（含 down） |
+| `20261110000003` | `regions` | `regions`（省/市/区三级地区字典，仅结构，不导数据；含 down） |
 
 ### 2.2 baseline 模型
 
@@ -82,6 +89,8 @@ baseline 内容 = 迁移前 `boot.go` 中 7 张既有表的等价 DDL（`users`�
 - INV-004（seed 依赖与结果不变）：seed 仅在 readiness check 通过后执行；`seedSuperAdmin`（1 个 `is_super=1`）与 `seedPermissions` 幂等写入（按 `code` 唯一、1062 兜底），seed 语义不因迁移机制改变而改变（权限清单见 `rbac.md`）。
 - INV-005（serve 无 DDL、migrate 无 serve）：serve 只做只读 readiness check，不执行任何 DDL；migration 仅由 `migrate` 子命令执行。
 - INV-006（并发单实例执行）：多实例并发 `migrate up` 由 MySQL driver 默认 `GET_LOCK` 串行化，最终结构正确、`schema_migrations` 无重复版本。
+- INV-007（新增批次可回滚且不改变既有语义）：自 B1-03-01 起，新增表/列的迁移必须成对提供 up/down；
+  down 只删除本批次新增的表/列/索引，不回改既有列，且必须在注释中说明破坏性（数据丢失）影响。
 
 ## 4. 一致性模型与失败语义
 
@@ -108,12 +117,14 @@ migration 不新增业务错误码；失败通过 `gerror` 返回并由 CLI 进�
 
 ## 7. 跨模块关系
 
-- 所有业务表（`products`/`product_images`、`skus`、`inventories`/`inventory_logs`、`addresses`、`cart_items`、`orders`/`order_items`、`refresh_tokens`）均经本机制新增迁移，serve 不建表。
+- 所有业务表（`products`/`product_images`、`skus`、`inventories`/`inventory_logs`、`addresses`、`cart_items`、`orders`/`order_items`、`refresh_tokens`、
+  `product_specs`/`product_spec_values`/`sku_spec_values`、`regions`）均经本机制新增迁移，serve 不建表。
 - 部署顺序为 `build → migrate up → serve`；`product.md`/`sku.md`/`inventory.md`/`category.md`/`rbac.md`/`address.md`/`cart.md`/`order.md`/`iam.md` 的数据模型均以本机制建立，不再回退到 `boot.go` 建表。
 
 ## 8. Deferred / 已知留白
 
-- 仅提供 `.up.sql`，任何 `down` 调用会报错；V1 已禁止 down，风险可控。
+- 历史批次（`20261001000001`–`20261001000023`）无 `.down.sql`，对它们调用 down 会报错；
+  生产流程不执行 down，新增批次虽提供 down，但仍只用于测试库与人工回滚，缺少自动化 down 门禁。
 - 14 位时间戳作 version，`force` 需指定完整时间戳数字，可读性差；需在 CLI 帮助中明确 baseline 版本号与 `force` 语义（不执行 SQL、不校验结构）。
 - dirty 恢复依赖人工 `force`，存在误操作风险。
 - 迁移 Job 未在真实 Kubernetes 集群验证（调度、`kubectl wait`、TTL 清理、NetworkPolicy、镜像拉取凭据）；已用本地真实二进制 + 真实 MySQL + 独立进程覆盖锁、超时、终止与恢复语义。

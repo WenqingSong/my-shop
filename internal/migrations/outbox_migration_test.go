@@ -186,14 +186,17 @@ func legacyRequestKey(id int64) string {
 	return "legacy-" + strconv.FormatInt(id, 10)
 }
 
-// rollbackOutboxMigration 用 golang-migrate 回滚本批次的一个版本（验证 down 文件）。
+// rollbackOutboxMigration 用 golang-migrate 回滚到 Outbox 批次之前的版本（验证 down 文件）。
+// 说明：后续批次（如 B1-03-01 的 product_spec/user_profile/regions）会提高 latest 版本，
+// 因此这里回滚到 outbox 批次之前（20261001000023）以执行版本 24 的 down，
+// 而不是依赖「最新版本恰好是本批次」。
 func rollbackOutboxMigration(t *testing.T, _ *sql.DB) {
 	t.Helper()
 	m, err := newMigrate(context.Background())
 	if err != nil {
 		t.Fatalf("new migrate: %v", err)
 	}
-	if err := m.Steps(-1); err != nil {
+	if err := m.Migrate(20261001000023); err != nil {
 		closeMigrate(context.Background(), m)
 		t.Fatalf("回滚 Outbox migration: %v", err)
 	}

@@ -58,6 +58,16 @@ DB 存 TINYINT，API 出参用字符串枚举（具名三态，非布尔开关�
 - 失败语义：fail-hard——计数 UPDATE 失败则详情 500；计数 UPDATE 独立提交，不与后续响应写出绑定（UPDATE 成功即视为有效浏览）。
 - 并发：原子自增（InnoDB 行锁）保证并发不丢失；无 Redis/MQ/异步。
 
+### 2.5 商品规格（`product_specs` / `product_spec_values`）
+
+商品规格以「商品级规格组 + 规格值」建模，由 migration `20261110000001_product_spec` 建立：
+
+- `product_specs`：`product_id` + `name`（如「颜色」），`uk_product_spec_name (product_id, name)`，FK → `products.id` `ON DELETE CASCADE`。
+- `product_spec_values`：`spec_id` + `value`（如「黑色」），`uk_spec_value (spec_id, value)`，FK → `product_specs.id` `ON DELETE CASCADE`。
+- SKU 与规格值的关联、规格组合唯一性与 `skus.spec_signature` 见 `sku.md` §2.4。
+
+SPU 只拥有规格组/值的定义，不承载规格组合与 SKU 级图片；规格组合唯一性由 `skus` 上的 `uk_product_signature` 保证。
+
 ## 3. 状态机与生命周期
 
 合法状态迁移：
@@ -126,7 +136,9 @@ draft ──> on_shelf ──> off_shelf
 
 - `products.category_id` → `categories.id`（FK `ON DELETE RESTRICT`）：分类删除保护，见 `category.md`。
 - 商品详情组合 SPU + SKU：`DetailRes`/`AdminDetailRes` 内嵌 `skus`，见 `sku.md`。
-- 商品建表经 golang-migrate 迁移（`20261001000002_products.up.sql`），见 `migration.md`。
+- `product_specs.product_id` → `products.id`（FK `ON DELETE CASCADE`）：规格组是商品的下属数据，随商品删除清理；
+  商品本身仍受 `fk_skus_product`（`ON DELETE RESTRICT`）保护，存在 SKU 时不可删除。
+- 商品建表经 golang-migrate 迁移（`20261001000002_products.up.sql`、`20261110000001_product_spec.up.sql`），见 `migration.md`。
 - `products.price`（SPU 基础展示价）与 `skus.price`（SKU 独立售价）独立、无派生、无同步，见 `sku.md`。
 
 ## 9. Deferred / 已知留白
@@ -134,3 +146,5 @@ draft ──> on_shelf ──> off_shelf
 - 已绑定商品后分类被禁用：已有商品（含已上架）不受影响，前台仍按商品自身 `status` 过滤；再次上架会因分类禁用被拒。该「禁用后处理已有商品」语义不在 V1 扩展。
 - 叶子分类被后续添加子分类后变为非叶子：已绑定商品不受影响，但再次上架会被拒（非叶子）。
 - 无商品删除接口（当前不处理）。
+- 商品详情暂不返回规格结构：`product_specs`/`product_spec_values` 与 `sku_spec_values` 目前只有数据库结构，
+  规格维护与详情组合属于后续任务，见 `docs/dev/product-sku.md`。

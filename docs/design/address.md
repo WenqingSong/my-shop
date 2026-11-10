@@ -6,7 +6,10 @@
 
 为前台登录用户提供「收货地址」能力：对自己的地址增删改查，支持每用户最多一个默认地址，严格按 `Principal.UserID` 隔离数据。地址详情为稳定可读字段，供未来订单模块「下单时保存地址快照」复制使用。
 
-边界：不实现订单/快照表；不引入行政区划 code 与码表；不设地址数量上限；不实现地址标签/分组；不提供后台查看/管理用户地址；不改动 IAM/认证/会话语义。事实来源为单一 MySQL。
+边界：不实现订单/快照表；不设地址数量上限；不实现地址标签/分组；不提供后台查看/管理用户地址；不改动 IAM/认证/会话语义。事实来源为单一 MySQL。
+
+地区字典 `regions`（省/市/区三级）已由 migration `20261110000003_regions` 建立**结构**，但本模块仍使用省/市/区自由文本：
+`addresses` 不新增 `region_id`、不建指向 `regions` 的外键，地区数据也尚未导入。结构化地区接入属于后续任务。
 
 ## 2. 数据模型
 
@@ -33,6 +36,22 @@
 - `user_id` 为归属锚点，`idx_user_id` 支撑按用户列表查询；FK `ON DELETE CASCADE` 为防御性（当前无用户删除接口，见 `iam.md`）。
 
 建表经 golang-migrate（`20261001000005_addresses.up.sql`），见 `migration.md`。
+
+### 2.2 `regions`（地区字典，只读结构）
+
+| 字段 | 类型 | 约束/说明 |
+| --- | --- | --- |
+| `id` | BIGINT UNSIGNED | 主键，自增；导入时允许显式指定遗留 `system_city.city_id` |
+| `parent_id` | BIGINT UNSIGNED | 非空默认 0；省级为 0（沿用 `categories` 的「0 表示无父级」约定） |
+| `level` | TINYINT | 非空；`1=省`、`2=市`、`3=区/县` |
+| `name` | VARCHAR(64) | 非空，地区名称 |
+| `created_at`/`updated_at` | DATETIME | 默认 `CURRENT_TIMESTAMP` |
+
+索引：`idx_parent (parent_id)`、`idx_level (level)`。不建自引用外键（无法表达省级 `parent_id=0`）、不建名称唯一约束
+（历史数据存在重名/占位节点）；层级与父子一致性由导入工具与后续应用层校验。
+
+**ID 规则**：`regions.id` 直接复用 `system_city.city_id`（导入时显式写入），使 `addresses`/历史订单中已有的地区 id
+无需二次映射；不得在导入时重新编号。本任务只建结构，不导入数据。
 
 ## 3. 业务不变量
 
@@ -73,11 +92,14 @@
 - `addresses.user_id` → `users.id`（FK `ON DELETE CASCADE`）；`user_id` 为数据归属锚点，隔离依赖 `middleware.Principal.UserID`。
 - 前台路由挂载于 `internal/cmd/routes_frontend.go`（`middleware.Auth`），路径无版本前缀（对齐 `/me`、`/categories`、`/products`）。
 - 地址详情字段（`recipient_name`/`phone`/`province`/`city`/`district`/`detail`）为稳定可读字段，未来订单模块读取后复制形成快照；订单/快照表不在本模块。
+- `regions` 为独立只读字典，与 `addresses` 无外键关联；`addresses` 仍保存自由文本，`regions` 的结构与 ID 规则见 §2.2。
 - 错误码域 7000-7999 归地址域所有。
 
 ## 8. Deferred / 已知留白
 
-- 无行政区划 code 与码表；配送范围、运费、仓储路由等需要结构化地区的能力，由未来独立任务引入 region code，不在本模块提前扩展。
+- 地区字典只有结构（`regions`），尚未导入数据，也尚未接入地址（无 `region_id`、无外键）；
+  配送范围、运费、仓储路由等依赖结构化地区的能力仍由后续任务实现，不在本模块提前扩展。
+- `regions` 不提供 code/经纬度等扩展字段；若后续需要行政区划代码，按 additive 方式加列，不改变 `id` 规则。
 - 无地址数量上限、无邮编、无标签/分组。
 - 并发「设默认」落败方返回 409（7002），客户端需提示重试；属可接受的 V1 语义。
 - 手机号校验限定中国大陆号码 `^1[3-9]\d{9}$`；海外号码支持需扩展校验。
