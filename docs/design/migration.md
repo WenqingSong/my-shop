@@ -76,6 +76,11 @@ B1-03-02 的六项交易与资金迁移），仅用于测试库验证与人工�
 | `20261110000007` | `recharge_orders` | `recharge_orders`（Mock 充值订单；含 down） |
 | `20261110000008` | `points` | `user_points_accounts` + `user_points_logs`（积分账户 + 流水；含 down） |
 | `20261110000009` | `coupon_snapshot` | `user_coupons` 增 `coupon_title`/`coupon_price`/`use_min_price`/`end_time` 可空快照列（无回填；含 down） |
+| `20261110000010` | `coupon_batch` | `coupon_templates` 增 `discount_type`/`discount_rate_bp`/`per_user_limit`；新增 `coupon_batches`/`coupon_template_scopes`；`user_coupons` 增 `batch_id`/`claim_no`，`uk_user_template` 替换为 `uk_user_template_claim`（含 down，down 会裁剪 `claim_no>1` 的多领记录） |
+| `20261110000011` | `group_buy` | `group_buy_activities` + `group_buy_teams` + `group_buy_participants`（拼团活动/团/参与记录；含 down） |
+| `20261110000012` | `bargain` | `bargain_activities` + `bargain_instances` + `bargain_help_records`（砍价活动/实例/助力；含 down） |
+| `20261110000013` | `member` | `member_levels` + `user_memberships` + `member_growth_logs`（等级/用户会员/成长值流水；不重复创建积分账本；含 down） |
+| `20261110000014` | `distribution` | `user_referrals` + `distribution_commissions`（一级推荐关系/订单佣金；含 down） |
 
 ### 2.2 baseline 模型
 
@@ -125,8 +130,10 @@ migration 不新增业务错误码；失败通过 `gerror` 返回并由 CLI 进�
 
 - 所有业务表（`products`/`product_images`、`skus`、`inventories`/`inventory_logs`、`addresses`、`cart_items`、`orders`/`order_items`、`refresh_tokens`、
   `product_specs`/`product_spec_values`/`sku_spec_values`、`regions`、`order_status_logs`、`wallet_accounts`/`wallet_transactions`、
-  `recharge_orders`、`user_points_accounts`/`user_points_logs`）均经本机制新增迁移，serve 不建表。
-- 部署顺序为 `build → migrate up → serve`；`product.md`/`sku.md`/`inventory.md`/`category.md`/`rbac.md`/`address.md`/`cart.md`/`order.md`/`iam.md` 的数据模型均以本机制建立，不再回退到 `boot.go` 建表。
+  `recharge_orders`、`user_points_accounts`/`user_points_logs`、`coupon_batches`/`coupon_template_scopes`、
+  `group_buy_activities`/`group_buy_teams`/`group_buy_participants`、`bargain_activities`/`bargain_instances`/`bargain_help_records`、
+  `member_levels`/`user_memberships`/`member_growth_logs`、`user_referrals`/`distribution_commissions`）均经本机制新增迁移，serve 不建表。
+- 部署顺序为 `build → migrate up → serve`；`product.md`/`sku.md`/`inventory.md`/`category.md`/`rbac.md`/`address.md`/`cart.md`/`order.md`/`iam.md`/`coupon.md`/`marketing.md`/`member.md`/`distribution.md` 的数据模型均以本机制建立，不再回退到 `boot.go` 建表。
 
 ## 8. Deferred / 已知留白
 

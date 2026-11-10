@@ -46,7 +46,8 @@ discount_amount = min(coupon_templates.discount_amount, original_amount)
 
 ## 5. 会员优惠（Deferred）
 
-尚未建模、未实现。目标语义（B1-04 及以后，需先落 `docs/design/member.md` 的等级模型）：
+**等级与折扣配置已建模**（`member_levels.discount_rate_bp`，见 `docs/design/member.md`），但**计价尚未实现**。
+目标语义（B1-04 及以后）：
 
 - 会员折扣按「商品金额」计算，不折扣运费；
 - 折扣结果写入订单独立快照列（不得直接改写 `discount_amount` 的券语义）；

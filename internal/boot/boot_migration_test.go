@@ -25,6 +25,11 @@ const migrationBaselineVersion = uint(20261001000001)
 // products，products 通过外键引用 categories，因此被引用方必须排在引用方之后，
 // 否则 DROP TABLE 会因外键依赖失败。
 var migrationRelatedTables = []string{
+	"distribution_commissions", "user_referrals",
+	"member_growth_logs", "user_memberships", "member_levels",
+	"bargain_help_records", "bargain_instances", "bargain_activities",
+	"group_buy_participants", "group_buy_teams", "group_buy_activities",
+	"coupon_template_scopes", "coupon_batches",
 	"wallet_transactions", "wallet_accounts", "recharge_orders", "user_points_logs", "user_points_accounts", "order_status_logs",
 	"regions", "sku_spec_values", "product_spec_values", "product_specs",
 	"legacy_id_map",

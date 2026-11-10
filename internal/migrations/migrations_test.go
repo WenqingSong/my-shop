@@ -14,14 +14,19 @@ import (
 // baselineVersion 是内嵌 baseline 迁移的版本号（14 位时间戳）。
 const baselineVersion = uint(20261001000001)
 
-// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + … + regions + coupon_snapshot）。
-const latestMigrationVersion = uint(20261110000009)
+// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + … + distribution）。
+const latestMigrationVersion = uint(20261110000014)
 
-// businessTables 是 migration 应建立的 47 张业务表。
+// businessTables 是 migration 应建立的 60 张业务表。
 // 注意顺序：wallet_transactions 通过外键引用 wallet_accounts（ON DELETE RESTRICT），故排在 wallet_accounts 之前；
 // sku_spec_values 通过外键引用 skus（ON DELETE CASCADE）与 product_spec_values（ON DELETE RESTRICT），
 // product_spec_values 引用 product_specs，product_specs 引用 products，故三者必须排在 skus/products 之前；
 // order_items 通过外键引用 orders（ON DELETE CASCADE），故 order_items 排在 orders 之前；
+// distribution_commissions 通过外键引用 orders（ON DELETE RESTRICT），故排在 orders 之前；
+// group_buy/bargain 的 participants/teams/help_records/instances 分别引用 teams/instances/activities，
+// 且 activities 引用 products/skus，故必须先子后父排在 products/skus 之前；
+// coupon_template_scopes 引用 coupon_templates/products/categories、coupon_batches 引用 coupon_templates，
+// 故排在 coupon_templates 之前；user_memberships 引用 member_levels，故排在 member_levels 之前；
 // flash_sale_activity_skus 通过外键引用 flash_sale_activities（ON DELETE CASCADE），故排在它之前；
 // recommend_items 通过外键引用 recommend_positions（ON DELETE CASCADE），故排在它之前；
 // refresh_tokens/cart_items/favorites/flash_sale_orders/product_likes/banners 无外键、置前；addresses 通过外键引用 users（ON DELETE CASCADE），
@@ -30,6 +35,11 @@ const latestMigrationVersion = uint(20261110000009)
 // 即 inventories/inventory_logs 排在 skus 之前、skus 排在 products 之前、products 排在 categories 之前，
 // 否则 DROP TABLE 会因外键依赖失败。
 var businessTables = []string{
+	"distribution_commissions", "user_referrals",
+	"member_growth_logs", "user_memberships", "member_levels",
+	"bargain_help_records", "bargain_instances", "bargain_activities",
+	"group_buy_participants", "group_buy_teams", "group_buy_activities",
+	"coupon_template_scopes", "coupon_batches",
 	"wallet_transactions", "wallet_accounts", "recharge_orders", "user_points_logs", "user_points_accounts", "order_status_logs",
 	"regions", "sku_spec_values", "product_spec_values", "product_specs",
 	"legacy_id_map",
@@ -430,7 +440,8 @@ type tableSpec struct {
 func strPtr(s string) *string { return &s }
 
 // expectedSchema 是「legacy_id_map + baseline 7 表 + orders/order_items + reviews + flash_sale 3 表 + favorites/product_likes/banners + articles 3 表 + recommend 2 表
-// + 交易/资金 6 表（order_status_logs、wallet_accounts、wallet_transactions、recharge_orders、user_points_accounts、user_points_logs）」DDL 的精确结构快照，
+// + 交易/资金 6 表（order_status_logs、wallet_accounts、wallet_transactions、recharge_orders、user_points_accounts、user_points_logs）
+// + 营销/关系 13 表（coupon_batches、coupon_template_scopes、group_buy_*、bargain_*、member_*、user_referrals、distribution_commissions）」DDL 的精确结构快照，
 // 是 INV-003「结构严格等价」的权威基准。它独立于迁移文件硬编码，因此任何对相关迁移的
 // 列/类型/空值/默认值/索引/引擎/字符集改动若不同步更新此处，等价性测试都会失败——
 // 这正是它能够识别错误实现的原因。
@@ -577,7 +588,10 @@ var expectedSchema = []tableSpec{
 			{Name: "name", Type: "varchar(64)"},
 			{Name: "threshold_amount", Type: "int unsigned"},
 			{Name: "discount_amount", Type: "int unsigned"},
+			{Name: "discount_type", Type: "tinyint", Default: strPtr("1")},
+			{Name: "discount_rate_bp", Type: "int unsigned", Nullable: true},
 			{Name: "total_quantity", Type: "int unsigned"},
+			{Name: "per_user_limit", Type: "int unsigned", Default: strPtr("1")},
 			{Name: "issued_quantity", Type: "int unsigned", Default: strPtr("0")},
 			{Name: "claim_start_time", Type: "datetime"},
 			{Name: "claim_end_time", Type: "datetime"},
@@ -599,6 +613,8 @@ var expectedSchema = []tableSpec{
 			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
 			{Name: "user_id", Type: "bigint unsigned"},
 			{Name: "template_id", Type: "bigint unsigned"},
+			{Name: "batch_id", Type: "bigint unsigned", Nullable: true},
+			{Name: "claim_no", Type: "int unsigned", Default: strPtr("1")},
 			{Name: "coupon_title", Type: "varchar(64)", Nullable: true},
 			{Name: "coupon_price", Type: "int unsigned", Nullable: true},
 			{Name: "use_min_price", Type: "int unsigned", Nullable: true},
@@ -613,9 +629,301 @@ var expectedSchema = []tableSpec{
 		},
 		Indexes: []indexSpec{
 			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
-			{Name: "uk_user_template", Unique: true, Columns: []string{"user_id", "template_id"}},
+			{Name: "uk_user_template_claim", Unique: true, Columns: []string{"user_id", "template_id", "claim_no"}},
 			{Name: "idx_user_id", Unique: false, Columns: []string{"user_id"}},
 			{Name: "idx_order_id", Unique: false, Columns: []string{"order_id"}},
+			{Name: "idx_batch_id", Unique: false, Columns: []string{"batch_id"}},
+		},
+	},
+	{
+		Name:      "coupon_batches",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "template_id", Type: "bigint unsigned"},
+			{Name: "total_quantity", Type: "int unsigned"},
+			{Name: "issued_quantity", Type: "int unsigned", Default: strPtr("0")},
+			{Name: "claim_start_time", Type: "datetime"},
+			{Name: "claim_end_time", Type: "datetime"},
+			{Name: "status", Type: "tinyint", Default: strPtr("1")},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "idx_template_status", Unique: false, Columns: []string{"template_id", "status"}},
+		},
+	},
+	{
+		Name:      "coupon_template_scopes",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "template_id", Type: "bigint unsigned"},
+			{Name: "product_id", Type: "bigint unsigned", Nullable: true},
+			{Name: "category_id", Type: "bigint unsigned", Nullable: true},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "uk_template_product", Unique: true, Columns: []string{"template_id", "product_id"}},
+			{Name: "uk_template_category", Unique: true, Columns: []string{"template_id", "category_id"}},
+			{Name: "idx_product_id", Unique: false, Columns: []string{"product_id"}},
+			{Name: "idx_category_id", Unique: false, Columns: []string{"category_id"}},
+		},
+	},
+	{
+		Name:      "group_buy_activities",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "product_id", Type: "bigint unsigned"},
+			{Name: "sku_id", Type: "bigint unsigned"},
+			{Name: "name", Type: "varchar(64)"},
+			{Name: "group_price", Type: "int unsigned"},
+			{Name: "group_size", Type: "int unsigned"},
+			{Name: "team_ttl_minutes", Type: "int unsigned"},
+			{Name: "start_time", Type: "datetime"},
+			{Name: "end_time", Type: "datetime"},
+			{Name: "status", Type: "tinyint", Default: strPtr("1")},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "idx_product_id", Unique: false, Columns: []string{"product_id"}},
+			{Name: "idx_sku_id", Unique: false, Columns: []string{"sku_id"}},
+			{Name: "idx_status_time", Unique: false, Columns: []string{"status", "start_time", "end_time"}},
+		},
+	},
+	{
+		Name:      "group_buy_teams",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "activity_id", Type: "bigint unsigned"},
+			{Name: "leader_user_id", Type: "bigint unsigned"},
+			{Name: "group_price", Type: "int unsigned"},
+			{Name: "required_size", Type: "int unsigned"},
+			{Name: "joined_count", Type: "int unsigned", Default: strPtr("1")},
+			{Name: "status", Type: "tinyint", Default: strPtr("10")},
+			{Name: "expire_at", Type: "datetime"},
+			{Name: "closed_at", Type: "datetime", Nullable: true},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "idx_activity_status", Unique: false, Columns: []string{"activity_id", "status"}},
+			{Name: "idx_leader_user", Unique: false, Columns: []string{"leader_user_id"}},
+			{Name: "idx_status_expire", Unique: false, Columns: []string{"status", "expire_at"}},
+		},
+	},
+	{
+		Name:      "group_buy_participants",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "team_id", Type: "bigint unsigned"},
+			{Name: "user_id", Type: "bigint unsigned"},
+			{Name: "order_id", Type: "bigint unsigned", Nullable: true},
+			{Name: "status", Type: "tinyint", Default: strPtr("10")},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "uk_team_user", Unique: true, Columns: []string{"team_id", "user_id"}},
+			{Name: "uk_order_id", Unique: true, Columns: []string{"order_id"}},
+			{Name: "idx_user_time", Unique: false, Columns: []string{"user_id", "created_at"}},
+		},
+	},
+	{
+		Name:      "bargain_activities",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "product_id", Type: "bigint unsigned"},
+			{Name: "sku_id", Type: "bigint unsigned"},
+			{Name: "name", Type: "varchar(64)"},
+			{Name: "start_price", Type: "int unsigned"},
+			{Name: "floor_price", Type: "int unsigned"},
+			{Name: "help_amount", Type: "int unsigned"},
+			{Name: "max_help_count", Type: "int unsigned"},
+			{Name: "start_time", Type: "datetime"},
+			{Name: "end_time", Type: "datetime"},
+			{Name: "status", Type: "tinyint", Default: strPtr("1")},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "idx_product_id", Unique: false, Columns: []string{"product_id"}},
+			{Name: "idx_sku_id", Unique: false, Columns: []string{"sku_id"}},
+			{Name: "idx_status_time", Unique: false, Columns: []string{"status", "start_time", "end_time"}},
+		},
+	},
+	{
+		Name:      "bargain_instances",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "activity_id", Type: "bigint unsigned"},
+			{Name: "user_id", Type: "bigint unsigned"},
+			{Name: "start_price", Type: "int unsigned"},
+			{Name: "floor_price", Type: "int unsigned"},
+			{Name: "current_price", Type: "int unsigned"},
+			{Name: "helped_count", Type: "int unsigned", Default: strPtr("0")},
+			{Name: "max_help_count", Type: "int unsigned"},
+			{Name: "status", Type: "tinyint", Default: strPtr("10")},
+			{Name: "expire_at", Type: "datetime"},
+			{Name: "completed_at", Type: "datetime", Nullable: true},
+			{Name: "order_id", Type: "bigint unsigned", Nullable: true},
+			{Name: "active_key", Type: "varchar(64)", Nullable: true, Extra: "STORED GENERATED"},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "uk_active_instance", Unique: true, Columns: []string{"active_key"}},
+			{Name: "uk_order_id", Unique: true, Columns: []string{"order_id"}},
+			{Name: "idx_activity_id", Unique: false, Columns: []string{"activity_id"}},
+			{Name: "idx_user_status", Unique: false, Columns: []string{"user_id", "status"}},
+			{Name: "idx_status_expire", Unique: false, Columns: []string{"status", "expire_at"}},
+		},
+	},
+	{
+		Name:      "bargain_help_records",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "instance_id", Type: "bigint unsigned"},
+			{Name: "helper_user_id", Type: "bigint unsigned"},
+			{Name: "cut_amount", Type: "int unsigned"},
+			{Name: "price_before", Type: "int unsigned"},
+			{Name: "price_after", Type: "int unsigned"},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "uk_instance_helper", Unique: true, Columns: []string{"instance_id", "helper_user_id"}},
+			{Name: "idx_helper_time", Unique: false, Columns: []string{"helper_user_id", "created_at"}},
+		},
+	},
+	{
+		Name:      "member_levels",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "level_no", Type: "int unsigned"},
+			{Name: "name", Type: "varchar(64)"},
+			{Name: "growth_threshold", Type: "bigint unsigned", Default: strPtr("0")},
+			{Name: "discount_rate_bp", Type: "int unsigned", Default: strPtr("10000")},
+			{Name: "status", Type: "tinyint", Default: strPtr("1")},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "uk_level_no", Unique: true, Columns: []string{"level_no"}},
+			{Name: "uk_growth_threshold", Unique: true, Columns: []string{"growth_threshold"}},
+		},
+	},
+	{
+		Name:      "user_memberships",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "user_id", Type: "bigint unsigned"},
+			{Name: "level_id", Type: "bigint unsigned"},
+			{Name: "growth_value", Type: "bigint unsigned", Default: strPtr("0")},
+			{Name: "upgraded_at", Type: "datetime", Nullable: true},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "uk_user_id", Unique: true, Columns: []string{"user_id"}},
+			{Name: "idx_level_id", Unique: false, Columns: []string{"level_id"}},
+		},
+	},
+	{
+		Name:      "member_growth_logs",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "user_id", Type: "bigint unsigned"},
+			{Name: "change_amount", Type: "bigint"},
+			{Name: "growth_before", Type: "bigint unsigned"},
+			{Name: "growth_after", Type: "bigint unsigned"},
+			{Name: "change_type", Type: "varchar(32)"},
+			{Name: "biz_type", Type: "varchar(32)"},
+			{Name: "biz_id", Type: "bigint unsigned", Nullable: true},
+			{Name: "idempotency_key", Type: "varchar(64)"},
+			{Name: "remark", Type: "varchar(255)", Default: strPtr("")},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "uk_idempotency", Unique: true, Columns: []string{"idempotency_key"}},
+			{Name: "idx_user_time", Unique: false, Columns: []string{"user_id", "created_at"}},
+			{Name: "idx_biz", Unique: false, Columns: []string{"biz_type", "biz_id"}},
+		},
+	},
+	{
+		Name:      "user_referrals",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "user_id", Type: "bigint unsigned"},
+			{Name: "referrer_user_id", Type: "bigint unsigned"},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "uk_user_id", Unique: true, Columns: []string{"user_id"}},
+			{Name: "idx_referrer_user", Unique: false, Columns: []string{"referrer_user_id", "created_at"}},
+		},
+	},
+	{
+		Name:      "distribution_commissions",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "order_id", Type: "bigint unsigned"},
+			{Name: "buyer_user_id", Type: "bigint unsigned"},
+			{Name: "beneficiary_user_id", Type: "bigint unsigned"},
+			{Name: "base_amount", Type: "int unsigned"},
+			{Name: "rate_bp", Type: "int unsigned"},
+			{Name: "commission_amount", Type: "int unsigned"},
+			{Name: "status", Type: "tinyint", Default: strPtr("10")},
+			{Name: "settled_at", Type: "datetime", Nullable: true},
+			{Name: "reversed_amount", Type: "int unsigned", Default: strPtr("0")},
+			{Name: "reversed_at", Type: "datetime", Nullable: true},
+			{Name: "refund_id", Type: "bigint unsigned", Nullable: true},
+			{Name: "reversal_reason", Type: "varchar(32)", Default: strPtr("")},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "uk_order_id", Unique: true, Columns: []string{"order_id"}},
+			{Name: "uk_refund_id", Unique: true, Columns: []string{"refund_id"}},
+			{Name: "idx_beneficiary_status", Unique: false, Columns: []string{"beneficiary_user_id", "status", "created_at"}},
+			{Name: "idx_status_created", Unique: false, Columns: []string{"status", "created_at"}},
 		},
 	},
 	{
