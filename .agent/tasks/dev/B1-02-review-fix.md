@@ -233,7 +233,7 @@ D1 的目标规范是把 gvalid 归一成 `1001 → 400 → 参数错误`，但*
 | `tools/openapi-gen/paths_check.go`（新增） | `verifyPathViews` / `checkPathViews` / `isPlannedPathItem` | 主/分域 Paths 结构化比对 |
 | `tools/openapi-gen/errcodes_crosspkg.go`（新增） | `crossPackageErrorCodes` / `loadCrossPackageEvidence` / `validateCrossPackageRegistry` | 跨包错误码补充登记 + 代码事实自校验 |
 | `tools/openapi-gen/check.go` | 第 10～12 步 | 接入未引用组件、Paths 一致性、补充登记自校验 |
-| `tools/openapi-gen/review_fix_test.go`（新增） | 9 个用例 | R1/R3/R4/R5 的自动化覆盖 |
+| `tools/openapi-gen/review_fix_test.go`（新增） | 10 个用例 | R1/R3/R4/R5 的自动化覆盖 |
 | `scripts/contract-check.sh` | 步骤 2 | 输出新增检查项，避免"脚本没跑"与"跑了但没查"混淆 |
 
 ---
