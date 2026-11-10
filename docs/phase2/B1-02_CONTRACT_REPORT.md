@@ -19,6 +19,10 @@
 
 > **整改记录（2026-11-10）**：GPT-6 第一轮独立审查发现的问题已在 **B1-02-review-fix** 中处理，
 > 详见 `docs/reports/B1-02-review-fix.md`。本文件保留 B1-02 交付时的事实与结论，不回改历史。
+>
+> **勘误（2026-11-10，B1-02-DOC-FIX）**：D1 受影响接口数由 **13** 修正为 **14**——补入
+> `POST /admin/roles/:id/permissions`（body `permission_id` 必填，绑定阶段即触发 gvalid → 51 → 500）。
+> 仅修正统计数字，技术决策、契约行为与批准状态均未改变。
 
 ---
 
@@ -46,7 +50,7 @@
 
 | 决策 | 结论 | 契约落地方式 |
 |---|---|---|
-| D1 参数校验错误映射 | APPROVED | 目标 `400/1001`；13 条接口的 `500/51` 以 `x-known-issue` 如实记录，未改代码 |
+| D1 参数校验错误映射 | APPROVED | 目标 `400/1001`；14 条接口的 `500/51` 以 `x-known-issue` 如实记录，未改代码（条数经 B1-02-DOC-FIX 勘误） |
 | D2 枚举类型 | APPROVED | 新 API 目标 string；现有整数枚举按实际 JSON 类型记录，未伪装成 string |
 | D3 分页 | APPROVED | 新 API `page/size` 严格校验 + `items/total/page/size`；现有 clamp/strict/none 三态如实记录 |
 | D4 时间格式 | APPROVED | 新 API RFC3339 含偏移；现有 `gtime.Time` 记录为 `YYYY-MM-DD HH:MM:SS` 无偏移 |
@@ -175,7 +179,7 @@
 
 | 决策 | 落地方式 | 抽查证据 |
 |---|---|---|
-| D1 参数校验 | 13 条接口带 `x-known-issue`（`actual_http_status: 500`、`actual_business_code: 51`）；其余按 `400/1001` | `POST /admin/login`、`POST /orders` |
+| D1 参数校验 | 14 条接口带 `x-known-issue`（`actual_http_status: 500`、`actual_business_code: 51`）；其余按 `400/1001` | `POST /admin/login`、`POST /orders` |
 | D2 枚举 | string 保持 string，int 保持 int；`Order.status` 另标 `received` 不可观测 | `Order.status`、`DashboardStatusItem.status` |
 | D3 分页 | `x-pagination-mode: clamp/strict/none`；9 条 clamp、2 条 strict、其余 none | `GET /products`（clamp）、`GET /admin/orders`（strict） |
 | D4 时间 | 响应 `pattern + x-format: gtime-local`；请求 `x-format: gtime-lenient` | `Address.created_at`、`FlashSaleCreateRequest.start_time` |

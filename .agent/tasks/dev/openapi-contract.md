@@ -107,7 +107,7 @@ go test ./tools/openapi-gen -count=1
 
 | 编号 | 内容 | 影响 |
 |---|---|---|
-| D1 | DTO `gvalid` 校验失败实际返回 `HTTP 500 + code 51` | 14 条接口在契约中以 `x-known-issue` 标注，运行时未修复（B1-02-review-fix 复核：D1 原表 13 条，补标 `POST /admin/roles/:id/permissions`，见 `docs/reports/B1-02-review-fix.md`） |
+| D1 | DTO `gvalid` 校验失败实际返回 `HTTP 500 + code 51` | 14 条接口在契约中以 `x-known-issue` 标注，运行时未修复（B1-02-review-fix 复核：D1 原表 13 条，补标 `POST /admin/roles/:id/permissions`，见 `docs/reports/B1-02-review-fix.md`；决策文档已由 B1-02-DOC-FIX 勘误为 14 条） |
 | D2 | `Order.status` 的 `received` 是事务内中间态，API 查询不可观测 | 枚举保留，字段级 `x-known-issue` |
 | K-1 | `IdempotencyKeyHeader` 草案组件 | **已修复（B1-02-review-fix）**：生成器 `components.go` / `parametersComponentNames` 删除，产物不再出现 |
 | L-2 | `x-error-codes` 为同包静态调用链，不追踪跨包 service 调用 | 已声明为 `scope: static-call-chain`；跨包遗漏经人工核实后登记在 `tools/openapi-gen/errcodes_crosspkg.go`，并由 `-check` 校验 |

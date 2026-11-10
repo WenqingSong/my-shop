@@ -10,6 +10,7 @@
 | 文档状态 | **APPROVED（Owner 已批准，2026-11-10）** |
 | 决策数量 | 5（D1～D5） |
 | 最后更新 | 2026-11-10 |
+| 勘误记录 | 2026-11-10 B1-02-DOC-FIX：D1 受影响接口数由 13 修正为 14（仅事实勘误，决策与批准状态不变） |
 
 > 本文档只做契约层决策，不修改任何生产业务代码。
 > 所有"当前实际行为"均来自 B1-01 的逐条核实证据，本文档不新增未经证据支持的事实。
@@ -61,13 +62,17 @@ DTO `v:"required"` → gvalid 失败（gcode 51）
 | 场景 | 实际响应 | 受影响接口（B1-01 §15.1 逐条核实） |
 |---|---|---|
 | 经 service 显式校验的参数错误 | `400` + `code 1001` | 购物车、订单、评价、文章、优惠券、秒杀等活动参数 |
-| DTO 带 `v:"required"` 且未显式兜底 | `500` + `code 51` + `message "内部错误"` | `POST /admin/login`、`POST /admin/admins`、`PUT /admin/admins/:id/status`、`POST /admin/admins/:id/roles`、`POST /admin/roles`、`POST /admin/permissions`、`PUT /admin/users/:id/status`、`POST /categories`、`POST /orders`、`POST /admin/skus`、`POST /admin/refunds/:id/review`、`POST /admin/refunds/:id/execute`、`POST /admin/refunds/:id/close` |
+| DTO 带 `v:"required"` 且未显式兜底 | `500` + `code 51` + `message "内部错误"` | `POST /admin/login`、`POST /admin/admins`、`PUT /admin/admins/:id/status`、`POST /admin/admins/:id/roles`、`POST /admin/roles`、`POST /admin/permissions`、`PUT /admin/users/:id/status`、`POST /categories`、`POST /orders`、`POST /admin/skus`、`POST /admin/refunds/:id/review`、`POST /admin/refunds/:id/execute`、`POST /admin/refunds/:id/close`、`POST /admin/roles/:id/permissions` |
 | 路径参数缺失（如 `/admin/products/:id` 的 `id` 非数字） | 由框架路由匹配失败，返回 `404 text/plain "Not Found"`，不是统一 JSON | 所有含 `:id` 的接口 |
 
 补充事实：
 - 全部 DTO 的校验标签只有两种形态：`required`（87 处）与 `required|in:0,1`（2 处），不存在 `min/max/length` 等可映射为数值/长度约束的标签。
 - `internal/logic/cart/cart.go:81-85` 有显式注释与规避代码，说明团队已知该缺陷。
 - `code 51` 不在 `internal/codes/codes.go` 的常量与码表中，属于**框架码穿透**，不是业务码。
+- **勘误（2026-11-10，B1-02-DOC-FIX）**：上表"`500 + 51`"接口清单原记为 **13 条**，经 B1-02-REVIEW-FIX
+  对全部 DTO 的非 path 必填字段逐条复核后确认为 **14 条**，补入 `POST /admin/roles/:id/permissions`
+  （body 字段 `permission_id` 带 `v:"required"`）。本次仅修正统计与清单，D1.3 规范内容、
+  APPROVED 状态与审批记录时间均不变。
 
 ### D1.3 已批准规范（APPROVED 2026-11-10；目标标准，仅适用于新接口与新代码）
 
@@ -84,7 +89,7 @@ DTO `v:"required"` → gvalid 失败（gcode 51）
 B1-02 采取"**双轨记录 + 已知问题标注**"：
 
 1. **通用响应**：`components/responses.yaml` 中定义 `BadRequest`（400/1001），作为新规范的默认 400 响应。
-2. **现状偏离**：对 D1.2 表中"`500 + 51`"的 13 条接口，在 operation 上标注：
+2. **现状偏离**：对 D1.2 表中"`500 + 51`"的 14 条接口，在 operation 上标注：
 
 ```yaml
 x-known-issue:
@@ -109,7 +114,7 @@ x-known-issue:
 
 ### D1.6 影响范围
 
-- 契约：13 条 operation 的 `x-known-issue` 与 `responses`。
+- 契约：14 条 operation 的 `x-known-issue` 与 `responses`。
 - 代码（本任务禁止）：`internal/middleware/response.go`、`internal/codes/codes.go`。
 - 文档：`docs/phase2/B1-02_CONTRACT_REPORT.md` 已知问题章节。
 
@@ -432,7 +437,7 @@ x-idempotency:
 2. **不得**给形态 A 的分页参数声明 `minimum: 1`（因为实际是静默归一，不是拒绝）。
 3. **不得**给 `*gtime.Time` 响应声明 `format: date-time`（会暗示 RFC3339）。
 4. **不得在任何接口声明 `Idempotency-Key` 参数**（D5 已否决 Header 方案）。
-5. **不得**把 §D1.2 表中 13 条接口的 `500/51` 隐藏，也不得把全部接口都写成 `500/51`。
+5. **不得**把 §D1.2 表中 14 条接口的 `500/51` 隐藏，也不得把全部接口都写成 `500/51`。
 6. 任何"目标规范"与"实际行为"不一致处，必须同时出现：
    - 实际的 `responses`/`schema`
    - 解释差异的 `description`
@@ -454,7 +459,7 @@ x-idempotency:
 
 | 决策 | 结论（APPROVED / REJECTED / DEFERRED） | 审批人 | 审批时间 | 备注 |
 |---|---|---|---|---|
-| D1 参数校验错误映射 | APPROVED | Owner | 2026-11-10 | 目标 `400/1001`；当前 13 条接口的 `500/51` 以 `x-known-issue` 记录，本次不改代码 |
+| D1 参数校验错误映射 | APPROVED | Owner | 2026-11-10 | 目标 `400/1001`；当前 14 条接口的 `500/51` 以 `x-known-issue` 记录，本次不改代码（条数于 2026-11-10 B1-02-DOC-FIX 勘误，原记 13 条） |
 | D2 枚举类型 | APPROVED | Owner | 2026-11-10 | 新 API 目标 string；现有整数枚举按实际 JSON 类型记录，不得伪装 |
 | D3 分页 | APPROVED | Owner | 2026-11-10 | 新 API `page/size` 严格校验 + `items/total/page/size`；现有按 clamp/strict/none 三态记录 |
 | D4 时间格式 | APPROVED | Owner | 2026-11-10 | 新 API RFC3339 含偏移；现有 `gtime.Time` 如实记录为无偏移 |
