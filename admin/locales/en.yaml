@@ -96,7 +96,10 @@ menus:
   pureTable: Table
   pureSysManagement: System Manage
   pureUser: User Manage
+  pureUserList: User Status
+  pureAdmin: Admin Manage
   pureRole: Role Manage
+  purePermissionAdmin: Permission Manage
   pureSystemMenu: Menu Manage
   pureDept: Dept Manage
   pureSysMonitor: System Monitor

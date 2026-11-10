@@ -1,14 +1,15 @@
 import { $t } from "@/plugins/i18n";
 import { marketingAdmin } from "@/router/enums";
+import { PERMISSION } from "@/utils/permission";
 
 const Layout = () => import("@/layout/index.vue");
 
 /**
  * 营销路由。
  *
- * 权限：优惠券有 `coupon:*`，秒杀有 `flash_sale:create/update`。
- * 读接口（优惠券列表）需要 coupon:list；秒杀没有读接口，
- * 菜单不按角色硬编码屏蔽，无权限时由后端 403 兜底。
+ * 权限：优惠券列表读接口要求 coupon:list，页面级权限与菜单一致；
+ * 秒杀后台没有读接口（只有 create/update/repair），因此页面不声明读权限码，
+ * 进入后由按钮权限与后端 403 兜底。
  */
 export default {
   path: "/marketing",
@@ -27,7 +28,8 @@ export default {
       component: () => import("@/views/marketing/coupons/index.vue"),
       meta: {
         title: $t("menus.pureCoupon"),
-        icon: "ep/ticket"
+        icon: "ep/ticket",
+        permissions: [PERMISSION.COUPON_LIST]
       }
     },
     {

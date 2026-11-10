@@ -1,5 +1,7 @@
 import { clearAccessToken, getAccessToken, isTokenExpired } from "@/utils/auth";
 import { ensureAdminProfile, useUserStoreHook } from "@/store/modules/user";
+import { usePermissionStoreHook } from "@/store/modules/permission";
+import { hasMetaPermission } from "@/utils/permission";
 
 /**
  * 路由认证守卫的**决策逻辑**。
@@ -92,4 +94,92 @@ export async function resolveAuthGuard(to: {
       replace: true
     };
   }
+}
+
+/** 无权限落地页（全屏 403） */
+export const ACCESS_DENIED_PATH = "/access-denied";
+
+/** 权限守卫需要的最小路由信息（`vue-router` 的 `to` 满足该结构） */
+export interface PermissionGuardTarget {
+  path: string;
+  fullPath: string;
+  meta?: {
+    permissions?: string[];
+    permissionsMode?: "every" | "some";
+  };
+  matched?: Array<{
+    meta?: {
+      permissions?: string[];
+      permissionsMode?: "every" | "some";
+    };
+  }>;
+}
+
+/**
+ * 判断当前主体是否有权访问目标路由。
+ *
+ * - 逐级检查 `matched` 中每条记录的 `meta.permissions`（父级布局不声明则不限制）；
+ * - 没有声明 `permissions` 的页面只要求登录（与后端"仅 AdminAuth"的读接口一致）；
+ * - `is_super` 由 `hasPermission` 统一放行（界面展示语义，最终授权仍在后端）。
+ */
+export function hasRoutePermission(target: PermissionGuardTarget): boolean {
+  const metas =
+    target.matched && target.matched.length > 0
+      ? target.matched.map(item => item.meta)
+      : [target.meta];
+  return metas.every(meta => hasMetaPermission(meta));
+}
+
+/**
+ * 取当前权限下第一个可访问的菜单页面，作为无权限时的落地页。
+ *
+ * 只遍历已按权限过滤过的 `wholeMenus`，因此返回值本身一定可访问。
+ */
+export function getFirstAccessibleMenuPath(): string | null {
+  const menus = usePermissionStoreHook().wholeMenus as Array<{
+    path?: string;
+    children?: unknown[];
+  }>;
+
+  const walk = (nodes: typeof menus): string | null => {
+    for (const node of nodes) {
+      const children = node.children as typeof menus | undefined;
+      if (children && children.length > 0) {
+        const found = walk(children);
+        if (found) return found;
+      } else if (typeof node.path === "string" && node.path.startsWith("/")) {
+        return node.path;
+      }
+    }
+    return null;
+  };
+
+  return walk(menus);
+}
+
+/**
+ * 计算页面访问权限决策。
+ *
+ * 覆盖场景：
+ * - 登录页 / 403 页：不参与权限判断；
+ * - 有权限：放行；
+ * - 无权限：跳转到第一个可访问菜单；若没有可访问菜单（或就是当前页），跳 403。
+ *
+ * 前端守卫只是体验层：即使绕过，后端 RBAC 仍会拒绝。
+ */
+export function resolvePermissionGuard(
+  to: PermissionGuardTarget
+): AuthGuardDecision {
+  if (to.path === LOGIN_PATH || to.path === ACCESS_DENIED_PATH) {
+    return { type: "allow" };
+  }
+
+  if (hasRoutePermission(to)) return { type: "allow" };
+
+  const fallback = getFirstAccessibleMenuPath();
+  if (fallback && fallback !== to.path) {
+    return { type: "redirect", path: fallback, replace: true };
+  }
+
+  return { type: "redirect", path: ACCESS_DENIED_PATH, replace: true };
 }

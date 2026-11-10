@@ -12,6 +12,7 @@ import { flashSaleHandlers } from "./flash-sale";
 import { bannerHandlers } from "./banner";
 import { recommendationHandlers } from "./recommendation";
 import { articleHandlers } from "./article";
+import { accessHandlers } from "./access";
 
 /**
  * Mock 处理器集合。
@@ -37,5 +38,6 @@ export const handlers: HttpHandler[] = [
   ...flashSaleHandlers,
   ...bannerHandlers,
   ...recommendationHandlers,
-  ...articleHandlers
+  ...articleHandlers,
+  ...accessHandlers
 ];

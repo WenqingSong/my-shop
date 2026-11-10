@@ -13,6 +13,10 @@ vi.mock("@/plugins/i18n", () => ({
 
 import { getHistoryMode } from "@/router/history";
 import home from "@/router/modules/home";
+import access from "@/router/modules/access";
+import order from "@/router/modules/order";
+import refund from "@/router/modules/refund";
+import marketing from "@/router/modules/marketing";
 import remaining from "@/router/modules/remaining";
 
 describe("管理端路由", () => {
@@ -51,5 +55,59 @@ describe("管理端路由", () => {
 
   it("历史模式配置缺失时回退为 h5（无 base）", () => {
     expect(getHistoryMode(undefined as unknown as string).base).toBe("");
+  });
+
+  it("A5 提供用户与系统管理路由（管理员/角色/权限）", () => {
+    const userGroup = access.find(item => item.path === "/user");
+    const systemGroup = access.find(item => item.path === "/system");
+
+    expect(userGroup?.redirect).toBe("/users");
+    expect(userGroup?.children?.map(item => item.path)).toEqual(["/users"]);
+
+    expect(systemGroup?.redirect).toBe("/system/admins");
+    expect(systemGroup?.children?.map(item => item.path)).toEqual([
+      "/system/admins",
+      "/system/roles",
+      "/system/permissions"
+    ]);
+  });
+
+  it("A5 路由只使用后端真实权限码，且管理员页采用 some 模式", () => {
+    const users = access[0].children?.[0];
+    expect(users?.meta?.permissions).toEqual(["user:read"]);
+
+    const admins = access[1].children?.[0];
+    expect(admins?.meta?.permissions).toEqual([
+      "admin:create",
+      "admin:disable",
+      "admin:delete",
+      "admin:assign_role"
+    ]);
+    const adminsMeta = admins?.meta as
+      | { permissionsMode?: "every" | "some" }
+      | undefined;
+    expect(adminsMeta?.permissionsMode).toBe("some");
+
+    const roles = access[1].children?.[1];
+    expect(roles?.meta?.permissions).toEqual(["role:list"]);
+
+    const permissions = access[1].children?.[2];
+    expect(permissions?.meta?.permissions).toEqual(["permission:list"]);
+  });
+
+  it("工作台、订单、退款、优惠券页面声明真实读权限码", () => {
+    expect(home.children[0].meta?.permissions).toEqual(["dashboard:view"]);
+
+    expect(order.children?.map(item => item.meta?.permissions)).toEqual([
+      ["order:list"],
+      ["order:view"]
+    ]);
+    expect(refund.children?.map(item => item.meta?.permissions)).toEqual([
+      ["refund:list"],
+      ["refund:view"]
+    ]);
+    expect(marketing.children?.[0]?.meta?.permissions).toEqual(["coupon:list"]);
+    // 秒杀后台没有读接口，不编造读权限码
+    expect(marketing.children?.[1]?.meta?.permissions).toBeUndefined();
   });
 });

@@ -22,8 +22,17 @@ declare global {
     showLink?: boolean;
     /** 是否显示父级菜单 `可选` */
     showParent?: boolean;
-    /** 页面级别权限设置 `可选` */
+    /** 页面级别权限设置（模板遗留的角色白名单，管理端不使用） `可选` */
     roles?: Array<string>;
+    /**
+     * 页面级权限码（来自 Go 后端真实权限码）。
+     *
+     * 缺省表示页面只要求管理员登录（后端读接口仅 AdminAuth），
+     * 不表示"默认放行所有写操作"：写操作按钮仍按各自权限码控制。
+     */
+    permissions?: Array<string>;
+    /** `permissions` 的匹配模式，缺省 `every`（全部满足） */
+    permissionsMode?: "every" | "some";
     /** 按钮级别权限设置 `可选` */
     auths?: Array<string>;
     /** 路由组件缓存（开启 `true`、关闭 `false`）`可选` */

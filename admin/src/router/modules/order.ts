@@ -1,5 +1,6 @@
 import { $t } from "@/plugins/i18n";
 import { orderAdmin } from "@/router/enums";
+import { PERMISSION } from "@/utils/permission";
 
 const Layout = () => import("@/layout/index.vue");
 
@@ -7,8 +8,9 @@ const Layout = () => import("@/layout/index.vue");
  * 订单路由。
  *
  * 访问控制：后端订单读接口有真实权限码（order:list / order:view），
- * 但前端无法从 `/admin/me` 拿到 permissions[]，因此菜单不按角色硬编码屏蔽；
- * 无权限时由后端返回 403，页面展示可读错误。发货按钮按 order:ship 控制。
+ * A5 起由 `meta.permissions` 在菜单与路由守卫两层控制；
+ * 发货按钮按 order:ship 控制。非超级管理员的有效权限在后端
+ * 未下发 `permissions[]` 前按 fail-closed 处理（见 `@/utils/permission`）。
  */
 export default {
   path: "/order",
@@ -27,7 +29,8 @@ export default {
       component: () => import("@/views/order/index.vue"),
       meta: {
         title: $t("menus.pureOrderList"),
-        icon: "ep/tickets"
+        icon: "ep/tickets",
+        permissions: [PERMISSION.ORDER_LIST]
       }
     },
     {
@@ -36,7 +39,8 @@ export default {
       component: () => import("@/views/order/detail.vue"),
       meta: {
         title: $t("menus.pureOrderDetail"),
-        showLink: false
+        showLink: false,
+        permissions: [PERMISSION.ORDER_VIEW]
       }
     }
   ]

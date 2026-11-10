@@ -1,19 +1,25 @@
 /**
  * 前端权限判断（RBAC 适配层）。
  *
- * 背景：后端 `/admin/me` 当前只返回 `is_super` 与 `roles`，**没有** `permissions[]`。
- * 因此前端采用"角色 → 权限码"的本地映射，作为契约冻结前的过渡方案。
+ * 事实来源（A5 复核后的真实后端能力）：
+ * - `GET /admin/me` 返回 `{ id, username, is_super, roles }`，**不返回** `permissions[]`；
+ * - 后端**没有**"查询当前管理员有效权限"接口；
+ * - 后端**没有**"查询角色已有权限"接口（只有授予/移除权限的写接口）。
  *
- * 硬性约束：
- * 1. 只配置**已经明确知道**的角色（当前仅 `super_admin`），不为未知角色赋权。
- * 2. `permissions` 一旦由后端下发，就以它为准（即使为空数组），不再回退到角色映射。
- * 3. 前端权限判断只用于界面呈现，**不是安全边界**；真正的授权由后端
- *    `RequirePermission(...)` 中间件执行，前端最多做到"不展示无权入口"。
- * 4. 未知角色默认拒绝（白名单语义）。
+ * 因此 A5 的授权优先级是：
+ * 1. `is_super === true` → 视为拥有全部权限（仅影响界面展示）；
+ * 2. 后端下发了 `permissions[]`（当前未实现，保留兼容）→ 以其为准；
+ * 3. 以上都不具备 → **fail-closed**，非超级管理员的有效权限集合为空。
+ *
+ * 明确禁止：把角色名当作权限集合。角色名只用于展示（`/admin/me` 的 `roles`），
+ * 不参与授权计算。
+ *
+ * 前端权限判断只用于界面呈现，**不是安全边界**：真正的授权由后端
+ * `RequirePermission(...)` 中间件执行。
  *
  * 设计说明：本模块保持**零依赖**（不 import store、不 import router），
- * 通过 `setPermissionSubject()` 由 Pinia 在登录/恢复会话时同步一份快照。
- * 这样可以避免 `router → router/utils → store → router` 的循环依赖。
+ * 通过 `setPermissionSubject()` 由 Pinia 在登录/恢复会话时同步一份快照，
+ * 避免 `router → router/utils → store → router` 的循环依赖。
  */
 
 /**
@@ -24,10 +30,12 @@
  * - `internal/cmd/routes_admin.go` 中 `RequirePermission(code)` 的实际参数。
  *
  * 注意：
- * - 商品/分类/SKU/库存**没有** `*:read` 权限码，查询接口只要求 AdminAuth；
- * - A3 的订单与退款**有**独立读权限码（`order:list` / `order:view` /
- *   `refund:list` / `refund:view`），以 `routes_admin.go` 为准。
- * 前端不为页面访问编造权限码；写操作按钮按下列真实码控制。
+ * - 商品/分类/SKU/库存/轮播图/推荐位的**读接口没有权限码**，仅要求 AdminAuth，
+ *   因此前端不为这些页面的"读"编造权限码；
+ * - 订单/退款/优惠券/工作台有真实读权限码（`order:list`、`refund:list`、
+ *   `coupon:list`、`dashboard:view`）；
+ * - 用户域只有 `user:read` / `user:status`，**没有**用户列表权限码；
+ * - 管理员域只有写权限码，**没有** `admin:list`。
  */
 export const PERMISSION = {
   DASHBOARD_VIEW: "dashboard:view",
@@ -61,33 +69,37 @@ export const PERMISSION = {
   RECOMMEND_CREATE: "recommend:create",
   RECOMMEND_UPDATE: "recommend:update",
   RECOMMEND_DELETE: "recommend:delete",
-  RECOMMEND_ITEM: "recommend:item"
+  RECOMMEND_ITEM: "recommend:item",
+  USER_READ: "user:read",
+  USER_STATUS: "user:status",
+  ADMIN_CREATE: "admin:create",
+  ADMIN_DISABLE: "admin:disable",
+  ADMIN_DELETE: "admin:delete",
+  ADMIN_ASSIGN_ROLE: "admin:assign_role",
+  ROLE_CREATE: "role:create",
+  ROLE_LIST: "role:list",
+  ROLE_UPDATE: "role:update",
+  ROLE_DELETE: "role:delete",
+  ROLE_ASSIGN_PERMISSION: "role:assign_permission",
+  PERMISSION_CREATE: "permission:create",
+  PERMISSION_LIST: "permission:list",
+  PERMISSION_UPDATE: "permission:update",
+  PERMISSION_DELETE: "permission:delete"
 } as const;
 
 /** 权限码：工作台只读（保留 A1 的命名，避免调用方改动） */
 export const PERMISSION_DASHBOARD_VIEW = PERMISSION.DASHBOARD_VIEW;
 
-/**
- * 角色 → 权限码映射（集中配置）。
- *
- * 仅登记当前已知角色 `super_admin`。其余角色在后端契约明确前不得推测，
- * 遇到未知角色时一律按"无权限"处理。
- */
-export const ROLE_PERMISSION_MAP: Readonly<Record<string, readonly string[]>> =
-  {
-    super_admin: [PERMISSION_DASHBOARD_VIEW]
-  };
-
 /** 权限判断主体 */
 export interface PermissionSubject {
   /** 是否超级管理员（后端 `is_super`） */
   isSuper: boolean;
-  /** 角色名列表（后端 `roles`） */
+  /** 角色名列表（后端 `roles`），**不参与授权计算**，仅用于展示 */
   roles: string[];
   /**
    * 后端下发的权限码。
-   * `null` 表示后端**未提供**该字段（当前状态），此时回退到角色映射；
-   * 空数组表示后端明确表示"没有任何权限"，此时不做回退。
+   * `null` 表示后端**未提供**该字段（当前真实状态）→ 非超级管理员按 fail-closed 处理；
+   * 空数组表示后端明确表示"没有任何权限"。
    */
   permissions: string[] | null;
 }
@@ -108,7 +120,7 @@ export function setPermissionSubject(subject: PermissionSubject) {
   currentSubject = {
     isSuper: Boolean(subject.isSuper),
     roles: [...(subject.roles ?? [])],
-    permissions: subject.permissions ?? null
+    permissions: subject.permissions ? [...subject.permissions] : null
   };
 }
 
@@ -125,23 +137,15 @@ export function resetPermissionSubject() {
 /**
  * 计算主体的有效权限集合。
  *
- * 优先级：`is_super` → `*`；后端 `permissions` → 直接使用；
- * 否则按 `roles` 查映射表（未知角色不贡献任何权限）。
+ * 顺序：`is_super` → `["*"]`；后端 `permissions` → 直接使用；
+ * 否则返回空数组（fail-closed）。角色名不参与计算。
  */
 export function resolvePermissions(
   subject: PermissionSubject = currentSubject
 ): string[] {
   if (subject.isSuper) return ["*"];
-
   if (subject.permissions !== null) return [...subject.permissions];
-
-  const result = new Set<string>();
-  for (const role of subject.roles ?? []) {
-    const granted = ROLE_PERMISSION_MAP[role];
-    if (!granted) continue;
-    for (const permission of granted) result.add(permission);
-  }
-  return [...result];
+  return [];
 }
 
 /**
@@ -165,4 +169,32 @@ export function hasPermission(
   const granted = resolvePermissions(subject);
   const match = (permission: string) => granted.includes(permission);
   return mode === "some" ? requiredList.some(match) : requiredList.every(match);
+}
+
+/**
+ * 路由 `meta` 声明的页面级权限判断（菜单过滤与路由守卫共用）。
+ *
+ * - `meta.permissions` 缺省/空数组 → 页面只要求登录（后端读接口仅 AdminAuth）；
+ * - `meta.permissionsMode` 缺省为 `every`。
+ */
+export function hasMetaPermission(
+  meta?: {
+    permissions?: string[];
+    permissionsMode?: "every" | "some";
+  } | null
+): boolean {
+  const required = meta?.permissions;
+  if (!required || required.length === 0) return true;
+  return hasPermission(required, { mode: meta?.permissionsMode ?? "every" });
+}
+
+/**
+ * 当前权限主体的签名（用于"是否需要重算菜单"的比较）。
+ *
+ * 只依赖有效权限集合：权限变化 → 签名变化 → 重建菜单。
+ */
+export function getPermissionSignature(
+  subject: PermissionSubject = currentSubject
+): string {
+  return resolvePermissions(subject).slice().sort().join(",");
 }

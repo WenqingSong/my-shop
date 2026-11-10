@@ -1,5 +1,6 @@
 import { $t } from "@/plugins/i18n";
 import { home } from "@/router/enums";
+import { PERMISSION } from "@/utils/permission";
 const Layout = () => import("@/layout/index.vue");
 
 export default {
@@ -19,7 +20,9 @@ export default {
       component: () => import("@/views/dashboard/index.vue"),
       meta: {
         title: $t("menus.pureDashboard"),
-        icon: "ep/odometer"
+        icon: "ep/odometer",
+        // 后端 5 个工作台接口均要求 dashboard:view
+        permissions: [PERMISSION.DASHBOARD_VIEW]
       }
     }
   ]

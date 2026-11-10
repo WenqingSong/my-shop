@@ -96,7 +96,10 @@ menus:
   pureTable: 表格
   pureSysManagement: 系统管理
   pureUser: 用户管理
+  pureUserList: 用户状态管理
+  pureAdmin: 管理员管理
   pureRole: 角色管理
+  purePermissionAdmin: 权限管理
   pureSystemMenu: 菜单管理
   pureDept: 部门管理
   pureSysMonitor: 系统监控

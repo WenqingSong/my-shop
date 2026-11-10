@@ -11,15 +11,25 @@ vi.mock("@/plugins/i18n", () => ({
   localesConfigs: { zh: {}, en: {} }
 }));
 
-import { HOME_PATH, LOGIN_PATH, resolveAuthGuard } from "@/router/guard";
+import {
+  ACCESS_DENIED_PATH,
+  HOME_PATH,
+  LOGIN_PATH,
+  hasRoutePermission,
+  resolveAuthGuard,
+  resolvePermissionGuard
+} from "@/router/guard";
 import {
   __resetProfileRequestCache,
   useUserStoreHook
 } from "@/store/modules/user";
+import { usePermissionStoreHook } from "@/store/modules/permission";
 import { clearAccessToken, getAccessToken, setAccessToken } from "@/utils/auth";
 import {
+  PERMISSION,
   getPermissionSubject,
-  resetPermissionSubject
+  resetPermissionSubject,
+  setPermissionSubject
 } from "@/utils/permission";
 import { MOCK_ACCESS_TOKEN, MOCK_EXPIRES_IN } from "@/mocks/handlers/admin";
 
@@ -33,6 +43,7 @@ describe("路由认证守卫决策", () => {
     __resetProfileRequestCache();
     useUserStoreHook().RESET_AUTH_STATE();
     resetPermissionSubject();
+    usePermissionStoreHook().wholeMenus = [];
     clearAccessToken();
     window.sessionStorage.clear();
   });
@@ -170,5 +181,139 @@ describe("路由认证守卫决策", () => {
       replace: true
     });
     expect(useUserStoreHook().profileLoaded).toBe(false);
+  });
+});
+
+describe("路由页面级权限守卫决策", () => {
+  const rolesPage = {
+    path: "/system/roles",
+    fullPath: "/system/roles",
+    meta: { permissions: [PERMISSION.ROLE_LIST] }
+  };
+
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    __resetProfileRequestCache();
+    useUserStoreHook().RESET_AUTH_STATE();
+    resetPermissionSubject();
+    usePermissionStoreHook().wholeMenus = [];
+    clearAccessToken();
+    window.sessionStorage.clear();
+  });
+
+  it("未声明 permissions 的页面只要求登录（与后端仅 AdminAuth 的读接口一致）", () => {
+    const target = { path: "/products", fullPath: "/products" };
+
+    expect(hasRoutePermission(target)).toBe(true);
+    expect(resolvePermissionGuard(target).type).toBe("allow");
+  });
+
+  it("超级管理员可访问任何声明了权限码的页面", () => {
+    setPermissionSubject({ isSuper: true, roles: [], permissions: null });
+
+    expect(hasRoutePermission(rolesPage)).toBe(true);
+    expect(resolvePermissionGuard(rolesPage).type).toBe("allow");
+  });
+
+  it("非超级管理员有对应权限码时放行", () => {
+    setPermissionSubject({
+      isSuper: false,
+      roles: [],
+      permissions: [PERMISSION.ROLE_LIST]
+    });
+
+    expect(hasRoutePermission(rolesPage)).toBe(true);
+  });
+
+  it("非超级管理员无权限码时拒绝（fail-closed，角色名不解锁）", () => {
+    setPermissionSubject({
+      isSuper: false,
+      roles: ["super_admin", "operator"],
+      permissions: null
+    });
+
+    expect(hasRoutePermission(rolesPage)).toBe(false);
+  });
+
+  it("被拒绝且没有可访问菜单时跳转 403 页", () => {
+    resetPermissionSubject();
+
+    expect(resolvePermissionGuard(rolesPage)).toEqual({
+      type: "redirect",
+      path: ACCESS_DENIED_PATH,
+      replace: true
+    });
+  });
+
+  it("被拒绝时跳转到第一个可访问菜单页面（避免落在死路）", () => {
+    resetPermissionSubject();
+    usePermissionStoreHook().wholeMenus = [
+      {
+        path: "/product",
+        meta: { title: "商品管理" },
+        children: [{ path: "/products", meta: { title: "商品列表" } }]
+      }
+    ];
+
+    expect(resolvePermissionGuard(rolesPage)).toEqual({
+      type: "redirect",
+      path: "/products",
+      replace: true
+    });
+  });
+
+  it("登录页与 403 页不参与权限判断", () => {
+    resetPermissionSubject();
+    const loginTarget = { path: LOGIN_PATH, fullPath: LOGIN_PATH };
+    const deniedTarget = {
+      path: ACCESS_DENIED_PATH,
+      fullPath: ACCESS_DENIED_PATH
+    };
+
+    expect(resolvePermissionGuard(loginTarget).type).toBe("allow");
+    expect(resolvePermissionGuard(deniedTarget).type).toBe("allow");
+  });
+
+  it("matched 逐级检查：父级布局不声明权限时只校验子路由", () => {
+    setPermissionSubject({
+      isSuper: false,
+      roles: [],
+      permissions: []
+    });
+
+    const target = {
+      path: "/system/roles",
+      fullPath: "/system/roles",
+      matched: [
+        { meta: { title: "系统管理" } },
+        { meta: { permissions: [PERMISSION.ROLE_LIST] } }
+      ]
+    };
+
+    expect(hasRoutePermission(target)).toBe(false);
+  });
+
+  it("some 模式：命中任一权限码即可访问（管理员页）", () => {
+    setPermissionSubject({
+      isSuper: false,
+      roles: [],
+      permissions: [PERMISSION.ADMIN_DELETE]
+    });
+
+    const target = {
+      path: "/system/admins",
+      fullPath: "/system/admins",
+      meta: {
+        permissions: [
+          PERMISSION.ADMIN_CREATE,
+          PERMISSION.ADMIN_DISABLE,
+          PERMISSION.ADMIN_DELETE,
+          PERMISSION.ADMIN_ASSIGN_ROLE
+        ],
+        permissionsMode: "some" as const
+      }
+    };
+
+    expect(hasRoutePermission(target)).toBe(true);
   });
 });

@@ -48,7 +48,8 @@ export type userType = {
   roles?: Array<string>;
   /**
    * 后端下发的权限码。
-   * `null` 表示后端当前未提供该字段（A1 现状），此时回退到角色映射。
+   * `null` 表示后端未提供该字段（当前 `/admin/me` 的真实状态）：
+   * 非超级管理员按 fail-closed 处理，有效权限为空。
    */
   permissions?: Array<string> | null;
   /** 是否已通过 `/admin/me` 完成会话校验 */

@@ -7,6 +7,8 @@ const home = 0, // 平台规定只有 home 路由的 rank 才能为 0 ，所以�
   aftersalesAdmin = 4, // A3 退款售后
   marketingAdmin = 5, // A4 营销
   contentAdmin = 6, // A4 内容
+  userAdmin = 7, // A5 用户
+  systemAdmin = 8, // A5 系统管理（管理员/角色/权限）
   chatai = 1,
   vueflow = 2,
   ganttastic = 3,
@@ -43,6 +45,8 @@ export {
   aftersalesAdmin,
   marketingAdmin,
   contentAdmin,
+  userAdmin,
+  systemAdmin,
   chatai,
   vueflow,
   ganttastic,

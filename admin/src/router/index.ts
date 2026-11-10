@@ -18,7 +18,8 @@ import {
   type RouteComponent,
   createRouter
 } from "vue-router";
-import { resolveAuthGuard } from "./guard";
+import { resolveAuthGuard, resolvePermissionGuard } from "./guard";
+import { getPermissionSignature } from "@/utils/permission";
 
 /**
  * 自动导入全部静态路由，无需再手动引入！
@@ -80,6 +81,26 @@ export const router: Router = createRouter({
 /** 记录已经加载的页面路径 */
 const loadedPaths = new Set<string>();
 
+/**
+ * 上次构建菜单时的权限签名。
+ *
+ * 菜单在应用启动时（尚未登录）就会构建一次，登录成功或权限变化后必须重建，
+ * 否则侧边栏会停留在"匿名权限"的结果上。用签名比较避免每次导航都深拷贝路由树。
+ */
+let lastMenuSignature: string | null = null;
+
+/**
+ * 按当前权限主体重建菜单（仅在签名变化时执行）。
+ *
+ * 供路由守卫与 `refreshAccess()`（权限变更后）共用。
+ */
+export function syncMenusWithPermissions() {
+  const signature = getPermissionSignature();
+  if (signature === lastMenuSignature) return;
+  lastMenuSignature = signature;
+  usePermissionStoreHook().handleWholeMenus([]);
+}
+
 /** 重置已加载页面记录 */
 export function resetLoadedPaths() {
   loadedPaths.clear();
@@ -96,6 +117,8 @@ export function resetRouter() {
   );
   usePermissionStoreHook().clearAllCachePage();
   resetLoadedPaths();
+  // 登出/重置后重新按匿名权限构建菜单，避免残留上一个账号的菜单
+  lastMenuSignature = null;
 }
 
 router.beforeEach(async (to: ToRouteType, _from) => {
@@ -139,6 +162,19 @@ router.beforeEach(async (to: ToRouteType, _from) => {
       query: decision.query,
       replace: true
     };
+  }
+
+  /**
+   * 认证通过后按当前权限重建菜单，再做页面级权限判断。
+   *
+   * 顺序不能颠倒：无权限时的兜底落地页来自"已过滤的菜单"。
+   */
+  syncMenusWithPermissions();
+
+  const access = resolvePermissionGuard(to);
+  if (access.type === "redirect") {
+    NProgress.done();
+    return { path: access.path, replace: true };
   }
 
   return true;

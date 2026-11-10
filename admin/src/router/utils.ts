@@ -11,7 +11,7 @@ import {
   isIncludeAllChildren
 } from "@pureadmin/utils";
 import { buildHierarchyTree } from "@/utils/tree";
-import { getPermissionSubject } from "@/utils/permission";
+import { getPermissionSubject, hasMetaPermission } from "@/utils/permission";
 import { type menuType, routerArrays } from "@/layout/types";
 import { useMultiTagsStoreHook } from "@/store/modules/multiTags";
 import { usePermissionStoreHook } from "@/store/modules/permission";
@@ -76,9 +76,18 @@ function isOneOfArray(a: Array<string>, b: Array<string>) {
 /** 取出当前登录管理员的角色 roles，过滤无权限的菜单 */
 function filterNoPermissionTree(data: RouteComponent[]) {
   const currentRoles = getPermissionSubject().roles ?? [];
-  const newTree = cloneDeep(data).filter((v: any) =>
-    isOneOfArray(v.meta?.roles, currentRoles)
-  );
+  const newTree = cloneDeep(data).filter((v: any) => {
+    // 模板遗留的 meta.roles 白名单：管理端路由不使用，保留兼容语义
+    if (
+      Array.isArray(v.meta?.roles) &&
+      v.meta.roles.length > 0 &&
+      !isOneOfArray(v.meta.roles, currentRoles)
+    ) {
+      return false;
+    }
+    // A5：页面级权限码（真实后端权限码），无权限的页面不进入菜单
+    return hasMetaPermission(v.meta);
+  });
   newTree.forEach(
     (v: any) => v.children && (v.children = filterNoPermissionTree(v.children))
   );

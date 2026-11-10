@@ -47,7 +47,7 @@ export const useUserStore = defineStore("pure-user", {
     nickname: "",
     isSuper: false,
     roles: [],
-    // `null` = 后端未提供 permissions 字段（A1 现状）
+    // `null` = 后端未提供 permissions 字段（当前 `/admin/me` 的真实状态，非超级管理员 fail-closed）
     permissions: null,
     profileLoaded: false,
     verifyCode: "",

@@ -232,6 +232,35 @@ export interface MockArticle {
   updated_at: string;
 }
 
+/** A5：用户账号状态（users 表只有 id/status 这两个后台可见字段） */
+export interface MockUser {
+  id: number;
+  status: 0 | 1;
+}
+
+/** A5：管理员（列表接口不存在，夹具仅用于写操作的目标校验） */
+export interface MockAdmin {
+  id: number;
+  username: string;
+  status: 0 | 1;
+  is_super: 0 | 1;
+}
+
+/** A5：角色（后端字段只有 id/name/description） */
+export interface MockRole {
+  id: number;
+  name: string;
+  description: string;
+}
+
+/** A5：权限定义（后端字段只有 id/code/name/description） */
+export interface MockPermission {
+  id: number;
+  code: string;
+  name: string;
+  description: string;
+}
+
 /** 固定时间戳，保证测试断言稳定 */
 const SEED_TIME = "2026-11-01 10:00:00";
 const MOCK_IMAGE_HOST = "https://mock-upload.local/files";
@@ -1142,7 +1171,108 @@ function seedArticles(): MockArticle[] {
   ];
 }
 
+/* -------------------------------------------------------------------------- */
+/* A5：用户 / 管理员 / 角色 / 权限夹具                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 权限夹具与后端 `internal/boot/seed.go` 的 `seedPermissionList` 一一对应。
+ * 这是**开发/测试夹具**，不是生产数据；权限码本身以后端 seed 为准。
+ */
+const A5_PERMISSION_SEED: Array<[string, string]> = [
+  ["category:create", "创建分类"],
+  ["category:update", "更新分类"],
+  ["category:delete", "删除分类"],
+  ["product:create", "创建商品"],
+  ["product:update", "更新商品"],
+  ["product:on_shelf", "上架商品"],
+  ["product:off_shelf", "下架商品"],
+  ["sku:create", "创建 SKU"],
+  ["sku:update", "更新 SKU"],
+  ["sku:delete", "删除 SKU"],
+  ["inventory:increase", "增加库存"],
+  ["inventory:deduct", "扣减库存"],
+  ["admin:create", "创建管理员"],
+  ["admin:disable", "禁用管理员"],
+  ["admin:delete", "删除管理员"],
+  ["admin:assign_role", "分配管理员角色"],
+  ["role:create", "创建角色"],
+  ["role:list", "查看角色"],
+  ["role:update", "更新角色"],
+  ["role:delete", "删除角色"],
+  ["role:assign_permission", "分配角色权限"],
+  ["permission:create", "创建权限"],
+  ["permission:list", "查看权限"],
+  ["permission:update", "更新权限"],
+  ["permission:delete", "删除权限"],
+  ["order:ship", "订单发货"],
+  ["order:list", "订单列表与统计查询"],
+  ["order:view", "订单详情查看"],
+  ["refund:list", "查看退款列表"],
+  ["refund:view", "查看退款详情与审计"],
+  ["refund:review", "审核退款申请"],
+  ["refund:execute", "执行退款与关闭退款"],
+  ["flash_sale:create", "创建秒杀活动"],
+  ["flash_sale:update", "更新秒杀活动"],
+  ["flash_sale:repair", "修复秒杀请求"],
+  ["review:take_down", "下架评价"],
+  ["banner:create", "创建轮播图"],
+  ["banner:update", "更新轮播图"],
+  ["banner:delete", "删除轮播图"],
+  ["recommend:create", "创建推荐位"],
+  ["recommend:update", "更新推荐位"],
+  ["recommend:delete", "删除推荐位"],
+  ["recommend:item", "管理推荐商品"],
+  ["dashboard:view", "查看运营数据大屏"],
+  ["user:read", "查看用户状态"],
+  ["user:status", "禁用/启用用户"],
+  ["coupon:create", "创建优惠券模板"],
+  ["coupon:list", "查看优惠券模板"],
+  ["coupon:stop", "停止优惠券领取"]
+];
+
+function seedUsers(): MockUser[] {
+  return [
+    { id: 101, status: 1 },
+    { id: 102, status: 0 },
+    { id: 103, status: 1 }
+  ];
+}
+
+function seedAdmins(): MockAdmin[] {
+  return [
+    { id: 1, username: "admin", status: 1, is_super: 1 },
+    { id: 2, username: "ops01", status: 1, is_super: 0 },
+    { id: 3, username: "ops02", status: 0, is_super: 0 }
+  ];
+}
+
+function seedRoles(): MockRole[] {
+  return [
+    { id: 501, name: "operator", description: "日常运营" },
+    { id: 502, name: "auditor", description: "只读审计" }
+  ];
+}
+
+function seedPermissions(): MockPermission[] {
+  return A5_PERMISSION_SEED.map(([code, name], index) => ({
+    id: index + 1,
+    code,
+    name,
+    description: ""
+  }));
+}
+
 interface MockDb {
+  users: MockUser[];
+  admins: MockAdmin[];
+  roles: MockRole[];
+  permissions: MockPermission[];
+  /** 角色-权限关联，key 为 `roleId:permissionId`（仅用于 Mock 幂等演示） */
+  rolePermissions: Set<string>;
+  nextAdminId: number;
+  nextRoleId: number;
+  nextPermissionId: number;
   categories: MockCategory[];
   products: MockProduct[];
   skus: MockSku[];
@@ -1175,6 +1305,14 @@ interface MockDb {
 }
 
 export const mockDb: MockDb = {
+  users: [],
+  admins: [],
+  roles: [],
+  permissions: [],
+  rolePermissions: new Set<string>(),
+  nextAdminId: 1,
+  nextRoleId: 1,
+  nextPermissionId: 1,
   categories: [],
   products: [],
   skus: [],
@@ -1203,6 +1341,15 @@ export const mockDb: MockDb = {
   nextPositionId: 1,
   nextRecommendItemId: 1,
   reset() {
+    this.users = seedUsers();
+    this.admins = seedAdmins();
+    this.roles = seedRoles();
+    this.permissions = seedPermissions();
+    this.rolePermissions = new Set<string>(["501:1", "501:4"]);
+    this.nextAdminId = 10;
+    this.nextRoleId = 600;
+    this.nextPermissionId = 100;
+
     this.categories = seedCategories();
     this.products = seedProducts();
     this.skus = seedSkus();
