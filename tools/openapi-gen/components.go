@@ -123,13 +123,10 @@ func buildParametersComponent() *OMap {
 		Set("description", "每页数量；<1 归一为 20，>100 归一为 100（历史行为，不返回 400）。").
 		Set("schema", NewOMap().Set("type", "integer").Set("format", "int64").Set("default", 20)).
 		Set("x-pagination-mode", "clamp"))
-	out.Set("IdempotencyKeyHeader", NewOMap().
-		Set("name", "Idempotency-Key").
-		Set("in", "header").
-		Set("required", false).
-		Set("description", "幂等键（目标规范，仅适用于新接口）。同一 key + 同一请求体在 TTL 内返回首次结果；"+
-			"同一 key + 不同请求体返回 409。现有订单/秒杀接口尚未支持该 Header，仍使用 JSON body 的 idempotency_key。").
-		Set("schema", NewOMap().Set("type", "string").Set("minLength", 8).Set("maxLength", 128)))
+	// 注意：不生成 Idempotency-Key Header 组件。
+	// D5（Owner 2026-11-10 批准）已否决 Header 方案，幂等键只存在于 JSON body 的 idempotency_key，
+	// 服务端不读取该 Header。历史上曾生成过 IdempotencyKeyHeader 草案组件（K-1），已在本任务移除；
+	// 若未来重新引入 Header，必须先新增 ADR 决策并同步修改本函数与 DTO。
 	return out
 }
 

@@ -15,6 +15,9 @@
 #   8. 错误码注册表 ↔ codes.go
 #   9. 权限码 ↔ 路由 ↔ seed
 #  10. planned 接口与实际路由分离
+#  11. 未引用组件治理（可达性 + 允许保留清单）
+#  12. 主文件 Paths 与分域 Paths 结构化一致
+#  13. 跨包错误码补充登记表与代码事实一致
 #
 # 环境缺失的检查项一律输出 NOT RUN，绝不伪造 PASS。
 # =============================================================================
@@ -73,10 +76,13 @@ log "2. 契约结构与一致性（go run ./tools/openapi-gen -check）"
 # ---------------------------------------------------------------------------
 CHECK_LOG="$(mktemp)"
 if go run ./tools/openapi-gen -repo . -check >"${CHECK_LOG}" 2>&1; then
-  ok "$(cat "${CHECK_LOG}")"
+  cat "${CHECK_LOG}"
   ok "OpenAPI 3.1 版本/结构、\$ref 完整性、operationId 唯一性"
   ok "DTO ↔ Schema、错误码 ↔ codes.go、权限码 ↔ 路由 ↔ seed 双向一致"
   ok "planned 接口与实际路由分离"
+  ok "未引用组件可达性 + 允许保留清单（stale/已引用/新未引用均失败）"
+  ok "主文件 Paths 与分域 Paths 逐字段一致（含重复/缺失/内容漂移）"
+  ok "跨包错误码补充登记与代码事实一致"
 else
   cat "${CHECK_LOG}"
   bad "契约结构与一致性检查未通过"

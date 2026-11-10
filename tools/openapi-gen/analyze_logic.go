@@ -134,6 +134,37 @@ func (g *codeGraph) constantsFor(domain string, entries []string) map[string]boo
 	return out
 }
 
+// reachableFuncs 返回从入口函数出发、经同包调用可达的函数集合（深度有界）。
+// 用于校验「补充登记」的调用链是否真的存在于当前代码，避免登记表随代码演进而失真。
+func (g *codeGraph) reachableFuncs(domain string, entries []string) map[string]bool {
+	out := map[string]bool{}
+	if _, ok := g.funcCodes[domain]; !ok {
+		return out
+	}
+	queue := append([]string{}, entries...)
+	depth := 0
+	for len(queue) > 0 && depth < 6 {
+		next := make([]string, 0, len(queue))
+		for _, fn := range queue {
+			if fn == "" || out[fn] {
+				continue
+			}
+			if _, exists := g.funcCodes[domain][fn]; !exists {
+				continue
+			}
+			out[fn] = true
+			for callee := range g.calls[domain][fn] {
+				if !out[callee] {
+					next = append(next, callee)
+				}
+			}
+		}
+		queue = next
+		depth++
+	}
+	return out
+}
+
 // allConstants 返回该业务域引用的全部错误码（找不到函数级入口时的 fallback）。
 func (g *codeGraph) allConstants(domain string) map[string]bool {
 	return g.all[domain]

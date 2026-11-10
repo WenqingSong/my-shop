@@ -17,6 +17,9 @@
 > 按任务书"独立审查必须由 GPT-6 给出 PASS"的要求，执行者**不得**自行判定 PASS。
 > 不得将其表述为"基本完成"。
 
+> **整改记录（2026-11-10）**：GPT-6 第一轮独立审查发现的问题已在 **B1-02-review-fix** 中处理，
+> 详见 `docs/reports/B1-02-review-fix.md`。本文件保留 B1-02 交付时的事实与结论，不回改历史。
+
 ---
 
 ## 1. 任务完成情况
@@ -349,6 +352,11 @@ ok  cnb.cool/go-cloud-devops/my-shop/tools/openapi-gen   0.013s
 D5-APPROVED 已否决 Header 方案，该组件**未被任何 operation 引用**，不构成规范。
 按 Owner"本次不重新生成 OpenAPI"的指令，收尾阶段不改动该文件；应在下次契约生成时移除。
 独立审查若判定必须立即消除，应单独提出 finding，由后续任务处理，不属于本次收尾范围。
+
+**B1-02-review-fix 已修复（R2）**：生成器 `tools/openapi-gen/components.go` 的组件定义与
+`parametersComponentNames` 登记同时删除并重新生成，`openapi/components/parameters.yaml` 与主文件中
+均不再出现 `IdempotencyKeyHeader`。D5 决策正文（`B1-02_CONTRACT_DECISIONS.md` §D5）按"保留决策历史"
+原则未改动。
 
 ---
 

@@ -3,7 +3,13 @@
 # 关闭 oas3-unused-component 的原因：
 # 本契约按组件拆分，components.schemas 的每一项是指向 ./components/schemas.yaml 的 $ref，
 # Spectral 无法跨文件追踪「operation -> components -> 外部文件」的使用链，会产生成百上千条误报。
-# 真实的多余/缺失组件由 tools/openapi-gen -check 的 DTO 双向比对负责（缺一个即失败）。
+#
+# 替代检查（B1-02-review-fix R3，已接入 tools/openapi-gen -check）：
+#   tools/openapi-gen/components_reach.go 从 paths（含 planned）与 security requirement 出发，
+#   沿 $ref 递归计算组件可达性（覆盖 schemas / responses / parameters / securitySchemes 等全部
+#   已声明组件类型与嵌套引用），未引用组件必须逐条登记在
+#   tools/openapi-gen/unused-components-allowlist.yaml 中，否则检查失败。
+#   白名单条目若已失效或已被引用，同样失败。
 extends: ["spectral:oas"]
 rules:
   oas3-unused-component: off

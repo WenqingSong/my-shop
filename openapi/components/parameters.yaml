@@ -42,12 +42,3 @@ SizeClampParam:
     format: int64
     default: 20
   x-pagination-mode: clamp
-IdempotencyKeyHeader:
-  name: Idempotency-Key
-  in: header
-  required: false
-  description: 幂等键（目标规范，仅适用于新接口）。同一 key + 同一请求体在 TTL 内返回首次结果；同一 key + 不同请求体返回 409。现有订单/秒杀接口尚未支持该 Header，仍使用 JSON body 的 idempotency_key。
-  schema:
-    type: string
-    minLength: 8
-    maxLength: 128

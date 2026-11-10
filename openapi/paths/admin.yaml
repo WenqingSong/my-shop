@@ -1,5 +1,9 @@
 # 本文件是 openapi/surgecart.openapi.yaml 的分域视图，由 tools/openapi-gen 生成，禁止手工编辑。
-# OpenAPI 3.1 的 Path Item 不支持 $ref，因此 paths 必须内联在主文件；本文件用于分域评审与一致性校验。
+# OpenAPI 3.1 的 Path Item 允许 $ref，但本生成器刻意把 Path Item 内联进主文件：
+#   1) 单一入口自洽：主文件不依赖分域文件即可被 Spectral / Redocly 等工具完整解析，避免跨文件 Path Item 解析差异；
+#   2) 门禁可靠：check 的路径/参数/operation 结构与分域名结构化比对，比跨文件 $ref 解析更容易定位差异；
+#   3) 分域文件只承担评审视图职责，不参与运行时或工具链解析。
+# 因此本文件用于分域评审与主/分域一致性校验，不是主文件的引用目标。
 /admin/login:
   post:
     tags:
@@ -56,8 +60,8 @@
           - 1001
           - 1002
           - 2002
-        scope: call-chain
-        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
       "400":
         $ref: '#/components/responses/BadRequest'
       "401":
@@ -98,8 +102,8 @@
           - 1001
           - 1002
           - 1003
-        scope: call-chain
-        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
       "400":
         $ref: '#/components/responses/BadRequest'
       "401":
@@ -141,8 +145,8 @@
           - 1001
           - 1002
           - 1003
-        scope: call-chain
-        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
       "400":
         $ref: '#/components/responses/BadRequest'
       "401":
@@ -195,8 +199,8 @@
           - 1002
           - 1003
           - 2015
-        scope: call-chain
-        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
       "400":
         $ref: '#/components/responses/BadRequest'
       "401":
@@ -280,8 +284,8 @@
           - 1002
           - 1003
           - 2015
-        scope: call-chain
-        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
       "400":
         $ref: '#/components/responses/BadRequest'
       "401":
@@ -351,8 +355,8 @@
           - 1002
           - 1003
           - 2004
-        scope: call-chain
-        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
       "400":
         $ref: '#/components/responses/BadRequest'
       "401":
@@ -434,8 +438,8 @@
           - 2003
           - 2005
           - 2006
-        scope: call-chain
-        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
       "400":
         $ref: '#/components/responses/BadRequest'
       "401":
@@ -492,8 +496,8 @@
           - 2003
           - 2005
           - 2006
-        scope: call-chain
-        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
       "400":
         $ref: '#/components/responses/BadRequest'
       "401":
@@ -572,8 +576,8 @@
           - 2005
           - 2006
           - 2007
-        scope: call-chain
-        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
       "400":
         $ref: '#/components/responses/BadRequest'
       "401":
@@ -638,8 +642,8 @@
           - 2003
           - 2005
           - 2006
-        scope: call-chain
-        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
       "400":
         $ref: '#/components/responses/BadRequest'
       "401":
@@ -707,8 +711,8 @@
           - 1002
           - 1003
           - 2008
-        scope: call-chain
-        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
       "400":
         $ref: '#/components/responses/BadRequest'
       "401":
@@ -752,8 +756,8 @@
           - 1001
           - 1002
           - 1003
-        scope: call-chain
-        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
       "400":
         $ref: '#/components/responses/BadRequest'
       "401":
@@ -820,8 +824,8 @@
           - 1003
           - 2007
           - 2008
-        scope: call-chain
-        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
       "400":
         $ref: '#/components/responses/BadRequest'
       "401":
@@ -877,8 +881,8 @@
           - 1002
           - 1003
           - 2007
-        scope: call-chain
-        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
       "400":
         $ref: '#/components/responses/BadRequest'
       "401":
@@ -929,6 +933,12 @@
     x-pagination-mode: none
     x-idempotency:
       mode: none
+    x-known-issue:
+      - id: B1-02-D1
+        summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
+        actual_http_status: 500
+        actual_business_code: 51
+        remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
     responses:
       "200":
         description: 成功。handler 显式返回 nil，data 为 null（不是空对象 {}）。
@@ -949,8 +959,8 @@
           - 1003
           - 2007
           - 2009
-        scope: call-chain
-        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
       "400":
         $ref: '#/components/responses/BadRequest'
       "401":
@@ -1012,8 +1022,8 @@
           - 1001
           - 1002
           - 1003
-        scope: call-chain
-        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
       "400":
         $ref: '#/components/responses/BadRequest'
       "401":
@@ -1084,8 +1094,8 @@
           - 1002
           - 1003
           - 2010
-        scope: call-chain
-        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
       "400":
         $ref: '#/components/responses/BadRequest'
       "401":
@@ -1129,8 +1139,8 @@
           - 1001
           - 1002
           - 1003
-        scope: call-chain
-        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
       "400":
         $ref: '#/components/responses/BadRequest'
       "401":
@@ -1200,8 +1210,8 @@
           - 1003
           - 2009
           - 2010
-        scope: call-chain
-        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
       "400":
         $ref: '#/components/responses/BadRequest'
       "401":
@@ -1257,8 +1267,8 @@
           - 1002
           - 1003
           - 2009
-        scope: call-chain
-        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
       "400":
         $ref: '#/components/responses/BadRequest'
       "401":

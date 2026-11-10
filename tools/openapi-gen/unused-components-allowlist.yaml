@@ -1,0 +1,202 @@
+# =============================================================================
+# 未引用组件允许保留清单（B1-02-review-fix R3）
+#
+# 由 tools/openapi-gen -check 强制校验，规则：
+#   1. 只有本文件逐项列名的组件才允许「未被任何 $ref 引用」；
+#   2. 条目必须存在于 openapi/surgecart.openapi.yaml 的 components 中，否则报「过期记录」；
+#   3. 条目若实际已被引用，报「应从清单移除」；
+#   4. 任何未列名的未引用组件都会让检查失败；
+#   5. 不允许按组件类型或名称通配，必须逐个列名。
+#
+# 判定口径：从 paths（含 planned）与 security requirement 出发，沿 $ref 递归可达即为「已引用」。
+# 维护方式：新增 API/DTO 后如果检查失败，先确认该组件确实需要保留，再把名称加到对应分组。
+# =============================================================================
+version: 1
+
+groups:
+  # 142 条常驻 API 的完整请求 DTO。operation 的 requestBody/parameters 是「按字段位置拆分的
+  # 内联子集」（path/query/body 分开生成），因此不会 $ref 完整 Req Schema。
+  # 保留用途：DTO 全量覆盖审计（B1-02_DTO_SCHEMA_INVENTORY.md 与 components/schemas.yaml 双向核对）。
+  - type: schemas
+    category: dto-request
+    reason: "operation 请求按字段位置内联生成，完整请求 DTO 仅用于 DTO 全量覆盖审计"
+    names:
+      - AddressCreateRequest
+      - AddressDeleteRequest
+      - AddressDetailRequest
+      - AddressListRequest
+      - AddressUpdateRequest
+      - AdminAssignAdminRoleRequest
+      - AdminAssignRolePermissionRequest
+      - AdminCreateAdminRequest
+      - AdminCreatePermissionRequest
+      - AdminCreateRoleRequest
+      - AdminDeleteAdminRequest
+      - AdminDeletePermissionRequest
+      - AdminDeleteRoleRequest
+      - AdminListPermissionRequest
+      - AdminListRoleRequest
+      - AdminLoginRequest
+      - AdminLogoutRequest
+      - AdminMeRequest
+      - AdminRemoveAdminRoleRequest
+      - AdminRemoveRolePermissionRequest
+      - AdminUpdateAdminStatusRequest
+      - AdminUpdatePermissionRequest
+      - AdminUpdateRoleRequest
+      - ArticleCreateRequest
+      - ArticleDeleteRequest
+      - ArticleDetailRequest
+      - ArticleFavoriteCheckRequest
+      - ArticleFavoriteRequest
+      - ArticleLikeCheckRequest
+      - ArticleLikeCountRequest
+      - ArticleLikeRequest
+      - ArticleListRequest
+      - ArticleMyFavoritesRequest
+      - ArticleMyListRequest
+      - ArticleUnfavoriteRequest
+      - ArticleUnlikeRequest
+      - ArticleUpdateRequest
+      - BannerAdminDetailRequest
+      - BannerAdminListRequest
+      - BannerCreateRequest
+      - BannerDeleteRequest
+      - BannerListRequest
+      - BannerUpdateRequest
+      - CartAddRequest
+      - CartDeleteRequest
+      - CartListRequest
+      - CartUpdateQuantityRequest
+      - CartUpdateSelectedRequest
+      - CategoryCreateRequest
+      - CategoryDeleteRequest
+      - CategoryDetailRequest
+      - CategoryListRequest
+      - CategoryUpdateRequest
+      - CouponAdminCreateRequest
+      - CouponAdminListRequest
+      - CouponAdminStopRequest
+      - CouponClaimRequest
+      - CouponListMineRequest
+      - DashboardFlashSalesRequest
+      - DashboardOverviewRequest
+      - DashboardStatusRequest
+      - DashboardTopRequest
+      - DashboardTrendRequest
+      - FavoriteAddRequest
+      - FavoriteCheckRequest
+      - FavoriteListRequest
+      - FavoriteRemoveRequest
+      - FlashSaleCreateOrderRequest
+      - FlashSaleCreateRequest
+      - FlashSaleGetOrderResultRequest
+      - FlashSaleListRequestAuditsRequest
+      - FlashSaleRepairRequestRequest
+      - FlashSaleUpdateRequest
+      - HealthLivenessRequest
+      - HealthReadinessRequest
+      - InventoryDeductRequest
+      - InventoryGetRequest
+      - InventoryIncreaseRequest
+      - InventoryListLogsRequest
+      - LikeCancelRequest
+      - LikeCheckRequest
+      - LikeCountRequest
+      - LikeLikeRequest
+      - OrderAdminListRequest
+      - OrderAdminOrderDetailRequest
+      - OrderAdminOrderStatsRequest
+      - OrderCancelRequest
+      - OrderCreateRequest
+      - OrderDetailRequest
+      - OrderListRequest
+      - OrderPayRequest
+      - OrderReceiveRequest
+      - OrderShipRequest
+      - ProductAdminDetailRequest
+      - ProductAdminListRequest
+      - ProductCreateRequest
+      - ProductDetailRequest
+      - ProductListRequest
+      - ProductOffShelfRequest
+      - ProductOnShelfRequest
+      - ProductUpdateRequest
+      - RecommendAddItemRequest
+      - RecommendAdminDetailRequest
+      - RecommendAdminListRequest
+      - RecommendCreateRequest
+      - RecommendDeleteRequest
+      - RecommendFrontendRequest
+      - RecommendRemoveItemRequest
+      - RecommendUpdateRequest
+      - RecommendUpdateSortRequest
+      - RefundAdminDetailRequest
+      - RefundAdminListRequest
+      - RefundApplyRequest
+      - RefundCloseRequest
+      - RefundDetailRequest
+      - RefundExecuteRequest
+      - RefundListAuditsRequest
+      - RefundListRequest
+      - RefundReviewRequest
+      - RefundRevokeRequest
+      - ReviewCreateRequest
+      - ReviewDeleteRequest
+      - ReviewListRequest
+      - ReviewMyListRequest
+      - ReviewTakeDownRequest
+      - ReviewUpdateRequest
+      - SkuCreateRequest
+      - SkuDeleteRequest
+      - SkuUpdateRequest
+      - UploadAdminTokenRequest
+      - UploadFrontendTokenRequest
+      - UserGetUserStatusRequest
+      - UserListSessionsRequest
+      - UserLoginRequest
+      - UserLogoutRequest
+      - UserMeRequest
+      - UserRefreshRequest
+      - UserRegisterRequest
+      - UserRevokeAllRequest
+      - UserRevokeOthersRequest
+      - UserRevokeSessionRequest
+      - UserUpdateUserStatusRequest
+
+  # handler 显式返回 nil 的写接口：实际响应 data 为 null（operation 内声明 type: null），
+  # 因此不会 $ref 空对象形态的 Res Schema。保留用途同上（DTO 全量覆盖审计）。
+  - type: schemas
+    category: dto-null-response
+    reason: "handler 返回 nil，operation 的 data 声明为 null，空对象 Res Schema 仅用于 DTO 全量覆盖审计"
+    names:
+      - AdminAssignAdminRoleResponse
+      - AdminAssignRolePermissionResponse
+      - AdminDeleteAdminResponse
+      - AdminDeletePermissionResponse
+      - AdminDeleteRoleResponse
+      - AdminLogoutResponse
+      - AdminRemoveAdminRoleResponse
+      - AdminRemoveRolePermissionResponse
+      - UserLogoutResponse
+      - UserRevokeAllResponse
+      - UserRevokeOthersResponse
+      - UserRevokeSessionResponse
+
+  # 通用响应模板：operation 的 200 用 allOf 内联 Success + 具体 data，失败状态引用具名响应。
+  - type: responses
+    category: response-template
+    reason: "通用响应模板，operation 通过 allOf / 具名响应间接表达，不直接 $ref"
+    names:
+      - ErrorResponse
+      - SuccessResponse
+
+  # D3 分页语义参考组件：operation 的分页参数由 DTO 内联生成。
+  - type: parameters
+    category: pagination-semantics
+    reason: "D3 clamp/strict 两套分页语义的文档化组件，operation 参数由 DTO 内联生成"
+    names:
+      - PageClampParam
+      - PageStrictParam
+      - SizeClampParam
+      - SizeStrictParam

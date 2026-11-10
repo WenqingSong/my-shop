@@ -357,7 +357,11 @@ func writeAll(
 			filepath.Join(outRoot, "paths", name+".yaml"),
 			[]string{
 				"# 本文件是 openapi/surgecart.openapi.yaml 的分域视图，由 tools/openapi-gen 生成，禁止手工编辑。",
-				"# OpenAPI 3.1 的 Path Item 不支持 $ref，因此 paths 必须内联在主文件；本文件用于分域评审与一致性校验。",
+				"# OpenAPI 3.1 的 Path Item 允许 $ref，但本生成器刻意把 Path Item 内联进主文件：",
+				"#   1) 单一入口自洽：主文件不依赖分域文件即可被 Spectral / Redocly 等工具完整解析，避免跨文件 Path Item 解析差异；",
+				"#   2) 门禁可靠：check 的路径/参数/operation 结构与分域名结构化比对，比跨文件 $ref 解析更容易定位差异；",
+				"#   3) 分域文件只承担评审视图职责，不参与运行时或工具链解析。",
+				"# 因此本文件用于分域评审与主/分域一致性校验，不是主文件的引用目标。",
 			},
 			view,
 		); err != nil {
@@ -437,7 +441,8 @@ func buildMainDocument(
 
 	doc.Set("tags", buildTags(apis))
 
-	// paths 必须内联（OpenAPI 3.1 的 Path Item 不支持 $ref）。
+	// paths 采用内联：Path Item $ref 在 3.1 中可用，但会让工具链与门禁依赖跨文件解析，
+	// 收益（复用）低于成本（解析差异 + 差异定位困难）。详见 writeAll 中分域视图头注释。
 	paths := NewOMap()
 	for _, p := range pathOrder {
 		item, err := buildPathItem(byPath[p], codes, refs, cms)
@@ -515,10 +520,11 @@ var responsesComponentNames = []string{
 	"Conflict", "TooManyRequests", "InternalError", "ServiceUnavailable",
 }
 
+// parametersComponentNames 是分页语义参考组件的登记表（D3）。
+// 不包含 Idempotency-Key Header：D5 已否决 Header 方案（K-1 整改）。
 var parametersComponentNames = []string{
 	"PageStrictParam", "SizeStrictParam",
 	"PageClampParam", "SizeClampParam",
-	"IdempotencyKeyHeader",
 }
 
 // buildTags 收集实际使用的 tag，按稳定顺序输出。
@@ -607,13 +613,27 @@ func buildPlannedIndex() []any {
 	return out
 }
 
+// d1AffectedCount 统计带 D1 已知问题的 operation 数量（避免文档里的条数与代码脱节）。
+func d1AffectedCount() int {
+	n := 0
+	for _, m := range opMetaByKey {
+		for _, i := range m.KnownIssues {
+			if v, _ := i.Get("id"); v == "B1-02-D1" {
+				n++
+				break
+			}
+		}
+	}
+	return n
+}
+
 // buildGlobalKnownIssues 汇总跨接口的契约已知问题。
 func buildGlobalKnownIssues() []any {
 	return []any{
 		NewOMap().
 			Set("id", "B1-02-D1").
 			Set("summary", "DTO gvalid 校验失败返回 HTTP 500 + code 51，与目标规范 400 + 1001 不一致").
-			Set("affected", "13 条带 v:\"required\" 的写接口，见各 operation 的 x-known-issue").
+			Set("affected", fmt.Sprintf("%d 条带 v:\"required\" 的写接口，见各 operation 的 x-known-issue", d1AffectedCount())).
 			Set("remediation", "需单独立项修复错误码映射；B1-02 仅在契约层标注"),
 		NewOMap().
 			Set("id", "B1-01-H15.4").

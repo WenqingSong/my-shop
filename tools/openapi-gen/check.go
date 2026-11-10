@@ -274,6 +274,23 @@ func check(repoRoot string) error {
 		add("缺少 x-static-routes（/storage/banners/* 静态路由必须显式登记）")
 	}
 
+	// ---- 10. 未引用组件治理（替代 Spectral oas3-unused-component） ----
+	unusedProblems, retained, err := checkUnusedComponents(repoRoot, doc)
+	if err != nil {
+		return err
+	}
+	problems = append(problems, unusedProblems...)
+
+	// ---- 11. 主文件 paths 与分域视图结构化一致 ----
+	viewRep, err := checkPathViews(filepath.Dir(openapiPath), doc)
+	if err != nil {
+		return err
+	}
+	problems = append(problems, viewRep.Problems...)
+
+	// ---- 12. 跨包错误码补充登记表自校验 ----
+	problems = append(problems, validateCrossPackageRegistry(repoRoot, cms, apis)...)
+
 	if len(problems) > 0 {
 		sort.Strings(problems)
 		for _, p := range problems {
@@ -281,8 +298,9 @@ func check(repoRoot string) error {
 		}
 		return fmt.Errorf("契约检查未通过（%d 项）", len(problems))
 	}
-	fmt.Printf("契约检查通过：%d 条常驻 API + %d 条 planned 占位，%d 个 Schema\n",
-		len(actual), len(planned), schemas.Len())
+	fmt.Printf("契约检查通过：%d 条常驻 API + %d 条 planned 占位，%d 个 Schema，%d 个未引用组件（均已在白名单登记）\n",
+		len(actual), len(planned), schemas.Len(), len(retained))
+	fmt.Printf("Paths 分域一致性：%s\n", viewRep.Summary())
 	return nil
 }
 

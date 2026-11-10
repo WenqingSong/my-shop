@@ -44,7 +44,9 @@ func pathParamNames(p string) []string {
 	return out
 }
 
-// buildPathItem 构建单个 path 的 PathItem（3.1 不允许 PathItem $ref，必须内联）。
+// buildPathItem 构建单个 path 的 PathItem。
+// 3.1 的 Path Item 支持 $ref，本生成器仍选择内联：单一入口自洽 + 门禁差异可定位，
+// 详见 gen.go 中 writeAll 写分域视图时的说明。
 func buildPathItem(apis []*API, codes map[string]*ErrorCode, graph *codeGraph, cms map[string]controllerMethod) (*OMap, error) {
 	item := NewOMap()
 	for _, api := range apis {
@@ -332,8 +334,9 @@ func buildResponses(api *API, meta *opMeta, codes map[string]*ErrorCode, graph *
 	if len(codeValues) > 0 {
 		apiMeta := NewOMap().
 			Set("codes", codeValues).
-			Set("scope", "call-chain").
-			Set("note", "controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。")
+			Set("scope", "static-call-chain").
+			Set("note", "controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；"+
+				"这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。")
 		res.Set("x-error-codes", apiMeta)
 	}
 
@@ -401,6 +404,13 @@ func errorCodesFor(api *API, codes map[string]*ErrorCode, graph *codeGraph, cms 
 			continue
 		}
 		set[c.Code] = true
+	}
+	// 跨包补充登记：logic 内再调 service.<Other>() 时对方的业务错误码，
+	// 同包调用图看不到，靠人工核实后逐条登记（errcodes_crosspkg.go）。
+	for _, name := range supplementalErrorCodes(api.Key()) {
+		if c, ok := codes[name]; ok && c.Code != 0 {
+			set[c.Code] = true
+		}
 	}
 
 	values := make([]int, 0, len(set))
