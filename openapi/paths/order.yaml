@@ -1,0 +1,651 @@
+# 本文件是 openapi/surgecart.openapi.yaml 的分域视图，由 tools/openapi-gen 生成，禁止手工编辑。
+# OpenAPI 3.1 的 Path Item 不支持 $ref，因此 paths 必须内联在主文件；本文件用于分域评审与一致性校验。
+/orders:
+  post:
+    tags:
+      - 订单
+    summary: 创建订单
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: orderCreate
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: order.Create
+    x-source: routes_frontend.go
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              source:
+                type: string
+                enum: [cart, direct]
+                x-enum-labels:
+                  cart: 购物车勾选下单
+                  direct: 单 SKU 直接购买
+                x-go-validate: required
+                description: 来源：cart/direct
+              address_id:
+                type: integer
+                format: int64
+                x-go-type: int64
+                x-go-validate: required
+                description: 收货地址 id（必须属于当前用户）
+              idempotency_key:
+                type: string
+                x-go-validate: required
+                description: 幂等键（同键同内容幂等，同键不同内容 9006）
+              sku_id:
+                type: integer
+                format: int64
+                x-go-type: int64
+                description: 直接购买 SKU id（source=direct 必填）
+              quantity:
+                type: integer
+                format: int64
+                x-go-type: int64
+                description: 直接购买数量（source=direct 必填，正整数）
+              coupon_id:
+                type: integer
+                format: int64
+                x-go-type: int64
+                description: 可选使用的用户券 id（一笔订单最多一张，0 或缺省表示不使用）
+            required:
+              - source
+              - address_id
+              - idempotency_key
+    x-pagination-mode: none
+    x-idempotency:
+      mode: body
+      field: idempotency_key
+      required: true
+      header_supported: false
+    x-known-issue:
+      - id: B1-02-D1
+        summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
+        actual_http_status: 500
+        actual_business_code: 51
+        remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/OrderCreateResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 5001
+          - 9001
+          - 9003
+          - 9004
+          - 9005
+          - 9006
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'
+  get:
+    tags:
+      - 订单
+    summary: 查询本人订单列表
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: orderList
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: order.List
+    x-source: routes_frontend.go
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/OrderListResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 9001
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/orders/{id}:
+  get:
+    tags:
+      - 订单
+    summary: 查询本人订单详情
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: orderDetail
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: order.Detail
+    x-source: routes_frontend.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 订单 id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/OrderDetailResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 9001
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/orders/{id}/pay:
+  post:
+    tags:
+      - 订单
+    summary: 支付订单（Mock）
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: orderPay
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: order.Pay
+    x-source: routes_frontend.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 订单 id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/OrderPayResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 9001
+          - 9002
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/orders/{id}/cancel:
+  post:
+    tags:
+      - 订单
+    summary: 取消订单
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: orderCancel
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: order.Cancel
+    x-source: routes_frontend.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 订单 id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/OrderCancelResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 9001
+          - 9002
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/orders/{id}/receive:
+  post:
+    tags:
+      - 订单
+    summary: 确认收货
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: orderReceive
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: order.Receive
+    x-source: routes_frontend.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 订单 id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/OrderReceiveResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 9001
+          - 9002
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/orders/{id}/ship:
+  post:
+    tags:
+      - 订单
+    summary: 发货
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`order:ship`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: orderShip
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: order:ship
+    x-handler: order.Ship
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 订单 id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/OrderShipResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 9001
+          - 9002
+          - 18005
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/orders:
+  get:
+    tags:
+      - 订单
+    summary: 后台订单分页列表
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`order:list`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: orderAdminList
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: order:list
+    x-handler: order.AdminList
+    x-source: routes_admin.go
+    parameters:
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int
+        description: 页码，默认 1；<1 或非整数返回 400
+        x-pagination-mode: strict
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int
+        description: 每页数量，默认 20、上限 100；越界或非整数返回 400
+        x-pagination-mode: strict
+      - name: order_no
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 订单号，精确匹配
+      - name: user_id
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 用户 id，精确匹配；<=0 返回 400
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [pending_payment, paid, shipped, received, completed, cancelled, refunded]
+        description: 状态字符串枚举，非法返回 400
+      - name: start_time
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 创建时间起点，RFC3339（含时区偏移），左闭
+      - name: end_time
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 创建时间终点，RFC3339（含时区偏移），右开
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 排序字段白名单 id/created_at，默认 id，非法返回 400
+      - name: order
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 排序方向 asc/desc，默认 desc，非法返回 400
+    x-pagination-mode: strict
+    x-pagination-contract: 严格行为：page/size 非正整数或越界返回 HTTP 400 + code 1001。
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/OrderAdminListResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/orders/stats:
+  get:
+    tags:
+      - 订单
+    summary: 后台订单状态统计
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`order:list`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: orderAdminStats
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: order:list
+    x-handler: order.AdminStats
+    x-source: routes_admin.go
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/OrderStatsResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/orders/{id}:
+  get:
+    tags:
+      - 订单
+    summary: 后台订单详情
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`order:view`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: orderAdminDetail
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: order:view
+    x-handler: order.AdminDetail
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 订单 id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/OrderAdminDetailResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 9001
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'

@@ -1,0 +1,687 @@
+# 本文件是 openapi/surgecart.openapi.yaml 的分域视图，由 tools/openapi-gen 生成，禁止手工编辑。
+# OpenAPI 3.1 的 Path Item 不支持 $ref，因此 paths 必须内联在主文件；本文件用于分域评审与一致性校验。
+/orders/{id}/refund:
+  post:
+    tags:
+      - 退款
+    summary: 发起退款申请
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: refundApply
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: refund.Apply
+    x-source: routes_frontend.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 订单 id
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              reason:
+                type: string
+                description: 申请原因（必填）
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/RefundApplyResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 18001
+          - 18003
+          - 18004
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/refunds:
+  get:
+    tags:
+      - 退款
+    summary: 查询本人退款记录列表
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: refundList
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: refund.List
+    x-source: routes_frontend.go
+    parameters:
+      - name: order_id
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 按订单过滤；<=0 忽略
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/RefundListResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/refunds/{id}:
+  get:
+    tags:
+      - 退款
+    summary: 查询本人退款详情
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: refundDetail
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: refund.Detail
+    x-source: routes_frontend.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 退款申请 id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/RefundDetailResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 18001
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/refunds/{id}/revoke:
+  post:
+    tags:
+      - 退款
+    summary: 撤销退款申请
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: refundRevoke
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: refund.Revoke
+    x-source: routes_frontend.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 退款申请 id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/RefundRevokeResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 18001
+          - 18002
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/refunds:
+  get:
+    tags:
+      - 退款
+    summary: 后台退款分页列表
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`refund:list`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: refundAdminList
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: refund:list
+    x-handler: refund.AdminList
+    x-source: routes_admin.go
+    parameters:
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int
+        description: 页码，默认 1；<1 或非整数返回 400
+        x-pagination-mode: strict
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int
+        description: 每页数量，默认 20、上限 100；越界或非整数返回 400
+        x-pagination-mode: strict
+      - name: order_id
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 订单 id，精确匹配；<=0 返回 400
+      - name: user_id
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 用户 id，精确匹配；<=0 返回 400
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [applying, pending_refund, refund_failed, review_rejected, revoked, refund_succeeded, closed]
+        description: 状态字符串枚举，非法返回 400
+    x-pagination-mode: strict
+    x-pagination-contract: 严格行为：page/size 非正整数或越界返回 HTTP 400 + code 1001。
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/RefundAdminListResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/refunds/{id}:
+  get:
+    tags:
+      - 退款
+    summary: 后台退款详情
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`refund:view`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: refundAdminDetail
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: refund:view
+    x-handler: refund.AdminDetail
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 退款申请 id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/RefundAdminDetailResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 18001
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/refunds/{id}/audits:
+  get:
+    tags:
+      - 退款
+    summary: 查询退款审计记录
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`refund:view`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: refundListAudits
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: refund:view
+    x-handler: refund.ListAudits
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 退款申请 id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/RefundListAuditsResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 18001
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/refunds/{id}/review:
+  post:
+    tags:
+      - 退款
+    summary: 审核退款申请
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`refund:review`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: refundReview
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: refund:review
+    x-handler: refund.Review
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 退款申请 id
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              result:
+                type: string
+                enum: [approve, reject]
+                x-enum-labels:
+                  approve: 通过
+                  reject: 拒绝
+                x-go-validate: required
+                description: 审核结果：approve/reject
+              reason:
+                type: string
+                x-go-validate: required
+                description: 审核原因
+            required:
+              - result
+              - reason
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    x-known-issue:
+      - id: B1-02-D1
+        summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
+        actual_http_status: 500
+        actual_business_code: 51
+        remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/RefundReviewResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 18001
+          - 18002
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/refunds/{id}/execute:
+  post:
+    tags:
+      - 退款
+    summary: 执行退款并确认结果
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`refund:execute`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: refundExecute
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: refund:execute
+    x-handler: refund.Execute
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 退款申请 id
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              result:
+                type: string
+                enum: [success, failure]
+                x-enum-labels:
+                  success: 退款成功
+                  failure: 退款失败
+                x-go-validate: required
+                description: 执行结果：success/failure
+              reason:
+                type: string
+                x-go-validate: required
+                description: 执行结果原因
+            required:
+              - result
+              - reason
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    x-known-issue:
+      - id: B1-02-D1
+        summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
+        actual_http_status: 500
+        actual_business_code: 51
+        remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/RefundExecuteResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 18001
+          - 18002
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/refunds/{id}/close:
+  post:
+    tags:
+      - 退款
+    summary: 关闭退款（恢复履约）
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`refund:execute`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: refundClose
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: refund:execute
+    x-handler: refund.Close
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 退款申请 id
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              reason:
+                type: string
+                x-go-validate: required
+                description: 关闭原因
+            required:
+              - reason
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    x-known-issue:
+      - id: B1-02-D1
+        summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
+        actual_http_status: 500
+        actual_business_code: 51
+        remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/RefundCloseResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 18001
+          - 18002
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'

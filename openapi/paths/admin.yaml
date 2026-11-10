@@ -1,0 +1,1271 @@
+# 本文件是 openapi/surgecart.openapi.yaml 的分域视图，由 tools/openapi-gen 生成，禁止手工编辑。
+# OpenAPI 3.1 的 Path Item 不支持 $ref，因此 paths 必须内联在主文件；本文件用于分域评审与一致性校验。
+/admin/login:
+  post:
+    tags:
+      - 后台认证
+    summary: 管理员登录
+    description: 公开接口，无需认证。
+    operationId: adminLogin
+    security: []
+    x-auth: public
+    x-handler: admin.Login
+    x-source: routes_admin.go
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              username:
+                type: string
+                x-go-validate: required
+                description: 管理员用户名
+              password:
+                type: string
+                x-go-validate: required
+                description: 管理员密码
+            required:
+              - username
+              - password
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    x-known-issue:
+      - id: B1-02-D1
+        summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
+        actual_http_status: 500
+        actual_business_code: 51
+        remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/AdminLoginResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 2002
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/logout:
+  post:
+    tags:
+      - 后台认证
+    summary: 登出当前管理员
+    description: 认证方式：仅校验 JWT 签名、有效期与 type=admin，不查询 Redis 会话；会话已撤销时仍可到达 handler（用于幂等登出）。 仅验签登出（管理员）：不查询 Redis 会话，重复登出幂等成功。
+    operationId: adminLogout
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-auth-mode: signature_only
+    x-handler: admin.Logout
+    x-source: routes_admin.go
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。handler 显式返回 nil，data 为 null（不是空对象 {}）。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      type: "null"
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/me:
+  get:
+    tags:
+      - 后台认证
+    summary: 获取当前登录管理员
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。该接口仅要求管理员身份，未绑定权限码（RBAC 只覆盖写侧粒度）。
+    operationId: adminMe
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-handler: admin.Me
+    x-source: routes_admin.go
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/AdminMeResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/users/{id}/status:
+  get:
+    tags:
+      - IAM
+    summary: 查询用户账号状态
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`user:read`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: userGetUserStatus
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: user:read
+    x-handler: iam.GetUserStatus
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 目标用户 id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/UserGetUserStatusResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 2015
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+  put:
+    tags:
+      - IAM
+    summary: 禁用/启用用户
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`user:status`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: userUpdateUserStatus
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: user:status
+    x-handler: iam.UpdateUserStatus
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 目标用户 id
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              status:
+                type: integer
+                format: int64
+                x-go-type: int
+                enum: [0, 1]
+                x-enum-labels:
+                  "0": 禁用
+                  "1": 启用
+                x-go-validate: required|in:0,1
+                description: 1 启用 / 0 禁用
+              reason:
+                type: string
+                x-go-validate: required
+                description: 变更原因，非空且不超过 255 字符
+            required:
+              - status
+              - reason
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    x-known-issue:
+      - id: B1-02-D1
+        summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
+        actual_http_status: 500
+        actual_business_code: 51
+        remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/UserUpdateUserStatusResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 2015
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/admins:
+  post:
+    tags:
+      - 管理员
+    summary: 创建普通管理员
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`admin:create`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: adminCreateAdmin
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: admin:create
+    x-handler: admin.CreateAdmin
+    x-source: routes_admin.go
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              username:
+                type: string
+                x-go-validate: required
+                description: 管理员用户名，3~24 位大小写字母或数字
+              password:
+                type: string
+                x-go-validate: required
+                description: 管理员密码，8~24 位
+            required:
+              - username
+              - password
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    x-known-issue:
+      - id: B1-02-D1
+        summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
+        actual_http_status: 500
+        actual_business_code: 51
+        remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/AdminCreateAdminResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 2004
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/admins/{id}/status:
+  put:
+    tags:
+      - 管理员
+    summary: 禁用/启用管理员
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`admin:disable`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: adminUpdateAdminStatus
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: admin:disable
+    x-handler: admin.UpdateAdminStatus
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 管理员 id
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              status:
+                type: integer
+                format: int64
+                x-go-type: int
+                enum: [0, 1]
+                x-enum-labels:
+                  "0": 禁用
+                  "1": 启用
+                x-go-validate: required|in:0,1
+                description: 1 启用 / 0 禁用
+            required:
+              - status
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    x-known-issue:
+      - id: B1-02-D1
+        summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
+        actual_http_status: 500
+        actual_business_code: 51
+        remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/AdminUpdateAdminStatusResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 2003
+          - 2005
+          - 2006
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/admins/{id}:
+  delete:
+    tags:
+      - 管理员
+    summary: 删除管理员
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`admin:delete`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: adminDeleteAdmin
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: admin:delete
+    x-handler: admin.DeleteAdmin
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 管理员 id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。handler 显式返回 nil，data 为 null（不是空对象 {}）。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      type: "null"
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 2003
+          - 2005
+          - 2006
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/admins/{id}/roles:
+  post:
+    tags:
+      - 管理员
+    summary: 为管理员分配角色
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`admin:assign_role`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: adminAssignAdminRole
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: admin:assign_role
+    x-handler: admin.AssignAdminRole
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 管理员 id
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              role_id:
+                type: integer
+                format: int64
+                x-go-type: int64
+                x-go-validate: required
+                description: 角色 id
+            required:
+              - role_id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    x-known-issue:
+      - id: B1-02-D1
+        summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
+        actual_http_status: 500
+        actual_business_code: 51
+        remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
+    responses:
+      "200":
+        description: 成功。handler 显式返回 nil，data 为 null（不是空对象 {}）。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      type: "null"
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 2003
+          - 2005
+          - 2006
+          - 2007
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/admins/{id}/roles/{role_id}:
+  delete:
+    tags:
+      - 管理员
+    summary: 移除管理员角色
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`admin:assign_role`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: adminRemoveAdminRole
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: admin:assign_role
+    x-handler: admin.RemoveAdminRole
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 管理员 id
+      - name: role_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 角色 id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。handler 显式返回 nil，data 为 null（不是空对象 {}）。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      type: "null"
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 2003
+          - 2005
+          - 2006
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/roles:
+  post:
+    tags:
+      - 角色
+    summary: 创建角色
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`role:create`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: adminCreateRole
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: role:create
+    x-handler: admin.CreateRole
+    x-source: routes_admin.go
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+                x-go-validate: required
+                description: 角色名，非空且不超过 64 字符
+              description:
+                type: string
+                description: 角色描述，不超过 255 字符
+            required:
+              - name
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    x-known-issue:
+      - id: B1-02-D1
+        summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
+        actual_http_status: 500
+        actual_business_code: 51
+        remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/AdminCreateRoleResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 2008
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'
+  get:
+    tags:
+      - 角色
+    summary: 角色列表
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`role:list`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: adminListRole
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: role:list
+    x-handler: admin.ListRole
+    x-source: routes_admin.go
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/AdminListRoleResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/roles/{id}:
+  put:
+    tags:
+      - 角色
+    summary: 更新角色
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`role:update`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: adminUpdateRole
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: role:update
+    x-handler: admin.UpdateRole
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 角色 id
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              name:
+                type: [string, "null"]
+                description: 角色名，非空且不超过 64 字符
+              description:
+                type: [string, "null"]
+                description: 角色描述，不超过 255 字符
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/AdminUpdateRoleResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 2007
+          - 2008
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'
+  delete:
+    tags:
+      - 角色
+    summary: 删除角色
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`role:delete`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: adminDeleteRole
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: role:delete
+    x-handler: admin.DeleteRole
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 角色 id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。handler 显式返回 nil，data 为 null（不是空对象 {}）。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      type: "null"
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 2007
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/roles/{id}/permissions:
+  post:
+    tags:
+      - 角色
+    summary: 为角色分配权限
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`role:assign_permission`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: adminAssignRolePermission
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: role:assign_permission
+    x-handler: admin.AssignRolePermission
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 角色 id
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              permission_id:
+                type: integer
+                format: int64
+                x-go-type: int64
+                x-go-validate: required
+                description: 权限 id
+            required:
+              - permission_id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。handler 显式返回 nil，data 为 null（不是空对象 {}）。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      type: "null"
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 2007
+          - 2009
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/roles/{id}/permissions/{permission_id}:
+  delete:
+    tags:
+      - 角色
+    summary: 移除角色权限
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`role:assign_permission`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: adminRemoveRolePermission
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: role:assign_permission
+    x-handler: admin.RemoveRolePermission
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 角色 id
+      - name: permission_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 权限 id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。handler 显式返回 nil，data 为 null（不是空对象 {}）。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      type: "null"
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/permissions:
+  post:
+    tags:
+      - 权限
+    summary: 创建权限
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`permission:create`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: adminCreatePermission
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: permission:create
+    x-handler: admin.CreatePermission
+    x-source: routes_admin.go
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              code:
+                type: string
+                x-go-validate: required
+                description: 权限 code，非空且不超过 64 字符
+              name:
+                type: string
+                x-go-validate: required
+                description: 权限名，非空且不超过 64 字符
+              description:
+                type: string
+                description: 权限描述，不超过 255 字符
+            required:
+              - code
+              - name
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    x-known-issue:
+      - id: B1-02-D1
+        summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
+        actual_http_status: 500
+        actual_business_code: 51
+        remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/AdminCreatePermissionResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 2010
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'
+  get:
+    tags:
+      - 权限
+    summary: 权限列表
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`permission:list`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: adminListPermission
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: permission:list
+    x-handler: admin.ListPermission
+    x-source: routes_admin.go
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/AdminListPermissionResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/permissions/{id}:
+  put:
+    tags:
+      - 权限
+    summary: 更新权限
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`permission:update`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: adminUpdatePermission
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: permission:update
+    x-handler: admin.UpdatePermission
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 权限 id
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              code:
+                type: [string, "null"]
+                description: 权限 code，非空且不超过 64 字符
+              name:
+                type: [string, "null"]
+                description: 权限名，非空且不超过 64 字符
+              description:
+                type: [string, "null"]
+                description: 权限描述，不超过 255 字符
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/AdminUpdatePermissionResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 2009
+          - 2010
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'
+  delete:
+    tags:
+      - 权限
+    summary: 删除权限
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`permission:delete`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: adminDeletePermission
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: permission:delete
+    x-handler: admin.DeletePermission
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 权限 id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。handler 显式返回 nil，data 为 null（不是空对象 {}）。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      type: "null"
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 2009
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'

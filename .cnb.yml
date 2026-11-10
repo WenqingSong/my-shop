@@ -57,6 +57,11 @@ main:
             chmod +x /usr/local/bin/kubectl
             kubectl version --client
 
+        - name: contract
+          # B1-02-04 契约门禁：OpenAPI 3.1 结构/$ref、DTO↔Schema、错误码↔codes.go、
+          # 权限码↔路由↔seed、路由↔契约双向比对。失败即阻断合并。
+          script: bash scripts/contract-check.sh
+
         - name: test
           script: make test
 
@@ -95,6 +100,11 @@ main:
               https://dl.k8s.io/release/v1.31.4/bin/linux/amd64/kubectl
             chmod +x /usr/local/bin/kubectl
             kubectl version --client
+
+        - name: contract
+          # B1-02-04 契约门禁：OpenAPI 3.1 结构/$ref、DTO↔Schema、错误码↔codes.go、
+          # 权限码↔路由↔seed、路由↔契约双向比对。失败即阻断合并。
+          script: bash scripts/contract-check.sh
 
         - name: test
           script: make test

@@ -1,0 +1,351 @@
+# 本文件是 openapi/surgecart.openapi.yaml 的分域视图，由 tools/openapi-gen 生成，禁止手工编辑。
+# OpenAPI 3.1 的 Path Item 不支持 $ref，因此 paths 必须内联在主文件；本文件用于分域评审与一致性校验。
+/banners:
+  get:
+    tags:
+      - 轮播图
+    summary: 公开轮播图列表（仅启用项）
+    description: 公开接口，无需认证。
+    operationId: bannerList
+    security: []
+    x-auth: public
+    x-handler: banner.List
+    x-source: routes_frontend.go
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/BannerListResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/banners:
+  get:
+    tags:
+      - 轮播图
+    summary: 后台轮播图列表（全部状态）
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。该接口仅要求管理员身份，未绑定权限码（RBAC 只覆盖写侧粒度）。
+    operationId: bannerAdminList
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-handler: banner.AdminList
+    x-source: routes_admin.go
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/BannerAdminListResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "500":
+        $ref: '#/components/responses/InternalError'
+  post:
+    tags:
+      - 轮播图
+    summary: 创建轮播图
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`banner:create`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: bannerCreate
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: banner:create
+    x-handler: banner.Create
+    x-source: routes_admin.go
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              title:
+                type: string
+                description: 标题（必填，trim 后非空且 ≤64 字符）
+              image_url:
+                type: string
+                description: 图片地址（必填，≤255 字符）
+              link_url:
+                type: string
+                description: 跳转目标（可选，≤512 字符，空表示无跳转）
+              sort:
+                type: integer
+                format: int64
+                x-go-type: int
+                description: 展示顺序，默认 0
+              status:
+                type: [integer, "null"]
+                format: int64
+                x-go-type: int
+                enum: [0, 1, null]
+                x-enum-labels:
+                  "0": 禁用
+                  "1": 启用
+                description: 1 启用 / 0 禁用，默认 1
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/BannerCreateResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 14002
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/banners/{id}:
+  get:
+    tags:
+      - 轮播图
+    summary: 后台轮播图详情
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。该接口仅要求管理员身份，未绑定权限码（RBAC 只覆盖写侧粒度）。
+    operationId: bannerAdminDetail
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-handler: banner.AdminDetail
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 轮播图 id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/BannerAdminDetailResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 14001
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+  put:
+    tags:
+      - 轮播图
+    summary: 更新轮播图
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`banner:update`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: bannerUpdate
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: banner:update
+    x-handler: banner.Update
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 轮播图 id
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              title:
+                type: [string, "null"]
+                description: 标题（trim 后非空且 ≤64 字符）
+              image_url:
+                type: [string, "null"]
+                description: 图片地址（≤255 字符）
+              link_url:
+                type: [string, "null"]
+                description: 跳转目标（≤512 字符，空表示清空跳转）
+              sort:
+                type: [integer, "null"]
+                format: int64
+                x-go-type: int
+                description: 展示顺序
+              status:
+                type: [integer, "null"]
+                format: int64
+                x-go-type: int
+                enum: [0, 1, null]
+                x-enum-labels:
+                  "0": 禁用
+                  "1": 启用
+                description: 1 启用 / 0 禁用
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/BannerUpdateResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 14001
+          - 14002
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+  delete:
+    tags:
+      - 轮播图
+    summary: 删除轮播图
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`banner:delete`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: bannerDelete
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: banner:delete
+    x-handler: banner.Delete
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 轮播图 id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/BannerDeleteResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 14001
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'

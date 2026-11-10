@@ -1,0 +1,120 @@
+# 本文件是 openapi/surgecart.openapi.yaml 的分域视图，由 tools/openapi-gen 生成，禁止手工编辑。
+# OpenAPI 3.1 的 Path Item 不支持 $ref，因此 paths 必须内联在主文件；本文件用于分域评审与一致性校验。
+/qiniu/upload/token:
+  get:
+    tags:
+      - 上传
+    summary: 前台签发七牛云上传凭证
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: uploadFrontendToken
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: upload.FrontendToken
+    x-source: routes_frontend.go
+    parameters:
+      - name: filename
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 文件名（含扩展名，可选）
+      - name: content_type
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 客户端声明 MIME 类型（可选）
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/UploadTokenResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 17001
+          - 17002
+          - 17003
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/qiniu/upload/token:
+  get:
+    tags:
+      - 上传
+    summary: 后台签发七牛云上传凭证
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。该接口仅要求管理员身份，未绑定权限码（RBAC 只覆盖写侧粒度）。
+    operationId: uploadAdminToken
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-handler: upload.AdminToken
+    x-source: routes_admin.go
+    parameters:
+      - name: filename
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 文件名（含扩展名，可选）
+      - name: content_type
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 客户端声明 MIME 类型（可选）
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/UploadTokenResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 17001
+          - 17002
+          - 17003
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "500":
+        $ref: '#/components/responses/InternalError'

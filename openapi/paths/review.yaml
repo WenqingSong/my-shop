@@ -1,0 +1,378 @@
+# 本文件是 openapi/surgecart.openapi.yaml 的分域视图，由 tools/openapi-gen 生成，禁止手工编辑。
+# OpenAPI 3.1 的 Path Item 不支持 $ref，因此 paths 必须内联在主文件；本文件用于分域评审与一致性校验。
+/products/{id}/reviews:
+  get:
+    tags:
+      - 评价
+    summary: 商品公开评价列表与汇总
+    description: 公开接口，无需认证。
+    operationId: reviewListProduct
+    security: []
+    x-auth: public
+    x-handler: review.ListProduct
+    x-source: routes_frontend.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 商品 id
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int
+        description: 页码，默认 1
+        x-pagination-mode: clamp
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int
+        description: 每页数量，默认 20，最大 100
+        x-pagination-mode: clamp
+    x-pagination-mode: clamp
+    x-pagination-contract: 历史行为：page<1 归一为 1；size<1 归一为 20；size>100 归一为 100；不返回 400。
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ReviewListResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/reviews:
+  post:
+    tags:
+      - 评价
+    summary: 提交评价
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: reviewCreate
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: review.Create
+    x-source: routes_frontend.go
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              order_item_id:
+                type: integer
+                format: int64
+                x-go-type: int64
+                description: 订单项 id（必填，缺失或 ≤0 返回 400）
+              rating:
+                type: integer
+                format: int64
+                x-go-type: int
+                description: 星级 1-5（越界返回 10004）
+              content:
+                type: string
+                description: 评价内容（trim 后非空且 ≤500 字符）
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ReviewCreateResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 10002
+          - 10003
+          - 10004
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/my/reviews:
+  get:
+    tags:
+      - 评价
+    summary: 本人全部评价
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: reviewMyList
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: review.MyList
+    x-source: routes_frontend.go
+    parameters:
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int
+        description: 页码，默认 1
+        x-pagination-mode: clamp
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int
+        description: 每页数量，默认 20，最大 100
+        x-pagination-mode: clamp
+    x-pagination-mode: clamp
+    x-pagination-contract: 历史行为：page<1 归一为 1；size<1 归一为 20；size>100 归一为 100；不返回 400。
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ReviewMyListResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/reviews/{id}:
+  put:
+    tags:
+      - 评价
+    summary: 修改本人评价
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: reviewUpdate
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: review.Update
+    x-source: routes_frontend.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 评价 id
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              rating:
+                type: integer
+                format: int64
+                x-go-type: int
+                description: 星级 1-5（越界返回 10004）
+              content:
+                type: string
+                description: 评价内容（trim 后非空且 ≤500 字符）
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ReviewUpdateResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 10001
+          - 10004
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+  delete:
+    tags:
+      - 评价
+    summary: 删除本人评价
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: reviewDelete
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: review.Delete
+    x-source: routes_frontend.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 评价 id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ReviewDeleteResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 10001
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/reviews/{id}/take-down:
+  post:
+    tags:
+      - 评价
+    summary: 下架违规评价
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`review:take_down`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: reviewTakeDown
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: review:take_down
+    x-handler: review.TakeDown
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 评价 id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ReviewTakeDownResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 10001
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'

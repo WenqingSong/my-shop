@@ -1,0 +1,588 @@
+# 本文件是 openapi/surgecart.openapi.yaml 的分域视图，由 tools/openapi-gen 生成，禁止手工编辑。
+# OpenAPI 3.1 的 Path Item 不支持 $ref，因此 paths 必须内联在主文件；本文件用于分域评审与一致性校验。
+/products:
+  get:
+    tags:
+      - 商品
+    summary: 前台商品列表（仅上架）
+    description: 公开接口，无需认证。
+    operationId: productList
+    security: []
+    x-auth: public
+    x-handler: product.List
+    x-source: routes_frontend.go
+    parameters:
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int
+        description: 页码，默认 1
+        x-pagination-mode: clamp
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int
+        description: 每页数量，默认 20，最大 100
+        x-pagination-mode: clamp
+      - name: category_id
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 分类 id，精确匹配
+      - name: keyword
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 关键词，模糊匹配 name/brand
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 排序字段：id/price/created_at/updated_at
+      - name: order
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 排序方向：asc/desc
+    x-pagination-mode: clamp
+    x-pagination-contract: 历史行为：page<1 归一为 1；size<1 归一为 20；size>100 归一为 100；不返回 400。
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ProductListResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 4001
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/products/{id}:
+  get:
+    tags:
+      - 商品
+    summary: 前台商品详情（仅上架）
+    description: 公开接口，无需认证。 前台商品详情（仅 on_shelf 可见）。注意：该 GET 请求会触发 view_count 自增写库。
+    operationId: productDetail
+    security: []
+    x-auth: public
+    x-handler: product.Detail
+    x-source: routes_frontend.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 商品 id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    x-known-issue:
+      - id: B1-01-H15.8
+        summary: 读接口在服务端执行 products.view_count + 1 写库，破坏幂等与缓存语义
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ProductDetailResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 4001
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/products:
+  get:
+    tags:
+      - 商品
+    summary: 后台商品列表（全部状态）
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。该接口仅要求管理员身份，未绑定权限码（RBAC 只覆盖写侧粒度）。
+    operationId: productAdminList
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-handler: product.AdminList
+    x-source: routes_admin.go
+    parameters:
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int
+        description: 页码，默认 1
+        x-pagination-mode: clamp
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int
+        description: 每页数量，默认 20，最大 100
+        x-pagination-mode: clamp
+      - name: category_id
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 分类 id，精确匹配
+      - name: keyword
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 关键词，模糊匹配 name/brand
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 排序字段：id/price/created_at/updated_at
+      - name: order
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 排序方向：asc/desc
+    x-pagination-mode: clamp
+    x-pagination-contract: 历史行为：page<1 归一为 1；size<1 归一为 20；size>100 归一为 100；不返回 400。
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ProductAdminListResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 4001
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+  post:
+    tags:
+      - 商品
+    summary: 创建商品
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`product:create`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: productCreate
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: product:create
+    x-handler: product.Create
+    x-source: routes_admin.go
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+                description: 商品名，非空且不超过 128 字符
+              brand:
+                type: string
+                description: 品牌，可选，不超过 64 字符
+              category_id:
+                type: integer
+                format: int64
+                x-go-type: int64
+                description: 分类 id（必须为存在且启用的叶子分类）
+              price:
+                oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+                x-go-type: json.Number
+                description: 价格（整数分，0~99999999）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+              main_image:
+                type: string
+                description: 主图 URL，可选，不超过 512 字符
+              detail:
+                type: string
+                description: 商品详情，可选
+              images:
+                type: array
+                items:
+                  type: string
+                description: 图片 URL 列表，可选
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ProductCreateResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 4001
+          - 4002
+          - 4003
+          - 4004
+          - 4007
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/products/{id}:
+  get:
+    tags:
+      - 商品
+    summary: 后台商品详情（全部状态）
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。该接口仅要求管理员身份，未绑定权限码（RBAC 只覆盖写侧粒度）。
+    operationId: productAdminDetail
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-handler: product.AdminDetail
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 商品 id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ProductAdminDetailResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 4001
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+  put:
+    tags:
+      - 商品
+    summary: 更新商品
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`product:update`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: productUpdate
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: product:update
+    x-handler: product.Update
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 商品 id
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              name:
+                type: [string, "null"]
+                description: 商品名
+              brand:
+                type: [string, "null"]
+                description: 品牌
+              category_id:
+                type: [integer, "null"]
+                format: int64
+                x-go-type: int64
+                description: 分类 id（变更时须为存在且启用的叶子分类）
+              price:
+                oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+                x-go-type: json.Number
+                description: 价格（整数分）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+              main_image:
+                type: [string, "null"]
+                description: 主图 URL
+              detail:
+                type: [string, "null"]
+                description: 商品详情
+              status:
+                type: [string, "null"]
+                description: 普通更新不改状态：合法值被忽略、非法值拒绝
+              images:
+                type: [array, "null"]
+                items:
+                  type: string
+                description: 图片 URL 列表；提供则全量替换，未提供则保留
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ProductUpdateResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 4001
+          - 4002
+          - 4003
+          - 4004
+          - 4006
+          - 4007
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/products/{id}/on-shelf:
+  post:
+    tags:
+      - 商品
+    summary: 上架商品
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`product:on_shelf`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: productOnShelf
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: product:on_shelf
+    x-handler: product.OnShelf
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 商品 id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ProductOnShelfResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 4001
+          - 4003
+          - 4004
+          - 4005
+          - 4007
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/products/{id}/off-shelf:
+  post:
+    tags:
+      - 商品
+    summary: 下架商品
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`product:off_shelf`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: productOffShelf
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: product:off_shelf
+    x-handler: product.OffShelf
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 商品 id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ProductOffShelfResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 4001
+          - 4003
+          - 4004
+          - 4005
+          - 4007
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'

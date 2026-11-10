@@ -1,0 +1,5691 @@
+# 本文件由 tools/openapi-gen 从 api/*/v1/*.go 自动生成，禁止手工编辑。
+# 字段事实源：Go DTO 的 json / dc / v / in 标签；schema 名为稳定业务名。
+# 生成命令：go run ./tools/openapi-gen -repo .
+Address:
+  type: object
+  description: Address 收货地址结构，创建/查询/更新复用。
+  required:
+    - id
+    - recipient_name
+    - phone
+    - province
+    - city
+    - district
+    - detail
+    - is_default
+    - created_at
+    - updated_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 地址 id
+    recipient_name:
+      type: string
+      description: 收货人姓名
+    phone:
+      type: string
+      description: 手机号
+    province:
+      type: string
+      description: 省（自由文本）
+    city:
+      type: string
+      description: 市（自由文本）
+    district:
+      type: string
+      description: 区（自由文本）
+    detail:
+      type: string
+      description: 详细地址
+    is_default:
+      type: boolean
+      description: 是否默认地址
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    updated_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 更新时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+AddressCreateRequest:
+  type: object
+  description: CreateReq 创建地址请求。请求体不含也不接受 user_id，归属取自已认证 Principal。
+  properties:
+    recipient_name:
+      type: string
+      description: 收货人姓名，trim 后 1~32 字符
+    phone:
+      type: string
+      description: 手机号，格式 ^1[3-9]\d{9}$
+    province:
+      type: string
+      description: 省（自由文本，非空）
+    city:
+      type: string
+      description: 市（自由文本，非空）
+    district:
+      type: string
+      description: 区（自由文本，非空）
+    detail:
+      type: string
+      description: 详细地址，trim 后 1~255 字符
+    is_default:
+      type: [boolean, "null"]
+      description: 是否默认地址；首条地址忽略此值自动置为默认
+AddressCreateResponse:
+  type: object
+  description: CreateRes 创建地址响应。
+  allOf:
+    - $ref: '#/Address'
+AddressListRequest:
+  type: object
+  description: ListReq 查询本人地址列表请求。
+  properties: {}
+  additionalProperties: false
+AddressListResponse:
+  type: object
+  description: ListRes 查询本人地址列表响应。
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/Address'}, {type: "null"}]
+      description: 地址列表（仅本人）
+AddressDetailRequest:
+  type: object
+  description: DetailReq 查询本人地址详情请求。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 地址 id
+AddressDetailResponse:
+  type: object
+  description: DetailRes 查询本人地址详情响应。
+  allOf:
+    - $ref: '#/Address'
+AddressUpdateRequest:
+  type: object
+  description: UpdateReq 更新本人地址请求。请求体不含也不接受 user_id。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 地址 id
+    recipient_name:
+      type: [string, "null"]
+      description: 收货人姓名
+    phone:
+      type: [string, "null"]
+      description: 手机号
+    province:
+      type: [string, "null"]
+      description: 省（自由文本）
+    city:
+      type: [string, "null"]
+      description: 市（自由文本）
+    district:
+      type: [string, "null"]
+      description: 区（自由文本）
+    detail:
+      type: [string, "null"]
+      description: 详细地址
+    is_default:
+      type: [boolean, "null"]
+      description: 是否默认地址
+AddressUpdateResponse:
+  type: object
+  description: UpdateRes 更新本人地址响应。
+  allOf:
+    - $ref: '#/Address'
+AddressDeleteRequest:
+  type: object
+  description: DeleteReq 删除本人地址请求。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 地址 id
+AddressDeleteResponse:
+  type: object
+  description: DeleteRes 删除本人地址响应（无业务字段）。
+  properties: {}
+  additionalProperties: false
+AdminLoginRequest:
+  type: object
+  description: LoginReq 管理员登录请求。
+  required:
+    - username
+    - password
+  properties:
+    username:
+      type: string
+      x-go-validate: required
+      description: 管理员用户名
+    password:
+      type: string
+      x-go-validate: required
+      description: 管理员密码
+AdminLoginResponse:
+  type: object
+  description: LoginRes 管理员登录响应。
+  required:
+    - access_token
+    - token_type
+    - expires_in
+  properties:
+    access_token:
+      type: string
+      description: 签发的 JWT access token（type=admin）
+    token_type:
+      type: string
+      description: token 类型，恒为 "Bearer"
+    expires_in:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: token 有效期（秒），恒为 3600
+AdminMeRequest:
+  type: object
+  description: MeReq 获取当前登录管理员请求。
+  properties: {}
+  additionalProperties: false
+AdminMeResponse:
+  type: object
+  description: MeRes 获取当前登录管理员响应。
+  required:
+    - id
+    - username
+    - is_super
+    - roles
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 管理员 id
+    username:
+      type: string
+      description: 管理员用户名
+    is_super:
+      type: boolean
+      description: 是否超级管理员
+    roles:
+      type: array
+      items:
+        type: string
+      description: 所属角色名列表
+AdminLogoutRequest:
+  type: object
+  description: LogoutReq 登出当前管理员请求。sid 来自当前 token，不接受客户端指定。
+  properties: {}
+  additionalProperties: false
+AdminLogoutResponse:
+  type: object
+  description: LogoutRes 登出当前管理员响应（无业务字段，成功时 data 为 null）。
+  properties: {}
+  additionalProperties: false
+AdminCreateAdminRequest:
+  type: object
+  description: CreateAdminReq 创建普通管理员请求（is_super 恒为 0）。
+  required:
+    - username
+    - password
+  properties:
+    username:
+      type: string
+      x-go-validate: required
+      description: 管理员用户名，3~24 位大小写字母或数字
+    password:
+      type: string
+      x-go-validate: required
+      description: 管理员密码，8~24 位
+AdminCreateAdminResponse:
+  type: object
+  description: CreateAdminRes 创建普通管理员响应。
+  required:
+    - id
+    - username
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 新管理员 id
+    username:
+      type: string
+      description: 新管理员用户名
+AdminUpdateAdminStatusRequest:
+  type: object
+  description: UpdateAdminStatusReq 禁用/启用管理员请求。
+  required:
+    - id
+    - status
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 管理员 id
+    status:
+      type: integer
+      format: int64
+      x-go-type: int
+      enum: [0, 1]
+      x-enum-labels:
+        "0": 禁用
+        "1": 启用
+      x-go-validate: required|in:0,1
+      description: 1 启用 / 0 禁用
+AdminUpdateAdminStatusResponse:
+  type: object
+  description: UpdateAdminStatusRes 禁用/启用管理员响应（无业务字段）。
+  properties: {}
+  additionalProperties: false
+AdminDeleteAdminRequest:
+  type: object
+  description: DeleteAdminReq 删除管理员请求。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 管理员 id
+AdminDeleteAdminResponse:
+  type: object
+  description: DeleteAdminRes 删除管理员响应（无业务字段）。
+  properties: {}
+  additionalProperties: false
+AdminAssignAdminRoleRequest:
+  type: object
+  description: AssignAdminRoleReq 为管理员分配角色请求。
+  required:
+    - id
+    - role_id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 管理员 id
+    role_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-go-validate: required
+      description: 角色 id
+AdminAssignAdminRoleResponse:
+  type: object
+  description: AssignAdminRoleRes 为管理员分配角色响应（无业务字段）。
+  properties: {}
+  additionalProperties: false
+AdminRemoveAdminRoleRequest:
+  type: object
+  description: RemoveAdminRoleReq 移除管理员角色请求。
+  required:
+    - id
+    - role_id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 管理员 id
+    role_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 角色 id
+AdminRemoveAdminRoleResponse:
+  type: object
+  description: RemoveAdminRoleRes 移除管理员角色响应（无业务字段）。
+  properties: {}
+  additionalProperties: false
+AdminRole:
+  type: object
+  description: Role 角色结构。
+  required:
+    - id
+    - name
+    - description
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 角色 id
+    name:
+      type: string
+      description: 角色名
+    description:
+      type: string
+      description: 角色描述
+AdminCreateRoleRequest:
+  type: object
+  description: CreateRoleReq 创建角色请求。
+  required:
+    - name
+  properties:
+    name:
+      type: string
+      x-go-validate: required
+      description: 角色名，非空且不超过 64 字符
+    description:
+      type: string
+      description: 角色描述，不超过 255 字符
+AdminCreateRoleResponse:
+  type: object
+  description: CreateRoleRes 创建角色响应。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 新角色 id
+AdminListRoleRequest:
+  type: object
+  description: ListRoleReq 角色列表请求。
+  properties: {}
+  additionalProperties: false
+AdminListRoleResponse:
+  type: object
+  description: ListRoleRes 角色列表响应。
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/AdminRole'}, {type: "null"}]
+      description: 角色列表
+AdminUpdateRoleRequest:
+  type: object
+  description: UpdateRoleReq 更新角色请求（仅提交需要变更的字段）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 角色 id
+    name:
+      type: [string, "null"]
+      description: 角色名，非空且不超过 64 字符
+    description:
+      type: [string, "null"]
+      description: 角色描述，不超过 255 字符
+AdminUpdateRoleResponse:
+  type: object
+  description: UpdateRoleRes 更新角色响应。
+  allOf:
+    - $ref: '#/AdminRole'
+AdminDeleteRoleRequest:
+  type: object
+  description: DeleteRoleReq 删除角色请求。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 角色 id
+AdminDeleteRoleResponse:
+  type: object
+  description: DeleteRoleRes 删除角色响应（无业务字段）。
+  properties: {}
+  additionalProperties: false
+AdminAssignRolePermissionRequest:
+  type: object
+  description: AssignRolePermissionReq 为角色分配权限请求。
+  required:
+    - id
+    - permission_id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 角色 id
+    permission_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-go-validate: required
+      description: 权限 id
+AdminAssignRolePermissionResponse:
+  type: object
+  description: AssignRolePermissionRes 为角色分配权限响应（无业务字段）。
+  properties: {}
+  additionalProperties: false
+AdminRemoveRolePermissionRequest:
+  type: object
+  description: RemoveRolePermissionReq 移除角色权限请求。
+  required:
+    - id
+    - permission_id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 角色 id
+    permission_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 权限 id
+AdminRemoveRolePermissionResponse:
+  type: object
+  description: RemoveRolePermissionRes 移除角色权限响应（无业务字段）。
+  properties: {}
+  additionalProperties: false
+Permission:
+  type: object
+  description: Permission 权限结构。
+  required:
+    - id
+    - code
+    - name
+    - description
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 权限 id
+    code:
+      type: string
+      description: 权限 code（稳定唯一 key，资源:动作）
+    name:
+      type: string
+      description: 权限名
+    description:
+      type: string
+      description: 权限描述
+AdminCreatePermissionRequest:
+  type: object
+  description: CreatePermissionReq 创建权限请求。
+  required:
+    - code
+    - name
+  properties:
+    code:
+      type: string
+      x-go-validate: required
+      description: 权限 code，非空且不超过 64 字符
+    name:
+      type: string
+      x-go-validate: required
+      description: 权限名，非空且不超过 64 字符
+    description:
+      type: string
+      description: 权限描述，不超过 255 字符
+AdminCreatePermissionResponse:
+  type: object
+  description: CreatePermissionRes 创建权限响应。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 新权限 id
+AdminListPermissionRequest:
+  type: object
+  description: ListPermissionReq 权限列表请求。
+  properties: {}
+  additionalProperties: false
+AdminListPermissionResponse:
+  type: object
+  description: ListPermissionRes 权限列表响应。
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/Permission'}, {type: "null"}]
+      description: 权限列表
+AdminUpdatePermissionRequest:
+  type: object
+  description: UpdatePermissionReq 更新权限请求（仅提交需要变更的字段）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 权限 id
+    code:
+      type: [string, "null"]
+      description: 权限 code，非空且不超过 64 字符
+    name:
+      type: [string, "null"]
+      description: 权限名，非空且不超过 64 字符
+    description:
+      type: [string, "null"]
+      description: 权限描述，不超过 255 字符
+AdminUpdatePermissionResponse:
+  type: object
+  description: UpdatePermissionRes 更新权限响应。
+  allOf:
+    - $ref: '#/Permission'
+AdminDeletePermissionRequest:
+  type: object
+  description: DeletePermissionReq 删除权限请求。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 权限 id
+AdminDeletePermissionResponse:
+  type: object
+  description: DeletePermissionRes 删除权限响应（无业务字段）。
+  properties: {}
+  additionalProperties: false
+Article:
+  type: object
+  description: Article 完整文章（详情与写接口响应，含正文）。
+  required:
+    - id
+    - author_id
+    - author_username
+    - title
+    - content
+    - created_at
+    - updated_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 文章 id
+    author_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 作者用户 id（取自 Principal.UserID）
+    author_username:
+      type: string
+      description: 作者用户名（LEFT JOIN users.username）
+    title:
+      type: string
+      description: 标题
+    content:
+      type: string
+      description: 正文
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    updated_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 更新时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+ArticleItem:
+  type: object
+  description: ArticleItem 列表条目（不含正文）。
+  required:
+    - id
+    - author_id
+    - author_username
+    - title
+    - created_at
+    - updated_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 文章 id
+    author_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 作者用户 id
+    author_username:
+      type: string
+      description: 作者用户名
+    title:
+      type: string
+      description: 标题
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    updated_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 更新时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+ArticleListRequest:
+  type: object
+  description: ListReq 公开文章列表请求（无需 token，分页，按 id 倒序）。
+  properties:
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 页码，默认 1
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量，默认 20，最大 100
+ArticleListResponse:
+  type: object
+  description: ListRes 公开文章列表响应。
+  required:
+    - items
+    - total
+    - page
+    - size
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/ArticleItem'}, {type: "null"}]
+      description: 文章列表（不含正文）
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 总数量
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量
+ArticleDetailRequest:
+  type: object
+  description: DetailReq 公开文章详情请求（无需 token）。
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      description: 文章 id
+ArticleDetailResponse:
+  type: object
+  description: DetailRes 公开文章详情响应。
+  allOf:
+    - $ref: '#/Article'
+ArticleCreateRequest:
+  type: object
+  description: CreateReq 发布文章请求（仅登录用户，作者身份取自 Principal.UserID，客户端身份字段被忽略）。
+  properties:
+    title:
+      type: string
+      description: 标题（trim 后非空且 ≤64 字符）
+    content:
+      type: string
+      description: 正文（trim 后非空且 ≤10000 字符）
+ArticleCreateResponse:
+  type: object
+  description: CreateRes 发布文章响应。
+  allOf:
+    - $ref: '#/Article'
+ArticleUpdateRequest:
+  type: object
+  description: UpdateReq 修改文章请求（仅作者本人）。
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      description: 文章 id
+    title:
+      type: string
+      description: 标题（trim 后非空且 ≤64 字符）
+    content:
+      type: string
+      description: 正文（trim 后非空且 ≤10000 字符）
+ArticleUpdateResponse:
+  type: object
+  description: UpdateRes 修改文章响应。
+  allOf:
+    - $ref: '#/Article'
+ArticleDeleteRequest:
+  type: object
+  description: DeleteReq 删除文章请求（仅作者本人，硬删除 + 事务清理点赞/收藏）。
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      description: 文章 id
+ArticleDeleteResponse:
+  type: object
+  description: DeleteRes 删除文章响应（无业务字段）。
+  properties: {}
+  additionalProperties: false
+ArticleMyListRequest:
+  type: object
+  description: MyListReq 我的文章列表请求（仅登录用户本人）。
+  properties:
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 页码，默认 1
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量，默认 20，最大 100
+ArticleMyListResponse:
+  type: object
+  description: MyListRes 我的文章列表响应。
+  required:
+    - items
+    - total
+    - page
+    - size
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/Article'}, {type: "null"}]
+      description: 本人文章列表
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 总数量
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量
+ArticleLikeCountRequest:
+  type: object
+  description: LikeCountReq 公开点赞数请求（无需 token）。
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      description: 文章 id
+ArticleLikeCountResponse:
+  type: object
+  description: LikeCountRes 公开点赞数响应。
+  required:
+    - count
+  properties:
+    count:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 该文章点赞数（实时 COUNT 聚合）
+ArticleLikeRequest:
+  type: object
+  description: LikeReq 点赞文章请求（仅登录用户，幂等）。
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      description: 文章 id
+ArticleLikeResponse:
+  type: object
+  description: LikeRes 点赞文章响应（点赞后本人必为已点赞）。
+  required:
+    - liked
+  properties:
+    liked:
+      type: boolean
+      description: 是否已点赞（成功后恒为 true）
+ArticleUnlikeRequest:
+  type: object
+  description: UnlikeReq 取消点赞请求（仅登录用户，幂等）。
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      description: 文章 id
+ArticleUnlikeResponse:
+  type: object
+  description: UnlikeRes 取消点赞响应（无业务字段）。
+  properties: {}
+  additionalProperties: false
+ArticleLikeCheckRequest:
+  type: object
+  description: LikeCheckReq 是否已点赞请求（仅登录用户，独立鉴权查询）。
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      description: 文章 id
+ArticleLikeCheckResponse:
+  type: object
+  description: LikeCheckRes 是否已点赞响应。
+  required:
+    - liked
+  properties:
+    liked:
+      type: boolean
+      description: 当前用户是否已点赞该文章
+ArticleFavoriteRequest:
+  type: object
+  description: FavoriteReq 收藏文章请求（仅登录用户，幂等）。
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      description: 文章 id
+ArticleFavoriteResponse:
+  type: object
+  description: FavoriteRes 收藏文章响应（收藏后本人必为已收藏）。
+  required:
+    - favorited
+  properties:
+    favorited:
+      type: boolean
+      description: 是否已收藏（成功后恒为 true）
+ArticleUnfavoriteRequest:
+  type: object
+  description: UnfavoriteReq 取消收藏请求（仅登录用户，幂等）。
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      description: 文章 id
+ArticleUnfavoriteResponse:
+  type: object
+  description: UnfavoriteRes 取消收藏响应（无业务字段）。
+  properties: {}
+  additionalProperties: false
+ArticleFavoriteCheckRequest:
+  type: object
+  description: FavoriteCheckReq 是否已收藏请求（仅登录用户，独立鉴权查询）。
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      description: 文章 id
+ArticleFavoriteCheckResponse:
+  type: object
+  description: FavoriteCheckRes 是否已收藏响应。
+  required:
+    - favorited
+  properties:
+    favorited:
+      type: boolean
+      description: 当前用户是否已收藏该文章
+ArticleMyFavoritesRequest:
+  type: object
+  description: MyFavoritesReq 我的收藏列表请求（仅登录用户本人）。
+  properties:
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 页码，默认 1
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量，默认 20，最大 100
+ArticleMyFavoritesResponse:
+  type: object
+  description: MyFavoritesRes 我的收藏列表响应（按收藏时间倒序）。
+  required:
+    - items
+    - total
+    - page
+    - size
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/ArticleItem'}, {type: "null"}]
+      description: 收藏的文章列表（不含正文）
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 总数量
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量
+BannerItem:
+  type: object
+  description: BannerItem 公开轮播图条目（仅 status=1）。
+  required:
+    - id
+    - title
+    - image_url
+    - link_url
+    - sort
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 轮播图 id
+    title:
+      type: string
+      description: 标题
+    image_url:
+      type: string
+      description: 图片地址（可直接访问）
+    link_url:
+      type: string
+      description: 跳转目标，无跳转时为空
+    sort:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 展示顺序
+Banner:
+  type: object
+  description: Banner 完整轮播图（后台列表/详情/写接口响应）。
+  required:
+    - id
+    - title
+    - image_url
+    - link_url
+    - sort
+    - status
+    - created_at
+    - updated_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 轮播图 id
+    title:
+      type: string
+      description: 标题
+    image_url:
+      type: string
+      description: 图片地址
+    link_url:
+      type: string
+      description: 跳转目标，无跳转时为空
+    sort:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 展示顺序
+    status:
+      type: integer
+      format: int64
+      x-go-type: int
+      enum: [0, 1]
+      x-enum-labels:
+        "0": 禁用
+        "1": 启用
+      description: 1 启用 / 0 禁用
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    updated_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 更新时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+BannerListRequest:
+  type: object
+  description: ListReq 公开轮播图列表请求（无需 token）。
+  properties: {}
+  additionalProperties: false
+BannerListResponse:
+  type: object
+  description: ListRes 公开轮播图列表响应（仅启用项，按 sort 升序、同值按 id 升序）。
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/BannerItem'}, {type: "null"}]
+      description: 轮播图列表
+BannerAdminListRequest:
+  type: object
+  description: AdminListReq 后台轮播图列表请求（AdminAuth，全部状态）。
+  properties: {}
+  additionalProperties: false
+BannerAdminListResponse:
+  type: object
+  description: AdminListRes 后台轮播图列表响应（全部状态，按 sort 升序、同值按 id 升序）。
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/Banner'}, {type: "null"}]
+      description: 轮播图列表
+BannerAdminDetailRequest:
+  type: object
+  description: AdminDetailReq 后台轮播图详情请求（AdminAuth，全部状态）。
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      description: 轮播图 id
+BannerAdminDetailResponse:
+  type: object
+  description: AdminDetailRes 后台轮播图详情响应。
+  allOf:
+    - $ref: '#/Banner'
+BannerCreateRequest:
+  type: object
+  description: CreateReq 创建轮播图请求（AdminAuth + RequirePermission("banner:create")）。
+  properties:
+    title:
+      type: string
+      description: 标题（必填，trim 后非空且 ≤64 字符）
+    image_url:
+      type: string
+      description: 图片地址（必填，≤255 字符）
+    link_url:
+      type: string
+      description: 跳转目标（可选，≤512 字符，空表示无跳转）
+    sort:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 展示顺序，默认 0
+    status:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      enum: [0, 1, null]
+      x-enum-labels:
+        "0": 禁用
+        "1": 启用
+      description: 1 启用 / 0 禁用，默认 1
+BannerCreateResponse:
+  type: object
+  description: CreateRes 创建轮播图响应。
+  allOf:
+    - $ref: '#/Banner'
+BannerUpdateRequest:
+  type: object
+  description: UpdateReq 更新轮播图请求（AdminAuth + RequirePermission("banner:update")，仅提交需变更字段）。
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      description: 轮播图 id
+    title:
+      type: [string, "null"]
+      description: 标题（trim 后非空且 ≤64 字符）
+    image_url:
+      type: [string, "null"]
+      description: 图片地址（≤255 字符）
+    link_url:
+      type: [string, "null"]
+      description: 跳转目标（≤512 字符，空表示清空跳转）
+    sort:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 展示顺序
+    status:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      enum: [0, 1, null]
+      x-enum-labels:
+        "0": 禁用
+        "1": 启用
+      description: 1 启用 / 0 禁用
+BannerUpdateResponse:
+  type: object
+  description: UpdateRes 更新轮播图响应。
+  allOf:
+    - $ref: '#/Banner'
+BannerDeleteRequest:
+  type: object
+  description: DeleteReq 删除轮播图请求（AdminAuth + RequirePermission("banner:delete")）。
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      description: 轮播图 id
+BannerDeleteResponse:
+  type: object
+  description: DeleteRes 删除轮播图响应。
+  properties: {}
+  additionalProperties: false
+CartItem:
+  type: object
+  description: CartItem 购物车条目（查询与写接口复用）。异常状态由查询时动态计算： available / unavailable_reason 标识「SKU 不存在 / SKU 禁用 / 商品下架」， insufficient 标识库存不足，price_changed 标识价格相对加购快照发生变化。
+  required:
+    - id
+    - sku_id
+    - quantity
+    - selected
+    - price_snapshot
+    - product_id
+    - product_name
+    - product_main_image
+    - sku_name
+    - current_price
+    - price_changed
+    - available
+    - unavailable_reason
+    - stock
+    - insufficient
+    - created_at
+    - updated_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 条目 id
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: SKU id
+    quantity:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 数量
+    selected:
+      type: boolean
+      description: 勾选状态
+    price_snapshot:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 加购时 SKU 价格快照（整数分，不锁价）
+    product_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 所属商品 id；SKU 被删除时为 null
+    product_name:
+      type: string
+      description: 商品名；SKU 被删除时为空
+    product_main_image:
+      type: string
+      description: 商品主图；SKU 被删除时为空
+    sku_name:
+      type: string
+      description: SKU 名；SKU 被删除时为空
+    current_price:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 当前 SKU 价格；SKU 被删除时为 null
+    price_changed:
+      type: boolean
+      description: 当前价与加购快照是否不一致
+    available:
+      type: boolean
+      description: 是否可购（SKU 存在且 enabled 且商品 on_shelf）
+    unavailable_reason:
+      type: string
+      enum: ["", sku_deleted, disabled, off_shelf]
+      x-enum-labels:
+        "": 可购
+        sku_deleted: SKU 已删除
+        disabled: SKU 已禁用
+        off_shelf: 商品已下架
+      description: 不可购原因：空/sku_deleted/disabled/off_shelf
+    stock:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 当前库存（无记录为 0）；SKU 被删除时为 null
+    insufficient:
+      type: boolean
+      description: 是否库存不足（quantity > stock）
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    updated_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 更新时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+CartListRequest:
+  type: object
+  description: ListReq 列出当前用户购物车条目请求。
+  properties: {}
+  additionalProperties: false
+CartListResponse:
+  type: object
+  description: ListRes 购物车条目列表响应（无分页，返回全部本人条目）。
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/CartItem'}, {type: "null"}]
+      description: 购物车条目列表
+CartAddRequest:
+  type: object
+  description: AddReq 添加 SKU 到购物车请求（重复添加同 SKU 累加数量）。
+  properties:
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: SKU id（必填；缺失或 ≤0 由 service 显式校验返回 400）
+    quantity:
+      oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+      x-go-type: json.Number
+      description: 数量（正整数，默认 1，上限 999）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+CartAddResponse:
+  type: object
+  description: AddRes 添加购物车条目响应（返回该条目当前快照）。
+  allOf:
+    - $ref: '#/CartItem'
+CartUpdateQuantityRequest:
+  type: object
+  description: UpdateQuantityReq 修改购物车条目数量请求。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 条目 id
+    quantity:
+      oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+      x-go-type: json.Number
+      description: 数量（正整数，上限 999）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+CartUpdateQuantityResponse:
+  type: object
+  description: UpdateQuantityRes 修改数量响应。
+  allOf:
+    - $ref: '#/CartItem'
+CartUpdateSelectedRequest:
+  type: object
+  description: UpdateSelectedReq 勾选/取消勾选购物车条目请求。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 条目 id
+    selected:
+      type: boolean
+      description: 勾选状态
+CartUpdateSelectedResponse:
+  type: object
+  description: UpdateSelectedRes 勾选响应。
+  allOf:
+    - $ref: '#/CartItem'
+CartDeleteRequest:
+  type: object
+  description: DeleteReq 删除购物车条目请求。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 条目 id
+CartDeleteResponse:
+  type: object
+  description: DeleteRes 删除购物车条目响应（无业务字段）。
+  properties: {}
+  additionalProperties: false
+Category:
+  type: object
+  description: Category 分类结构，同时用于树形节点与单分类详情。
+  required:
+    - id
+    - parent_id
+    - name
+    - sort
+    - status
+    - created_at
+    - updated_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 分类 id
+    parent_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 父分类 id，0 表示顶级
+    name:
+      type: string
+      description: 分类名
+    sort:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 同级排序值
+    status:
+      type: integer
+      format: int64
+      x-go-type: int
+      enum: [0, 1]
+      x-enum-labels:
+        "0": 禁用
+        "1": 启用
+      description: 1 启用 / 0 禁用
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    updated_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 更新时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    children:
+      type: array
+      items:
+        oneOf: [{$ref: '#/Category'}, {type: "null"}]
+      x-json-omitempty: true
+      description: 子分类（树形返回时填充）
+CategoryListRequest:
+  type: object
+  description: ListReq 树形分类列表请求。
+  properties: {}
+  additionalProperties: false
+CategoryListResponse:
+  type: object
+  description: ListRes 树形分类列表响应。
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/Category'}, {type: "null"}]
+      description: 顶级分类树
+CategoryDetailRequest:
+  type: object
+  description: DetailReq 分类详情请求。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 分类 id
+CategoryDetailResponse:
+  type: object
+  description: DetailRes 分类详情响应。
+  allOf:
+    - $ref: '#/Category'
+CategoryCreateRequest:
+  type: object
+  description: CreateReq 创建分类请求。
+  required:
+    - name
+  properties:
+    parent_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 父分类 id，0 表示顶级
+    name:
+      type: string
+      x-go-validate: required
+      description: 分类名，非空且不超过 64 字符
+    sort:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 同级排序值，默认 0
+    status:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      enum: [0, 1, null]
+      x-enum-labels:
+        "0": 禁用
+        "1": 启用
+      description: 1 启用 / 0 禁用，默认 1
+CategoryCreateResponse:
+  type: object
+  description: CreateRes 创建分类响应。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 新分类 id
+CategoryUpdateRequest:
+  type: object
+  description: UpdateReq 更新分类请求（仅提交需要变更的字段）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 分类 id
+    parent_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 父分类 id，0 表示顶级
+    name:
+      type: [string, "null"]
+      description: 分类名，非空且不超过 64 字符
+    sort:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 同级排序值
+    status:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      enum: [0, 1, null]
+      x-enum-labels:
+        "0": 禁用
+        "1": 启用
+      description: 1 启用 / 0 禁用
+CategoryUpdateResponse:
+  type: object
+  description: UpdateRes 更新分类响应。
+  allOf:
+    - $ref: '#/Category'
+CategoryDeleteRequest:
+  type: object
+  description: DeleteReq 删除分类请求。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 分类 id
+CategoryDeleteResponse:
+  type: object
+  description: DeleteRes 删除分类响应。
+  properties: {}
+  additionalProperties: false
+CouponTemplate:
+  type: object
+  description: Template 优惠券模板（后台管理响应）。
+  required:
+    - id
+    - name
+    - threshold_amount
+    - discount_amount
+    - total_quantity
+    - issued_quantity
+    - claim_start_time
+    - claim_end_time
+    - use_start_time
+    - use_end_time
+    - status
+    - created_at
+    - updated_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 模板 id
+    name:
+      type: string
+      description: 模板名
+    threshold_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 满减门槛（整数分，0=无门槛）
+    discount_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 减免金额（整数分）
+    total_quantity:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 发放总量
+    issued_quantity:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 已发放数量
+    claim_start_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 领取开始时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    claim_end_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 领取结束时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    use_start_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 使用开始时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    use_end_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 使用结束时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    status:
+      type: integer
+      format: int64
+      x-go-type: int
+      enum: [0, 1]
+      x-enum-labels:
+        "0": 已停止新领取
+        "1": 正常可领取
+      description: 1=正常可领取、0=已停止新领取
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    updated_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 更新时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+UserCoupon:
+  type: object
+  description: UserCoupon 用户已领取券（含模板关键字段快照，供「我的券」展示）。
+  required:
+    - id
+    - template_id
+    - status
+    - order_id
+    - received_at
+    - locked_at
+    - used_at
+    - name
+    - threshold_amount
+    - discount_amount
+    - use_start_time
+    - use_end_time
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 券 id
+    template_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 模板 id
+    status:
+      type: string
+      enum: [available, locked, used]
+      x-enum-labels:
+        available: 可用（DB 10）
+        locked: 已预占（DB 20）
+        used: 已使用（DB 30）
+      description: 状态：available/locked/used
+    order_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 当前预占/核销该券的订单 id（释放时为空）
+    received_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 领取时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    locked_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 预占时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    used_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 核销时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    name:
+      type: string
+      description: 模板名
+    threshold_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 满减门槛（整数分）
+    discount_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 减免金额（整数分）
+    use_start_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 使用开始时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    use_end_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 使用结束时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+CouponAdminCreateRequest:
+  type: object
+  description: AdminCreateReq 创建优惠券模板请求（后台，需 coupon:create）。
+  properties:
+    name:
+      type: string
+      description: 模板名（trim 后 1~64 字符）
+    threshold_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 满减门槛（整数分，≥0 且 ≤99999999，0=无门槛）
+    discount_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 减免金额（整数分，>0 且 ≤99999999）
+    total_quantity:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 发放总量（>0）
+    claim_start_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      x-format: gtime-lenient
+      description: 领取开始时间（必须早于领取结束）；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+    claim_end_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      x-format: gtime-lenient
+      description: 领取结束时间；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+    use_start_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      x-format: gtime-lenient
+      description: 使用开始时间（必须早于使用结束）；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+    use_end_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      x-format: gtime-lenient
+      description: 使用结束时间；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+CouponAdminCreateResponse:
+  type: object
+  description: AdminCreateRes 创建优惠券模板响应。
+  allOf:
+    - $ref: '#/CouponTemplate'
+CouponAdminListRequest:
+  type: object
+  description: AdminListReq 查询优惠券模板列表请求（后台，需 coupon:list）。
+  properties: {}
+  additionalProperties: false
+CouponAdminListResponse:
+  type: object
+  description: AdminListRes 查询优惠券模板列表响应。
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/CouponTemplate'}, {type: "null"}]
+      description: 模板列表（按 id 倒序）
+CouponAdminStopRequest:
+  type: object
+  description: AdminStopReq 停止新领取请求（后台，需 coupon:stop）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 模板 id
+CouponAdminStopResponse:
+  type: object
+  description: AdminStopRes 停止新领取响应。
+  allOf:
+    - $ref: '#/CouponTemplate'
+CouponClaimRequest:
+  type: object
+  description: ClaimReq 领取优惠券请求（前台登录用户，作用于 Principal.UserID）。
+  required:
+    - template_id
+  properties:
+    template_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 模板 id
+CouponClaimResponse:
+  type: object
+  description: ClaimRes 领取优惠券响应。
+  allOf:
+    - $ref: '#/UserCoupon'
+CouponListMineRequest:
+  type: object
+  description: ListMineReq 查询我的优惠券请求（前台登录用户，作用于 Principal.UserID）。
+  properties: {}
+  additionalProperties: false
+CouponListMineResponse:
+  type: object
+  description: ListMineRes 查询我的优惠券响应。
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/UserCoupon'}, {type: "null"}]
+      description: 我的优惠券列表（按 id 倒序）
+DashboardOverviewRequest:
+  type: object
+  description: OverviewReq 运营概览请求（无参数）。
+  properties: {}
+  additionalProperties: false
+DashboardOverviewResponse:
+  type: object
+  description: OverviewRes 运营概览响应。
+  required:
+    - user_total
+    - today_new_users
+    - product_total
+    - order_total
+    - today_new_orders
+    - today_order_amount
+  properties:
+    user_total:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 用户总数（前台 users）
+    today_new_users:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 今日新增用户数（created_at ∈ 今日）
+    product_total:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 商品总数（全部 SPU）
+    order_total:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 订单总数（普通 orders，全部状态）
+    today_new_orders:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 今日新增订单数（created_at ∈ 今日，全部状态）
+    today_order_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 今日订单金额（分，已支付口径，非实收）
+DashboardTrendRequest:
+  type: object
+  description: TrendReq 订单趋势请求（无参数，固定最近 7 天）。
+  properties: {}
+  additionalProperties: false
+DashboardTrendItem:
+  type: object
+  description: TrendItem 单日订单数量。
+  required:
+    - date
+    - order_count
+  properties:
+    date:
+      type: string
+      description: 日期（YYYY-MM-DD）
+    order_count:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 当日订单数（无数据为 0）
+DashboardTrendResponse:
+  type: object
+  description: TrendRes 订单趋势响应（7 项连续，无数据日期返回 0）。
+  required:
+    - days
+  properties:
+    days:
+      type: array
+      items:
+        oneOf: [{$ref: '#/DashboardTrendItem'}, {type: "null"}]
+      description: 最近 7 天每日订单数
+DashboardStatusRequest:
+  type: object
+  description: StatusReq 订单状态分布与时间范围总数请求。 start_time/end_time 可选；二者必须同传、均为 RFC3339 且 start < end；缺省则统计全部订单。
+  properties:
+    start_time:
+      type: string
+      x-in: query
+      description: 起始时间（RFC3339，可选，与 end_time 同传）
+    end_time:
+      type: string
+      x-in: query
+      description: 结束时间（RFC3339，可选，与 start_time 同传）
+DashboardStatusItem:
+  type: object
+  description: StatusItem 单个订单状态的分布计数。
+  required:
+    - status
+    - count
+  properties:
+    status:
+      type: integer
+      format: int64
+      x-go-type: int
+      enum: [10, 20, 30, 40, 50, 60, 70]
+      x-enum-labels:
+        "10": 待支付
+        "20": 已支付
+        "30": 已发货
+        "40": 已收货
+        "50": 已完成
+        "60": 已取消
+        "70": 已退款
+      description: 订单状态（10/20/30/40/50/60/70）
+    count:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 该状态订单数（无该状态为 0）
+DashboardStatusResponse:
+  type: object
+  description: StatusRes 订单状态分布与时间范围总数响应（7 状态显式返回，含 0）。
+  required:
+    - total
+    - status_distribution
+  properties:
+    total:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 时间范围内订单总数（全部状态）
+    status_distribution:
+      type: array
+      items:
+        oneOf: [{$ref: '#/DashboardStatusItem'}, {type: "null"}]
+      description: 订单状态分布（7 状态）
+DashboardTopRequest:
+  type: object
+  description: TopReq 商品销量排行请求（limit 可选，默认 10，上限 50）。 limit 使用 string 而非 int，是为了在框架的 gconv 静默转换之前拿到原始参数， 由业务层严格校验：非整数（如 "abc"/"12.5"）必须返回 400/1001，不得静默按默认值处理。
+  properties:
+    limit:
+      type: string
+      x-in: query
+      description: 返回数量（可选，正整数，默认 10，上限 50）
+DashboardTopItem:
+  type: object
+  description: TopItem 销量排行条目。
+  required:
+    - rank
+    - product_id
+    - product_name
+    - sales
+  properties:
+    rank:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 排名（从 1 开始）
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 商品 id
+    product_name:
+      type: string
+      description: 商品名
+    sales:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 销量（有效订单明细数量之和）
+DashboardTopResponse:
+  type: object
+  description: TopRes 商品销量排行响应。
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/DashboardTopItem'}, {type: "null"}]
+      description: 销量 TOP 榜
+DashboardFlashSalesRequest:
+  type: object
+  description: FlashSalesReq 秒杀运营统计请求（无参数）。
+  properties: {}
+  additionalProperties: false
+DashboardActivityStatus:
+  type: object
+  description: ActivityStatus 秒杀活动状态分布（按 flash_sale_activities.status 字段，非时间窗派生）。
+  required:
+    - enabled
+    - disabled
+  properties:
+    enabled:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: enabled 活动数（status=1）
+    disabled:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: disabled 活动数（status=0）
+DashboardRequestStatus:
+  type: object
+  description: RequestStatus 秒杀请求状态分布（全局聚合）。
+  required:
+    - queued
+    - success
+    - failed
+    - dead
+  properties:
+    queued:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: queued 请求数（status=0）
+    success:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: success 请求数（status=1）
+    failed:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: failed 请求数（status=2）
+    dead:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: dead 请求数（status=3）
+DashboardFlashSalesResponse:
+  type: object
+  description: FlashSalesRes 秒杀运营统计响应。
+  required:
+    - activity_total
+    - activity_status
+    - request_status
+    - current_queued
+    - success_orders
+  properties:
+    activity_total:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 秒杀活动总数
+    activity_status:
+      oneOf: [{$ref: '#/DashboardActivityStatus'}, {type: "null"}]
+      description: 活动状态分布
+    request_status:
+      oneOf: [{$ref: '#/DashboardRequestStatus'}, {type: "null"}]
+      description: 请求状态分布
+    current_queued:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 当前 queued 请求数量
+    success_orders:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 秒杀成功订单数量（flash_sale_orders 行）
+FavoriteItem:
+  type: object
+  description: FavoriteItem 收藏条目（列表与添加响应复用）。 商品信息（名称/主图/价格）不落库，查询时实时联查 products； 商品被下架/删除后收藏保留为软引用，available/unavailable_reason 动态标识其可用性。
+  required:
+    - id
+    - product_id
+    - product_name
+    - product_main_image
+    - product_price
+    - available
+    - unavailable_reason
+    - created_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 收藏条目 id
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 商品 id
+    product_name:
+      type: string
+      description: 商品名（实时联查；商品删除时为空）
+    product_main_image:
+      type: string
+      description: 商品主图（实时联查；商品删除时为空）
+    product_price:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 商品价格整数分（实时联查；商品删除时为 null）
+    available:
+      type: boolean
+      description: 商品当前是否 on_shelf
+    unavailable_reason:
+      type: string
+      enum: ["", off_shelf, product_deleted]
+      x-enum-labels:
+        "": 可购
+        off_shelf: 商品已下架
+        product_deleted: 商品已删除
+      description: 不可用原因：空/off_shelf/product_deleted
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 收藏时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+FavoriteAddRequest:
+  type: object
+  description: AddReq 添加收藏请求（仅登录用户，作用于 Principal.UserID；重复收藏幂等成功）。
+  properties:
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 商品 id（必填，缺失或 ≤0 返回 400）
+FavoriteAddResponse:
+  type: object
+  description: AddRes 添加收藏响应（返回该收藏条目，幂等重复时返回既有条目）。
+  allOf:
+    - $ref: '#/FavoriteItem'
+FavoriteRemoveRequest:
+  type: object
+  description: RemoveReq 取消收藏请求（按 product_id 幂等，未收藏/不存在也成功）。
+  required:
+    - product_id
+  properties:
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 商品 id
+FavoriteRemoveResponse:
+  type: object
+  description: RemoveRes 取消收藏响应（无业务字段）。
+  properties: {}
+  additionalProperties: false
+FavoriteListRequest:
+  type: object
+  description: ListReq 收藏列表请求（分页，仅登录用户本人收藏）。
+  properties:
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 页码，默认 1
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量，默认 20，最大 100
+FavoriteListResponse:
+  type: object
+  description: ListRes 收藏列表响应（按收藏时间倒序）。
+  required:
+    - items
+    - total
+    - page
+    - size
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/FavoriteItem'}, {type: "null"}]
+      description: 收藏列表
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 总数量
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量
+FavoriteCheckRequest:
+  type: object
+  description: CheckReq 是否已收藏请求（独立鉴权查询，供商品详情展示收藏态）。
+  properties:
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: query
+      description: 商品 id（必填，缺失或 ≤0 返回 400）
+FavoriteCheckResponse:
+  type: object
+  description: CheckRes 是否已收藏响应。
+  required:
+    - favorited
+  properties:
+    favorited:
+      type: boolean
+      description: 当前用户是否已收藏该商品
+FlashSaleActivitySku:
+  type: object
+  description: ActivitySku 秒杀活动 × SKU 绑定（秒杀价 + 秒杀库存）。
+  required:
+    - id
+    - sku_id
+    - flash_price
+    - total_stock
+    - sold
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 绑定 id
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: SKU id（软引用）
+    flash_price:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 秒杀价（整数分）
+    total_stock:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 秒杀初始库存
+    sold:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 已售数量
+FlashSaleActivity:
+  type: object
+  description: Activity 秒杀活动（含 SKU 绑定列表）。
+  required:
+    - id
+    - name
+    - status
+    - start_time
+    - end_time
+    - skus
+    - created_at
+    - updated_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 活动 id
+    name:
+      type: string
+      description: 活动名
+    status:
+      type: string
+      enum: [enabled, disabled]
+      x-enum-labels:
+        enabled: 启用
+        disabled: 禁用
+      description: 状态：enabled/disabled
+    start_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 开始时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    end_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 结束时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    skus:
+      type: array
+      items:
+        oneOf: [{$ref: '#/FlashSaleActivitySku'}, {type: "null"}]
+      description: SKU 绑定列表
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    updated_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 更新时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+FlashSaleOrder:
+  type: object
+  description: FlashOrder 秒杀订单（软引用快照自足）。
+  required:
+    - id
+    - order_no
+    - user_id
+    - activity_id
+    - sku_id
+    - product_id
+    - sku_name
+    - product_name
+    - product_main_image
+    - flash_price
+    - quantity
+    - idempotency_key
+    - created_at
+    - updated_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 订单 id
+    order_no:
+      type: string
+      description: 全局唯一秒杀订单号
+    user_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 归属用户 id
+    activity_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 活动 id（软引用）
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: SKU id（软引用）
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 商品 id（软引用）
+    sku_name:
+      type: string
+      description: SKU 名称快照
+    product_name:
+      type: string
+      description: 商品名快照
+    product_main_image:
+      type: string
+      description: 商品主图快照
+    flash_price:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 成交价快照 = 下单时秒杀价；单位：分（整数）
+    quantity:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 数量（V1 恒为 1）
+    idempotency_key:
+      type: string
+      description: 幂等键
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    updated_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 更新时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+FlashSaleActivitySkuInput:
+  type: object
+  description: ActivitySkuInput 创建/更新活动时的 SKU 绑定输入。 字段由 service 显式校验（不依赖 gvalid），避免非业务 gcode 透出为 500。
+  required:
+    - sku_id
+    - flash_price
+    - total_stock
+  properties:
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: SKU id（必须存在）
+    flash_price:
+      oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+      x-go-type: json.Number
+      description: 秒杀价（整数分，>0 且 ≤99999999）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+    total_stock:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 秒杀库存（正整数）
+FlashSaleCreateRequest:
+  type: object
+  description: CreateReq 创建秒杀活动请求（后台，需 flash_sale:create）。
+  properties:
+    name:
+      type: string
+      description: 活动名，trim 后 1~64 字符
+    start_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      x-format: gtime-lenient
+      description: 开始时间（必须早于结束时间）；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+    end_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      x-format: gtime-lenient
+      description: 结束时间；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+    skus:
+      type: array
+      items:
+        oneOf: [{$ref: '#/FlashSaleActivitySkuInput'}, {type: "null"}]
+      description: SKU 绑定列表（非空）
+FlashSaleCreateResponse:
+  type: object
+  description: CreateRes 创建秒杀活动响应。
+  allOf:
+    - $ref: '#/FlashSaleActivity'
+FlashSaleUpdateRequest:
+  type: object
+  description: UpdateReq 更新秒杀活动请求（后台，需 flash_sale:update；未提交字段保持不变）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 活动 id
+    name:
+      type: [string, "null"]
+      description: 活动名
+    status:
+      type: [string, "null"]
+      description: 状态：enabled/disabled
+    start_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      x-format: gtime-lenient
+      description: 开始时间；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+    end_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      x-format: gtime-lenient
+      description: 结束时间；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+    skus:
+      type: array
+      items:
+        oneOf: [{$ref: '#/FlashSaleActivitySkuInput'}, {type: "null"}]
+      description: SKU 绑定列表（提供则仅更新已存在绑定的秒杀价/库存；不允许新增或删除绑定，sku_id 必须已绑定该活动）
+FlashSaleUpdateResponse:
+  type: object
+  description: UpdateRes 更新秒杀活动响应。
+  allOf:
+    - $ref: '#/FlashSaleActivity'
+FlashSaleCreateOrderRequest:
+  type: object
+  description: CreateOrderReq 秒杀下单请求（前台登录用户，作用于 Principal.UserID；不提交价格/身份）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 活动 id
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: SKU id（必须为该活动绑定的 SKU）
+    idempotency_key:
+      type: string
+      description: 幂等键（同键同内容幂等返回既有请求状态，同键不同内容 12005）
+FlashSaleCreateOrderResponse:
+  type: object
+  description: CreateOrderRes 秒杀下单响应：V3 起为「排队受理结果」，不再同步返回已创建订单。
+  required:
+    - status
+    - idempotency_key
+    - activity_id
+    - sku_id
+  properties:
+    status:
+      type: string
+      enum: [queued]
+      x-enum-labels:
+        queued: 已受理/排队中
+      description: 受理状态：queued（已受理/排队中，或幂等命中时返回既有请求状态）
+    idempotency_key:
+      type: string
+      description: 幂等键
+    activity_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 活动 id
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: SKU id
+FlashSaleGetOrderResultRequest:
+  type: object
+  description: GetOrderResultReq 查询秒杀下单结果请求（前台登录用户，作用于 Principal.UserID）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 活动 id
+    idempotency_key:
+      type: string
+      x-in: query
+      description: 幂等键
+FlashSaleGetOrderResultResponse:
+  type: object
+  description: GetOrderResultRes 查询秒杀下单结果响应。
+  required:
+    - status
+  properties:
+    status:
+      type: string
+      enum: [queued, success, failed, dead]
+      x-enum-labels:
+        queued: 排队中
+        success: 落单成功
+        failed: 业务失败终态
+        dead: 技术失败待修复
+      description: 处理状态：queued/success/failed/dead
+    order:
+      oneOf: [{$ref: '#/FlashSaleOrder'}, {type: "null"}]
+      x-json-omitempty: true
+      description: success 时的秒杀订单
+    fail_code:
+      type: integer
+      format: int64
+      x-go-type: int
+      x-json-omitempty: true
+      description: 失败码（failed/dead 时的最近失败码，观测用）
+FlashSaleRepairRequestRequest:
+  type: object
+  description: RepairRequestReq 人工修复秒杀请求请求（后台，需 flash_sale:repair；仅 dead→queued）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 请求 id
+    target_status:
+      type: string
+      enum: [queued]
+      x-enum-labels:
+        queued: 重新排队
+      description: 目标状态（仅支持 queued）
+    reason:
+      type: string
+      description: 修复原因（必填）
+FlashSaleRepairRequestResponse:
+  type: object
+  description: RepairRequestRes 人工修复秒杀请求响应。
+  required:
+    - id
+    - status
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 请求 id
+    status:
+      type: string
+      enum: [queued]
+      x-enum-labels:
+        queued: 重新排队
+      description: 修复后状态：queued
+FlashSaleListRequestAuditsRequest:
+  type: object
+  description: ListRequestAuditsReq 查询秒杀请求审计记录请求（后台，需 flash_sale:repair）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 请求 id
+FlashSaleRequestAudit:
+  type: object
+  description: RequestAudit 秒杀请求修复审计记录（append-only，不可修改删除）。
+  required:
+    - id
+    - request_id
+    - operator_admin_id
+    - operator_username
+    - action
+    - before_status
+    - after_status
+    - reason
+    - created_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 审计记录 id
+    request_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 请求 id
+    operator_admin_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 操作者管理员 id
+    operator_username:
+      type: string
+      description: 操作者用户名快照
+    action:
+      type: string
+      description: 动作（如 dead_to_queued）
+    before_status:
+      type: integer
+      format: int64
+      x-go-type: int
+      enum: [0, 1, 2, 3]
+      x-enum-labels:
+        "0": queued
+        "1": success
+        "2": failed
+        "3": dead
+      description: 迁移前请求状态
+    after_status:
+      type: integer
+      format: int64
+      x-go-type: int
+      enum: [0, 1, 2, 3]
+      x-enum-labels:
+        "0": queued
+        "1": success
+        "2": failed
+        "3": dead
+      description: 迁移后请求状态
+    reason:
+      type: string
+      description: 修复原因
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+FlashSaleListRequestAuditsResponse:
+  type: object
+  description: ListRequestAuditsRes 查询秒杀请求审计记录响应。
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/FlashSaleRequestAudit'}, {type: "null"}]
+      description: 审计记录列表（按时间升序）
+HealthLivenessRequest:
+  type: object
+  description: LivenessReq is the request of the liveness probe.
+  properties: {}
+  additionalProperties: false
+HealthLivenessResponse:
+  type: object
+  description: LivenessRes is the response of the liveness probe.
+  required:
+    - status
+    - time
+  properties:
+    status:
+      type: string
+      description: service liveness status, always "ok" when alive
+    time:
+      type: string
+      description: current server time
+HealthReadinessRequest:
+  type: object
+  description: ReadinessReq is the request of the readiness probe.
+  properties: {}
+  additionalProperties: false
+HealthReadinessResponse:
+  type: object
+  description: ReadinessRes is the response of the readiness probe.
+  required:
+    - status
+  properties:
+    status:
+      type: string
+      description: service readiness status, "ready" when DB and Redis are reachable
+UserRegisterRequest:
+  type: object
+  description: RegisterReq 用户注册请求。
+  properties:
+    username:
+      type: string
+      description: 用户名，3~24 位大小写字母或数字
+    password:
+      type: string
+      description: 密码，8~24 位
+UserRegisterResponse:
+  type: object
+  description: RegisterRes 用户注册响应。
+  required:
+    - id
+    - username
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 新用户 id
+    username:
+      type: string
+      description: 注册用户名
+UserLoginRequest:
+  type: object
+  description: LoginReq 用户登录请求。
+  properties:
+    username:
+      type: string
+      description: 用户名
+    password:
+      type: string
+      description: 密码
+UserLoginResponse:
+  type: object
+  description: LoginRes 用户登录响应。
+  required:
+    - access_token
+    - refresh_token
+    - token_type
+    - expires_in
+  properties:
+    access_token:
+      type: string
+      description: 签发的 JWT access token
+    refresh_token:
+      type: string
+      description: 签发的长期 refresh token（明文仅本次响应出现一次）
+    token_type:
+      type: string
+      description: token 类型，恒为 "Bearer"
+    expires_in:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: token 有效期（秒），恒为 3600
+UserRefreshRequest:
+  type: object
+  description: RefreshReq 刷新 access token 请求。refresh token 自身即凭证，接口公开、无 Auth。
+  properties:
+    refresh_token:
+      type: string
+      description: refresh token 明文
+UserRefreshResponse:
+  type: object
+  description: RefreshRes 刷新响应。
+  required:
+    - access_token
+    - refresh_token
+    - token_type
+    - expires_in
+  properties:
+    access_token:
+      type: string
+      description: 新签发的 JWT access token
+    refresh_token:
+      type: string
+      description: 新签发的 refresh token（旧 token 已失效）
+    token_type:
+      type: string
+      description: token 类型，恒为 "Bearer"
+    expires_in:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: token 有效期（秒），恒为 3600
+UserMeRequest:
+  type: object
+  description: MeReq 获取当前登录用户请求。
+  properties: {}
+  additionalProperties: false
+UserMeResponse:
+  type: object
+  description: MeRes 获取当前登录用户响应。
+  required:
+    - id
+    - username
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 当前用户 id
+    username:
+      type: string
+      description: 当前用户名
+UserLogoutRequest:
+  type: object
+  description: LogoutReq 登出当前会话请求。sid 来自当前 token，不接受客户端指定。
+  properties: {}
+  additionalProperties: false
+UserLogoutResponse:
+  type: object
+  description: LogoutRes 登出当前会话响应（无业务字段，成功时 data 为 null）。
+  properties: {}
+  additionalProperties: false
+UserSession:
+  type: object
+  description: Session 会话条目（会话列表项）。
+  required:
+    - sid
+    - login_at
+    - user_agent
+    - ip
+    - current
+  properties:
+    sid:
+      type: string
+      description: 会话标识
+    login_at:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 登录时间（unix 秒）
+    user_agent:
+      type: string
+      description: 客户端 User-Agent
+    ip:
+      type: string
+      description: 客户端 IP
+    current:
+      type: boolean
+      description: 是否为当前会话
+UserListSessionsRequest:
+  type: object
+  description: ListSessionsReq 会话列表请求。
+  properties: {}
+  additionalProperties: false
+UserListSessionsResponse:
+  type: object
+  description: ListSessionsRes 会话列表响应。
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/UserSession'}, {type: "null"}]
+      description: 会话列表
+UserRevokeSessionRequest:
+  type: object
+  description: RevokeSessionReq 撤销指定会话请求。目标 sid 来自 URL 路径，不接受请求体指定。
+  properties:
+    sid:
+      type: string
+      x-in: path
+      description: 目标会话标识
+UserRevokeSessionResponse:
+  type: object
+  description: RevokeSessionRes 撤销指定会话响应（无业务字段，成功时 data 为 null）。
+  properties: {}
+  additionalProperties: false
+UserRevokeOthersRequest:
+  type: object
+  description: RevokeOthersReq 撤销其他会话请求。
+  properties: {}
+  additionalProperties: false
+UserRevokeOthersResponse:
+  type: object
+  description: RevokeOthersRes 撤销其他会话响应（无业务字段，成功时 data 为 null）。
+  properties: {}
+  additionalProperties: false
+UserRevokeAllRequest:
+  type: object
+  description: RevokeAllReq 全部退出请求。
+  properties: {}
+  additionalProperties: false
+UserRevokeAllResponse:
+  type: object
+  description: RevokeAllRes 全部退出响应（无业务字段，成功时 data 为 null）。
+  properties: {}
+  additionalProperties: false
+UserGetUserStatusRequest:
+  type: object
+  description: GetUserStatusReq 查询用户账号状态请求（后台域，AdminAuth + RequirePermission("user:read")）。 目标用户 id 来自 URL 路径，服务端不信任请求体身份。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 目标用户 id
+UserGetUserStatusResponse:
+  type: object
+  description: GetUserStatusRes 查询用户账号状态响应。
+  required:
+    - id
+    - status
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 用户 id
+    status:
+      type: integer
+      format: int64
+      x-go-type: int
+      enum: [0, 1]
+      x-enum-labels:
+        "0": 禁用
+        "1": 启用
+      description: 1 启用 / 0 禁用
+UserUpdateUserStatusRequest:
+  type: object
+  description: UpdateUserStatusReq 禁用/启用用户请求（后台域，AdminAuth + RequirePermission("user:status")）。 目标用户 id 来自 URL 路径；reason 必填（trim 后非空、≤255）。
+  required:
+    - id
+    - status
+    - reason
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 目标用户 id
+    status:
+      type: integer
+      format: int64
+      x-go-type: int
+      enum: [0, 1]
+      x-enum-labels:
+        "0": 禁用
+        "1": 启用
+      x-go-validate: required|in:0,1
+      description: 1 启用 / 0 禁用
+    reason:
+      type: string
+      x-go-validate: required
+      description: 变更原因，非空且不超过 255 字符
+UserUpdateUserStatusResponse:
+  type: object
+  description: UpdateUserStatusRes 禁用/启用用户响应（无业务字段，成功时 data 为 null）。
+  properties: {}
+  additionalProperties: false
+Inventory:
+  type: object
+  description: Inventory 库存结构，查询与写接口复用。
+  required:
+    - sku_id
+    - quantity
+    - created_at
+    - updated_at
+  properties:
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: SKU id
+    quantity:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 当前库存数量（无记录时为 0）
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间（无记录时为 null）；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    updated_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 更新时间（无记录时为 null）；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+InventoryLog:
+  type: object
+  description: Log 库存变更流水记录。
+  required:
+    - id
+    - sku_id
+    - change_type
+    - change_qty
+    - before_qty
+    - after_qty
+    - operator_admin_id
+    - reason
+    - created_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 流水 id
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: SKU id
+    change_type:
+      type: string
+      enum: [increase, deduct]
+      x-enum-labels:
+        increase: 增加
+        deduct: 扣减
+      description: 变更类型：increase/deduct
+    change_qty:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 变更量（正数）
+    before_qty:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 变更前库存
+    after_qty:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 变更后库存
+    operator_admin_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 操作者管理员 id（可空）
+    reason:
+      type: string
+      description: 变更原因
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 变更时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+InventoryGetRequest:
+  type: object
+  description: GetReq 查询库存请求。
+  required:
+    - sku_id
+  properties:
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: SKU id
+InventoryGetResponse:
+  type: object
+  description: GetRes 查询库存响应（无记录 = 0）。
+  allOf:
+    - $ref: '#/Inventory'
+InventoryIncreaseRequest:
+  type: object
+  description: IncreaseReq 增加库存请求（兼作首次初始化）。
+  required:
+    - sku_id
+  properties:
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: SKU id
+    quantity:
+      oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+      x-go-type: json.Number
+      description: 增加数量（正整数）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+InventoryIncreaseResponse:
+  type: object
+  description: IncreaseRes 增加库存响应。
+  allOf:
+    - $ref: '#/Inventory'
+InventoryDeductRequest:
+  type: object
+  description: DeductReq 条件扣减库存请求（库存充足才成功）。
+  required:
+    - sku_id
+  properties:
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: SKU id
+    quantity:
+      oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+      x-go-type: json.Number
+      description: 扣减数量（正整数）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+InventoryDeductResponse:
+  type: object
+  description: DeductRes 扣减库存响应。
+  allOf:
+    - $ref: '#/Inventory'
+InventoryListLogsRequest:
+  type: object
+  description: ListLogsReq 查询库存流水请求（分页，id 倒序）。
+  required:
+    - sku_id
+  properties:
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: SKU id
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      x-in: query
+      default: 1
+      description: 页码，默认 1
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      x-in: query
+      default: 20
+      description: 每页条数，默认 20，最大 100
+InventoryListLogsResponse:
+  type: object
+  description: ListLogsRes 库存流水响应（id 倒序，分页）。
+  required:
+    - items
+    - total
+    - page
+    - size
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/InventoryLog'}, {type: "null"}]
+      description: 当前页流水（id 倒序）
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 符合条件的流水总数
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 生效页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 生效每页条数
+LikeLikeRequest:
+  type: object
+  description: LikeReq 点赞请求（仅登录用户，作用于 Principal.UserID；重复点赞幂等成功）。
+  properties:
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 商品 id（必填，缺失或 ≤0 返回 400）
+LikeLikeResponse:
+  type: object
+  description: LikeRes 点赞响应（点赞后本人对商品必为已点赞）。
+  required:
+    - liked
+  properties:
+    liked:
+      type: boolean
+      description: 是否已点赞（点赞成功后恒为 true）
+LikeCancelRequest:
+  type: object
+  description: CancelReq 取消点赞请求（按 product_id 幂等，未点赞/不存在也成功）。
+  required:
+    - product_id
+  properties:
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 商品 id
+LikeCancelResponse:
+  type: object
+  description: CancelRes 取消点赞响应（无业务字段）。
+  properties: {}
+  additionalProperties: false
+LikeCheckRequest:
+  type: object
+  description: CheckReq 是否已点赞请求（独立鉴权查询，供商品详情展示点赞态）。
+  properties:
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: query
+      description: 商品 id（必填，缺失或 ≤0 返回 400）
+LikeCheckResponse:
+  type: object
+  description: CheckRes 是否已点赞响应。
+  required:
+    - liked
+  properties:
+    liked:
+      type: boolean
+      description: 当前用户是否已点赞该商品
+LikeCountRequest:
+  type: object
+  description: CountReq 公开点赞数请求（无需 token）。
+  properties:
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: query
+      description: 商品 id（必填，缺失或 ≤0 返回 400）
+LikeCountResponse:
+  type: object
+  description: CountRes 公开点赞数响应。
+  required:
+    - count
+  properties:
+    count:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 该商品点赞数（实时 COUNT 聚合）
+Order:
+  type: object
+  description: Order 订单结构（查询与写接口复用）。
+  required:
+    - id
+    - order_no
+    - user_id
+    - status
+    - total_amount
+    - original_amount
+    - discount_amount
+    - user_coupon_id
+    - idempotency_key
+    - recipient_name
+    - phone
+    - province
+    - city
+    - district
+    - detail
+    - address_id
+    - expire_at
+    - cancel_reason
+    - paid_at
+    - shipped_at
+    - received_at
+    - completed_at
+    - cancelled_at
+    - refunded_at
+    - created_at
+    - updated_at
+    - items
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 订单 id
+    order_no:
+      type: string
+      description: 全局唯一订单号
+    user_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 归属用户 id
+    status:
+      type: string
+      enum: [pending_payment, paid, shipped, received, completed, cancelled, refunded]
+      x-enum-labels:
+        pending_payment: 待支付（DB 10）
+        paid: 已支付（DB 20）
+        shipped: 已发货（DB 30）
+        received: 已收货（DB 40，实际不可观测）
+        completed: 已完成（DB 50，终态）
+        cancelled: 已取消（DB 60，终态）
+        refunded: 已退款（DB 70，终态）
+      x-known-issue:
+        - id: B1-02-D2
+          summary: received(40) 为事务内中间态，API 查询实际不可观测；枚举仍保留以匹配 DTO 与 DB
+      description: 状态：pending_payment/paid/shipped/received/completed/cancelled/refunded
+    total_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 应付金额（整数分，快照 = original_amount - discount_amount）
+    original_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 优惠前金额（整数分，快照 = Σ 订单项 price×quantity）
+    discount_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 优惠金额（整数分，快照，无券为 0）
+    user_coupon_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 下单时使用的用户券 id（软引用，快照，无券为空）
+    idempotency_key:
+      type: string
+      description: 幂等键
+    recipient_name:
+      type: string
+      description: 收货人姓名快照
+    phone:
+      type: string
+      description: 手机号快照
+    province:
+      type: string
+      description: 省快照
+    city:
+      type: string
+      description: 市快照
+    district:
+      type: string
+      description: 区快照
+    detail:
+      type: string
+      description: 详细地址快照
+    address_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 下单时地址 id（软引用，可空）
+    expire_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 支付截止时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    cancel_reason:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      enum: [1, 2, null]
+      x-enum-labels:
+        "1": 用户取消
+        "2": 超时未支付自动取消
+      description: 取消原因：1=用户、2=超时；未取消为 null
+    paid_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 支付时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    shipped_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 发货时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    received_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 收货时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    completed_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 完成时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    cancelled_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 取消时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    refunded_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 退款时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    updated_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 更新时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/OrderItem'}, {type: "null"}]
+      description: 订单项列表
+OrderItem:
+  type: object
+  description: OrderItem 订单项（商品/SKU/价格快照，自足）。
+  required:
+    - id
+    - sku_id
+    - product_id
+    - sku_name
+    - product_name
+    - product_main_image
+    - price
+    - quantity
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 订单项 id
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: SKU id（软引用）
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 商品 id（软引用）
+    sku_name:
+      type: string
+      description: SKU 名称快照
+    product_name:
+      type: string
+      description: 商品名快照
+    product_main_image:
+      type: string
+      description: 商品主图快照
+    price:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 成交价（整数分，下单时 skus.price 快照）
+    quantity:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 数量
+OrderCreateRequest:
+  type: object
+  description: CreateReq 创建订单请求（source=cart 时从购物车勾选项下单，忽略 sku_id/quantity； source=direct 时按单个 SKU + 数量直接购买）。
+  required:
+    - source
+    - address_id
+    - idempotency_key
+  properties:
+    source:
+      type: string
+      enum: [cart, direct]
+      x-enum-labels:
+        cart: 购物车勾选下单
+        direct: 单 SKU 直接购买
+      x-go-validate: required
+      description: 来源：cart/direct
+    address_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-go-validate: required
+      description: 收货地址 id（必须属于当前用户）
+    idempotency_key:
+      type: string
+      x-go-validate: required
+      description: 幂等键（同键同内容幂等，同键不同内容 9006）
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 直接购买 SKU id（source=direct 必填）
+    quantity:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 直接购买数量（source=direct 必填，正整数）
+    coupon_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 可选使用的用户券 id（一笔订单最多一张，0 或缺省表示不使用）
+OrderCreateResponse:
+  type: object
+  description: CreateRes 创建订单响应。
+  allOf:
+    - $ref: '#/Order'
+OrderListRequest:
+  type: object
+  description: ListReq 查询本人订单列表请求。
+  properties: {}
+  additionalProperties: false
+OrderListResponse:
+  type: object
+  description: ListRes 订单列表响应（仅本人，按 id 倒序）。
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/Order'}, {type: "null"}]
+      description: 订单列表（仅本人，按 id 倒序）
+OrderDetailRequest:
+  type: object
+  description: DetailReq 查询本人订单详情请求。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 订单 id
+OrderDetailResponse:
+  type: object
+  description: DetailRes 订单详情响应。
+  allOf:
+    - $ref: '#/Order'
+OrderPayRequest:
+  type: object
+  description: PayReq 支付请求（Mock 支付，仅本人）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 订单 id
+OrderPayResponse:
+  type: object
+  description: PayRes 支付响应。
+  allOf:
+    - $ref: '#/Order'
+OrderCancelRequest:
+  type: object
+  description: CancelReq 取消订单请求（仅本人，待支付订单）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 订单 id
+OrderCancelResponse:
+  type: object
+  description: CancelRes 取消订单响应。
+  allOf:
+    - $ref: '#/Order'
+OrderReceiveRequest:
+  type: object
+  description: ReceiveReq 确认收货请求（仅本人，已发货订单）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 订单 id
+OrderReceiveResponse:
+  type: object
+  description: ReceiveRes 确认收货响应。
+  allOf:
+    - $ref: '#/Order'
+OrderShipRequest:
+  type: object
+  description: ShipReq 发货请求（仅管理员，持 order:ship）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 订单 id
+OrderShipResponse:
+  type: object
+  description: ShipRes 发货响应。
+  allOf:
+    - $ref: '#/Order'
+OrderAdminListRequest:
+  type: object
+  description: AdminListReq 后台订单分页列表请求（只读，持 order:list）。
+  properties:
+    page:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 页码，默认 1；<1 或非整数返回 400
+    size:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 每页数量，默认 20、上限 100；越界或非整数返回 400
+    order_no:
+      type: string
+      description: 订单号，精确匹配
+    user_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 用户 id，精确匹配；<=0 返回 400
+    status:
+      type: string
+      enum: [pending_payment, paid, shipped, received, completed, cancelled, refunded]
+      x-enum-labels:
+        pending_payment: 待支付（DB 10）
+        paid: 已支付（DB 20）
+        shipped: 已发货（DB 30）
+        received: 已收货（DB 40，实际不可观测）
+        completed: 已完成（DB 50，终态）
+        cancelled: 已取消（DB 60，终态）
+        refunded: 已退款（DB 70，终态）
+      description: 状态字符串枚举，非法返回 400
+    start_time:
+      type: string
+      description: 创建时间起点，RFC3339（含时区偏移），左闭
+    end_time:
+      type: string
+      description: 创建时间终点，RFC3339（含时区偏移），右开
+    sort:
+      type: string
+      description: 排序字段白名单 id/created_at，默认 id，非法返回 400
+    order:
+      type: string
+      description: 排序方向 asc/desc，默认 desc，非法返回 400
+OrderAdminListResponse:
+  type: object
+  description: AdminListRes 后台订单分页列表响应。
+  required:
+    - items
+    - total
+    - page
+    - size
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/AdminOrderListItem'}, {type: "null"}]
+      description: 订单列表（轻量，不含明细）
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 总记录数
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量
+AdminOrderListItem:
+  type: object
+  description: AdminOrderListItem 后台订单列表项（轻量，不含订单明细）。
+  required:
+    - id
+    - order_no
+    - user_id
+    - status
+    - total_amount
+    - created_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 订单 id
+    order_no:
+      type: string
+      description: 订单号
+    user_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 用户 id
+    status:
+      type: string
+      enum: [pending_payment, paid, shipped, received, completed, cancelled, refunded]
+      x-enum-labels:
+        pending_payment: 待支付（DB 10）
+        paid: 已支付（DB 20）
+        shipped: 已发货（DB 30）
+        received: 已收货（DB 40，实际不可观测）
+        completed: 已完成（DB 50，终态）
+        cancelled: 已取消（DB 60，终态）
+        refunded: 已退款（DB 70，终态）
+      description: 状态字符串枚举
+    total_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 成交总价（整数分，快照）
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+OrderAdminOrderStatsRequest:
+  type: object
+  description: AdminOrderStatsReq 后台订单状态统计请求（只读，持 order:list）。
+  properties: {}
+  additionalProperties: false
+OrderStatsResponse:
+  type: object
+  description: AdminOrderStatsRes 后台订单状态统计响应。
+  required:
+    - total
+    - stats
+  properties:
+    total:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 全部普通订单总数（等于各状态数量之和）
+    stats:
+      type: array
+      items:
+        oneOf: [{$ref: '#/OrderStatsItem'}, {type: "null"}]
+      description: 各状态数量（覆盖全部 7 态，无数据为 0）
+OrderStatsItem:
+  type: object
+  description: AdminOrderStatsItem 单状态统计项。
+  required:
+    - status
+    - count
+  properties:
+    status:
+      type: string
+      enum: [pending_payment, paid, shipped, received, completed, cancelled, refunded]
+      x-enum-labels:
+        pending_payment: 待支付（DB 10）
+        paid: 已支付（DB 20）
+        shipped: 已发货（DB 30）
+        received: 已收货（DB 40，实际不可观测）
+        completed: 已完成（DB 50，终态）
+        cancelled: 已取消（DB 60，终态）
+        refunded: 已退款（DB 70，终态）
+      description: 状态字符串枚举
+    count:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 该状态订单数量
+OrderAdminOrderDetailRequest:
+  type: object
+  description: AdminOrderDetailReq 后台订单详情请求（只读，持 order:view）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 订单 id
+OrderAdminDetailResponse:
+  type: object
+  description: AdminOrderDetailRes 后台订单详情响应（复用 Order，含明细与快照）。
+  allOf:
+    - $ref: '#/Order'
+Product:
+  type: object
+  description: Product 商品结构，前台/后台查询与写接口复用。
+  required:
+    - id
+    - name
+    - brand
+    - category_id
+    - price
+    - main_image
+    - detail
+    - status
+    - view_count
+    - images
+    - created_at
+    - updated_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 商品 id
+    name:
+      type: string
+      description: 商品名
+    brand:
+      type: string
+      description: 品牌
+    category_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 分类 id
+    price:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 价格（整数分）
+    main_image:
+      type: string
+      description: 主图 URL
+    detail:
+      type: string
+      description: 商品详情
+    status:
+      type: string
+      enum: [draft, on_shelf, off_shelf]
+      x-enum-labels:
+        draft: 草稿
+        on_shelf: 已上架
+        off_shelf: 已下架
+      description: 状态：draft/on_shelf/off_shelf
+    view_count:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 累计浏览量（只读）
+    images:
+      type: array
+      items:
+        type: string
+      description: 图片 URL 列表（按 sort 升序）
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    updated_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 更新时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+ProductListRequest:
+  type: object
+  description: ListReq 前台商品列表请求（仅 on_shelf）。
+  properties:
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 页码，默认 1
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量，默认 20，最大 100
+    category_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 分类 id，精确匹配
+    keyword:
+      type: string
+      description: 关键词，模糊匹配 name/brand
+    sort:
+      type: string
+      description: 排序字段：id/price/created_at/updated_at
+    order:
+      type: string
+      description: 排序方向：asc/desc
+ProductListResponse:
+  type: object
+  description: ListRes 商品列表响应。
+  required:
+    - items
+    - total
+    - page
+    - size
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/Product'}, {type: "null"}]
+      description: 商品列表
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 总数量
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量
+ProductDetailRequest:
+  type: object
+  description: DetailReq 前台商品详情请求（仅 on_shelf 可见）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 商品 id
+ProductDetailResponse:
+  type: object
+  description: DetailRes 前台商品详情响应（组合 SPU 与 SKU，仅返回 enabled SKU）。
+  allOf:
+    - $ref: '#/Product'
+  required:
+    - skus
+  properties:
+    skus:
+      type: array
+      items:
+        oneOf: [{$ref: '#/Sku'}, {type: "null"}]
+      description: SKU 列表（前台仅 enabled）
+ProductAdminListRequest:
+  type: object
+  description: AdminListReq 后台商品列表请求（全部状态）。
+  properties:
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 页码，默认 1
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量，默认 20，最大 100
+    category_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 分类 id，精确匹配
+    keyword:
+      type: string
+      description: 关键词，模糊匹配 name/brand
+    sort:
+      type: string
+      description: 排序字段：id/price/created_at/updated_at
+    order:
+      type: string
+      description: 排序方向：asc/desc
+ProductAdminListResponse:
+  type: object
+  description: AdminListRes 后台商品列表响应。
+  required:
+    - items
+    - total
+    - page
+    - size
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/Product'}, {type: "null"}]
+      description: 商品列表
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 总数量
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量
+ProductAdminDetailRequest:
+  type: object
+  description: AdminDetailReq 后台商品详情请求（全部状态）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 商品 id
+ProductAdminDetailResponse:
+  type: object
+  description: AdminDetailRes 后台商品详情响应（组合 SPU 与 SKU，返回全部状态 SKU）。
+  allOf:
+    - $ref: '#/Product'
+  required:
+    - skus
+  properties:
+    skus:
+      type: array
+      items:
+        oneOf: [{$ref: '#/Sku'}, {type: "null"}]
+      description: SKU 列表（全部状态）
+ProductCreateRequest:
+  type: object
+  description: CreateReq 创建商品请求（status 强制 draft，不接受客户端指定）。
+  properties:
+    name:
+      type: string
+      description: 商品名，非空且不超过 128 字符
+    brand:
+      type: string
+      description: 品牌，可选，不超过 64 字符
+    category_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 分类 id（必须为存在且启用的叶子分类）
+    price:
+      oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+      x-go-type: json.Number
+      description: 价格（整数分，0~99999999）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+    main_image:
+      type: string
+      description: 主图 URL，可选，不超过 512 字符
+    detail:
+      type: string
+      description: 商品详情，可选
+    images:
+      type: array
+      items:
+        type: string
+      description: 图片 URL 列表，可选
+ProductCreateResponse:
+  type: object
+  description: CreateRes 创建商品响应（status 恒为 draft）。
+  allOf:
+    - $ref: '#/Product'
+ProductUpdateRequest:
+  type: object
+  description: UpdateReq 更新商品请求（普通更新不能改变 status；提交合法 status 被忽略、非法值拒绝）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 商品 id
+    name:
+      type: [string, "null"]
+      description: 商品名
+    brand:
+      type: [string, "null"]
+      description: 品牌
+    category_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 分类 id（变更时须为存在且启用的叶子分类）
+    price:
+      oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+      x-go-type: json.Number
+      description: 价格（整数分）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+    main_image:
+      type: [string, "null"]
+      description: 主图 URL
+    detail:
+      type: [string, "null"]
+      description: 商品详情
+    status:
+      type: [string, "null"]
+      description: 普通更新不改状态：合法值被忽略、非法值拒绝
+    images:
+      type: [array, "null"]
+      items:
+        type: string
+      description: 图片 URL 列表；提供则全量替换，未提供则保留
+ProductUpdateResponse:
+  type: object
+  description: UpdateRes 更新商品响应。
+  allOf:
+    - $ref: '#/Product'
+ProductOnShelfRequest:
+  type: object
+  description: OnShelfReq 上架商品请求（无请求体，仅 :id）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 商品 id
+ProductOnShelfResponse:
+  type: object
+  description: OnShelfRes 上架商品响应。
+  allOf:
+    - $ref: '#/Product'
+ProductOffShelfRequest:
+  type: object
+  description: OffShelfReq 下架商品请求（无请求体，仅 :id）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 商品 id
+ProductOffShelfResponse:
+  type: object
+  description: OffShelfRes 下架商品响应。
+  allOf:
+    - $ref: '#/Product'
+RecommendItemSnapshot:
+  type: object
+  description: ItemSnapshot 前台推荐商品快照（仅 on_shelf 商品，查询时 JOIN products 实时快照）。
+  required:
+    - product_id
+    - name
+    - main_image
+    - price
+    - sort
+  properties:
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 商品 id
+    name:
+      type: string
+      description: 商品名
+    main_image:
+      type: string
+      description: 商品主图
+    price:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 价格（整数分）
+    sort:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 展示顺序
+RecommendItem:
+  type: object
+  description: Item 后台推荐商品关系（完整字段，商品下架后仍保留并可见）。
+  required:
+    - id
+    - position_id
+    - product_id
+    - sort
+    - created_at
+    - updated_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 关系 id
+    position_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 推荐位 id
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 商品 id（软引用）
+    sort:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 展示顺序
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    updated_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 更新时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+RecommendPosition:
+  type: object
+  description: Position 推荐位（后台完整字段）。
+  required:
+    - id
+    - code
+    - name
+    - status
+    - created_at
+    - updated_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 推荐位 id
+    code:
+      type: string
+      description: 稳定业务标识（创建后不可变）
+    name:
+      type: string
+      description: 推荐位名称
+    status:
+      type: integer
+      format: int64
+      x-go-type: int
+      enum: [0, 1]
+      x-enum-labels:
+        "0": 禁用
+        "1": 启用
+      description: 1 启用 / 0 禁用
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    updated_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 更新时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+RecommendFrontendRequest:
+  type: object
+  description: FrontendReq 前台推荐位查询请求（无需 token）。
+  required:
+    - code
+  properties:
+    code:
+      type: string
+      x-in: path
+      x-go-validate: required
+      description: 推荐位 code
+RecommendFrontendResponse:
+  type: object
+  description: FrontendRes 前台推荐位查询响应（推荐位不存在或禁用时 code/name 为空、items 为空数组）。
+  required:
+    - code
+    - name
+    - items
+  properties:
+    code:
+      type: string
+      description: 推荐位 code（不存在/禁用时为空）
+    name:
+      type: string
+      description: 推荐位名称（不存在/禁用时为空）
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/RecommendItemSnapshot'}, {type: "null"}]
+      description: 可售商品快照列表（按 sort,id 升序）
+RecommendAdminListRequest:
+  type: object
+  description: AdminListReq 后台推荐位列表请求（AdminAuth，全部状态）。
+  properties: {}
+  additionalProperties: false
+RecommendAdminListResponse:
+  type: object
+  description: AdminListRes 后台推荐位列表响应（全部状态，按 id 升序）。
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/RecommendPosition'}, {type: "null"}]
+      description: 推荐位列表
+RecommendAdminDetailRequest:
+  type: object
+  description: AdminDetailReq 后台推荐位详情请求（AdminAuth，全部状态，含推荐商品）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 推荐位 id
+RecommendAdminDetailResponse:
+  type: object
+  description: AdminDetailRes 后台推荐位详情响应。
+  allOf:
+    - $ref: '#/RecommendPosition'
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/RecommendItem'}, {type: "null"}]
+      description: 推荐商品关系列表（按 sort,id 升序）
+RecommendCreateRequest:
+  type: object
+  description: CreateReq 创建推荐位请求（AdminAuth + RequirePermission("recommend:create")）。
+  properties:
+    code:
+      type: string
+      description: 稳定业务标识（[a-z0-9][a-z0-9-]{0,63}，创建后不可变）
+    name:
+      type: string
+      description: 推荐位名称（trim 后非空且 ≤64 字符）
+    status:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 1 启用 / 0 禁用，默认 1
+RecommendCreateResponse:
+  type: object
+  description: CreateRes 创建推荐位响应。
+  allOf:
+    - $ref: '#/RecommendPosition'
+RecommendUpdateRequest:
+  type: object
+  description: UpdateReq 更新推荐位请求（AdminAuth + RequirePermission("recommend:update")，仅 name/status，不改 code）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 推荐位 id
+    name:
+      type: [string, "null"]
+      description: 推荐位名称（trim 后非空且 ≤64 字符）
+    status:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 1 启用 / 0 禁用
+RecommendUpdateResponse:
+  type: object
+  description: UpdateRes 更新推荐位响应。
+  allOf:
+    - $ref: '#/RecommendPosition'
+RecommendDeleteRequest:
+  type: object
+  description: DeleteReq 删除推荐位请求（AdminAuth + RequirePermission("recommend:delete")，物理删除 + 级联推荐商品）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 推荐位 id
+RecommendDeleteResponse:
+  type: object
+  description: DeleteRes 删除推荐位响应。
+  properties: {}
+  additionalProperties: false
+RecommendAddItemRequest:
+  type: object
+  description: AddItemReq 添加推荐商品请求（AdminAuth + RequirePermission("recommend:item")）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 推荐位 id
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 商品 id（必须存在）
+    sort:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 展示顺序，默认 0
+RecommendAddItemResponse:
+  type: object
+  description: AddItemRes 添加推荐商品响应。
+  allOf:
+    - $ref: '#/RecommendItem'
+RecommendRemoveItemRequest:
+  type: object
+  description: RemoveItemReq 移除推荐商品请求（AdminAuth + RequirePermission("recommend:item")）。
+  required:
+    - id
+    - product_id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 推荐位 id
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 商品 id
+RecommendRemoveItemResponse:
+  type: object
+  description: RemoveItemRes 移除推荐商品响应。
+  properties: {}
+  additionalProperties: false
+RecommendUpdateSortRequest:
+  type: object
+  description: UpdateSortReq 调整推荐商品排序请求（AdminAuth + RequirePermission("recommend:item")）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 推荐位 id
+    product_ids:
+      type: array
+      items:
+        type: integer
+        format: int64
+        x-go-type: int64
+      description: 按目标顺序排列的商品 id 列表（非空、无重复，必须恰好覆盖该推荐位全部已加入商品）
+RecommendUpdateSortResponse:
+  type: object
+  description: UpdateSortRes 调整推荐商品排序响应。
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/RecommendItem'}, {type: "null"}]
+      description: 排序后的推荐商品关系列表（按 sort,id 升序）
+Refund:
+  type: object
+  description: Refund 退款申请（查询与写接口复用）。
+  required:
+    - id
+    - order_id
+    - user_id
+    - status
+    - amount
+    - reason
+    - review_reason
+    - reviewed_by
+    - reviewed_at
+    - execute_reason
+    - executed_by
+    - executed_at
+    - created_at
+    - updated_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 退款申请 id
+    order_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 订单 id（软引用）
+    user_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 申请者（订单所有者）id
+    status:
+      type: string
+      enum: [applying, pending_refund, refund_failed, review_rejected, revoked, refund_succeeded, closed]
+      x-enum-labels:
+        applying: 申请中（DB 10）
+        pending_refund: 待退款（DB 20）
+        refund_failed: 退款失败（DB 30）
+        review_rejected: 审核拒绝（DB 40，终态）
+        revoked: 已撤销（DB 50，终态）
+        refund_succeeded: 退款成功（DB 60，终态）
+        closed: 已关闭（DB 70，终态）
+      description: 状态：applying/pending_refund/refund_failed/review_rejected/revoked/refund_succeeded/closed
+    amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 退款金额（整数分，= 订单 total_amount 快照，服务端派生）
+    reason:
+      type: string
+      description: 申请原因
+    review_reason:
+      type: string
+      description: 审核原因
+    reviewed_by:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 审核管理员 id（可空）
+    reviewed_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 审核时间（可空）；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    execute_reason:
+      type: string
+      description: 执行/关闭原因
+    executed_by:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 执行/关闭管理员 id（可空）
+    executed_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 执行/关闭时间（可空）；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    updated_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 更新时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+RefundApplyRequest:
+  type: object
+  description: ApplyReq 发起退款申请请求（仅本人、已支付未发货订单）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 订单 id
+    reason:
+      type: string
+      description: 申请原因（必填）
+RefundApplyResponse:
+  type: object
+  description: ApplyRes 发起退款申请响应。
+  allOf:
+    - $ref: '#/Refund'
+RefundRevokeRequest:
+  type: object
+  description: RevokeReq 撤销退款申请请求（仅本人、申请中）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 退款申请 id
+RefundRevokeResponse:
+  type: object
+  description: RevokeRes 撤销退款申请响应。
+  allOf:
+    - $ref: '#/Refund'
+RefundDetailRequest:
+  type: object
+  description: DetailReq 查询本人退款详情请求。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 退款申请 id
+RefundDetailResponse:
+  type: object
+  description: DetailRes 退款详情响应。
+  allOf:
+    - $ref: '#/Refund'
+RefundListRequest:
+  type: object
+  description: ListReq 查询本人退款记录列表请求（可选 order_id 过滤）。
+  properties:
+    order_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 按订单过滤；<=0 忽略
+RefundListResponse:
+  type: object
+  description: ListRes 退款记录列表响应。
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/Refund'}, {type: "null"}]
+      description: 退款记录列表（按 id 倒序）
+RefundAdminListRequest:
+  type: object
+  description: AdminListReq 后台退款分页列表请求（只读，持 refund:list）。
+  properties:
+    page:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 页码，默认 1；<1 或非整数返回 400
+    size:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 每页数量，默认 20、上限 100；越界或非整数返回 400
+    order_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 订单 id，精确匹配；<=0 返回 400
+    user_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 用户 id，精确匹配；<=0 返回 400
+    status:
+      type: string
+      enum: [applying, pending_refund, refund_failed, review_rejected, revoked, refund_succeeded, closed]
+      x-enum-labels:
+        applying: 申请中（DB 10）
+        pending_refund: 待退款（DB 20）
+        refund_failed: 退款失败（DB 30）
+        review_rejected: 审核拒绝（DB 40，终态）
+        revoked: 已撤销（DB 50，终态）
+        refund_succeeded: 退款成功（DB 60，终态）
+        closed: 已关闭（DB 70，终态）
+      description: 状态字符串枚举，非法返回 400
+RefundAdminListResponse:
+  type: object
+  description: AdminListRes 后台退款分页列表响应。
+  required:
+    - items
+    - total
+    - page
+    - size
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/Refund'}, {type: "null"}]
+      description: 退款列表（按 id 倒序）
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 总记录数
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量
+RefundAdminDetailRequest:
+  type: object
+  description: AdminDetailReq 后台退款详情请求（只读，持 refund:view）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 退款申请 id
+RefundAdminDetailResponse:
+  type: object
+  description: AdminDetailRes 后台退款详情响应。
+  allOf:
+    - $ref: '#/Refund'
+RefundListAuditsRequest:
+  type: object
+  description: ListAuditsReq 查询退款审计记录请求（只读，持 refund:view）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 退款申请 id
+RefundListAuditsResponse:
+  type: object
+  description: ListAuditsRes 退款审计记录响应。
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/RefundAudit'}, {type: "null"}]
+      description: 审计记录列表（按 id 升序）
+RefundAudit:
+  type: object
+  description: RefundAudit 退款审计记录（append-only，不可修改删除）。
+  required:
+    - id
+    - refund_id
+    - action
+    - operator_type
+    - operator_id
+    - operator_username
+    - before_status
+    - after_status
+    - reason
+    - created_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 审计记录 id
+    refund_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 退款申请 id
+    action:
+      type: string
+      enum: [apply, review_approve, review_reject, execute_success, execute_failure, close, revoke]
+      description: 动作：apply/review_approve/review_reject/execute_success/execute_failure/close/revoke
+    operator_type:
+      type: integer
+      format: int64
+      x-go-type: int
+      enum: [1, 2]
+      x-enum-labels:
+        "1": 用户
+        "2": 管理员
+      description: 操作者类型：1=user、2=admin
+    operator_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 操作者 id
+    operator_username:
+      type: string
+      description: 操作者用户名快照
+    before_status:
+      type: integer
+      format: int64
+      x-go-type: int
+      enum: [0, 10, 20, 30, 40, 50, 60, 70]
+      x-enum-labels:
+        "0": 无前置状态（apply）
+        "10": 申请中
+        "20": 待退款
+        "30": 退款失败
+        "40": 审核拒绝
+        "50": 已撤销
+        "60": 退款成功
+        "70": 已关闭
+      description: 操作前状态（apply 为 0）
+    after_status:
+      type: integer
+      format: int64
+      x-go-type: int
+      enum: [10, 20, 30, 40, 50, 60, 70]
+      x-enum-labels:
+        "10": 申请中
+        "20": 待退款
+        "30": 退款失败
+        "40": 审核拒绝
+        "50": 已撤销
+        "60": 退款成功
+        "70": 已关闭
+      description: 操作后状态
+    reason:
+      type: string
+      description: 原因
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+RefundReviewRequest:
+  type: object
+  description: ReviewReq 审核退款申请请求（后台，持 refund:review）。
+  required:
+    - id
+    - result
+    - reason
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 退款申请 id
+    result:
+      type: string
+      enum: [approve, reject]
+      x-enum-labels:
+        approve: 通过
+        reject: 拒绝
+      x-go-validate: required
+      description: 审核结果：approve/reject
+    reason:
+      type: string
+      x-go-validate: required
+      description: 审核原因
+RefundReviewResponse:
+  type: object
+  description: ReviewRes 审核退款申请响应。
+  allOf:
+    - $ref: '#/Refund'
+RefundExecuteRequest:
+  type: object
+  description: ExecuteReq 执行退款请求（后台，持 refund:execute；人工 Mock 确认结果）。
+  required:
+    - id
+    - result
+    - reason
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 退款申请 id
+    result:
+      type: string
+      enum: [success, failure]
+      x-enum-labels:
+        success: 退款成功
+        failure: 退款失败
+      x-go-validate: required
+      description: 执行结果：success/failure
+    reason:
+      type: string
+      x-go-validate: required
+      description: 执行结果原因
+RefundExecuteResponse:
+  type: object
+  description: ExecuteRes 执行退款响应。
+  allOf:
+    - $ref: '#/Refund'
+RefundCloseRequest:
+  type: object
+  description: CloseReq 关闭退款请求（后台，持 refund:execute；仅退款失败→已关闭）。
+  required:
+    - id
+    - reason
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 退款申请 id
+    reason:
+      type: string
+      x-go-validate: required
+      description: 关闭原因
+RefundCloseResponse:
+  type: object
+  description: CloseRes 关闭退款响应。
+  allOf:
+    - $ref: '#/Refund'
+ReviewItem:
+  type: object
+  description: ReviewItem 公开评价条目（仅 status=published，供商品详情页公开列表）。
+  required:
+    - id
+    - product_id
+    - sku_id
+    - rating
+    - content
+    - user_id
+    - created_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 评价 id
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 商品 id
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: SKU id
+    rating:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 星级 1-5
+    content:
+      type: string
+      description: 评价内容
+    user_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 买家用户 id
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+Review:
+  type: object
+  description: Review 完整评价条目（含状态与订单项，供本人列表与写接口响应）。
+  required:
+    - id
+    - user_id
+    - order_item_id
+    - product_id
+    - sku_id
+    - rating
+    - content
+    - status
+    - created_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 评价 id
+    user_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 归属用户 id
+    order_item_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 订单项 id
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 商品 id
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: SKU id
+    rating:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 星级 1-5
+    content:
+      type: string
+      description: 评价内容
+    status:
+      type: string
+      enum: [published, taken_down, deleted]
+      x-enum-labels:
+        published: 公开（DB 1）
+        taken_down: 已下架（DB 2）
+        deleted: 已删除（DB 3）
+      description: 状态：published/taken_down/deleted
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+ReviewListRequest:
+  type: object
+  description: ListReq 商品公开评价列表与汇总请求（无需 token）。
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      description: 商品 id
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 页码，默认 1
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量，默认 20，最大 100
+ReviewListResponse:
+  type: object
+  description: ListRes 商品公开评价列表与汇总响应（仅 published，按 id 倒序）。
+  required:
+    - items
+    - page
+    - size
+    - total
+    - avg_rating
+    - count
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/ReviewItem'}, {type: "null"}]
+      description: 评价列表（仅 published）
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 已发布评价总数
+    avg_rating:
+      type: number
+      format: double
+      x-go-type: float64
+      description: 平均分（1 位小数）
+    count:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 已发布评价条数
+ReviewCreateRequest:
+  type: object
+  description: CreateReq 提交评价请求（仅登录用户，作用于 Principal.UserID）。 归属字段（user_id/product_id/sku_id）由服务端从 Principal 与订单项推导，不信任客户端提交。
+  properties:
+    order_item_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 订单项 id（必填，缺失或 ≤0 返回 400）
+    rating:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 星级 1-5（越界返回 10004）
+    content:
+      type: string
+      description: 评价内容（trim 后非空且 ≤500 字符）
+ReviewCreateResponse:
+  type: object
+  description: CreateRes 提交评价响应。
+  allOf:
+    - $ref: '#/Review'
+ReviewMyListRequest:
+  type: object
+  description: MyListReq 本人全部评价列表请求（仅登录用户，含全部状态）。
+  properties:
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 页码，默认 1
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量，默认 20，最大 100
+ReviewMyListResponse:
+  type: object
+  description: MyListRes 本人全部评价列表响应（含全部状态，按 id 倒序）。
+  required:
+    - items
+    - total
+    - page
+    - size
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/Review'}, {type: "null"}]
+      description: 本人评价列表
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 总数量
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量
+ReviewUpdateRequest:
+  type: object
+  description: UpdateReq 修改本人评价请求（仅本人且 status=published 可改）。
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      description: 评价 id
+    rating:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 星级 1-5（越界返回 10004）
+    content:
+      type: string
+      description: 评价内容（trim 后非空且 ≤500 字符）
+ReviewUpdateResponse:
+  type: object
+  description: UpdateRes 修改本人评价响应。
+  allOf:
+    - $ref: '#/Review'
+ReviewDeleteRequest:
+  type: object
+  description: DeleteReq 删除本人评价请求（仅本人，published → deleted 软删除）。
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      description: 评价 id
+ReviewDeleteResponse:
+  type: object
+  description: DeleteRes 删除本人评价响应。
+  allOf:
+    - $ref: '#/Review'
+ReviewTakeDownRequest:
+  type: object
+  description: TakeDownReq 下架违规评价请求（仅管理员，持 review:take_down，published → taken_down）。
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      description: 评价 id
+ReviewTakeDownResponse:
+  type: object
+  description: TakeDownRes 下架违规评价响应。
+  allOf:
+    - $ref: '#/Review'
+Sku:
+  type: object
+  description: Sku 商品 SKU 结构，前台/后台商品详情内嵌复用。
+  required:
+    - id
+    - product_id
+    - name
+    - price
+    - status
+    - created_at
+    - updated_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: SKU id（稳定引用键，不重用）
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 所属商品 id
+    name:
+      type: string
+      description: SKU 名称
+    price:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 价格（整数分）
+    status:
+      type: string
+      enum: [enabled, disabled]
+      x-enum-labels:
+        enabled: 启用
+        disabled: 禁用
+      description: 状态：enabled/disabled
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    updated_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 更新时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+SkuCreateRequest:
+  type: object
+  description: CreateReq 创建 SKU 请求（product_id 在请求体，指向必须存在的商品）。
+  required:
+    - product_id
+    - name
+    - price
+  properties:
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-go-validate: required
+      description: 所属商品 id（必须存在）
+    name:
+      type: string
+      x-go-validate: required
+      description: SKU 名称，非空且不超过 128 字符
+    price:
+      oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+      x-go-type: json.Number
+      x-go-validate: required
+      description: 价格（整数分，0~99999999）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+    status:
+      type: [string, "null"]
+      enum: [enabled, disabled, null]
+      x-enum-labels:
+        enabled: 启用
+        disabled: 禁用
+      description: 状态：enabled/disabled，默认 enabled
+SkuCreateResponse:
+  type: object
+  description: CreateRes 创建 SKU 响应。
+  allOf:
+    - $ref: '#/Sku'
+SkuUpdateRequest:
+  type: object
+  description: UpdateReq 更新 SKU 请求（product_id 不可变）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: SKU id
+    name:
+      type: [string, "null"]
+      description: SKU 名称，非空且不超过 128 字符
+    price:
+      oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+      x-go-type: json.Number
+      description: 价格（整数分，0~99999999）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+    status:
+      type: [string, "null"]
+      enum: [enabled, disabled, null]
+      x-enum-labels:
+        enabled: 启用
+        disabled: 禁用
+      description: 状态：enabled/disabled
+SkuUpdateResponse:
+  type: object
+  description: UpdateRes 更新 SKU 响应。
+  allOf:
+    - $ref: '#/Sku'
+SkuDeleteRequest:
+  type: object
+  description: DeleteReq 删除 SKU 请求（物理删除）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: SKU id
+SkuDeleteResponse:
+  type: object
+  description: DeleteRes 删除 SKU 响应（无业务字段）。
+  properties: {}
+  additionalProperties: false
+UploadFrontendTokenRequest:
+  type: object
+  description: FrontendTokenReq 前台签发七牛云上传凭证请求（Auth：登录用户）。 filename 与 content_type 均可选：filename 含扩展名，用于扩展名预校验与生成 key； content_type 为客户端声明 MIME，用于预校验。大小上限固化进 token 的 fsizeLimit 由七牛服务端执行。
+  properties:
+    filename:
+      type: string
+      description: 文件名（含扩展名，可选）
+    content_type:
+      type: string
+      description: 客户端声明 MIME 类型（可选）
+UploadAdminTokenRequest:
+  type: object
+  description: AdminTokenReq 后台签发七牛云上传凭证请求（AdminAuth：管理员）。
+  properties:
+    filename:
+      type: string
+      description: 文件名（含扩展名，可选）
+    content_type:
+      type: string
+      description: 客户端声明 MIME 类型（可选）
+UploadTokenResponse:
+  type: object
+  description: TokenRes 上传凭证响应：客户端用 token 向 upload_url 直传文件，上传成功后访问 final_url。
+  required:
+    - token
+    - key
+    - upload_url
+    - domain
+    - final_url
+    - expires_at
+  properties:
+    token:
+      type: string
+      description: 七牛云上传凭证（客户端直传用）
+    key:
+      type: string
+      description: 后端预生成的存储 key（写入 token scope）
+    upload_url:
+      type: string
+      description: 上传主机（按 region 映射）
+    domain:
+      type: string
+      description: 对外访问域名
+    final_url:
+      type: string
+      description: 上传成功后可直接访问的地址（domain/key）
+    expires_at:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 凭证过期时间（unix 秒）
+Success:
+  type: object
+  description: 统一成功响应包装：{code:0, message:"OK", data:<业务数据>}。data 的具体 Schema 由各 operation 的 allOf 覆盖；data 为 null 时表示该操作无返回体。
+  required:
+    - code
+    - message
+    - data
+  properties:
+    code:
+      type: integer
+      const: 0
+      description: 业务码，成功恒为 0
+    message:
+      type: string
+      const: OK
+      description: 成功文案，恒为 OK
+    data:
+      description: 业务数据；类型由具体 operation 指定，可为 null
+Error:
+  type: object
+  description: 统一失败响应：{code:<业务错误码>, message:<码表文案>, data:null}。客户端必须以 code 判定错误类型，不得依赖 message 文本。
+  required:
+    - code
+    - message
+    - data
+  properties:
+    code:
+      type: integer
+      minimum: 1
+      description: 业务错误码；完整注册表见 components/error-codes.yaml
+    message:
+      type: string
+      description: 码表固定文案，不拼接字段细节
+    data:
+      type: "null"
+      description: 失败时恒为 null

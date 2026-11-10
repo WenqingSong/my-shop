@@ -1,0 +1,428 @@
+# 本文件是 openapi/surgecart.openapi.yaml 的分域视图，由 tools/openapi-gen 生成，禁止手工编辑。
+# OpenAPI 3.1 的 Path Item 不支持 $ref，因此 paths 必须内联在主文件；本文件用于分域评审与一致性校验。
+/register:
+  post:
+    tags:
+      - IAM
+    summary: 注册新用户
+    description: 公开接口，无需认证。
+    operationId: userRegister
+    security: []
+    x-auth: public
+    x-handler: iam.Register
+    x-source: routes_frontend.go
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              username:
+                type: string
+                description: 用户名，3~24 位大小写字母或数字
+              password:
+                type: string
+                description: 密码，8~24 位
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/UserRegisterResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 2001
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/login:
+  post:
+    tags:
+      - IAM
+    summary: 用户名密码登录
+    description: 公开接口，无需认证。
+    operationId: userLogin
+    security: []
+    x-auth: public
+    x-handler: iam.Login
+    x-source: routes_frontend.go
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              username:
+                type: string
+                description: 用户名
+              password:
+                type: string
+                description: 密码
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/UserLoginResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 2002
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/refresh:
+  post:
+    tags:
+      - IAM
+    summary: 用 refresh token 换取新双 token
+    description: 公开接口，无需认证。
+    operationId: userRefresh
+    security: []
+    x-auth: public
+    x-handler: iam.Refresh
+    x-source: routes_frontend.go
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              refresh_token:
+                type: string
+                description: refresh token 明文
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/UserRefreshResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 2012
+          - 2013
+          - 2014
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/me:
+  get:
+    tags:
+      - IAM
+    summary: 获取当前登录用户
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: userMe
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: iam.Me
+    x-source: routes_frontend.go
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/UserMeResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/sessions:
+  get:
+    tags:
+      - IAM
+    summary: 会话列表
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: userListSessions
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: iam.ListSessions
+    x-source: routes_frontend.go
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/UserListSessionsResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/sessions/{sid}:
+  delete:
+    tags:
+      - IAM
+    summary: 撤销指定会话
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: userRevokeSession
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: iam.RevokeSession
+    x-source: routes_frontend.go
+    parameters:
+      - name: sid
+        in: path
+        required: true
+        schema:
+          type: string
+        description: 目标会话标识
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。handler 显式返回 nil，data 为 null（不是空对象 {}）。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      type: "null"
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 2011
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/sessions/revoke-others:
+  post:
+    tags:
+      - IAM
+    summary: 撤销其他会话
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: userRevokeOthers
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: iam.RevokeOthers
+    x-source: routes_frontend.go
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。handler 显式返回 nil，data 为 null（不是空对象 {}）。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      type: "null"
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/sessions/revoke-all:
+  post:
+    tags:
+      - IAM
+    summary: 全部退出
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: userRevokeAll
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: iam.RevokeAll
+    x-source: routes_frontend.go
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。handler 显式返回 nil，data 为 null（不是空对象 {}）。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      type: "null"
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/logout:
+  post:
+    tags:
+      - IAM
+    summary: 登出当前会话
+    description: 认证方式：仅校验 JWT 签名、有效期与 type=user，不查询 Redis 会话；会话已撤销时仍可到达 handler（用于幂等登出）。 仅验签登出：JWT 签名与 type 合法即可到达 handler，不查询 Redis 会话，因此会话已撤销时重复登出仍返回成功（幂等）。
+    operationId: userLogout
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-auth-mode: signature_only
+    x-handler: iam.Logout
+    x-source: routes_frontend.go
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。handler 显式返回 nil，data 为 null（不是空对象 {}）。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      type: "null"
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "500":
+        $ref: '#/components/responses/InternalError'

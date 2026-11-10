@@ -1,0 +1,272 @@
+# 本文件是 openapi/surgecart.openapi.yaml 的分域视图，由 tools/openapi-gen 生成，禁止手工编辑。
+# OpenAPI 3.1 的 Path Item 不支持 $ref，因此 paths 必须内联在主文件；本文件用于分域评审与一致性校验。
+/admin/inventories/{sku_id}:
+  get:
+    tags:
+      - 库存
+    summary: 查询库存
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。该接口仅要求管理员身份，未绑定权限码（RBAC 只覆盖写侧粒度）。
+    operationId: inventoryGet
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-handler: inventory.Get
+    x-source: routes_admin.go
+    parameters:
+      - name: sku_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: SKU id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/InventoryGetResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 5001
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/inventories/{sku_id}/logs:
+  get:
+    tags:
+      - 库存
+    summary: 查询库存流水
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。该接口仅要求管理员身份，未绑定权限码（RBAC 只覆盖写侧粒度）。
+    operationId: inventoryListLogs
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-handler: inventory.ListLogs
+    x-source: routes_admin.go
+    parameters:
+      - name: sku_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: SKU id
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int
+          default: 1
+        description: 页码，默认 1
+        x-pagination-mode: clamp
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int
+          default: 20
+        description: 每页条数，默认 20，最大 100
+        x-pagination-mode: clamp
+    x-pagination-mode: clamp
+    x-pagination-contract: 历史行为：page<1 归一为 1；size<1 归一为 20；size>100 归一为 100；不返回 400。
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/InventoryListLogsResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 5001
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/inventories/{sku_id}/increase:
+  post:
+    tags:
+      - 库存
+    summary: 增加库存
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`inventory:increase`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: inventoryIncrease
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: inventory:increase
+    x-handler: inventory.Increase
+    x-source: routes_admin.go
+    parameters:
+      - name: sku_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: SKU id
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              quantity:
+                oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+                x-go-type: json.Number
+                description: 增加数量（正整数）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/InventoryIncreaseResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 5001
+          - 6002
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/inventories/{sku_id}/deduct:
+  post:
+    tags:
+      - 库存
+    summary: 扣减库存
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`inventory:deduct`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: inventoryDeduct
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: inventory:deduct
+    x-handler: inventory.Deduct
+    x-source: routes_admin.go
+    parameters:
+      - name: sku_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: SKU id
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              quantity:
+                oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+                x-go-type: json.Number
+                description: 扣减数量（正整数）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/InventoryDeductResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 5001
+          - 6001
+          - 6002
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'

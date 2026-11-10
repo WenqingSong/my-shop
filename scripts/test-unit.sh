@@ -46,4 +46,8 @@ go test -run 'TestRuntimeContextDetachesSignalCancellation|TestForceCloseWindow|
 # 注：扫描器 ctx 取消与 B4 秒杀装配/互斥/恢复用例已随 ./internal/worker/... 整包执行，
 # 不再指向 ./internal/cmd（该包没有同名用例，旧命令是空跑）。
 
+# B1-02：142 条常驻路由锁定 + 路由↔OpenAPI 双向比对 + 契约生成器（纯内存，不连接 DB/Redis）。
+go test -count=1 -run 'TestRoute|TestContractPlannedNotRouted' ./internal/cmd/...
+go test -count=1 ./tools/openapi-gen/...
+
 log_info "单元测试全部通过"

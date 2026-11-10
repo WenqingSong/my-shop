@@ -1,0 +1,234 @@
+# 本文件是 openapi/surgecart.openapi.yaml 的分域视图，由 tools/openapi-gen 生成，禁止手工编辑。
+# OpenAPI 3.1 的 Path Item 不支持 $ref，因此 paths 必须内联在主文件；本文件用于分域评审与一致性校验。
+/admin/skus:
+  post:
+    tags:
+      - SKU
+    summary: 创建 SKU
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`sku:create`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: skuCreate
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: sku:create
+    x-handler: sku.Create
+    x-source: routes_admin.go
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              product_id:
+                type: integer
+                format: int64
+                x-go-type: int64
+                x-go-validate: required
+                description: 所属商品 id（必须存在）
+              name:
+                type: string
+                x-go-validate: required
+                description: SKU 名称，非空且不超过 128 字符
+              price:
+                oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+                x-go-type: json.Number
+                x-go-validate: required
+                description: 价格（整数分，0~99999999）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+              status:
+                type: [string, "null"]
+                enum: [enabled, disabled, null]
+                x-enum-labels:
+                  enabled: 启用
+                  disabled: 禁用
+                description: 状态：enabled/disabled，默认 enabled
+            required:
+              - product_id
+              - name
+              - price
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    x-known-issue:
+      - id: B1-02-D1
+        summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
+        actual_http_status: 500
+        actual_business_code: 51
+        remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/SkuCreateResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 4001
+          - 5001
+          - 5002
+          - 5003
+          - 5004
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/skus/{id}:
+  put:
+    tags:
+      - SKU
+    summary: 更新 SKU
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`sku:update`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: skuUpdate
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: sku:update
+    x-handler: sku.Update
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: SKU id
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              name:
+                type: [string, "null"]
+                description: SKU 名称，非空且不超过 128 字符
+              price:
+                oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+                x-go-type: json.Number
+                description: 价格（整数分，0~99999999）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+              status:
+                type: [string, "null"]
+                enum: [enabled, disabled, null]
+                x-enum-labels:
+                  enabled: 启用
+                  disabled: 禁用
+                description: 状态：enabled/disabled
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/SkuUpdateResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 5001
+          - 5002
+          - 5003
+          - 5004
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'
+  delete:
+    tags:
+      - SKU
+    summary: 删除 SKU
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`sku:delete`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: skuDelete
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: sku:delete
+    x-handler: sku.Delete
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: SKU id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/SkuDeleteResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 5001
+          - 5005
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'

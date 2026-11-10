@@ -1,0 +1,74 @@
+# 本文件是 openapi/surgecart.openapi.yaml 的分域视图，由 tools/openapi-gen 生成，禁止手工编辑。
+# OpenAPI 3.1 的 Path Item 不支持 $ref，因此 paths 必须内联在主文件；本文件用于分域评审与一致性校验。
+/health:
+  get:
+    tags:
+      - Health
+    summary: Liveness probe
+    description: 公开接口，无需认证。
+    operationId: healthLiveness
+    security: []
+    x-auth: public
+    x-handler: health.Liveness
+    x-source: internal/cmd/cmd.go
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/HealthLivenessResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1005
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "500":
+        $ref: '#/components/responses/InternalError'
+      "503":
+        $ref: '#/components/responses/ServiceUnavailable'
+/ready:
+  get:
+    tags:
+      - Health
+    summary: Readiness probe
+    description: 公开接口，无需认证。
+    operationId: healthReadiness
+    security: []
+    x-auth: public
+    x-handler: health.Readiness
+    x-source: internal/cmd/cmd.go
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/HealthReadinessResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1005
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "500":
+        $ref: '#/components/responses/InternalError'
+      "503":
+        $ref: '#/components/responses/ServiceUnavailable'

@@ -1,0 +1,442 @@
+# 本文件是 openapi/surgecart.openapi.yaml 的分域视图，由 tools/openapi-gen 生成，禁止手工编辑。
+# OpenAPI 3.1 的 Path Item 不支持 $ref，因此 paths 必须内联在主文件；本文件用于分域评审与一致性校验。
+/flash-sales/{id}/orders:
+  post:
+    tags:
+      - 秒杀
+    summary: 秒杀下单
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: flashSaleCreateOrder
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: flashsale.CreateOrder
+    x-source: routes_frontend.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 活动 id
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              sku_id:
+                type: integer
+                format: int64
+                x-go-type: int64
+                description: SKU id（必须为该活动绑定的 SKU）
+              idempotency_key:
+                type: string
+                description: 幂等键（同键同内容幂等返回既有请求状态，同键不同内容 12005）
+    x-pagination-mode: none
+    x-idempotency:
+      mode: body
+      field: idempotency_key
+      required: false
+      header_supported: false
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/FlashSaleCreateOrderResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 1005
+          - 12001
+          - 12002
+          - 12003
+          - 12004
+          - 12005
+          - 12006
+          - 12007
+          - 12009
+          - 12010
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "429":
+        $ref: '#/components/responses/TooManyRequests'
+      "500":
+        $ref: '#/components/responses/InternalError'
+      "503":
+        $ref: '#/components/responses/ServiceUnavailable'
+/flash-sales/{id}/orders/result:
+  get:
+    tags:
+      - 秒杀
+    summary: 查询秒杀下单结果
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: flashSaleGetOrderResult
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: flashsale.GetOrderResult
+    x-source: routes_frontend.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 活动 id
+      - name: idempotency_key
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 幂等键
+    x-pagination-mode: none
+    x-idempotency:
+      mode: query
+      field: idempotency_key
+      required: false
+      header_supported: false
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/FlashSaleGetOrderResultResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 1004
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/flash-sales:
+  post:
+    tags:
+      - 秒杀
+    summary: 创建秒杀活动
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`flash_sale:create`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: flashSaleCreate
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: flash_sale:create
+    x-handler: flashsale.Create
+    x-source: routes_admin.go
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+                description: 活动名，trim 后 1~64 字符
+              start_time:
+                type: [string, "null"]
+                x-go-type: gtime.Time
+                x-format: gtime-lenient
+                description: 开始时间（必须早于结束时间）；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+              end_time:
+                type: [string, "null"]
+                x-go-type: gtime.Time
+                x-format: gtime-lenient
+                description: 结束时间；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+              skus:
+                type: array
+                items:
+                  oneOf: [{$ref: '#/components/schemas/FlashSaleActivitySkuInput'}, {type: "null"}]
+                description: SKU 绑定列表（非空）
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/FlashSaleCreateResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 5001
+          - 12001
+          - 12007
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/flash-sales/{id}:
+  put:
+    tags:
+      - 秒杀
+    summary: 更新秒杀活动
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`flash_sale:update`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: flashSaleUpdate
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: flash_sale:update
+    x-handler: flashsale.Update
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 活动 id
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              name:
+                type: [string, "null"]
+                description: 活动名
+              status:
+                type: [string, "null"]
+                description: 状态：enabled/disabled
+              start_time:
+                type: [string, "null"]
+                x-go-type: gtime.Time
+                x-format: gtime-lenient
+                description: 开始时间；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+              end_time:
+                type: [string, "null"]
+                x-go-type: gtime.Time
+                x-format: gtime-lenient
+                description: 结束时间；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+              skus:
+                type: array
+                items:
+                  oneOf: [{$ref: '#/components/schemas/FlashSaleActivitySkuInput'}, {type: "null"}]
+                description: SKU 绑定列表（提供则仅更新已存在绑定的秒杀价/库存；不允许新增或删除绑定，sku_id 必须已绑定该活动）
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/FlashSaleUpdateResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 5001
+          - 12001
+          - 12007
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/flash-sales/requests/{id}/repair:
+  post:
+    tags:
+      - 秒杀
+    summary: 修复秒杀请求（dead→queued）
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`flash_sale:repair`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: flashSaleRepairRequest
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: flash_sale:repair
+    x-handler: flashsale.RepairRequest
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 请求 id
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              target_status:
+                type: string
+                enum: [queued]
+                x-enum-labels:
+                  queued: 重新排队
+                description: 目标状态（仅支持 queued）
+              reason:
+                type: string
+                description: 修复原因（必填）
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/FlashSaleRepairRequestResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 1004
+          - 12008
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/flash-sales/requests/{id}/audits:
+  get:
+    tags:
+      - 秒杀
+    summary: 查询秒杀请求审计记录
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`flash_sale:repair`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: flashSaleListRequestAudits
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: flash_sale:repair
+    x-handler: flashsale.ListRequestAudits
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 请求 id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/FlashSaleListRequestAuditsResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+        scope: call-chain
+        note: controller→service→logic 调用链中实际引用的业务错误码 + 通用码；码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "500":
+        $ref: '#/components/responses/InternalError'

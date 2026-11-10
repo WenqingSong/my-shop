@@ -1,0 +1,558 @@
+# 本文件由 tools/openapi-gen 从 internal/codes/codes.go 自动生成，禁止手工编辑。
+# 错误码、HTTP 状态与 message 全部来自 codes.go；未做任何补全或推测。
+source: internal/codes/codes.go
+note: 错误码、HTTP 状态与 message 均直接来自 codes.go；未做任何补全或推测。
+codes:
+  - code: 7002
+    constant: CodeAddressDefaultConflict
+    http_status: 409
+    message: 默认地址冲突
+    domain: address
+  - code: 7001
+    constant: CodeAddressNotFound
+    http_status: 404
+    message: 地址不存在
+    domain: address
+  - code: 2003
+    constant: CodeAdminNotFound
+    http_status: 404
+    message: 管理员不存在
+    domain: iam
+    reused_by_domains:
+      - admin
+  - code: 2004
+    constant: CodeAdminUsernameExists
+    http_status: 409
+    message: 管理员用户名已存在
+    domain: iam
+    reused_by_domains:
+      - admin
+  - code: 16002
+    constant: CodeArticleInvalidInput
+    http_status: 400
+    message: 文章内容非法
+    domain: article
+  - code: 16001
+    constant: CodeArticleNotFound
+    http_status: 404
+    message: 文章不存在
+    domain: article
+  - code: 14002
+    constant: CodeBannerInvalidInput
+    http_status: 400
+    message: 轮播图参数非法
+    domain: banner
+  - code: 14001
+    constant: CodeBannerNotFound
+    http_status: 404
+    message: 轮播图不存在
+    domain: banner
+  - code: 8002
+    constant: CodeCartInvalidQuantity
+    http_status: 400
+    message: 数量非法
+    domain: cart
+  - code: 8001
+    constant: CodeCartItemNotFound
+    http_status: 404
+    message: 购物车条目不存在
+    domain: cart
+  - code: 8003
+    constant: CodeCartSkuUnavailable
+    http_status: 409
+    message: 商品不可加购
+    domain: cart
+  - code: 3003
+    constant: CodeCategoryHasChildren
+    http_status: 409
+    message: 有子分类不能删除
+    domain: category
+    reused_by_domains:
+      - categories
+  - code: 3005
+    constant: CodeCategoryHasProducts
+    http_status: 409
+    message: 分类下存在商品，不能删除
+    domain: category
+    reused_by_domains:
+      - categories
+  - code: 3004
+    constant: CodeCategoryInvalidParent
+    http_status: 400
+    message: 父分类非法
+    domain: category
+    reused_by_domains:
+      - categories
+  - code: 3002
+    constant: CodeCategoryNameExists
+    http_status: 409
+    message: 同级重名
+    domain: category
+    reused_by_domains:
+      - categories
+  - code: 3001
+    constant: CodeCategoryNotFound
+    http_status: 404
+    message: 分类不存在
+    domain: category
+    reused_by_domains:
+      - categories
+  - code: 19004
+    constant: CodeCouponAlreadyClaimed
+    http_status: 409
+    message: 已领取该优惠券
+    domain: coupon
+  - code: 19006
+    constant: CodeCouponClaimSoldOut
+    http_status: 409
+    message: 优惠券已领完
+    domain: coupon
+  - code: 19005
+    constant: CodeCouponClaimUnavailable
+    http_status: 409
+    message: 优惠券暂不可领取
+    domain: coupon
+  - code: 19003
+    constant: CodeCouponNotFound
+    http_status: 404
+    message: 优惠券不存在
+    domain: coupon
+  - code: 19002
+    constant: CodeCouponTemplateInvalid
+    http_status: 400
+    message: 优惠券参数非法
+    domain: coupon
+  - code: 19001
+    constant: CodeCouponTemplateNotFound
+    http_status: 404
+    message: 优惠券模板不存在
+    domain: coupon
+  - code: 19007
+    constant: CodeCouponUnavailable
+    http_status: 409
+    message: 优惠券不可用
+    domain: coupon
+  - code: 11001
+    constant: CodeFavoriteProductUnavailable
+    http_status: 409
+    message: 商品不可收藏
+    domain: favorite
+  - code: 12001
+    constant: CodeFlashSaleActivityNotFound
+    http_status: 404
+    message: 秒杀活动不存在
+    domain: flashsale
+  - code: 12004
+    constant: CodeFlashSaleAlreadyPurchased
+    http_status: 409
+    message: 已参与该秒杀
+    domain: flashsale
+  - code: 12005
+    constant: CodeFlashSaleIdempotencyConflict
+    http_status: 409
+    message: 幂等键冲突
+    domain: flashsale
+  - code: 12007
+    constant: CodeFlashSaleInvalidArgument
+    http_status: 400
+    message: 秒杀活动参数非法
+    domain: flashsale
+  - code: 12002
+    constant: CodeFlashSaleNotInTimeWindow
+    http_status: 409
+    message: 秒杀活动不在进行中
+    domain: flashsale
+  - code: 12010
+    constant: CodeFlashSaleQueueFull
+    http_status: 429
+    message: 秒杀排队已满，请稍后重试
+    domain: flashsale
+  - code: 12009
+    constant: CodeFlashSaleRateLimited
+    http_status: 429
+    message: 请求过于频繁，请稍后重试
+    domain: flashsale
+  - code: 12008
+    constant: CodeFlashSaleRequestNotRepairable
+    http_status: 409
+    message: 秒杀请求不可修复
+    domain: flashsale
+  - code: 12006
+    constant: CodeFlashSaleSkuUnavailable
+    http_status: 409
+    message: 秒杀商品不可购买
+    domain: flashsale
+  - code: 12003
+    constant: CodeFlashSaleStockInsufficient
+    http_status: 409
+    message: 秒杀库存不足
+    domain: flashsale
+  - code: 1003
+    constant: CodeForbidden
+    http_status: 403
+    message: 禁止访问
+    domain: common
+  - code: 1000
+    constant: CodeInternalError
+    http_status: 500
+    message: 内部错误
+    domain: common
+    reused_by_domains:
+      - address
+      - admin
+      - article
+      - banner
+      - cart
+      - categories
+      - coupon
+      - dashboard
+      - favorite
+      - flashsale
+      - iam
+      - inventory
+      - like
+      - order
+      - product
+      - recommendation
+      - refund
+      - review
+      - sku
+  - code: 1001
+    constant: CodeInvalidArgument
+    http_status: 400
+    message: 参数错误
+    domain: common
+    reused_by_domains:
+      - address
+      - admin
+      - article
+      - cart
+      - categories
+      - coupon
+      - dashboard
+      - favorite
+      - flashsale
+      - iam
+      - like
+      - order
+      - product
+      - refund
+      - review
+      - sku
+  - code: 2002
+    constant: CodeInvalidCredentials
+    http_status: 401
+    message: 用户名或密码错误
+    domain: iam
+    reused_by_domains:
+      - admin
+  - code: 6001
+    constant: CodeInventoryInsufficient
+    http_status: 409
+    message: 库存不足
+    domain: inventory
+  - code: 6002
+    constant: CodeInventoryInvalidQuantity
+    http_status: 400
+    message: 库存数量非法
+    domain: inventory
+  - code: 13001
+    constant: CodeLikeProductUnavailable
+    http_status: 409
+    message: 商品不可点赞
+    domain: like
+  - code: 1004
+    constant: CodeNotFound
+    http_status: 404
+    message: 未找到
+    domain: common
+    reused_by_domains:
+      - flashsale
+  - code: 0
+    constant: CodeOK
+    http_status: 200
+    message: OK
+    domain: common
+    reused_by_domains:
+      - iam
+  - code: 9004
+    constant: CodeOrderCartEmpty
+    http_status: 400
+    message: 购物车无勾选商品
+    domain: order
+  - code: 9006
+    constant: CodeOrderIdempotencyConflict
+    http_status: 409
+    message: 幂等键冲突
+    domain: order
+  - code: 9005
+    constant: CodeOrderInvalidQuantity
+    http_status: 400
+    message: 购买数量非法
+    domain: order
+  - code: 9002
+    constant: CodeOrderInvalidStatusTransition
+    http_status: 409
+    message: 订单状态迁移非法
+    domain: order
+  - code: 9001
+    constant: CodeOrderNotFound
+    http_status: 404
+    message: 订单不存在
+    domain: order
+  - code: 9003
+    constant: CodeOrderSkuUnavailable
+    http_status: 409
+    message: 商品不可购买
+    domain: order
+  - code: 2010
+    constant: CodePermissionCodeExists
+    http_status: 409
+    message: 权限 code 已存在
+    domain: iam
+    reused_by_domains:
+      - admin
+  - code: 2009
+    constant: CodePermissionNotFound
+    http_status: 404
+    message: 权限不存在
+    domain: iam
+    reused_by_domains:
+      - admin
+  - code: 4007
+    constant: CodeProductCategoryDisabled
+    http_status: 400
+    message: 分类已禁用
+    domain: product
+  - code: 4004
+    constant: CodeProductCategoryNotLeaf
+    http_status: 400
+    message: 分类不是叶子分类
+    domain: product
+  - code: 4003
+    constant: CodeProductInvalidCategory
+    http_status: 400
+    message: 分类非法
+    domain: product
+  - code: 4002
+    constant: CodeProductInvalidPrice
+    http_status: 400
+    message: 价格非法
+    domain: product
+  - code: 4006
+    constant: CodeProductInvalidStatus
+    http_status: 400
+    message: 商品状态非法
+    domain: product
+  - code: 4005
+    constant: CodeProductInvalidStatusTransition
+    http_status: 409
+    message: 商品状态迁移非法
+    domain: product
+  - code: 4001
+    constant: CodeProductNotFound
+    http_status: 404
+    message: 商品不存在
+    domain: product
+    reused_by_domains:
+      - favorite
+      - flashsale
+      - like
+      - recommendation
+      - sku
+  - code: 15003
+    constant: CodeRecommendInvalidInput
+    http_status: 400
+    message: 推荐位参数非法
+    domain: recommendation
+  - code: 15005
+    constant: CodeRecommendItemDuplicate
+    http_status: 409
+    message: 该商品已加入此推荐位
+    domain: recommendation
+  - code: 15004
+    constant: CodeRecommendItemNotFound
+    http_status: 404
+    message: 推荐商品关系不存在
+    domain: recommendation
+  - code: 15006
+    constant: CodeRecommendItemSortMismatch
+    http_status: 409
+    message: 排序商品列表未覆盖全部已加入商品
+    domain: recommendation
+  - code: 15002
+    constant: CodeRecommendPositionCodeExists
+    http_status: 409
+    message: 推荐位标识已存在
+    domain: recommendation
+  - code: 15001
+    constant: CodeRecommendPositionNotFound
+    http_status: 404
+    message: 推荐位不存在
+    domain: recommendation
+  - code: 2013
+    constant: CodeRefreshTokenExpired
+    http_status: 401
+    message: refresh token 已过期
+    domain: iam
+  - code: 2012
+    constant: CodeRefreshTokenInvalid
+    http_status: 401
+    message: refresh token 无效
+    domain: iam
+  - code: 2014
+    constant: CodeRefreshTokenReuse
+    http_status: 401
+    message: refresh token 已失效，请重新登录
+    domain: iam
+  - code: 18004
+    constant: CodeRefundAlreadyExists
+    http_status: 409
+    message: 退款申请已存在
+    domain: refund
+  - code: 18002
+    constant: CodeRefundInvalidStatusTransition
+    http_status: 409
+    message: 退款状态迁移非法
+    domain: refund
+  - code: 18001
+    constant: CodeRefundNotFound
+    http_status: 404
+    message: 退款申请不存在
+    domain: refund
+  - code: 18003
+    constant: CodeRefundOrderNotRefundable
+    http_status: 409
+    message: 订单不可退款
+    domain: refund
+  - code: 18005
+    constant: CodeRefundShipConflict
+    http_status: 409
+    message: 退款与发货冲突
+    domain: refund
+    reused_by_domains:
+      - order
+  - code: 10003
+    constant: CodeReviewAlreadyExists
+    http_status: 409
+    message: 该订单项已评价
+    domain: review
+  - code: 10004
+    constant: CodeReviewInvalidInput
+    http_status: 400
+    message: 评价内容非法
+    domain: review
+  - code: 10002
+    constant: CodeReviewNotEligible
+    http_status: 409
+    message: 暂不可评价
+    domain: review
+  - code: 10001
+    constant: CodeReviewNotFound
+    http_status: 404
+    message: 评价不存在
+    domain: review
+  - code: 2008
+    constant: CodeRoleNameExists
+    http_status: 409
+    message: 角色名已存在
+    domain: iam
+    reused_by_domains:
+      - admin
+  - code: 2007
+    constant: CodeRoleNotFound
+    http_status: 404
+    message: 角色不存在
+    domain: iam
+    reused_by_domains:
+      - admin
+  - code: 2006
+    constant: CodeSelfOperationForbidden
+    http_status: 403
+    message: 不能操作自身
+    domain: iam
+    reused_by_domains:
+      - admin
+  - code: 1005
+    constant: CodeServiceUnavailable
+    http_status: 503
+    message: 服务不可用
+    domain: common
+    reused_by_domains:
+      - flashsale
+      - health
+  - code: 2011
+    constant: CodeSessionNotFound
+    http_status: 404
+    message: 会话不存在
+    domain: iam
+  - code: 5005
+    constant: CodeSkuHasInventory
+    http_status: 409
+    message: SKU 存在库存记录，不能删除
+    domain: sku
+  - code: 5002
+    constant: CodeSkuInvalidPrice
+    http_status: 400
+    message: 价格非法
+    domain: sku
+  - code: 5003
+    constant: CodeSkuInvalidStatus
+    http_status: 400
+    message: SKU 状态非法
+    domain: sku
+  - code: 5004
+    constant: CodeSkuNameExists
+    http_status: 409
+    message: SKU 名称已存在
+    domain: sku
+  - code: 5001
+    constant: CodeSkuNotFound
+    http_status: 404
+    message: SKU 不存在
+    domain: sku
+    reused_by_domains:
+      - cart
+      - flashsale
+      - inventory
+      - order
+  - code: 2005
+    constant: CodeSuperAdminProtected
+    http_status: 403
+    message: 超级管理员受保护
+    domain: iam
+    reused_by_domains:
+      - admin
+  - code: 1002
+    constant: CodeUnauthorized
+    http_status: 401
+    message: 未授权
+    domain: common
+    reused_by_domains:
+      - admin
+      - iam
+  - code: 17002
+    constant: CodeUploadConfigInvalid
+    http_status: 500
+    message: 上传服务配置错误
+    domain: upload
+  - code: 17001
+    constant: CodeUploadInvalidInput
+    http_status: 400
+    message: 文件类型或参数非法
+    domain: upload
+  - code: 17003
+    constant: CodeUploadTokenFailed
+    http_status: 500
+    message: 签发上传凭证失败
+    domain: upload
+  - code: 2015
+    constant: CodeUserNotFound
+    http_status: 404
+    message: 用户不存在
+    domain: iam
+  - code: 2001
+    constant: CodeUsernameExists
+    http_status: 409
+    message: 用户名已存在
+    domain: iam

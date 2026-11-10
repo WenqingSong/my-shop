@@ -1,0 +1,9 @@
+# Spectral ruleset（契约检查专用）。
+#
+# 关闭 oas3-unused-component 的原因：
+# 本契约按组件拆分，components.schemas 的每一项是指向 ./components/schemas.yaml 的 $ref，
+# Spectral 无法跨文件追踪「operation -> components -> 外部文件」的使用链，会产生成百上千条误报。
+# 真实的多余/缺失组件由 tools/openapi-gen -check 的 DTO 双向比对负责（缺一个即失败）。
+extends: ["spectral:oas"]
+rules:
+  oas3-unused-component: off
