@@ -14,11 +14,12 @@ import (
 // baselineVersion 是内嵌 baseline 迁移的版本号（14 位时间戳）。
 const baselineVersion = uint(20261001000001)
 
-// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + … + flash_sale_request_outbox + regions）。
-const latestMigrationVersion = uint(20261110000003)
+// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + … + regions + coupon_snapshot）。
+const latestMigrationVersion = uint(20261110000009)
 
-// businessTables 是 migration 应建立的 41 张业务表。
-// 注意顺序：sku_spec_values 通过外键引用 skus（ON DELETE CASCADE）与 product_spec_values（ON DELETE RESTRICT），
+// businessTables 是 migration 应建立的 47 张业务表。
+// 注意顺序：wallet_transactions 通过外键引用 wallet_accounts（ON DELETE RESTRICT），故排在 wallet_accounts 之前；
+// sku_spec_values 通过外键引用 skus（ON DELETE CASCADE）与 product_spec_values（ON DELETE RESTRICT），
 // product_spec_values 引用 product_specs，product_specs 引用 products，故三者必须排在 skus/products 之前；
 // order_items 通过外键引用 orders（ON DELETE CASCADE），故 order_items 排在 orders 之前；
 // flash_sale_activity_skus 通过外键引用 flash_sale_activities（ON DELETE CASCADE），故排在它之前；
@@ -29,6 +30,7 @@ const latestMigrationVersion = uint(20261110000003)
 // 即 inventories/inventory_logs 排在 skus 之前、skus 排在 products 之前、products 排在 categories 之前，
 // 否则 DROP TABLE 会因外键依赖失败。
 var businessTables = []string{
+	"wallet_transactions", "wallet_accounts", "recharge_orders", "user_points_logs", "user_points_accounts", "order_status_logs",
 	"regions", "sku_spec_values", "product_spec_values", "product_specs",
 	"legacy_id_map",
 	"user_coupons", "coupon_templates",
@@ -427,7 +429,8 @@ type tableSpec struct {
 // strPtr 便于书写字符串默认值（区分「默认空字符串」与「无默认值」）。
 func strPtr(s string) *string { return &s }
 
-// expectedSchema 是「legacy_id_map + baseline 7 表 + orders/order_items + reviews + flash_sale 3 表 + favorites/product_likes/banners + articles 3 表 + recommend 2 表」DDL 的精确结构快照，
+// expectedSchema 是「legacy_id_map + baseline 7 表 + orders/order_items + reviews + flash_sale 3 表 + favorites/product_likes/banners + articles 3 表 + recommend 2 表
+// + 交易/资金 6 表（order_status_logs、wallet_accounts、wallet_transactions、recharge_orders、user_points_accounts、user_points_logs）」DDL 的精确结构快照，
 // 是 INV-003「结构严格等价」的权威基准。它独立于迁移文件硬编码，因此任何对相关迁移的
 // 列/类型/空值/默认值/索引/引擎/字符集改动若不同步更新此处，等价性测试都会失败——
 // 这正是它能够识别错误实现的原因。
@@ -596,6 +599,10 @@ var expectedSchema = []tableSpec{
 			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
 			{Name: "user_id", Type: "bigint unsigned"},
 			{Name: "template_id", Type: "bigint unsigned"},
+			{Name: "coupon_title", Type: "varchar(64)", Nullable: true},
+			{Name: "coupon_price", Type: "int unsigned", Nullable: true},
+			{Name: "use_min_price", Type: "int unsigned", Nullable: true},
+			{Name: "end_time", Type: "datetime", Nullable: true},
 			{Name: "status", Type: "tinyint"},
 			{Name: "order_id", Type: "bigint unsigned", Nullable: true},
 			{Name: "received_at", Type: "datetime"},
@@ -623,7 +630,10 @@ var expectedSchema = []tableSpec{
 			{Name: "total_amount", Type: "int unsigned"},
 			{Name: "original_amount", Type: "int unsigned", Default: strPtr("0")},
 			{Name: "discount_amount", Type: "int unsigned", Default: strPtr("0")},
+			{Name: "shipping_fee", Type: "int unsigned", Default: strPtr("0")},
 			{Name: "user_coupon_id", Type: "bigint unsigned", Nullable: true},
+			{Name: "pay_type", Type: "varchar(16)", Default: strPtr("")},
+			{Name: "transaction_no", Type: "varchar(64)", Default: strPtr("")},
 			{Name: "idempotency_key", Type: "varchar(64)"},
 			{Name: "request_hash", Type: "varchar(64)"},
 			{Name: "recipient_name", Type: "varchar(32)"},
@@ -641,6 +651,9 @@ var expectedSchema = []tableSpec{
 			{Name: "completed_at", Type: "datetime", Nullable: true},
 			{Name: "cancelled_at", Type: "datetime", Nullable: true},
 			{Name: "refunded_at", Type: "datetime", Nullable: true},
+			{Name: "delivery_type", Type: "varchar(32)", Default: strPtr("")},
+			{Name: "delivery_name", Type: "varchar(64)", Default: strPtr("")},
+			{Name: "delivery_sn", Type: "varchar(64)", Default: strPtr("")},
 			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
 			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
 		},
@@ -662,6 +675,7 @@ var expectedSchema = []tableSpec{
 			{Name: "sku_id", Type: "bigint unsigned"},
 			{Name: "product_id", Type: "bigint unsigned"},
 			{Name: "sku_name", Type: "varchar(128)"},
+			{Name: "spec_text", Type: "varchar(128)", Default: strPtr("")},
 			{Name: "product_name", Type: "varchar(128)"},
 			{Name: "product_main_image", Type: "varchar(512)", Default: strPtr("")},
 			{Name: "price", Type: "int unsigned"},
@@ -954,6 +968,130 @@ var expectedSchema = []tableSpec{
 			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
 			{Name: "uk_position_product", Unique: true, Columns: []string{"position_id", "product_id"}},
 			{Name: "idx_position_sort", Unique: false, Columns: []string{"position_id", "sort"}},
+		},
+	},
+	{
+		Name:      "order_status_logs",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "order_id", Type: "bigint unsigned"},
+			{Name: "from_status", Type: "tinyint"},
+			{Name: "to_status", Type: "tinyint"},
+			{Name: "change_type", Type: "varchar(32)"},
+			{Name: "operator_type", Type: "tinyint"},
+			{Name: "operator_id", Type: "bigint unsigned", Default: strPtr("0")},
+			{Name: "remark", Type: "varchar(255)", Default: strPtr("")},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "idx_order_time", Unique: false, Columns: []string{"order_id", "created_at"}},
+		},
+	},
+	{
+		Name:      "wallet_accounts",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "user_id", Type: "bigint unsigned"},
+			{Name: "balance", Type: "int unsigned", Default: strPtr("0")},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "uk_user_id", Unique: true, Columns: []string{"user_id"}},
+		},
+	},
+	{
+		Name:      "wallet_transactions",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "account_id", Type: "bigint unsigned"},
+			{Name: "user_id", Type: "bigint unsigned"},
+			{Name: "tx_type", Type: "varchar(32)"},
+			{Name: "direction", Type: "tinyint"},
+			{Name: "amount", Type: "int unsigned"},
+			{Name: "balance_before", Type: "int unsigned"},
+			{Name: "balance_after", Type: "int unsigned"},
+			{Name: "biz_type", Type: "varchar(32)"},
+			{Name: "biz_id", Type: "bigint unsigned", Nullable: true},
+			{Name: "idempotency_key", Type: "varchar(64)"},
+			{Name: "remark", Type: "varchar(255)", Default: strPtr("")},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "uk_idempotency", Unique: true, Columns: []string{"idempotency_key"}},
+			{Name: "idx_account_id", Unique: false, Columns: []string{"account_id", "id"}},
+			{Name: "idx_user_id", Unique: false, Columns: []string{"user_id", "id"}},
+			{Name: "idx_biz", Unique: false, Columns: []string{"biz_type", "biz_id"}},
+		},
+	},
+	{
+		Name:      "recharge_orders",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "order_no", Type: "varchar(32)"},
+			{Name: "user_id", Type: "bigint unsigned"},
+			{Name: "amount", Type: "int unsigned"},
+			{Name: "status", Type: "tinyint", Default: strPtr("10")},
+			{Name: "pay_type", Type: "varchar(16)", Default: strPtr("")},
+			{Name: "paid_at", Type: "datetime", Nullable: true},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "uk_order_no", Unique: true, Columns: []string{"order_no"}},
+			{Name: "idx_user_status", Unique: false, Columns: []string{"user_id", "status"}},
+		},
+	},
+	{
+		Name:      "user_points_accounts",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "user_id", Type: "bigint unsigned"},
+			{Name: "points", Type: "bigint unsigned", Default: strPtr("0")},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "uk_user_id", Unique: true, Columns: []string{"user_id"}},
+		},
+	},
+	{
+		Name:      "user_points_logs",
+		Engine:    "InnoDB",
+		Collation: "utf8mb4_unicode_ci",
+		Columns: []columnSpec{
+			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
+			{Name: "user_id", Type: "bigint unsigned"},
+			{Name: "change_amount", Type: "bigint"},
+			{Name: "points_before", Type: "bigint unsigned"},
+			{Name: "points_after", Type: "bigint unsigned"},
+			{Name: "change_type", Type: "varchar(32)"},
+			{Name: "biz_type", Type: "varchar(32)"},
+			{Name: "biz_id", Type: "bigint unsigned", Nullable: true},
+			{Name: "idempotency_key", Type: "varchar(64)"},
+			{Name: "remark", Type: "varchar(255)", Default: strPtr("")},
+			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
+		},
+		Indexes: []indexSpec{
+			{Name: "PRIMARY", Unique: true, Columns: []string{"id"}},
+			{Name: "uk_idempotency", Unique: true, Columns: []string{"idempotency_key"}},
+			{Name: "idx_user_time", Unique: false, Columns: []string{"user_id", "created_at"}},
+			{Name: "idx_biz", Unique: false, Columns: []string{"biz_type", "biz_id"}},
 		},
 	},
 }

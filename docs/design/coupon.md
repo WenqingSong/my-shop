@@ -38,6 +38,10 @@
 | `id` | BIGINT UNSIGNED | 主键，自增 |
 | `user_id` | BIGINT UNSIGNED | 非空，软引用（无 FK），指向 `users.id` |
 | `template_id` | BIGINT UNSIGNED | 非空，软引用（无 FK），指向 `coupon_templates.id` |
+| `coupon_title` | VARCHAR(64) | 可空，领取时的模板名称快照；NULL=历史券未快照 |
+| `coupon_price` | INT UNSIGNED | 可空，领取时的减免金额快照（整数分）；NULL=历史券未快照 |
+| `use_min_price` | INT UNSIGNED | 可空，领取时的使用门槛快照（整数分）；NULL=历史券未快照 |
+| `end_time` | DATETIME | 可空，领取时确定的券到期时间快照；NULL=历史券未快照 |
 | `status` | TINYINT | 非空，`10=可用`、`20=已预占`、`30=已使用`（见状态机） |
 | `order_id` | BIGINT UNSIGNED | 可空，当前预占/核销该券的订单 id（释放时清空） |
 | `received_at` | DATETIME | 领取时间 |
@@ -72,6 +76,7 @@
 - INV-C08（核销/释放原子）：支付核销 `locked→used`、取消/超时 `locked→available` 均条件更新 + RowsAffected 只生效一次；退款不返券。
 - INV-C09（归属隔离）：券仅本人可见可用；越权/不存在统一 19003（404），无写入。
 - INV-C10（幂等含 coupon_id）：同 `(user_id, idempotency_key)` 同 `request_hash`（含 coupon_id）→ 返回既有订单；同 key 不同内容 → 9006。
+- INV-C11（权益快照）：新领取的券必须写入 `coupon_title`/`coupon_price`/`use_min_price`/`end_time` 快照，写入后不随模板修改而漂移；历史券四列为 NULL（不伪造、不回填），读取方回退模板当前值。核销/释放只改 `status` 与时间列，不改快照。
 
 ## 5. 一致性模型与失败语义
 
@@ -109,11 +114,15 @@
 - `user_coupons.order_id` → `orders.id`（软引用，无 FK，释放时清空）；`orders.user_coupon_id` → `user_coupons.id`（软引用，下单时快照写入、不再随释放改变）。
 - 订单：`IOrder.Create` 接入 `ICoupon.LockInTx`（预占）；`Pay` 接入 `MarkUsedInTx`（核销）；`cancelInTx` 接入 `ReleaseInTx`（释放）；金额三列快照见 `order.md`。
 - 库存：下单经 `IInventory.DeductInTx`、取消/退款经 `IncreaseInTx`，与券联动在同一外层事务内。
-- 建表经 golang-migrate 迁移 `20261001000021_coupon.up.sql`（两表）、`20261001000022_order_coupon_amounts.up.sql`（orders 增三列 + 回填），见 `migration.md`。
+- 建表经 golang-migrate 迁移 `20261001000021_coupon.up.sql`（两表）、`20261001000022_order_coupon_amounts.up.sql`（orders 增三列 + 回填）、
+  `20261110000009_coupon_snapshot.up.sql`（`user_coupons` 增四个可空快照列，无回填），见 `migration.md`。
+- 快照列当前只有结构：`Claim` 仍不写快照，`ListMine` 仍联表读模板；写入快照属 B1-04，读取方在此期间必须容忍 NULL。
 
 ## 9. Deferred / 已知留白
 
 - 百分比折扣、指定商品/品类/品牌券、多券叠加、优惠分摊到多订单项、秒杀订单用券（V1 明确排除）。
 - 结算/计价规则引擎、积分抵扣、会员折扣、自动发券、转赠、营销推荐。
+- 领取时写入权益快照（列已建，`Claim` 尚未写；历史券保持 NULL）。
+- 优惠券批次、适用范围（商品/品类/品牌）、折扣类型与每人限领（B1-03-03 及以后）。
 - Redis 优惠券缓存、分布式锁（V1 锁无关，依赖 MySQL 条件更新 + 唯一约束）。
 - 前台领券/用券 UI（前端模板工程未接入后端）。

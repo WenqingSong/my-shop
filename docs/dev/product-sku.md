@@ -86,6 +86,8 @@ skus(id, product_id, name, image_url, price, status, spec_signature)
 - **稳定引用键**：`skus.id` 语义不变，购物车/订单项/库存/秒杀仍按它引用；新增表不回写这些表。
 - **不可改的表**：`inventories`、`inventory_logs`、`flash_sale_*`。规格只影响「选哪个 SKU」，不影响库存与秒杀事实来源。
 - **价格**：`skus.price` 仍是唯一下单定价来源；`spec_signature` 不可作为价格或身份凭证。
+- **订单规格快照**：`order_items.spec_text`（B1-03-02 新增，默认空串）用于下单时保存规格文本，使订单读取不依赖
+  `sku_spec_values` 是否仍存在；该列已建但下单链路尚未写入，历史订单为空串。
 
 ## 8. 关键测试与运行方式
 

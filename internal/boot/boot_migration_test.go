@@ -15,7 +15,8 @@ import (
 const migrationBaselineVersion = uint(20261001000001)
 
 // migrationRelatedTables 是 readiness 测试需要清空的表（含测试探针表）。
-// 注意顺序：sku_spec_values 引用 skus 与 product_spec_values，product_spec_values 引用 product_specs，
+// 注意顺序：wallet_transactions 通过外键引用 wallet_accounts（ON DELETE RESTRICT），故排在 wallet_accounts 之前；
+// sku_spec_values 引用 skus 与 product_spec_values，product_spec_values 引用 product_specs，
 // product_specs 引用 products，故三者必须排在 skus/products 之前；regions 无外键，可置前。
 // order_items 通过外键引用 orders（ON DELETE CASCADE），故 order_items 排在 orders 之前；
 // recommend_items 通过外键引用 recommend_positions（ON DELETE CASCADE），故 recommend_items 排在 recommend_positions 之前；
@@ -24,6 +25,7 @@ const migrationBaselineVersion = uint(20261001000001)
 // products，products 通过外键引用 categories，因此被引用方必须排在引用方之后，
 // 否则 DROP TABLE 会因外键依赖失败。
 var migrationRelatedTables = []string{
+	"wallet_transactions", "wallet_accounts", "recharge_orders", "user_points_logs", "user_points_accounts", "order_status_logs",
 	"regions", "sku_spec_values", "product_spec_values", "product_specs",
 	"legacy_id_map",
 	"recommend_items", "recommend_positions",

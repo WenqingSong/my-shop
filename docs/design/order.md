@@ -21,7 +21,10 @@
 | `total_amount` | INT UNSIGNED | 非空，应付金额整数分快照（= `original_amount` - `discount_amount`） |
 | `original_amount` | INT UNSIGNED | 非空，优惠前金额快照（= Σ 订单项 `price×quantity`） |
 | `discount_amount` | INT UNSIGNED | 非空，优惠金额快照（默认 0） |
+| `shipping_fee` | INT UNSIGNED | 非空默认 0，运费快照（整数分）；历史订单保持 0，迁移不重算 `total_amount` |
 | `user_coupon_id` | BIGINT UNSIGNED | 可空，下单时使用的用户券 id（软引用，快照，见 `coupon.md`） |
+| `pay_type` | VARCHAR(16) | 非空默认 ''，支付方式（Mock；空串=未支付/未选择，见 §2.5） |
+| `transaction_no` | VARCHAR(64) | 非空默认 ''，支付交易编号（Mock；仅追溯，不保证全局唯一） |
 | `idempotency_key` | VARCHAR(64) | 非空，客户端幂等键 |
 | `request_hash` | VARCHAR(64) | 非空，请求指纹（sha256 hex），用于同 key 判内容一致 |
 | `recipient_name`/`phone`/`province`/`city`/`district`/`detail` | VARCHAR(32/20/32/32/32/255) | 非空，收货地址快照 |
@@ -29,6 +32,9 @@
 | `expire_at` | DATETIME | 非空，支付截止 = `created_at + order.pay_timeout` |
 | `cancel_reason` | TINYINT | 可空，`1=用户取消`、`2=超时取消` |
 | `paid_at`/`shipped_at`/`received_at`/`completed_at`/`cancelled_at`/`refunded_at` | DATETIME | 可空，各状态推进时间 |
+| `delivery_type` | VARCHAR(32) | 非空默认 ''，物流方式（内嵌履约信息） |
+| `delivery_name` | VARCHAR(64) | 非空默认 ''，物流公司名称 |
+| `delivery_sn` | VARCHAR(64) | 非空默认 ''，物流单号 |
 | `created_at`/`updated_at` | DATETIME | 默认 `CURRENT_TIMESTAMP` |
 
 索引：`uk_order_no(order_no)`、`uk_user_idempotency(user_id, idempotency_key)`、`idx_user_id(user_id)`、`idx_status_expire(status, expire_at)`（支撑超时扫描）。
@@ -44,6 +50,7 @@
 | `sku_id` | BIGINT UNSIGNED | 非空，软引用（无 FK），指向 `skus.id` |
 | `product_id` | BIGINT UNSIGNED | 非空，软引用（无 FK），指向 `products.id` |
 | `sku_name` | VARCHAR(128) | 非空，快照 |
+| `spec_text` | VARCHAR(128) | 非空默认 ''，下单时 SKU 规格文本快照；历史订单为空串，不回填 |
 | `product_name` | VARCHAR(128) | 非空，快照 |
 | `product_main_image` | VARCHAR(512) | 非空默认 `''`，快照 |
 | `price` | INT UNSIGNED | 非空，成交价整数分 = 下单时 `skus.price` |
@@ -54,7 +61,31 @@
 
 ### 2.3 金额快照语义
 
-订单金额分三列快照：`original_amount`（优惠前金额）= Σ `order_items.price×quantity`（下单时重读 `skus.price`，不信任客户端提交价、也不信任购物车 `price_snapshot`）；`discount_amount`（优惠金额，由服务端按已选券计算，无券为 0）；`total_amount`（应付金额）= `original_amount - discount_amount`。订单快照为「锁定金额」，下单后改价/改模板不影响订单；`products.price` 与订单无关（订单为 SKU 粒度）。无券时 `original_amount = total_amount`、`discount_amount = 0`，与历史订单语义一致（历史订单迁移回填 `original_amount = total_amount`）。
+订单金额分三列快照：`original_amount`（优惠前金额）= Σ `order_items.price×quantity`（下单时重读 `skus.price`，不信任客户端提交价、也不信任购物车 `price_snapshot`）；`discount_amount`（优惠金额，由服务端按已选券计算，无券为 0）；`total_amount`（应付金额）= `original_amount - discount_amount + shipping_fee`。订单快照为「锁定金额」，下单后改价/改模板不影响订单；`products.price` 与订单无关（订单为 SKU 粒度）。无券时 `original_amount = total_amount`、`discount_amount = 0`，与历史订单语义一致（历史订单迁移回填 `original_amount = total_amount`）。
+
+`shipping_fee` 为运费快照（整数分），由 migration `20261110000004_order_shipping_payment` 新增，默认 0；**当前阶段未实现运费计算**，因此 `= original - discount` 仍等价成立。历史订单不重算 `total_amount`（保持迁移前已存值），运费/优惠/应付的完整公式与扩展顺序见 `pricing.md`。
+
+### 2.4 `order_status_logs`（订单状态流水）
+
+| 字段 | 类型 | 约束/说明 |
+| --- | --- | --- |
+| `id` | BIGINT UNSIGNED | 主键，自增 |
+| `order_id` | BIGINT UNSIGNED | 非空，软引用（无 FK），指向 `orders.id`；一单多条 |
+| `from_status` | TINYINT | 非空，变更前状态；创建事件写 0（无前态） |
+| `to_status` | TINYINT | 非空，变更后状态，取值与 `orders.status` 一致（10/20/30/40/50/60/70） |
+| `change_type` | VARCHAR(32) | 非空，语义类型：create/pay/cancel/timeout_cancel/ship/receive/complete/refund |
+| `operator_type` | TINYINT | 非空，`1=user`、`2=admin`、`3=system`（沿用并扩展 `refund_audits` 约定） |
+| `operator_id` | BIGINT UNSIGNED | 非空默认 0，操作者 id（软引用）；system 驱动写 0 |
+| `remark` | VARCHAR(255) | 非空默认 '' |
+| `created_at` | DATETIME | 默认 `CURRENT_TIMESTAMP` |
+
+索引：`idx_order_time(order_id, created_at)`（按订单时间线查询）。流水 append-only，无 UPDATE/DELETE 业务路径；**当前尚未写入**（既有状态推进逻辑未改），由后续 B1-04 在状态推进事务内补齐。
+
+### 2.5 支付与履约字段（内嵌模型）
+
+- 支付仅 Mock：`pay_type`（如 `mock`）、`transaction_no`、`paid_at` 记录支付事实；**不新增独立 `payments` 表，也不新增支付状态列**。当前 Mock 支付是「待支付→已支付」的一次性幂等推进，没有多次支付尝试/渠道流水/对账需求，订单现有字段足够承载；若未来出现多次支付尝试或独立对账语义，需先向 Owner 报告再扩展模型。
+- 订单状态仍是唯一状态机（10..70）：是否已支付由 `status` 与 `paid_at` 判定，`pay_type`/`transaction_no` 不参与状态迁移判定，避免出现第二套支付状态机。
+- 履约信息内嵌：`delivery_type`/`delivery_name`/`delivery_sn` 默认空串，随发货动作写入；不引入物流子表、物流轨迹或外部物流服务，发货仍由 `status=30` 推进。
 
 ## 3. 状态机与合法迁移
 
@@ -76,17 +107,20 @@
 - INV-001（归属与隔离）：`orders.user_id` 取自 `Principal.UserID`；用户只能查看/取消/支付/收货自己的订单；跨用户操作返回 9001（404）且无写入。
 - INV-002（幂等去重）：同一 `(user_id, idempotency_key)` 至多产生一个成功订单（`uk_user_idempotency` 兜底）；同 key 同 `request_hash` 返回既有订单、不重复扣库存；同 key 不同 `request_hash` 返回 9006。
 - INV-003（事务原子性）：创建订单 = 单事务「写 orders + 写 order_items + 扣库存 +（若用券）预占券 +（购物车模式）删已购条目」，任一步失败整体回滚，无半成品、库存、券与购物车均不变。
-- INV-004（服务端定价与快照）：`original_amount` = Σ 下单时 `skus.price×quantity`；`total_amount = original_amount - discount_amount`（`discount` 由服务端计算、≤ `original`）；快照自足，改价/改模板/改地址不影响订单。
+- INV-004（服务端定价与快照）：`original_amount` = Σ 下单时 `skus.price×quantity`；`total_amount = original_amount - discount_amount + shipping_fee`（`discount` 由服务端计算、≤ `original`；`shipping_fee` 为运费快照，当前阶段恒 0，故现行实现等价于 `original - discount`）；快照自足，改价/改模板/改地址不影响订单。
 - INV-005（状态机）：仅合法迁移可推进；非法迁移 9002 且状态不变；`refunded` 仅从 `paid` 可达。
 - INV-006（防超卖）：并发同一 SKU 下单成功扣减总量 ≤ 可售库存且库存 ≥ 0（条件扣减 + `RowsAffected`）。
 - INV-007（取消/退款只补偿一次）：同一订单取消/退款仅恢复一次库存（条件状态更新 + `RowsAffected` 原子闸门）。
 - INV-008（权限）：发货仅管理员（含超管，持 `order:ship`）；退款走 refund 模块（`refund:*` 权限，见 `refund.md`）；无权限 403、越权 404，均无 DB 副作用。
 - INV-009（唯一订单号）：`order_no` 全局唯一（`uk_order_no` 兜底，撞号重试）。
 - INV-010（支付幂等）：重复支付回调不重复改状态，仅待支付→已支付合法。
+- INV-011（运费历史兼容）：`shipping_fee` 默认 0，迁移不回填、不重算历史 `total_amount`；非零运费的计价与写入在 B1-04 实现，公式见 `pricing.md`。
+- INV-012（支付事实单一）：`pay_type`/`transaction_no`/`paid_at` 只记录支付事实，不构成第二套支付状态机；订单是否已支付以 `status` + `paid_at` 判定，Mock 支付仍仅 `10→20` 一次推进。
+- INV-013（状态流水只追加）：`order_status_logs` 每个订单可多条、状态值取自 10..70；流水写入必须与对应状态推进同事务（B1-04 实现），当前尚未写入，不改变既有状态机行为。
 
 ## 5. 一致性模型与失败语义
 
-- 事实来源：单一 MySQL。`orders`/`order_items`（订单事实）、`inventories`（库存事实）、`inventory_logs`（库存流水，只追加）、`skus`（下单时价格/状态事实来源，读后快照）。Redis 仅会话；无 MQ、无跨系统事务。
+- 事实来源：单一 MySQL。`orders`/`order_items`（订单事实）、`order_status_logs`（状态流水，只追加，当前未写入）、`inventories`（库存事实）、`inventory_logs`（库存流水，只追加）、`skus`（下单时价格/状态事实来源，读后快照）。Redis 仅会话；无 MQ、无跨系统事务。
 - 成功语义：创建成功 = orders + order_items + 库存扣减（+ 购物车条目删除）（+ 用券预占）同事务提交；取消成功 = 状态变更 + 库存恢复 + 券释放同事务；支付成功 = 状态推进 + 券核销同事务；退款成功 = 状态变更 + 库存恢复（不返券）；发货/收货成功 = 状态推进。
 - 原子性：下单与取消/退款均为单事务；库存变更复用 `IInventory` 的 tx 感知方法（`DeductInTx`/`IncreaseInTx`），Order 只协调外层事务、不复制扣减/增加业务规则。
 - 幂等与重复：幂等键重复（同 hash）→ 返回既有订单；支付/取消/退款重复 → 状态机 + 条件更新保证不重复改状态/不重复补偿。
@@ -126,13 +160,17 @@
 - 定价：`original_amount` 重读 `ISku.GetByID` 的 `skus.price` 求和，校验 SKU enabled 且商品 on_shelf（否则 9003）；用券经 `ICoupon` 校验归属/有效期/状态/门槛并计算 `discount_amount`。
 - 优惠券：`orders.user_coupon_id` → `user_coupons.id`（软引用，快照）；预占/核销/释放经 `ICoupon` 与订单状态变更同事务，见 `coupon.md`。
 - 地址：快照自 `addresses`，下单后地址变更不影响订单。
-- 建表经 golang-migrate 迁移（`20261001000007_orders.up.sql`）；金额三列（`original_amount`/`discount_amount`/`user_coupon_id`）由后续迁移 `20261001000022_order_coupon_amounts.up.sql` 增列并回填，见 `migration.md`、`coupon.md`。
+- 状态流水：`order_status_logs.order_id` → `orders.id`（软引用，无 FK，只追加）；写入时机与事务边界在 B1-04 与状态推进一起实现。
+- 钱包/积分：`wallet_transactions`/`user_points_logs` 通过 `biz_type` + `biz_id` 软关联订单（无 FK）；当前订单支付/退款**不读写钱包与积分**，余额支付、退款入账、积分抵扣/返还在 B1-04 实现，见 `wallet.md`、`member.md`、`pricing.md`。
+- 建表经 golang-migrate 迁移（`20261001000007_orders.up.sql`）；金额三列（`original_amount`/`discount_amount`/`user_coupon_id`）由 `20261001000022_order_coupon_amounts.up.sql` 增列并回填；运费/支付/履约字段与 `order_items.spec_text` 由 `20261110000004_order_shipping_payment.up.sql` 增列（无回填）；状态流水由 `20261110000005_order_status_logs.up.sql` 建表，见 `migration.md`。
 - 配置：`order.pay_timeout`（支付超时秒，默认 900）、`order.cancel_scan_interval`（扫描周期秒，默认 60）。
 
 ## 9. Deferred / 已知留白
 
 - 真实支付/退款到账/对账/资金回调（支付仅 Mock）。
-- 物流/快递单号、配送轨迹、发货单号回传。
+- 履约字段（`delivery_type`/`delivery_name`/`delivery_sn`）只有结构与默认值：发货接口仍只推进状态，承运商/运单号写入、物流轨迹查询与发货单回传未实现。
+- 运费计算、余额支付、退款入账、积分抵扣/返还、会员折扣未实现（结构与边界见 `pricing.md`、`wallet.md`、`member.md`）。
+- `order_status_logs` 只有结构：既有状态推进逻辑未改，流水写入在 B1-04 补齐。
 - `shipped/received/completed` 后的退款/退货/售后（留 After-sales/Refund 模块）。
 - 订单导出、收货人姓名/手机号模糊搜索等高级筛选（后台列表已支持 `order_no`/`user_id`/`status`/`start_time`/`end_time` 组合筛选与 7 态状态统计）。
 - 库存流水 `reason` 字段固定为空，订单驱动的扣减/恢复不落 `reason`，审计粒度有限。

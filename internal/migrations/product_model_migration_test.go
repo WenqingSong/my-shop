@@ -36,16 +36,17 @@ var (
 	b103UserColumns = []string{"nickname", "avatar_url", "phone"}
 )
 
-// migrateSteps 执行指定步数的迁移（负数表示回滚），用于验证 down 文件。
-func migrateSteps(t *testing.T, steps int) {
+// migrateTo 把数据库迁移到指定版本（用于验证 down 文件）。
+// 使用固定目标版本而不是相对步数，后续批次新增迁移时不会改变回滚落点。
+func migrateTo(t *testing.T, version uint) {
 	t.Helper()
 	m, err := newMigrate(context.Background())
 	if err != nil {
 		t.Fatalf("new migrate: %v", err)
 	}
 	defer closeMigrate(context.Background(), m)
-	if err := m.Steps(steps); err != nil {
-		t.Fatalf("migration steps %d: %v", steps, err)
+	if err := m.Migrate(version); err != nil {
+		t.Fatalf("migration to %d: %v", version, err)
 	}
 }
 
@@ -162,8 +163,8 @@ func TestProductModelMigrationUpDownUp(t *testing.T) {
 	productID := insertProduct(t, db, categoryID, "测试商品")
 	skuID := insertSku(t, db, productID, "历史规格名", 1999, nil, "")
 
-	// down：依次回滚 regions / user_profile / product_spec。
-	migrateSteps(t, -3)
+	// down：回滚到 B1-03-01 之前（执行 regions / user_profile / product_spec 的 down）。
+	migrateTo(t, 20261001000024)
 	if v := currentVersion(t, db); v != 20261001000024 {
 		t.Fatalf("down 后 version=%d want 20261001000024", v)
 	}

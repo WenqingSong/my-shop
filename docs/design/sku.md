@@ -61,6 +61,9 @@ SKU 状态为二态 `enabled`/`disabled`（不复用 SPU 三态），创建默�
 **无规格/历史 SKU**：不写 `sku_spec_values`，`spec_signature` 保持 NULL，`image_url` 为空。唯一索引允许多个 NULL，
 因此存量 SKU 可继续读写，不需要回填。
 
+**下单规格快照**：`order_items.spec_text`（B1-03-02 新增）用于保存下单时的规格文本快照，订单读取不依赖
+`sku_spec_values` 是否仍存在；该列默认空串，历史订单不回溯，写入逻辑在 B1-04 与下单链路一起实现。
+
 ## 3. 状态机与生命周期
 
 - 二态：`enabled` ↔ `disabled`，无迁移限制（非状态机迁移，是字段直接赋值）。

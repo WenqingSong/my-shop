@@ -14,8 +14,8 @@
 追踪表 `schema_migrations` 由 golang-migrate 自动创建；并发迁移串行化由 MySQL driver 默认 `GET_LOCK` 提供；迁移文件经 `//go:embed` 内嵌，运行时经 `iofs` source 挂载，不依赖工作目录。事实来源为单一 MySQL。
 
 CLI **不提供 `down` 子命令**（只有 `up`/`force`/`version`）。历史批次多数只有 `.up.sql`；
-自 `20261001000024` 起按需提供 `.down.sql`（outbox 与 B1-03-01 的 product_spec/user_profile/regions），
-仅用于测试库验证与人工显式回滚，生产发布流程不执行 down。
+自 `20261001000024` 起按需提供 `.down.sql`（outbox、B1-03-01 的 product_spec/user_profile/regions、
+B1-03-02 的六项交易与资金迁移），仅用于测试库验证与人工显式回滚，生产发布流程不执行 down。
 
 ### 1.1 独立执行（T2-05）
 
@@ -70,6 +70,12 @@ CLI **不提供 `down` 子命令**（只有 `up`/`force`/`version`）。历史�
 | `20261110000001` | `product_spec` | `product_specs` + `product_spec_values` + `sku_spec_values`；`skus` 增 `image_url`/`spec_signature` + `uk_product_signature`（含 down） |
 | `20261110000002` | `user_profile` | `users` 增 `nickname`/`avatar_url`/`phone` + `uk_phone`（含 down） |
 | `20261110000003` | `regions` | `regions`（省/市/区三级地区字典，仅结构，不导数据；含 down） |
+| `20261110000004` | `order_shipping_payment` | `orders` 增 `shipping_fee`/`pay_type`/`transaction_no`/`delivery_type`/`delivery_name`/`delivery_sn`；`order_items` 增 `spec_text`（无回填；含 down） |
+| `20261110000005` | `order_status_logs` | `order_status_logs`（订单状态流水，append-only；含 down） |
+| `20261110000006` | `wallet` | `wallet_accounts` + `wallet_transactions`（钱包账户 + 资金流水；含 down） |
+| `20261110000007` | `recharge_orders` | `recharge_orders`（Mock 充值订单；含 down） |
+| `20261110000008` | `points` | `user_points_accounts` + `user_points_logs`（积分账户 + 流水；含 down） |
+| `20261110000009` | `coupon_snapshot` | `user_coupons` 增 `coupon_title`/`coupon_price`/`use_min_price`/`end_time` 可空快照列（无回填；含 down） |
 
 ### 2.2 baseline 模型
 
@@ -118,7 +124,8 @@ migration 不新增业务错误码；失败通过 `gerror` 返回并由 CLI 进�
 ## 7. 跨模块关系
 
 - 所有业务表（`products`/`product_images`、`skus`、`inventories`/`inventory_logs`、`addresses`、`cart_items`、`orders`/`order_items`、`refresh_tokens`、
-  `product_specs`/`product_spec_values`/`sku_spec_values`、`regions`）均经本机制新增迁移，serve 不建表。
+  `product_specs`/`product_spec_values`/`sku_spec_values`、`regions`、`order_status_logs`、`wallet_accounts`/`wallet_transactions`、
+  `recharge_orders`、`user_points_accounts`/`user_points_logs`）均经本机制新增迁移，serve 不建表。
 - 部署顺序为 `build → migrate up → serve`；`product.md`/`sku.md`/`inventory.md`/`category.md`/`rbac.md`/`address.md`/`cart.md`/`order.md`/`iam.md` 的数据模型均以本机制建立，不再回退到 `boot.go` 建表。
 
 ## 8. Deferred / 已知留白
