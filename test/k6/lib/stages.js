@@ -48,13 +48,14 @@ export function buildStages(profile) {
   if (peak <= 0) {
     return base;
   }
-  // 只在「进入持续负载」的 stage 上替换 target，ramp 阶段仍按原比例过渡。
+  // T5-02 修正（实测发现的缺陷）：k6 的 stage target 是「该阶段结束时的 VU 数」，
+  // k6 会在整个 duration 内线性过渡。原实现把 ramp 阶段设成 peak/4，于是
+  // 「持续负载」阶段变成从 peak/4 爬到 peak 的 120s 慢爬坡——全程没有稳态窗口，
+  // Prometheus 只能看到一条单调上升的曲线，无法做「同一负载下的稳态对比」。
+  // 修正后：ramp 阶段直接到达 peak，持续阶段 target 与当前值相同 → 真正的保持。
   return base.map(function (stage, index) {
-    if (index === 1) {
+    if (index === 0 || index === 1) {
       return { duration: stage.duration, target: peak };
-    }
-    if (index === 0) {
-      return { duration: stage.duration, target: Math.max(1, Math.ceil(peak / 4)) };
     }
     return stage;
   });

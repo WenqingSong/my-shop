@@ -12,7 +12,7 @@
 | 结果汇总（`lib/report.js`） | IMPLEMENTED + VERIFIED | 产出 `summary.json` / `summary.txt` |
 | 执行入口（`scripts/run.ps1`） | IMPLEMENTED + VERIFIED | Docker 方式运行 + 元数据落盘 |
 | Smoke 场景（`scenarios/smoke.js`） | IMPLEMENTED + VERIFIED | 51 项 check 全通过，9 个请求 |
-| 只读负载场景（`scenarios/read-load.js`） | IMPLEMENTED / NOT_VERIFIED | 静态检查通过，未执行（属 T5-02） |
+| 只读负载场景（`scenarios/read-load.js`） | IMPLEMENTED + VERIFIED（T5-02） | 已执行 1 / 5 / 10 VU 三档，见 `docs/reports/t5-02-load-performance-analysis/` |
 | 秒杀下单场景（`scenarios/flashsale-order.js`） | IMPLEMENTED / NOT_VERIFIED | 静态检查通过，未执行（属 T5-03/04） |
 | 数据准备工具（`tools/prepare-data.js`） | IMPLEMENTED / NOT_VERIFIED | 本任务无管理员凭据，未真实执行 |
 
@@ -82,7 +82,7 @@ test/k6/
 │   └── report.js          # handleSummary：summary.json / summary.txt
 ├── scenarios/
 │   ├── smoke.js           # 已真实执行：健康/就绪/指标三层巡检
-│   ├── read-load.js       # T5-02 入口：只读负载（未执行）
+│   ├── read-load.js       # T5-02 入口：只读负载（已执行 1/5/10 VU）
 │   └── flashsale-order.js # T5-03/04 入口：秒杀下单 + 可选结果轮询（未执行）
 ├── tools/
 │   └── prepare-data.js    # 独立测试数据准备（用户由各场景准备；本工具准备商品/SKU/活动）
@@ -355,9 +355,22 @@ T5-01 已实测的关联证据：Smoke 结束后
 **问题**：不同负载下系统表现如何？`db_scanner` 与 `kafka` 两种消费模式的差异在哪？
 
 **变量**
-- 负载档：`low`（5 VU）/ `medium`（20 VU）/ `high`（50 VU），由 `lib/stages.js` 提供，
-  `LOAD_VUS` 可覆盖峰值；每档含 ramp-up / 持续 / ramp-down。
+- 负载档：`low` / `medium` / `high` 三套默认形状由 `lib/stages.js` 提供（5 / 20 / 50 VU，
+  ramp-up + 持续 + ramp-down）；`LOAD_VUS` 覆盖峰值 VU，**ramp 阶段会直接到达该值**，
+  保证「持续负载」阶段是真正的稳态（T5-02 修正了此前的写法：ramp 只到 peak/4，
+  导致持续阶段变成 120s 慢爬坡，Prometheus 看不到稳态）。
 - 消费模式：`FLASH_SALE_DISPATCH_MODE=kafka|db_scanner`（需重启应用，属部署动作）。
+
+**T5-02 实际执行参数**（只读链路，单节点 kind，笔记本资源有限，故取保守档位）：
+
+| 实验 | `LOAD_PROFILE` | `LOAD_VUS` | 时长结构 | 目标接口 |
+|---|---|---:|---|---|
+| A 基准 | `low` | 1 | 30s ramp + 120s 稳态 + 15s ramp-down | `GET /products` + `GET /products/:id` |
+| B 正常 | `low` | 5 | 同上 | 同上 |
+| C 增强 | `low` | 10 | 同上 | 同上 |
+
+`THINK_TIME_MS=200`（每迭代后思考时间）。三档之间静置 20s 冷却。
+结果与结论见 `docs/reports/t5-02-load-performance-analysis/`。
 
 **采集**
 | 维度 | 指标 | 来源 |
