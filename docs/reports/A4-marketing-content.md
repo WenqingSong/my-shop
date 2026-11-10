@@ -213,8 +213,9 @@ A0-A3 回归测试全部继续通过。
 
 ## 8. Git
 
-- 功能提交 SHA：`（提交后回填）`
-- 文档回填提交：本条提交
+- 功能提交 SHA：`61f6ced62eb14a78bb54d1e49b548d977e39f21a`
+  （`feat(admin): implement marketing and content management`，47 files changed）
+- 文档回填提交：本条提交（`docs(admin): 记录 A4 提交与推送结果`）
 - 目标分支：`feat/phase2-admin-frontend`
 - 远端：`origin/feat/phase2-admin-frontend`
 - 提交前远端状态：`origin/feat/phase2-admin-frontend...HEAD = 0 0`
