@@ -19,6 +19,7 @@ import (
 	refundCtrl "cnb.cool/go-cloud-devops/my-shop/internal/controller/refund"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/review"
 	uploadCtrl "cnb.cool/go-cloud-devops/my-shop/internal/controller/upload"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/wallet"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 )
 
@@ -47,6 +48,7 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	uploadCtrlV1 := uploadCtrl.NewV1()
 	refundCtrlV1 := refundCtrl.NewV1()
 	couponCtrl := coupon.NewV1()
+	walletCtrl := wallet.NewV1()
 
 	// 前台公开接口：注册、登录、刷新、分类查询、商品查询、轮播图列表（无需 token）。
 	root.POST("/register", iamCtrl.Register)
@@ -148,6 +150,11 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 
 		// 文件上传（仅登录用户，签发七牛云直传凭证）。
 		user.GET("/qiniu/upload/token", uploadCtrlV1.FrontendToken)
+
+		// 钱包（仅登录用户，作用于本人余额与本人流水；不接受客户端 user_id）。
+		user.GET("/wallet", walletCtrl.Account)
+		user.GET("/wallet/transactions", walletCtrl.Transactions)
+		user.POST("/wallet/recharges", walletCtrl.Recharge)
 	})
 
 	// 前台登出：仅验签（幂等撤销，即使 session 已撤销/缺失也能到达 handler）。

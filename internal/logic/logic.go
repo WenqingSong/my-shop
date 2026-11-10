@@ -25,4 +25,5 @@ import (
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/review"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/sku"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/upload"
+	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/wallet"
 )

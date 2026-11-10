@@ -266,6 +266,7 @@ DEPLOYMENT_REQUIRE_EXTERNAL_ENDPOINTS: "true"
 | `dashboard.timezone` | `DASHBOARD_TIMEZONE` | string | Asia/Shanghai | 非敏感 | Dashboard 日期切分 / MySQL 会话时区 |
 | `order.pay_timeout` | `ORDER_PAY_TIMEOUT` | int64 | 900 | 非敏感 | 订单创建 |
 | `order.cancel_scan_interval` | `ORDER_CANCEL_SCAN_INTERVAL` | int | 60 | 非敏感 | 订单超时取消扫描器 |
+| `wallet.mock_recharge.enabled` | `WALLET_MOCK_RECHARGE_ENABLED` | bool | false | 非敏感 | 钱包 Mock 充值接口 |
 | `flash_sale.dispatch_mode` | `FLASH_SALE_DISPATCH_MODE` | string | db_scanner | 非敏感 | 秒杀 Runtime 装配 |
 | `flash_sale.shutdown_timeout` | `FLASH_SALE_SHUTDOWN_TIMEOUT` | duration | 30s | 非敏感 | 秒杀 Runtime 关闭 |
 | `flash_sale.reconcile_scan_interval` | `FLASH_SALE_RECONCILE_SCAN_INTERVAL` | int | 60 | 非敏感 | 秒杀缓存对账扫描器 |

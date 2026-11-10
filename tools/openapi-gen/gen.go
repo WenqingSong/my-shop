@@ -25,7 +25,7 @@ var codesByValue = map[int]*ErrorCode{}
 var pathFileOrder = []string{
 	"iam", "admin", "categories", "product", "sku", "inventory", "address",
 	"cart", "order", "refund", "coupon", "flashsale", "banner", "recommendation",
-	"article", "review", "favorite", "like", "upload", "dashboard", "health",
+	"article", "review", "favorite", "like", "upload", "wallet", "dashboard", "health",
 }
 
 // tagDescriptions 是 tag 的稳定说明与展示顺序。
@@ -55,6 +55,7 @@ var tagDescriptions = []struct {
 	{"收藏", "商品收藏"},
 	{"点赞", "商品点赞"},
 	{"上传", "七牛云直传凭证签发"},
+	{"钱包", "用户钱包余额、资金流水与 Mock 充值"},
 	{"运营数据大屏", "后台运营数据聚合"},
 	{"Health", "存活与就绪探针"},
 }

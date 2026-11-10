@@ -88,6 +88,9 @@ const (
 	KeyOrderPayTimeout         Key = "order.pay_timeout"
 	KeyOrderCancelScanInterval Key = "order.cancel_scan_interval"
 
+	// wallet.*（资金安全开关：Mock 充值能凭空增加余额，默认关闭）
+	KeyWalletMockRechargeEnabled Key = "wallet.mock_recharge.enabled"
+
 	// flash_sale.*
 	KeyFlashSaleDispatchMode          Key = "flash_sale.dispatch_mode"
 	KeyFlashSaleShutdownTimeout       Key = "flash_sale.shutdown_timeout"
@@ -254,6 +257,9 @@ var specs = []Spec{
 	// ---------- order ----------
 	{KeyOrderPayTimeout, "ORDER_PAY_TIMEOUT", KindInt64, int64(900), false, "订单创建", "支付超时秒数"},
 	{KeyOrderCancelScanInterval, "ORDER_CANCEL_SCAN_INTERVAL", KindInt, 60, false, "订单超时取消扫描器", "扫描周期秒数"},
+
+	// ---------- wallet ----------
+	{KeyWalletMockRechargeEnabled, "WALLET_MOCK_RECHARGE_ENABLED", KindBool, false, false, "钱包 Mock 充值接口", "是否启用 Mock 充值（凭空造钱能力，默认关闭；部署严格模式禁止启用）"},
 
 	// ---------- flash_sale 基础 ----------
 	{KeyFlashSaleDispatchMode, "FLASH_SALE_DISPATCH_MODE", KindString, "db_scanner", false, "秒杀 Runtime 装配", "消费入口模式：db_scanner | kafka"},

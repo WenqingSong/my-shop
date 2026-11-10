@@ -137,6 +137,7 @@ var domains = map[string]DomainInfo{
 	"review":         {Name: "review", Prefix: "Review", Camel: "review"},
 	"sku":            {Name: "sku", Prefix: "Sku", Camel: "sku"},
 	"upload":         {Name: "upload", Prefix: "Upload", Camel: "upload"},
+	"wallet":         {Name: "wallet", Prefix: "Wallet", Camel: "wallet"},
 }
 
 // entitySchemaNames 为业务实体指定稳定 Schema 名。
@@ -181,6 +182,8 @@ var entitySchemaNames = map[string]string{
 	"review.ReviewItem":           "ReviewItem",
 	"review.Review":               "Review",
 	"sku.Sku":                     "Sku",
+	"wallet.Transaction":          "WalletTransaction",
+	"wallet.RechargeOrder":        "WalletRechargeOrder",
 }
 
 // explicitSchemaOverrides 覆盖 Req/Res 规则推导结果，消除重复词。

@@ -148,6 +148,19 @@ const (
 	CodeCouponClaimUnavailable Code = 19005 // 未开始/已结束/已停止，不可领取 → 409
 	CodeCouponClaimSoldOut     Code = 19006 // 发放总量已满 → 409
 	CodeCouponUnavailable      Code = 19007 // 下单用券：已使用/被占用/不在使用期/未达门槛 → 409
+
+	// 钱包域（Wallet）21000-21999（域序 21，由 B1-04-04 钱包任务持有）。
+	// 约定：21001-21099 为钱包业务码，21000 保留不用（域起点不作为具体错误）。
+	CodeWalletAccountUnavailable       Code = 21001 // 钱包账户不存在或初始化失败 → 500
+	CodeWalletInsufficientBalance      Code = 21002 // 余额不足（扣款条件更新 0 行）→ 409
+	CodeWalletInvalidRechargeAmount    Code = 21003 // 充值金额非法（非正/超上限）→ 400
+	CodeWalletRechargeOrderNotFound    Code = 21004 // 充值订单不存在或不属于当前用户（防枚举）→ 404
+	CodeWalletRechargeStatusNotAllowed Code = 21005 // 充值订单状态不允许该操作 → 409
+	CodeWalletDuplicatePayment         Code = 21006 // 重复支付（订单已扣款）→ 409
+	CodeWalletRefundCreditFailed       Code = 21007 // 退款入账失败 → 409
+	CodeWalletIdempotencyConflict      Code = 21008 // 资金流水幂等键冲突（同键不同业务金额）→ 409
+	CodeWalletMockRechargeDisabled     Code = 21009 // Mock 充值未启用（安全开关关闭）→ 403
+	CodeWalletAmountOverflow           Code = 21010 // 金额溢出（余额超出 INT UNSIGNED 可表示范围）→ 409
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -264,6 +277,17 @@ var codeTable = map[Code]codeInfo{
 	CodeCouponClaimUnavailable: {http.StatusConflict, "优惠券暂不可领取"},
 	CodeCouponClaimSoldOut:     {http.StatusConflict, "优惠券已领完"},
 	CodeCouponUnavailable:      {http.StatusConflict, "优惠券不可用"},
+
+	CodeWalletAccountUnavailable:       {http.StatusInternalServerError, "钱包账户不可用"},
+	CodeWalletInsufficientBalance:      {http.StatusConflict, "余额不足"},
+	CodeWalletInvalidRechargeAmount:    {http.StatusBadRequest, "充值金额非法"},
+	CodeWalletRechargeOrderNotFound:    {http.StatusNotFound, "充值订单不存在"},
+	CodeWalletRechargeStatusNotAllowed: {http.StatusConflict, "充值订单状态不允许该操作"},
+	CodeWalletDuplicatePayment:         {http.StatusConflict, "订单已支付"},
+	CodeWalletRefundCreditFailed:       {http.StatusConflict, "退款入账失败"},
+	CodeWalletIdempotencyConflict:      {http.StatusConflict, "资金流水幂等冲突"},
+	CodeWalletMockRechargeDisabled:     {http.StatusForbidden, "Mock 充值未启用"},
+	CodeWalletAmountOverflow:           {http.StatusConflict, "金额超出可表示范围"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。

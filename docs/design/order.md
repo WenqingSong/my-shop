@@ -161,7 +161,7 @@
 - 优惠券：`orders.user_coupon_id` → `user_coupons.id`（软引用，快照）；预占/核销/释放经 `ICoupon` 与订单状态变更同事务，见 `coupon.md`。
 - 地址：快照自 `addresses`，下单后地址变更不影响订单。
 - 状态流水：`order_status_logs.order_id` → `orders.id`（软引用，无 FK，只追加）；写入时机与事务边界在 B1-04 与状态推进一起实现。
-- 钱包/积分：`wallet_transactions`/`user_points_logs` 通过 `biz_type` + `biz_id` 软关联订单（无 FK）；当前订单支付/退款**不读写钱包与积分**，余额支付、退款入账、积分抵扣/返还在 B1-04 实现，见 `wallet.md`、`member.md`、`pricing.md`。
+- 钱包/积分：`wallet_transactions`/`user_points_logs` 通过 `biz_type` + `biz_id` 软关联订单（无 FK）。B1-04-04 已交付钱包内核与事务内原语 `IWallet.DebitForOrderInTx`（幂等键 `order_pay:<order_id>`）/`IWallet.CreditForRefundInTx`（`refund:<refund_id>`），但**订单支付入口 `Pay` 尚未接入余额渠道**：本任务基线未合入 B1-04-03 的订单/计价契约改动，按约束未修改 `internal/logic/order/order.go`。接入时在 `10→20` 同一事务内调用扣款方法即可，见 `wallet.md` §7。积分仍由 `member.md` 管理。
 - 建表经 golang-migrate 迁移（`20261001000007_orders.up.sql`）；金额三列（`original_amount`/`discount_amount`/`user_coupon_id`）由 `20261001000022_order_coupon_amounts.up.sql` 增列并回填；运费/支付/履约字段与 `order_items.spec_text` 由 `20261110000004_order_shipping_payment.up.sql` 增列（无回填）；状态流水由 `20261110000005_order_status_logs.up.sql` 建表，见 `migration.md`。
 - 配置：`order.pay_timeout`（支付超时秒，默认 900）、`order.cancel_scan_interval`（扫描周期秒，默认 60）。
 
@@ -169,7 +169,9 @@
 
 - 真实支付/退款到账/对账/资金回调（支付仅 Mock）。
 - 履约字段（`delivery_type`/`delivery_name`/`delivery_sn`）只有结构与默认值：发货接口仍只推进状态，承运商/运单号写入、物流轨迹查询与发货单回传未实现。
-- 运费计算、余额支付、退款入账、积分抵扣/返还、会员折扣未实现（结构与边界见 `pricing.md`、`wallet.md`、`member.md`）。
+- 运费计算、积分抵扣/返还、会员折扣未实现（结构与边界见 `pricing.md`、`member.md`）。
+- 余额支付：钱包侧原语（`DebitForOrderInTx`）已就绪并有资金一致性测试；订单支付入口尚未接入（阻塞于 B1-04-03 未合入），当前 `POST /orders/:id/pay` 仍是纯 Mock 状态推进，不读写钱包。
+- 退款入账：同理，`refund.Execute` 尚未调用 `CreditForRefundInTx`，当前退款成功不产生资金流水。
 - `order_status_logs` 只有结构：既有状态推进逻辑未改，流水写入在 B1-04 补齐。
 - `shipped/received/completed` 后的退款/退货/售后（留 After-sales/Refund 模块）。
 - 订单导出、收货人姓名/手机号模糊搜索等高级筛选（后台列表已支持 `order_no`/`user_id`/`status`/`start_time`/`end_time` 组合筛选与 7 态状态统计）。

@@ -46,6 +46,14 @@
 | 17 | 17000-17999 | object-storage-upload | ACTIVE |
 | 18 | 18000-18999 | order-refund-v1 | ACTIVE |
 | 19 | 19000-19999 | coupon-v1 | ACTIVE |
+| 21 | 21000-21999 | wallet（B1-04-04） | IMPLEMENTED（Registry 待补登记，见下） |
+
+> 域序 21 的登记状态：`internal/codes/codes.go` 已实现 21001-21010，`docs/design/wallet.md` §9 定义其语义；
+> 但基线 `.agent/registry/error-codes.md` 只登记到域序 19（19000-19999），**未包含域序 20/21**。
+> 按 Registry 规则，域必须在 `.agent/registry/error-codes.md` 中有独立 RESERVED 记录才算有效预留；
+> 本任务未修改该 Registry（不属于任务可写范围，且不应在同一分支内私留预留），需 Owner 通过独立
+> Registry 变更补登记域序 21，否则合并进共享分支时该域不被承认。此缺口已在
+> `docs/reports/B1-04-04-wallet.md` 的「阻塞事项」中记录。
 
 （本表为长期设计快照；分配状态与未来 RESERVED/ACTIVE/RELEASED 变化以 `.agent/registry/error-codes.md` 为唯一权威。）
 
@@ -69,4 +77,4 @@
 
 各业务模块 Design 继续在自身「错误码域」章节记录本模块具体错误码与归属声明，不在此重复，也不要求各模块重复全局 Namespace 规则：
 
-- `iam.md`、`rbac.md`、`category.md`、`product.md`、`sku.md`、`inventory.md`、`address.md`、`cart.md`、`order.md`、`review.md`、`favorite.md`、`like.md`、`flash-sale.md`、`banner.md`、`recommendation.md`、`article.md`、`storage.md`、`refund.md`、`coupon.md`。
+- `iam.md`、`rbac.md`、`category.md`、`product.md`、`sku.md`、`inventory.md`、`address.md`、`cart.md`、`order.md`、`review.md`、`favorite.md`、`like.md`、`flash-sale.md`、`banner.md`、`recommendation.md`、`article.md`、`storage.md`、`refund.md`、`coupon.md`、`wallet.md`（域 21）。

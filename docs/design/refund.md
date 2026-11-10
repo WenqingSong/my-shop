@@ -120,13 +120,14 @@
 - 库存恢复复用 `IInventory.IncreaseInTx`（「只补偿一次」不变量由订单状态条件更新闸门保证）。
 - 发货互斥：订单模块 `Ship` 在事务内检查有效退款申请（`service.Refund().HasActiveRequestInTx`），存在即拒绝。
 - 订单状态流水：退款成功推进订单 `paid→refunded` 时，B1-04 需在 `order_status_logs` 记一条 `refund` 流水（当前未写入，见 `order.md` §2.4）。
-- 钱包：当前 Mock 退款**不产生资金流水**（`wallet_transactions` 无用例）。B1-04 引入余额支付后，退款成功需在退款事务内写一条退款入账流水（`biz_type='refund'`、`biz_id=refund_requests.id`、确定性幂等键），见 `wallet.md`。
+- 钱包：当前 Mock 退款**不产生资金流水**（`wallet_transactions` 无用例）。B1-04-04 已交付事务内入账原语 `IWallet.CreditForRefundInTx`（`tx_type=order_refund`、`biz_type=refund`、`biz_id=refund_requests.id`、幂等键 `refund:<refund_id>`），但 `refund.Execute` 尚未调用它：本任务基线未合入 B1-04-03 的订单/退款契约改动，按约束未修改 `internal/logic/refund/refund.go`。接入时必须在「订单 `20→70` + 库存恢复 + 退款 `→60`」的同一事务内调用，且**仅当订单原支付渠道为余额**时才调用，见 `wallet.md` §6/§7。
 - 建表经 golang-migrate 迁移（`20261001000020_refund.up.sql`），见 `migration.md`。
 
 ## 9. Deferred / 已知留白
 
 - 真实支付平台退款、到账、对账、资金回调（执行退款为人工 Mock 确认）。
-- 退款钱包入账/余额回退（`wallet_transactions` 结构已建，退款入账在 B1-04 与余额支付一起实现）。
+- 退款钱包入账/余额回退：钱包侧原语已就绪（`CreditForRefundInTx`，含幂等与回滚测试），退款执行入口尚未接入（阻塞于 B1-04-03 未合入）；当前退款成功后余额不变。
+- 部分退款：`refund_requests.amount` 当前恒等于订单 `total_amount`，`CreditForRefundInTx` 已按传入金额入账，支持未来部分退款接入。
 - 部分退款、多次累计退款、换货、退货物流（寄回、物流单号、入库验收）。
 - 自动审核、自动退款、超时自动处理、自动重试。
 - 秒杀订单退款（无支付、下单即成交、库存独立不恢复）。
