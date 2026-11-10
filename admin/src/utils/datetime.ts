@@ -65,3 +65,17 @@ export function formatServerDateTime(
   }
   return text;
 }
+
+/**
+ * 格式化为后端 `gtime.Time` 请求体使用的本地时间字符串。
+ *
+ * 请求体（body）中的时间字段用 `YYYY-MM-DD HH:mm:ss`，与后端序列化格式一致；
+ * 查询参数中的时间仍使用 RFC3339（见 `toRFC3339`）。
+ */
+export function toServerDateTime(date: Date): string {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
+    date.getDate()
+  )} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(
+    date.getSeconds()
+  )}`;
+}

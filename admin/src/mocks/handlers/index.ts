@@ -7,6 +7,11 @@ import { inventoryHandlers } from "./inventory";
 import { uploadHandlers } from "./upload";
 import { orderHandlers } from "./order";
 import { refundHandlers } from "./refund";
+import { couponHandlers } from "./coupon";
+import { flashSaleHandlers } from "./flash-sale";
+import { bannerHandlers } from "./banner";
+import { recommendationHandlers } from "./recommendation";
+import { articleHandlers } from "./article";
 
 /**
  * Mock 处理器集合。
@@ -27,5 +32,10 @@ export const handlers: HttpHandler[] = [
   ...inventoryHandlers,
   ...uploadHandlers,
   ...orderHandlers,
-  ...refundHandlers
+  ...refundHandlers,
+  ...couponHandlers,
+  ...flashSaleHandlers,
+  ...bannerHandlers,
+  ...recommendationHandlers,
+  ...articleHandlers
 ];

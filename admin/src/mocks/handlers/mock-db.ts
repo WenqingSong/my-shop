@@ -158,6 +158,80 @@ export interface MockRefundAudit {
   created_at: string;
 }
 
+export interface MockCoupon {
+  id: number;
+  name: string;
+  threshold_amount: number;
+  discount_amount: number;
+  total_quantity: number;
+  issued_quantity: number;
+  claim_start_time: string;
+  claim_end_time: string;
+  use_start_time: string;
+  use_end_time: string;
+  status: 0 | 1;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MockActivity {
+  id: number;
+  name: string;
+  status: "enabled" | "disabled";
+  start_time: string;
+  end_time: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MockActivitySku {
+  id: number;
+  activity_id: number;
+  sku_id: number;
+  flash_price: number;
+  total_stock: number;
+  sold: number;
+}
+
+export interface MockBanner {
+  id: number;
+  title: string;
+  image_url: string;
+  link_url: string;
+  sort: number;
+  status: 0 | 1;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MockPosition {
+  id: number;
+  code: string;
+  name: string;
+  status: 0 | 1;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MockRecommendItem {
+  id: number;
+  position_id: number;
+  product_id: number;
+  sort: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MockArticle {
+  id: number;
+  author_id: number;
+  author_username: string;
+  title: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
 /** 固定时间戳，保证测试断言稳定 */
 const SEED_TIME = "2026-11-01 10:00:00";
 const MOCK_IMAGE_HOST = "https://mock-upload.local/files";
@@ -852,6 +926,222 @@ function seedRefunds(): {
   return { refunds, audits };
 }
 
+function seedCoupons(): MockCoupon[] {
+  return [
+    {
+      id: 8001,
+      name: "新人满减券",
+      threshold_amount: 10000,
+      discount_amount: 2000,
+      total_quantity: 1000,
+      issued_quantity: 120,
+      claim_start_time: "2026-11-01 00:00:00",
+      claim_end_time: "2026-12-31 23:59:59",
+      use_start_time: "2026-11-01 00:00:00",
+      use_end_time: "2027-01-31 23:59:59",
+      status: 1,
+      created_at: "2026-10-25 10:00:00",
+      updated_at: "2026-10-25 10:00:00"
+    },
+    {
+      id: 8002,
+      name: "无门槛 5 元券",
+      threshold_amount: 0,
+      discount_amount: 500,
+      total_quantity: 200,
+      issued_quantity: 200,
+      claim_start_time: "2026-11-01 00:00:00",
+      claim_end_time: "2026-11-30 23:59:59",
+      use_start_time: "2026-11-01 00:00:00",
+      use_end_time: "2026-12-15 23:59:59",
+      status: 1,
+      created_at: "2026-10-26 11:00:00",
+      updated_at: "2026-10-26 11:00:00"
+    },
+    {
+      id: 8003,
+      name: "双十一大额券",
+      threshold_amount: 50000,
+      discount_amount: 10000,
+      total_quantity: 500,
+      issued_quantity: 50,
+      claim_start_time: "2026-11-01 00:00:00",
+      claim_end_time: "2026-11-11 23:59:59",
+      use_start_time: "2026-11-11 00:00:00",
+      use_end_time: "2026-11-20 23:59:59",
+      status: 0,
+      created_at: "2026-10-28 09:00:00",
+      updated_at: "2026-11-02 09:30:00"
+    }
+  ];
+}
+
+function seedActivities(): {
+  activities: MockActivity[];
+  bindings: MockActivitySku[];
+} {
+  return {
+    activities: [
+      {
+        id: 8101,
+        name: "周末闪购",
+        status: "enabled",
+        start_time: "2026-11-15 10:00:00",
+        end_time: "2026-11-15 12:00:00",
+        created_at: "2026-11-05 09:00:00",
+        updated_at: "2026-11-05 09:00:00"
+      }
+    ],
+    bindings: [
+      {
+        id: 9101,
+        activity_id: 8101,
+        sku_id: 2001,
+        flash_price: 19900,
+        total_stock: 50,
+        sold: 12
+      },
+      {
+        id: 9102,
+        activity_id: 8101,
+        sku_id: 2002,
+        flash_price: 20900,
+        total_stock: 30,
+        sold: 5
+      }
+    ]
+  };
+}
+
+function seedBanners(): MockBanner[] {
+  return [
+    {
+      id: 8201,
+      title: "双十一主会场",
+      image_url: `${MOCK_IMAGE_HOST}/banner-1.png`,
+      link_url: "/products/1001",
+      sort: 1,
+      status: 1,
+      created_at: "2026-10-20 10:00:00",
+      updated_at: "2026-10-20 10:00:00"
+    },
+    {
+      id: 8202,
+      title: "新人专享",
+      image_url: `${MOCK_IMAGE_HOST}/banner-2.png`,
+      link_url: "",
+      sort: 2,
+      status: 1,
+      created_at: "2026-10-21 10:00:00",
+      updated_at: "2026-10-21 10:00:00"
+    },
+    {
+      id: 8203,
+      title: "旧活动横幅",
+      image_url: `${MOCK_IMAGE_HOST}/banner-3.png`,
+      link_url: "/articles/1",
+      sort: 3,
+      status: 0,
+      created_at: "2026-09-01 10:00:00",
+      updated_at: "2026-09-10 10:00:00"
+    }
+  ];
+}
+
+function seedRecommendations(): {
+  positions: MockPosition[];
+  items: MockRecommendItem[];
+} {
+  return {
+    positions: [
+      {
+        id: 8301,
+        code: "home-top",
+        name: "首页顶部推荐",
+        status: 1,
+        created_at: SEED_TIME,
+        updated_at: SEED_TIME
+      },
+      {
+        id: 8302,
+        code: "home-side",
+        name: "首页侧栏推荐",
+        status: 0,
+        created_at: SEED_TIME,
+        updated_at: SEED_TIME
+      }
+    ],
+    items: [
+      {
+        id: 9201,
+        position_id: 8301,
+        product_id: 1001,
+        sort: 0,
+        created_at: SEED_TIME,
+        updated_at: SEED_TIME
+      },
+      {
+        id: 9202,
+        position_id: 8301,
+        product_id: 1002,
+        sort: 1,
+        created_at: SEED_TIME,
+        updated_at: SEED_TIME
+      },
+      {
+        id: 9203,
+        position_id: 8302,
+        product_id: 1003,
+        sort: 0,
+        created_at: SEED_TIME,
+        updated_at: SEED_TIME
+      }
+    ]
+  };
+}
+
+function seedArticles(): MockArticle[] {
+  return [
+    {
+      id: 8401,
+      author_id: 101,
+      author_username: "u101",
+      title: "SurgeCart 选购指南",
+      content:
+        "第一步：确认使用场景。\n第二步：选择合适尺码与配色。\n第三步：关注活动期间的优惠券。",
+      created_at: "2026-10-20 09:00:00",
+      updated_at: "2026-10-20 09:00:00"
+    },
+    {
+      id: 8402,
+      author_id: 102,
+      author_username: "u102",
+      title: "跑步鞋保养技巧",
+      content: "避免暴晒，定期清洗鞋面，保持鞋内干燥。",
+      created_at: "2026-10-25 14:00:00",
+      updated_at: "2026-10-25 14:00:00"
+    },
+    {
+      id: 8403,
+      author_id: 101,
+      author_username: "u101",
+      title: "双十一活动说明",
+      content: "活动时间以商品详情页为准，优惠券数量有限，先到先得。",
+      created_at: "2026-11-01 08:00:00",
+      updated_at: "2026-11-02 10:00:00"
+    },
+    {
+      id: 8404,
+      author_id: 103,
+      author_username: "u103",
+      title: "如何选择运动水壶",
+      content: "容量、材质与密封性是三个关键指标。",
+      created_at: "2026-11-05 16:00:00",
+      updated_at: "2026-11-05 16:00:00"
+    }
+  ];
+}
+
 interface MockDb {
   categories: MockCategory[];
   products: MockProduct[];
@@ -862,11 +1152,24 @@ interface MockDb {
   orderItems: MockOrderItem[];
   refunds: MockRefund[];
   refundAudits: MockRefundAudit[];
+  coupons: MockCoupon[];
+  activities: MockActivity[];
+  activitySkus: MockActivitySku[];
+  banners: MockBanner[];
+  positions: MockPosition[];
+  recommendItems: MockRecommendItem[];
+  articles: MockArticle[];
   nextCategoryId: number;
   nextProductId: number;
   nextSkuId: number;
   nextLogId: number;
   nextRefundAuditId: number;
+  nextCouponId: number;
+  nextActivityId: number;
+  nextActivitySkuId: number;
+  nextBannerId: number;
+  nextPositionId: number;
+  nextRecommendItemId: number;
   reset: () => void;
   now: () => string;
 }
@@ -881,11 +1184,24 @@ export const mockDb: MockDb = {
   orderItems: [],
   refunds: [],
   refundAudits: [],
+  coupons: [],
+  activities: [],
+  activitySkus: [],
+  banners: [],
+  positions: [],
+  recommendItems: [],
+  articles: [],
   nextCategoryId: 1,
   nextProductId: 1,
   nextSkuId: 1,
   nextLogId: 1,
   nextRefundAuditId: 1,
+  nextCouponId: 1,
+  nextActivityId: 1,
+  nextActivitySkuId: 1,
+  nextBannerId: 1,
+  nextPositionId: 1,
+  nextRecommendItemId: 1,
   reset() {
     this.categories = seedCategories();
     this.products = seedProducts();
@@ -901,11 +1217,27 @@ export const mockDb: MockDb = {
     this.refunds = refunds;
     this.refundAudits = audits;
 
+    this.coupons = seedCoupons();
+    const activitySeed = seedActivities();
+    this.activities = activitySeed.activities;
+    this.activitySkus = activitySeed.bindings;
+    this.banners = seedBanners();
+    const recommendSeed = seedRecommendations();
+    this.positions = recommendSeed.positions;
+    this.recommendItems = recommendSeed.items;
+    this.articles = seedArticles();
+
     this.nextCategoryId = 100;
     this.nextProductId = 3001;
     this.nextSkuId = 4001;
     this.nextLogId = 100;
     this.nextRefundAuditId = 2000;
+    this.nextCouponId = 8500;
+    this.nextActivityId = 8600;
+    this.nextActivitySkuId = 8700;
+    this.nextBannerId = 8800;
+    this.nextPositionId = 8900;
+    this.nextRecommendItemId = 9300;
   },
   now() {
     // 固定"当前时间"，避免测试断言依赖真实时钟

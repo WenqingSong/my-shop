@@ -83,6 +83,13 @@ menus:
   pureAfterSales: 售后管理
   pureRefundList: 退款管理
   pureRefundDetail: 退款详情
+  pureMarketing: 营销管理
+  pureCoupon: 优惠券管理
+  pureFlashSale: 秒杀活动
+  pureContent: 内容管理
+  pureBanner: 轮播图管理
+  pureRecommendation: 商品推荐位
+  pureArticle: 文章内容
   pureHome: 首页
   pureLogin: 登录
   pureEmpty: 无Layout页

@@ -49,7 +49,19 @@ export const PERMISSION = {
   REFUND_LIST: "refund:list",
   REFUND_VIEW: "refund:view",
   REFUND_REVIEW: "refund:review",
-  REFUND_EXECUTE: "refund:execute"
+  REFUND_EXECUTE: "refund:execute",
+  COUPON_CREATE: "coupon:create",
+  COUPON_LIST: "coupon:list",
+  COUPON_STOP: "coupon:stop",
+  FLASH_SALE_CREATE: "flash_sale:create",
+  FLASH_SALE_UPDATE: "flash_sale:update",
+  BANNER_CREATE: "banner:create",
+  BANNER_UPDATE: "banner:update",
+  BANNER_DELETE: "banner:delete",
+  RECOMMEND_CREATE: "recommend:create",
+  RECOMMEND_UPDATE: "recommend:update",
+  RECOMMEND_DELETE: "recommend:delete",
+  RECOMMEND_ITEM: "recommend:item"
 } as const;
 
 /** 权限码：工作台只读（保留 A1 的命名，避免调用方改动） */

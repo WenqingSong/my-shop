@@ -22,6 +22,13 @@ import EpTickets from "~icons/ep/tickets?raw";
 import EpShoppingCart from "~icons/ep/shopping-cart?raw";
 import EpService from "~icons/ep/service?raw";
 import EpMoney from "~icons/ep/money?raw";
+// A4 营销 / 内容
+import EpTicket from "~icons/ep/ticket?raw";
+import EpAlarmClock from "~icons/ep/alarm-clock?raw";
+import EpPicture from "~icons/ep/picture?raw";
+import EpStar from "~icons/ep/star?raw";
+import EpDocument from "~icons/ep/document?raw";
+import EpPresent from "~icons/ep/present?raw";
 
 // https://icon-sets.iconify.design/ri/?keyword=ri
 import RiMindMap from "~icons/ri/mind-map?raw";
@@ -71,6 +78,12 @@ const icons = [
   ["ep/shopping-cart", EpShoppingCart],
   ["ep/service", EpService],
   ["ep/money", EpMoney],
+  ["ep/ticket", EpTicket],
+  ["ep/alarm-clock", EpAlarmClock],
+  ["ep/picture", EpPicture],
+  ["ep/star", EpStar],
+  ["ep/document", EpDocument],
+  ["ep/present", EpPresent],
   // Remix Icon: https://github.com/Remix-Design/RemixIcon
   ["ri/mind-map", RiMindMap],
   ["ri/admin-fill", RiAdminFill],

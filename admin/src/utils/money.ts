@@ -28,3 +28,25 @@ export function formatCentsAsYuan(cents: number): string {
 export function formatCentsAsCny(cents: number): string {
   return `¥${formatCentsAsYuan(cents)}`;
 }
+
+/**
+ * 元 → 整数分（精确换算）。
+ *
+ * 规则与 A2 商品价格一致：
+ * - 空值/非数字/负数返回 `null`；
+ * - 超过 `maxCents` 返回 `null`；
+ * - 小数位超过两位（例如 1.234）返回 `null`，不做静默四舍五入。
+ */
+export function parseYuanToCents(
+  value: number | string | null | undefined,
+  maxCents = 99_999_999
+): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const num = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(num) || num < 0) return null;
+
+  const cents = Math.round(num * 100);
+  if (!Number.isFinite(cents) || cents > maxCents) return null;
+  if (Math.abs(num * 100 - cents) > 1e-6) return null;
+  return cents;
+}

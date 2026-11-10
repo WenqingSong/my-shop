@@ -83,6 +83,13 @@ menus:
   pureAfterSales: After-sales
   pureRefundList: Refunds
   pureRefundDetail: Refund Detail
+  pureMarketing: Marketing
+  pureCoupon: Coupons
+  pureFlashSale: Flash Sales
+  pureContent: Content
+  pureBanner: Banners
+  pureRecommendation: Recommendations
+  pureArticle: Articles
   pureHome: Home
   pureLogin: Login
   pureEmpty: Empty Page
