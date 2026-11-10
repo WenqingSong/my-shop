@@ -1,0 +1,189 @@
+{
+  "meta": {
+    "run_id": "t503-b-c1",
+    "scenario": "flashsale-order",
+    "test_env": "local-kind",
+    "base_url": "http://host.docker.internal:18000",
+    "dispatch_mode": "kafka",
+    "data_prefix": "k6t503",
+    "summary_exported_at": "2026-11-10T08:27:06.965Z",
+    "test_run_duration_ms": 790.658038,
+    "profile": "low",
+    "activity_id": 14,
+    "sku_id": 12,
+    "flash_users": 1,
+    "idempotency_replay": false,
+    "verify_result": true,
+    "executor": "once",
+    "iterations_per_vu": 1,
+    "shared_user": true,
+    "fixed_key": null
+  },
+  "thresholds": {
+    "passed": [
+      "checks rate==1",
+      "k6_envelope_errors count==0",
+      "k6_request_errors count==0"
+    ],
+    "failed": []
+  },
+  "metrics": {
+    "k6_envelope_errors": {
+      "type": "counter",
+      "values": {
+        "count": 0,
+        "rate": 0
+      },
+      "thresholds": {
+        "count==0": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_waiting": {
+      "type": "trend",
+      "values": {
+        "max": 120.608251,
+        "p(90)": 45.4896598,
+        "p(95)": 103.07531739999996,
+        "avg": 29.635268681818175,
+        "min": 4.037739,
+        "med": 28.2870095
+      }
+    },
+    "k6_biz_outcomes": {
+      "type": "counter",
+      "values": {
+        "count": 20,
+        "rate": 25.295385664567164
+      }
+    },
+    "k6_request_errors": {
+      "type": "counter",
+      "values": {
+        "count": 0,
+        "rate": 0
+      },
+      "thresholds": {
+        "count==0": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_connecting": {
+      "type": "trend",
+      "values": {
+        "p(90)": 4.3122231000000015,
+        "p(95)": 4.8633026,
+        "avg": 1.7240186363636363,
+        "min": 0,
+        "med": 1.13315,
+        "max": 5.495387
+      }
+    },
+    "http_req_failed": {
+      "type": "rate",
+      "values": {
+        "rate": 0,
+        "passes": 0,
+        "fails": 22
+      }
+    },
+    "data_sent": {
+      "type": "counter",
+      "values": {
+        "count": 9985,
+        "rate": 12628.721293035156
+      }
+    },
+    "http_req_blocked": {
+      "type": "trend",
+      "values": {
+        "p(95)": 5.135923699999999,
+        "avg": 1.8899058636363635,
+        "min": 0.002466,
+        "med": 1.1620835,
+        "max": 8.161606,
+        "p(90)": 4.383551300000001
+      }
+    },
+    "iterations": {
+      "type": "counter",
+      "values": {
+        "count": 10,
+        "rate": 12.647692832283582
+      }
+    },
+    "http_req_duration{expected_response:true}": {
+      "type": "trend",
+      "values": {
+        "p(95)": 103.44082514999997,
+        "avg": 29.774587409090916,
+        "min": 4.13431,
+        "med": 28.598876,
+        "max": 120.734786,
+        "p(90)": 45.718726100000005
+      }
+    },
+    "k6_flash_order_final_state_ms": {
+      "type": "trend",
+      "values": {
+        "avg": 547.1,
+        "min": 538,
+        "med": 547.5,
+        "max": 553,
+        "p(90)": 553,
+        "p(95)": 553
+      }
+    },
+    "iteration_duration": {
+      "type": "trend",
+      "values": {
+        "max": 553.765241,
+        "p(90)": 553.7453168,
+        "p(95)": 553.7552789,
+        "avg": 547.303913,
+        "min": 538.201977,
+        "med": 547.594656
+      }
+    },
+    "checks": {
+      "type": "rate",
+      "values": {
+        "rate": 1,
+        "passes": 53,
+        "fails": 0
+      },
+      "thresholds": {
+        "rate==1": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_duration": {
+      "type": "trend",
+      "values": {
+        "max": 120.734786,
+        "p(90)": 45.718726100000005,
+        "p(95)": 103.44082514999997,
+        "avg": 29.774587409090916,
+        "min": 4.13431,
+        "med": 28.598876
+      }
+    },
+    "data_received": {
+      "type": "counter",
+      "values": {
+        "count": 8161,
+        "rate": 10321.782120426631
+      }
+    },
+    "http_reqs": {
+      "type": "counter",
+      "values": {
+        "count": 22,
+        "rate": 27.82492423102388
+      }
+    }
+  }
+}

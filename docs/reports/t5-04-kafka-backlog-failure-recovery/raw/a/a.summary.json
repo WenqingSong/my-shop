@@ -1,0 +1,54 @@
+﻿{
+    "experiment":  "A: consumer backlog \u0026 recovery (broker alive)",
+    "activity_id":  16,
+    "sku_id":  14,
+    "run_id":  "t504-a-run1",
+    "requests_submitted":  20,
+    "k6_exit_code":  0,
+    "k6_trace_lines":  21,
+    "lag_before":  "0",
+    "lag_while_paused_first":  "20",
+    "lag_while_paused_last":  "20",
+    "lag_after_recovery":  "0",
+    "committed_before":  "42",
+    "committed_after":  "62",
+    "recovery_samples":  null,
+    "db_during_pause":  {
+                            "requests_total":  "20",
+                            "requests_queued":  "20",
+                            "requests_success":  "0",
+                            "requests_failed":  "0",
+                            "requests_dead":  "0",
+                            "requests_unpublished":  "0",
+                            "requests_retry_exhausted":  "0",
+                            "orders_total":  "0",
+                            "orders_distinct_users":  "0",
+                            "orders_dup_per_user":  "0",
+                            "orders_dup_no":  "0",
+                            "sku_total_stock":  "20",
+                            "sku_sold":  "0",
+                            "sku_remaining":  "20",
+                            "request_status_distribution":  [
+                                                                "status=0 code=0 n=20"
+                                                            ]
+                        },
+    "db_final":  {
+                     "requests_total":  "20",
+                     "requests_queued":  "0",
+                     "requests_success":  "20",
+                     "requests_failed":  "0",
+                     "requests_dead":  "0",
+                     "requests_unpublished":  "0",
+                     "requests_retry_exhausted":  "0",
+                     "orders_total":  "20",
+                     "orders_distinct_users":  "20",
+                     "orders_dup_per_user":  "0",
+                     "orders_dup_no":  "0",
+                     "sku_total_stock":  "20",
+                     "sku_sold":  "20",
+                     "sku_remaining":  "0",
+                     "request_status_distribution":  [
+                                                         "status=1 code=0 n=20"
+                                                     ]
+                 }
+}

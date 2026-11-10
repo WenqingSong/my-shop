@@ -1,0 +1,18 @@
+﻿{
+    "run_id":  "t503-c-c1",
+    "scenario":  "flashsale-order",
+    "k6_image":  "grafana/k6:0.54.0",
+    "base_url":  "http://host.docker.internal:18000",
+    "profile":  null,
+    "started_at_utc":  "2026-11-10T08:28:10.9524604Z",
+    "finished_at_utc":  "2026-11-10T08:28:14.5238993Z",
+    "exit_code":  0,
+    "git_branch":  "feat/k8s-t5-03-concurrency-correctness",
+    "git_sha":  "ce8d86c8ee0958962cc656d15160f34b10a25ba1",
+    "git_dirty":  true,
+    "kube_context":  "kind-surgecart-local",
+    "app_image":  "surgecart:64ebbbd-t4-03",
+    "prometheus_service":  "monitoring/prometheus:9090（kubectl port-forward svc/prometheus 9090:9090 后查询）",
+    "k6_log":  "D:\\Wenqingsong\\CodeProjects\\codebuddy\\k8s\\test\\k6\\results\\t503-c-c1.k6.log",
+    "env":  "SURGECART_BASE_URL=http://host.docker.internal:18000; RUN_ID=t503-c-c1; SCENARIO=flashsale-order; K6_SUMMARY_DIR=/results; DATA_PREFIX=k6t503; EXPECT_DISPATCH_MODE=kafka; ACTIVITY_ID=15; SKU_ID=13; FLASH_USERS=1; FLASH_VERIFY=true; FLASH_EXECUTOR=once; FLASH_ITERATIONS=1; FLASH_VUS=10; FLASH_SHARED_USER=true; FLASH_FIXED_KEY=t503-c-fixed-key-1; FLASH_TRACE=true; FLASH_MAX_DURATION=5m"
+}

@@ -1,0 +1,23 @@
+﻿{
+    "pods":  [
+                 "NAME                        READY   STATUS      RESTARTS   AGE    IP            NODE                            NOMINATED NODE   READINESS GATES",
+                 "kafka-6cc98894b9-7djfr      1/1     Running     0          109m   10.244.0.32   surgecart-local-control-plane   \u003cnone\u003e           \u003cnone\u003e",
+                 "mysql-87f8b688f-t854q       1/1     Running     0          24h    10.244.0.9    surgecart-local-control-plane   \u003cnone\u003e           \u003cnone\u003e",
+                 "redis-5c44b5d69d-f66q6      1/1     Running     0          24h    10.244.0.11   surgecart-local-control-plane   \u003cnone\u003e           \u003cnone\u003e",
+                 "surgecart-7d4d84b88-gwpxp   1/1     Running     0          73m    10.244.0.35   surgecart-local-control-plane   \u003cnone\u003e           \u003cnone\u003e",
+                 "surgecart-migrate-7j8dm     0/1     Completed   0          22h    10.244.0.19   surgecart-local-control-plane   \u003cnone\u003e           \u003cnone\u003e"
+             ],
+    "pvc":  [
+                "NAME                STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE",
+                "kafka-data          Bound    pvc-bfcf7704-058a-48bb-9cdf-ed31a53ba322   2Gi        RWO            standard       \u003cunset\u003e                 24h",
+                "mysql-data          Bound    pvc-201fd1b3-8f85-4e0e-bee4-bc02826d8c47   2Gi        RWO            standard       \u003cunset\u003e                 24h",
+                "redis-data          Bound    pvc-8e507535-d9dd-4175-888e-4e9d537e17f9   1Gi        RWO            standard       \u003cunset\u003e                 24h",
+                "surgecart-storage   Bound    pvc-da9498d8-903a-46f5-9f50-5f3663433856   5Gi        RWO            standard       \u003cunset\u003e                 22h"
+            ],
+    "deployments":  [
+                        "kafka       1     1     apache/kafka:3.9.1",
+                        "mysql       1     1     mysql:8.0",
+                        "redis       1     1     redis:7-alpine",
+                        "surgecart   1     1     surgecart:64ebbbd-t4-03"
+                    ]
+}

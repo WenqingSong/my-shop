@@ -1,0 +1,35 @@
+﻿{
+    "topic":  "surgecart.flashsale.order.requested.v1",
+    "topic_etas":  [
+                       {
+                           "partition":  "0",
+                           "earliest":  "0",
+                           "latest":  "136"
+                       }
+                   ],
+    "dlq_topic":  "surgecart.flashsale.order.requested.v1.dlq",
+    "dlq_etas":  [
+                     {
+                         "partition":  "0",
+                         "earliest":  "0",
+                         "latest":  "22"
+                     }
+                 ],
+    "consumer_group":  "surgecart-flashsale-order-worker-v1",
+    "group_state":  [
+                        {
+                            "group":  "surgecart-flashsale-order-worker-v1",
+                            "topic":  "surgecart.flashsale.order.requested.v1",
+                            "partition":  0,
+                            "current":  "136",
+                            "logEnd":  "136",
+                            "lag":  "0",
+                            "consumerId":  "surgecart-flashsale-consumer-e2269bac-39b7-4a8d-8bda-8a6d2ebc62e3",
+                            "host":  "/10.244.0.35",
+                            "clientId":  "surgecart-flashsale-consumer"
+                        }
+                    ],
+    "lag_total":  0,
+    "unconsumed_records":  0,
+    "captured_at_cst":  "2026-11-10 19:41:52"
+}

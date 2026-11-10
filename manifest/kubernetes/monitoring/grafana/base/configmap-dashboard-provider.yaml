@@ -1,0 +1,36 @@
+# Grafana Dashboard Provider Provisioning（T4-04）。
+#
+# Provider 让 Grafana 启动时扫描指定目录下的 JSON 并自动导入为 Dashboard，
+# 因此 Dashboard 不需要在 UI 里手工创建，也不依赖 Grafana 数据库作为唯一副本。
+#
+# 关键约束：
+#   - allowUiUpdates: false —— UI 修改不会覆盖 Git 中的 JSON（清单是唯一事实来源）；
+#   - disableDeletion: true —— 不能通过 UI/API 删除被 Provision 的 Dashboard；
+#   - updateIntervalSeconds: 30 —— ConfigMap 更新后（kubectl rollout restart 或
+#     Reload Provisioning）30s 内重新扫描；
+#   - foldersFromFilesStructure: false —— 统一落在 folder: SurgeCart，避免路径变化导致重复 Dashboard。
+#
+# 挂载点：/etc/grafana/provisioning/dashboards（见 deployment.yaml）。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-provider
+  labels:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: surgecart
+data:
+  dashboard-provider.yaml: |
+    apiVersion: 1
+    providers:
+      - name: surgecart
+        orgId: 1
+        folder: SurgeCart
+        folderUid: surgecart
+        type: file
+        disableDeletion: true
+        allowUiUpdates: false
+        updateIntervalSeconds: 30
+        options:
+          path: /var/lib/grafana/dashboards
+          foldersFromFilesStructure: false

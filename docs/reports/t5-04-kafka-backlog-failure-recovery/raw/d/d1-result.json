@@ -1,0 +1,68 @@
+﻿{
+    "dlq_before":  16,
+    "dlq_after":  20,
+    "produced_offsets":  [
+                             130,
+                             131,
+                             132,
+                             133
+                         ],
+    "dlq_source_offsets":  [
+                               130,
+                               131,
+                               132,
+                               133
+                           ],
+    "source_offset_match":  true,
+    "dlq_reasons":  [
+                        "parse_error",
+                        "schema_version",
+                        "event_type",
+                        "request_missing"
+                    ],
+    "invalid_metric_series":  "instance=surgecart.surgecart.svc.cluster.local:8000,job=surgecart,result=invalid=4",
+    "dlq_metric_series":  [
+                              "instance=surgecart.surgecart.svc.cluster.local:8000,job=surgecart,reason=parse_error=1",
+                              "instance=surgecart.surgecart.svc.cluster.local:8000,job=surgecart,reason=event_type=1",
+                              "instance=surgecart.surgecart.svc.cluster.local:8000,job=surgecart,reason=request_missing=1",
+                              "instance=surgecart.surgecart.svc.cluster.local:8000,job=surgecart,reason=schema_version=1"
+                          ],
+    "db_before":  {
+                      "requests_total":  "0",
+                      "requests_queued":  "0",
+                      "requests_success":  "0",
+                      "requests_failed":  "0",
+                      "requests_dead":  "0",
+                      "requests_unpublished":  "0",
+                      "requests_retry_exhausted":  "0",
+                      "orders_total":  "0",
+                      "orders_distinct_users":  "0",
+                      "orders_dup_per_user":  "0",
+                      "orders_dup_no":  "0",
+                      "sku_total_stock":  "5",
+                      "sku_sold":  "0",
+                      "sku_remaining":  "5",
+                      "request_status_distribution":  [
+
+                                                      ]
+                  },
+    "db_after":  {
+                     "requests_total":  "0",
+                     "requests_queued":  "0",
+                     "requests_success":  "0",
+                     "requests_failed":  "0",
+                     "requests_dead":  "0",
+                     "requests_unpublished":  "0",
+                     "requests_retry_exhausted":  "0",
+                     "orders_total":  "0",
+                     "orders_distinct_users":  "0",
+                     "orders_dup_per_user":  "0",
+                     "orders_dup_no":  "0",
+                     "sku_total_stock":  "5",
+                     "sku_sold":  "0",
+                     "sku_remaining":  "5",
+                     "request_status_distribution":  [
+
+                                                     ]
+                 }
+}

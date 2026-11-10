@@ -1,0 +1,28 @@
+# Prometheus 基础层（base，T4-03）。
+#
+# 职责：只声明与运行环境无关的部分（抓取目标、安全上下文、TSDB 卷、ClusterIP Service）。
+# 环境差异（保留期、资源规格、镜像仓库地址）由 overlays/<env> 覆盖。
+#
+# 入口：
+#   kubectl kustomize manifest/kubernetes/monitoring/prometheus/overlays/local
+#
+# 不包含：Alertmanager、Grafana、Operator、ServiceMonitor/ServiceDiscovery、RBAC。
+# 静态配置抓取单一应用即可满足 T4-03 的验收目标，额外组件属于未授权扩大的范围。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+
+# 命名空间级资源统一落到 monitoring（Namespace 对象本身由 kustomize 跳过）。
+namespace: monitoring
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: surgecart
+      app.kubernetes.io/managed-by: kustomize
+    includeSelectors: false

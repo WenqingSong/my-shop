@@ -1,0 +1,91 @@
+﻿{
+    "key_counts":  {
+                       "stock_keys":  1,
+                       "bought_keys":  0,
+                       "idem_keys":  0,
+                       "activity_keys":  1,
+                       "soldout_keys":  0
+                   },
+    "sample_keys":  {
+                        "stock":  [
+                                      "flashsale:stock:12:10"
+                                  ],
+                        "activity":  [
+                                         "flashsale:activity:12"
+                                     ]
+                    },
+    "per_activity":  [
+                         {
+                             "activity_id":  "16",
+                             "sku_id":  "14",
+                             "key":  "flashsale:stock:16:14",
+                             "redis_stock":  "(nil)",
+                             "ttl_seconds":  "-2",
+                             "mysql_remaining":  "0",
+                             "verdict":  "no-cache-key"
+                         },
+                         {
+                             "activity_id":  "17",
+                             "sku_id":  "15",
+                             "key":  "flashsale:stock:17:15",
+                             "redis_stock":  "(nil)",
+                             "ttl_seconds":  "-2",
+                             "mysql_remaining":  "0",
+                             "verdict":  "no-cache-key"
+                         },
+                         {
+                             "activity_id":  "18",
+                             "sku_id":  "16",
+                             "key":  "flashsale:stock:18:16",
+                             "redis_stock":  "(nil)",
+                             "ttl_seconds":  "-2",
+                             "mysql_remaining":  "0",
+                             "verdict":  "no-cache-key"
+                         },
+                         {
+                             "activity_id":  "19",
+                             "sku_id":  "17",
+                             "key":  "flashsale:stock:19:17",
+                             "redis_stock":  "(nil)",
+                             "ttl_seconds":  "-2",
+                             "mysql_remaining":  "0",
+                             "verdict":  "no-cache-key"
+                         },
+                         {
+                             "activity_id":  "20",
+                             "sku_id":  "18",
+                             "key":  "flashsale:stock:20:18",
+                             "redis_stock":  "(nil)",
+                             "ttl_seconds":  "-2",
+                             "mysql_remaining":  "0",
+                             "verdict":  "no-cache-key"
+                         },
+                         {
+                             "activity_id":  "21",
+                             "sku_id":  "19",
+                             "key":  "flashsale:stock:21:19",
+                             "redis_stock":  "(nil)",
+                             "ttl_seconds":  "-2",
+                             "mysql_remaining":  "10",
+                             "verdict":  "no-cache-key"
+                         },
+                         {
+                             "activity_id":  "22",
+                             "sku_id":  "20",
+                             "key":  "flashsale:stock:22:20",
+                             "redis_stock":  "(nil)",
+                             "ttl_seconds":  "-2",
+                             "mysql_remaining":  "0",
+                             "verdict":  "no-cache-key"
+                         },
+                         {
+                             "activity_id":  "23",
+                             "sku_id":  "21",
+                             "key":  "flashsale:stock:23:21",
+                             "redis_stock":  "(nil)",
+                             "ttl_seconds":  "-2",
+                             "mysql_remaining":  "5",
+                             "verdict":  "no-cache-key"
+                         }
+                     ]
+}

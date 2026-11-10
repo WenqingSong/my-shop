@@ -1,0 +1,188 @@
+# Grafana Deployment（T4-04）。
+#
+# 单副本：本地 kind 单节点、数据卷 RWO，且面试演示场景不需要 HA；
+# 多副本需要共享数据库（Grafana 的 SQLite 默认存储在 PVC 内，不支持多写），属于未授权扩大范围。
+#
+# 安全基线（与 Prometheus 同款，不放宽 restricted PSS）：
+#   - 非 root：官方镜像默认 USER 472，这里显式固定 runAsUser/RunAsGroup=472；
+#   - readOnlyRootFilesystem + capabilities drop ALL + allowPrivilegeEscalation false；
+#   - seccomp RuntimeDefault；
+#   - automountServiceAccountToken=false：Grafana 只访问 Prometheus HTTP 接口，不访问 API Server，
+#     因此不需要任何 RBAC。
+#
+# 只读根文件系统下的可写目录（Grafana 启动与运行必需）：
+#   /var/lib/grafana   —— PVC：grafana.db（Dashboard/用户/组织）、plugins、csv 等（必须持久）
+#   /var/lib/grafana/dashboards —— ConfigMap 只读挂载（Provisioning 扫描目录）
+#   /var/log/grafana   —— emptyDir：日志走 stdout（GF_LOG_MODE=console），目录仅兜底
+#   /tmp               —— emptyDir（内存）：进程临时文件兜底
+#
+# 日志按要求输出到 stdout/stderr：GF_LOG_MODE=console，可直接 kubectl logs 查看。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  labels:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: surgecart
+    app.kubernetes.io/version: "11.2.2"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  # 单副本 + RWO PVC：Recreate 避免滚动更新时新旧 Pod 争抢同一块卷（Multi-Attach / 锁冲突）。
+  strategy:
+    type: Recreate
+  progressDeadlineSeconds: 300
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: grafana
+      app.kubernetes.io/component: monitoring
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: grafana
+        app.kubernetes.io/component: monitoring
+        app.kubernetes.io/part-of: surgecart
+        app.kubernetes.io/version: "11.2.2"
+      annotations:
+        # Provisioning 配置与 Dashboard 都以 ConfigMap 为源；ConfigMap 更新不会自动重启 Pod，
+        # 变更流程：kubectl apply -k ... → kubectl -n monitoring rollout restart deployment/grafana。
+        surgecart.io/config-source: "configmap/grafana-datasources,configmap/grafana-dashboard-provider,configmap/grafana-dashboard-surgecart"
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        # 官方 grafana/grafana 镜像的默认用户（grafana，UID 472）；显式固定避免镜像默认值漂移。
+        runAsUser: 472
+        runAsGroup: 472
+        # PVC 挂载后授权给 472，保证 grafana.db 与 plugins 目录可写。
+        fsGroup: 472
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: grafana
+          # 版本固定（不使用 latest / 浮动的 11.x）：Provisioning 与 Dashboard schema 在版本间会变化。
+          image: grafana/grafana:11.2.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            # 路径显式声明：与 volumeMounts 一一对应，避免镜像默认路径与挂载点不一致。
+            - name: GF_PATHS_DATA
+              value: /var/lib/grafana
+            - name: GF_PATHS_LOGS
+              value: /var/log/grafana
+            - name: GF_PATHS_PROVISIONING
+              value: /etc/grafana/provisioning
+            # 日志写 stdout/stderr（只读根文件系统下唯一正确的日志去处）。
+            - name: GF_LOG_MODE
+              value: console
+            - name: GF_LOG_LEVEL
+              value: info
+            # 关闭匿名访问与注册：只允许认证用户访问（本地为镜像默认管理员，见交付报告「已知限制」）。
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "false"
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+            # 离线集群：关闭所有出网行为（更新检查、使用统计、新闻源）。
+            - name: GF_ANALYTICS_REPORTING_ENABLED
+              value: "false"
+            - name: GF_ANALYTICS_CHECK_FOR_UPDATES
+              value: "false"
+            - name: GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES
+              value: "false"
+            - name: GF_NEWS_NEWS_FEED_ENABLED
+              value: "false"
+          # 首次启动要初始化 SQLite（grafana.db）并加载 Provisioning，2s × 30 = 60s 覆盖本地场景。
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 30
+          # 存活：/api/health 只回答进程与 HTTP 服务是否存活。
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # 就绪：/api/health 返回 200 才接流量（未就绪时不进入 Service Endpoints）。
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            # Grafana 单实例查询一个 Prometheus：requests 保证调度，limits 留出面板并发查询余量。
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            # Grafana 数据库 / 插件 / 导出文件（必须持久，否则 Pod 重建后用户与设置丢失）。
+            - name: data
+              mountPath: /var/lib/grafana
+            # Dashboard JSON（只读，唯一事实来源在 Git）。
+            - name: dashboards
+              mountPath: /var/lib/grafana/dashboards
+              readOnly: true
+            # Provisioning：数据源与 Dashboard Provider（只读）。
+            - name: provisioning-datasources
+              mountPath: /etc/grafana/provisioning/datasources
+              readOnly: true
+            - name: provisioning-dashboards
+              mountPath: /etc/grafana/provisioning/dashboards
+              readOnly: true
+            # 只读根文件系统下的兜底可写目录。
+            - name: logs
+              mountPath: /var/log/grafana
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: grafana-data
+        - name: dashboards
+          configMap:
+            name: grafana-dashboard-surgecart
+            items:
+              - key: surgecart-overview.json
+                path: surgecart-overview.json
+        - name: provisioning-datasources
+          configMap:
+            name: grafana-datasources
+            items:
+              - key: datasource.yaml
+                path: datasource.yaml
+        - name: provisioning-dashboards
+          configMap:
+            name: grafana-dashboard-provider
+            items:
+              - key: dashboard-provider.yaml
+                path: dashboard-provider.yaml
+        - name: logs
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 32Mi

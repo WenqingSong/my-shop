@@ -173,6 +173,9 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 		// RequestID 注册于 Response 之前（外层）：统一读取/生成 Request ID、回写响应头，
 		// 并在请求结束时输出含 request_id 的结构化访问日志（与 Nginx 访问日志关联）。
 		root.Middleware(middleware.RequestID)
+		// Metrics 必须位于 Response 之外（读取 Response 写完后的最终状态码），
+		// 位于 RequestID 之内（不干扰 Request ID 与访问日志）。
+		root.Middleware(middleware.Metrics)
 		root.Middleware(middleware.Response)
 		root.Bind(health.NewV1())
 

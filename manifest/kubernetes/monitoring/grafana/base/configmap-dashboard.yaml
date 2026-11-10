@@ -1,0 +1,645 @@
+# SurgeCart Overview Dashboard（T4-04）。
+#
+# 由 Dashboard Provider 从 /var/lib/grafana/dashboards 自动导入（见 configmap-dashboard-provider.yaml），
+# 因此 Grafana 重建后无需手工重建面板：Dashboard 的唯一事实来源是本文件的 JSON。
+#
+# UID 固定为 surgecart-overview：重复 apply 只会更新同一个 Dashboard，
+# 不会在 Grafana 里堆出多份同名副本（也不会打断已有的分享链接）。
+#
+# 指标来源全部为 T4-02 实现、T4-03 抓取的真实序列，命名与标签均按实际 /metrics 输出核对：
+#   surgecart_http_requests_total{method,route,status}
+#   surgecart_http_request_duration_seconds_bucket{le,method,route,status}
+#   surgecart_http_requests_in_flight
+#   go_goroutines / go_memstats_heap_alloc_bytes / go_gc_duration_seconds_count / process_cpu_seconds_total
+#   surgecart_kafka_consumer_lag{topic,partition,consumer_group}
+#   flashsale_outbox_backlog_pending
+#   surgecart_outbox_oldest_age_seconds
+#   surgecart_sampler_up{sampler}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-surgecart
+  labels:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: surgecart
+    grafana_dashboard: "surgecart-overview"
+data:
+  surgecart-overview.json: |
+    {
+      "annotations": {"list": []},
+      "description": "SurgeCart 运行状态总览：HTTP 服务、Go Runtime、Kafka 消费、Outbox 发布四个维度。所有面板均来自 Prometheus 中的真实抓取数据。",
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "panels": [
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "description": "按规范化路由统计的 HTTP 请求速率（QPS）。route 标签是 Gin 的路由模板（如 /products/:id），不是原始 URL，因此不会因 ID 不同而发散。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": false,
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "lineInterpolation": "smooth",
+                "lineWidth": 1,
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"}
+              },
+              "mappings": [],
+              "min": 0,
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "reqps"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
+          "id": 1,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "editorMode": "code",
+              "expr": "sum by (route) (rate(surgecart_http_requests_total{job=\"surgecart\"}[$__rate_interval]))",
+              "legendFormat": "{{route}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "HTTP Request Rate",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "description": "5xx 为服务端故障（红色关注项）；4xx 为客户端错误（如秒杀限流/参数错误），单独一条曲线，不与服务端故障混算。分母为全部状态码的请求速率。无对应状态码时用 or vector(0) 显式补 0，避免「没有曲线」被误读为「没有错误」。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": false,
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"}
+              },
+              "mappings": [],
+              "min": 0,
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "percentunit"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0},
+          "id": 2,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "editorMode": "code",
+              "expr": "(sum(rate(surgecart_http_requests_total{job=\"surgecart\",status=~\"5..\"}[$__rate_interval])) or vector(0)) / clamp_min(sum(rate(surgecart_http_requests_total{job=\"surgecart\"}[$__rate_interval])), 0.000001)",
+              "legendFormat": "5xx server errors",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "editorMode": "code",
+              "expr": "(sum(rate(surgecart_http_requests_total{job=\"surgecart\",status=~\"4..\"}[$__rate_interval])) or vector(0)) / clamp_min(sum(rate(surgecart_http_requests_total{job=\"surgecart\"}[$__rate_interval])), 0.000001)",
+              "legendFormat": "4xx client errors",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "HTTP Error Ratio",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "description": "当前并发处理中的请求数（Gauge）。持续等于或接近并发上限说明请求在排队；空闲时为 0 属于正常状态。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 20}, {"color": "red", "value": 50}]},
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0},
+          "id": 3,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "editorMode": "code",
+              "expr": "sum(surgecart_http_requests_in_flight{job=\"surgecart\"})",
+              "legendFormat": "in-flight",
+              "range": false,
+              "refId": "A"
+            }
+          ],
+          "title": "HTTP In-Flight",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "description": "由 Histogram bucket 计算的 P95 延迟（histogram_quantile 分别对每个 route 的 le 桶求和）。不使用 average（_sum/_count 无法反映长尾）。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": false,
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "lineInterpolation": "smooth",
+                "lineWidth": 1,
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"}
+              },
+              "mappings": [],
+              "min": 0,
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+          "id": 4,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "editorMode": "code",
+              "expr": "histogram_quantile(0.95, sum by (le, route) (rate(surgecart_http_request_duration_seconds_bucket{job=\"surgecart\"}[$__rate_interval])))",
+              "legendFormat": "p95 {{route}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "HTTP Latency (P95)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "description": "Go Runtime 协程数量。异常单调增长通常意味着 goroutine 泄漏（例如 Kafka 消费循环或 Outbox worker 未退出）。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": false,
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"}
+              },
+              "mappings": [],
+              "min": 0,
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+          "id": 5,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "editorMode": "code",
+              "expr": "go_goroutines{job=\"surgecart\"}",
+              "legendFormat": "goroutines",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Goroutines",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "description": "堆上已分配（仍存活）字节数。锯齿形是 GC 回收的正常表现；持续抬升说明对象存活时间被拉长或存在泄漏。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": false,
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"}
+              },
+              "mappings": [],
+              "min": 0,
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 0, "y": 16},
+          "id": 6,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "editorMode": "code",
+              "expr": "go_memstats_heap_alloc_bytes{job=\"surgecart\"}",
+              "legendFormat": "heap alloc",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Heap Alloc",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "description": "每秒 GC 次数（go_gc_duration_seconds_count 的速率）。GC 频率突增通常与分配速率上升相关，可作为堆内存压力的先行指标。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": false,
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"}
+              },
+              "mappings": [],
+              "min": 0,
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 8, "y": 16},
+          "id": 7,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "editorMode": "code",
+              "expr": "rate(go_gc_duration_seconds_count{job=\"surgecart\"}[$__rate_interval])",
+              "legendFormat": "GC cycles/s",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "GC Cycles Rate",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "description": "进程 CPU 使用率（单核归一化，1 = 占满一个核）。与容器 CPU limit 对照可判断是否被限流。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": false,
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"}
+              },
+              "mappings": [],
+              "min": 0,
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "percentunit"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 16, "y": 16},
+          "id": 8,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "editorMode": "code",
+              "expr": "rate(process_cpu_seconds_total{job=\"surgecart\"}[$__rate_interval])",
+              "legendFormat": "process CPU",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Process CPU",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "description": "所有 consumer group / topic / partition 的消费积压总和。0 表示已追平；持续不为 0 说明消费能力不足或消费者停摆。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "mappings": [],
+              "noValue": "NO DATA",
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 1000}]},
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 0, "y": 24},
+          "id": 9,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "editorMode": "code",
+              "expr": "sum(surgecart_kafka_consumer_lag{job=\"surgecart\"})",
+              "legendFormat": "total lag",
+              "range": false,
+              "refId": "A"
+            }
+          ],
+          "title": "Kafka Consumer Lag (Total)",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "description": "按 topic + partition 拆分的消费积压。单分区持续积压通常意味着该分区消费阻塞或分区分配不均。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": false,
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"}
+              },
+              "mappings": [],
+              "min": 0,
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 8, "y": 24},
+          "id": 10,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "editorMode": "code",
+              "expr": "sum by (topic, partition) (surgecart_kafka_consumer_lag{job=\"surgecart\"})",
+              "legendFormat": "{{topic}} · p{{partition}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Kafka Lag by Partition",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "description": "当前总 lag 与 15 分钟前的差值：正值表示积压正在扩大（消费跟不上），负值表示正在追平，0 表示稳定。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": true,
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"}
+              },
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 16, "y": 24},
+          "id": 11,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "editorMode": "code",
+              "expr": "sum(surgecart_kafka_consumer_lag{job=\"surgecart\"}) - sum(surgecart_kafka_consumer_lag{job=\"surgecart\"} offset 15m)",
+              "legendFormat": "Δlag vs 15m ago",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Kafka Lag Trend (15m Delta)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "description": "Outbox 中待发布事件数（真实积压）。注意区分三种情况：0 且 Sampler Health=UP 表示确实无积压；NO DATA 表示指标未被采样；非 0 表示发布链路落后。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "mappings": [],
+              "noValue": "NO DATA (sampler?)",
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 100}]},
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 0, "y": 32},
+          "id": 12,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "editorMode": "code",
+              "expr": "flashsale_outbox_backlog_pending{job=\"surgecart\"}",
+              "legendFormat": "pending",
+              "range": false,
+              "refId": "A"
+            }
+          ],
+          "title": "Outbox Pending Backlog",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "description": "最老待发布事件的年龄。持续增长说明 Outbox 发布被阻塞（例如 Kafka 不可用）；该值比「积压数量」更早暴露下游故障。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "mappings": [],
+              "noValue": "NO DATA (sampler?)",
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 60}, {"color": "red", "value": 300}]},
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 8, "y": 32},
+          "id": 13,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "editorMode": "code",
+              "expr": "surgecart_outbox_oldest_age_seconds{job=\"surgecart\"}",
+              "legendFormat": "oldest age",
+              "range": false,
+              "refId": "A"
+            }
+          ],
+          "title": "Outbox Oldest Event Age",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "description": "采样器健康度：1=采集成功，0=采样失败。为 0 时，同页的 Outbox/Kafka 面板必须视为「指标不可信」，不能把失败读成 0 积压。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "mappings": [
+                {
+                  "options": {
+                    "0": {"color": "red", "index": 1, "text": "DOWN"},
+                    "1": {"color": "green", "index": 0, "text": "UP"}
+                  },
+                  "type": "value"
+                }
+              ],
+              "noValue": "NO DATA",
+              "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]},
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 16, "y": 32},
+          "id": 14,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "value_and_name",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "editorMode": "code",
+              "expr": "surgecart_sampler_up{job=\"surgecart\"}",
+              "legendFormat": "{{sampler}}",
+              "range": false,
+              "refId": "A"
+            }
+          ],
+          "title": "Sampler Health",
+          "type": "stat"
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 39,
+      "tags": ["surgecart", "kubernetes", "prometheus"],
+      "templating": {"list": []},
+      "time": {"from": "now-1h", "to": "now"},
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "SurgeCart Overview",
+      "uid": "surgecart-overview",
+      "version": 1,
+      "weekStart": ""
+    }

@@ -1,0 +1,7 @@
+﻿=== 实验 D 结论 ===
+D-1 见 d1-result.json / d1-dlq-messages.json（4 条永久错误 → DLQ，来源偏移与投递偏移一致）
+D-2 重试预算耗尽：request=124 dlq_latest=22 原因=retry_exhausted
+D-2 最终请求行：status=3 retry_count=4 last_error_code=500 flash_order_id=0 published_offset=135
+D-2 数据库：orders=0 sold=0 dead=2
+D-2 Redis 相关键：
+NOTE: retry_count 由本脚本注入（模拟已完成 4 次技术失败），验证的是「预算耗尽后的处置」而非「重试计数如何推进」。

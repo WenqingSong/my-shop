@@ -1,0 +1,36 @@
+﻿=== 实验 A 结论 ===
+activity_id=16 sku_id=14 run=t504-a-run1 requests=20 k6_exit=0
+lag: before=0 paused_first=20 paused_last=20 after_recovery=0
+committed_offset: before=42 after=62
+--- db during pause ---
+  requests_total = 20
+  requests_queued = 20
+  requests_success = 0
+  requests_failed = 0
+  requests_dead = 0
+  requests_unpublished = 0
+  requests_retry_exhausted = 0
+  orders_total = 0
+  orders_distinct_users = 0
+  orders_dup_per_user = 0
+  orders_dup_no = 0
+  sku_total_stock = 20
+  sku_sold = 0
+  sku_remaining = 20
+  request_status_distribution = status=0 code=0 n=20
+--- db final ---
+  requests_total = 20
+  requests_queued = 0
+  requests_success = 20
+  requests_failed = 0
+  requests_dead = 0
+  requests_unpublished = 0
+  requests_retry_exhausted = 0
+  orders_total = 20
+  orders_distinct_users = 20
+  orders_dup_per_user = 0
+  orders_dup_no = 0
+  sku_total_stock = 20
+  sku_sold = 20
+  sku_remaining = 0
+  request_status_distribution = status=1 code=0 n=20

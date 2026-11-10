@@ -1,0 +1,29 @@
+# Prometheus 查询入口（T4-03）。
+#
+# 只提供 ClusterIP：本任务不要求从集群外访问 Prometheus Web UI，
+# NodePort/LoadBalancer/Ingress 都会把监控界面暴露到业务入口之外，属于未授权扩大的暴露面。
+# 需要本机查看时用：
+#   kubectl -n monitoring port-forward svc/prometheus 9090:9090
+#
+# 注意：port-forward 只用于人工查看，**不是** Prometheus 的抓取路径
+# （抓取走 Pod 内的 Service DNS，见 configmap.yaml）。
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: surgecart
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/component: monitoring
+  ports:
+    # 命名端口：Deployment 探针与 Service targetPort 共用 http，避免端口号多处漂移。
+    - name: http
+      port: 9090
+      targetPort: http
+      protocol: TCP
+  sessionAffinity: None

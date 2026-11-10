@@ -1,0 +1,18 @@
+﻿{
+    "run_id":  "t502-b-5vu",
+    "scenario":  "read-load",
+    "k6_image":  "grafana/k6:0.54.0",
+    "base_url":  "http://host.docker.internal:18000",
+    "profile":  "low",
+    "started_at_utc":  "2026-11-10T04:38:48.6114645Z",
+    "finished_at_utc":  "2026-11-10T04:41:36.9244585Z",
+    "exit_code":  0,
+    "git_branch":  "feat/k8s-t5-02-load-performance-analysis",
+    "git_sha":  "a069b9d9d8f0f24e74c1fe4be4d5723023a31505",
+    "git_dirty":  true,
+    "kube_context":  "kind-surgecart-local",
+    "app_image":  "surgecart:64ebbbd-t4-03",
+    "prometheus_service":  "monitoring/prometheus:9090（kubectl port-forward svc/prometheus 9090:9090 后查询）",
+    "k6_log":  "D:\\Wenqingsong\\CodeProjects\\codebuddy\\k8s\\test\\k6\\results\\t502-b-5vu.k6.log",
+    "env":  "SURGECART_BASE_URL=http://host.docker.internal:18000; RUN_ID=t502-b-5vu; SCENARIO=read-load; K6_SUMMARY_DIR=/results; LOAD_PROFILE=low; EXPECT_DISPATCH_MODE=kafka; PRODUCT_ID=4; LOAD_VUS=5; THINK_TIME_MS=200"
+}

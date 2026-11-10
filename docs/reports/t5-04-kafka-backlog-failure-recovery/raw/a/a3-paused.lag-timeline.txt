@@ -1,0 +1,3 @@
+﻿2026-11-10T09:34:50Z	committed=42	logEnd=62	broker_lag=20	prom_lag=0	backlog=0
+2026-11-10T09:35:01Z	committed=42	logEnd=62	broker_lag=20	prom_lag=20	backlog=0
+2026-11-10T09:35:17Z	committed=42	logEnd=62	broker_lag=20	prom_lag=20	backlog=0

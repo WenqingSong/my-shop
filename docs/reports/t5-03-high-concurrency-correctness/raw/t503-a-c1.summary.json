@@ -1,0 +1,204 @@
+{
+  "meta": {
+    "run_id": "t503-a-c1",
+    "scenario": "flashsale-order",
+    "test_env": "local-kind",
+    "base_url": "http://host.docker.internal:18000",
+    "dispatch_mode": "kafka",
+    "data_prefix": "k6t503",
+    "summary_exported_at": "2026-11-10T08:25:52.979Z",
+    "test_run_duration_ms": 10118.655243,
+    "profile": "low",
+    "activity_id": 13,
+    "sku_id": 11,
+    "flash_users": 40,
+    "idempotency_replay": false,
+    "verify_result": true,
+    "executor": "once",
+    "iterations_per_vu": 1,
+    "shared_user": false,
+    "fixed_key": null
+  },
+  "thresholds": {
+    "passed": [
+      "k6_request_errors count==0",
+      "checks rate==1",
+      "k6_envelope_errors count==0"
+    ],
+    "failed": []
+  },
+  "metrics": {
+    "data_sent": {
+      "type": "counter",
+      "values": {
+        "count": 51803,
+        "rate": 5119.553809863903
+      }
+    },
+    "checks": {
+      "type": "rate",
+      "values": {
+        "rate": 1,
+        "passes": 268,
+        "fails": 0
+      },
+      "thresholds": {
+        "rate==1": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_blocked": {
+      "type": "trend",
+      "values": {
+        "min": 0.001869,
+        "med": 0.0036525000000000004,
+        "max": 22.257152,
+        "p(90)": 15.6223098,
+        "p(95)": 18.13988,
+        "avg": 3.601669554054054
+      }
+    },
+    "iteration_duration": {
+      "type": "trend",
+      "values": {
+        "min": 214.119042,
+        "med": 385.19115250000004,
+        "max": 1150.397784,
+        "p(90)": 1149.4669059,
+        "p(95)": 1150.14014315,
+        "avg": 512.159625375
+      }
+    },
+    "http_req_failed": {
+      "type": "rate",
+      "values": {
+        "rate": 0,
+        "passes": 0,
+        "fails": 148
+      }
+    },
+    "k6_envelope_errors": {
+      "type": "counter",
+      "values": {
+        "count": 0,
+        "rate": 0
+      },
+      "thresholds": {
+        "count==0": {
+          "ok": true
+        }
+      }
+    },
+    "iterations": {
+      "type": "counter",
+      "values": {
+        "count": 40,
+        "rate": 3.953094461605623
+      }
+    },
+    "http_reqs": {
+      "type": "counter",
+      "values": {
+        "count": 148,
+        "rate": 14.626449507940807
+      }
+    },
+    "k6_business_rejected": {
+      "type": "counter",
+      "values": {
+        "count": 20,
+        "rate": 1.9765472308028116
+      }
+    },
+    "k6_flash_order_final_state_ms": {
+      "type": "trend",
+      "values": {
+        "avg": 806.25,
+        "min": 549,
+        "med": 621,
+        "max": 1150,
+        "p(90)": 1150,
+        "p(95)": 1150
+      }
+    },
+    "http_req_duration{expected_response:true}": {
+      "type": "trend",
+      "values": {
+        "avg": 86.78523923648649,
+        "min": 4.49584,
+        "med": 102.39318850000001,
+        "max": 143.462662,
+        "p(90)": 125.6847362,
+        "p(95)": 133.90433475
+      }
+    },
+    "http_req_waiting": {
+      "type": "trend",
+      "values": {
+        "avg": 86.62302637162166,
+        "min": 4.417512,
+        "med": 102.237206,
+        "max": 143.365664,
+        "p(90)": 125.5557627,
+        "p(95)": 133.7693802
+      }
+    },
+    "vus_max": {
+      "type": "gauge",
+      "values": {
+        "value": 40,
+        "min": 40,
+        "max": 40
+      }
+    },
+    "http_req_connecting": {
+      "type": "trend",
+      "values": {
+        "max": 22.182203,
+        "p(90)": 15.5675869,
+        "p(95)": 18.0408236,
+        "avg": 3.5561505608108126,
+        "min": 0,
+        "med": 0
+      }
+    },
+    "data_received": {
+      "type": "counter",
+      "values": {
+        "count": 68454,
+        "rate": 6765.128206868783
+      }
+    },
+    "k6_request_errors": {
+      "type": "counter",
+      "values": {
+        "count": 0,
+        "rate": 0
+      },
+      "thresholds": {
+        "count==0": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_duration": {
+      "type": "trend",
+      "values": {
+        "max": 143.462662,
+        "p(90)": 125.6847362,
+        "p(95)": 133.90433475,
+        "avg": 86.78523923648649,
+        "min": 4.49584,
+        "med": 102.39318850000001
+      }
+    },
+    "k6_biz_outcomes": {
+      "type": "counter",
+      "values": {
+        "rate": 6.72026058472956,
+        "count": 68
+      }
+    }
+  }
+}

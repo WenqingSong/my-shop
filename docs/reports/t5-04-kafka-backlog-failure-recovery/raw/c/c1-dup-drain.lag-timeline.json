@@ -1,0 +1,14 @@
+﻿{
+    "at_utc":  "2026-11-10T10:10:11Z",
+    "at_cst":  "2026-11-10 18:10:11",
+    "committed_offset":  "104",
+    "log_end_offset":  "104",
+    "broker_lag":  "0",
+    "topic_earliest":  "0",
+    "topic_latest":  "104",
+    "prom_lag":  "0",
+    "prom_backlog_pending":  "0",
+    "prom_consumer_joined":  "1",
+    "consumer_id":  "surgecart-flashsale-consumer-8a692786-2f75-4fd8-952c-fb52d7c60923",
+    "kafka_error":  ""
+}

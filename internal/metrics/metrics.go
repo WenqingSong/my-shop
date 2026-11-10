@@ -203,9 +203,15 @@ type observableGauge struct {
 	value    float64
 }
 
-// newObservableGauge 构造一个未观测（不导出）的 Gauge。
+// newObservableGauge 构造一个未观测（不导出）的 flashsale_* Gauge。
 func newObservableGauge(name, help string) *observableGauge {
-	return &observableGauge{desc: prometheus.NewDesc("flashsale_"+name, help, nil, nil)}
+	return newObservableGaugeNamed("flashsale_"+name, help)
+}
+
+// newObservableGaugeNamed 用完整指标名（含命名空间前缀）构造未观测 Gauge。
+// 应用级指标（surgecart_*，见 application.go）复用它，避免再写一套「未观测不导出」实现。
+func newObservableGaugeNamed(fullName, help string) *observableGauge {
+	return &observableGauge{desc: prometheus.NewDesc(fullName, help, nil, nil)}
 }
 
 // Describe 实现 prometheus.Collector；无标签，因此只描述一条指标。
@@ -401,21 +407,6 @@ func MarkConsumerJoined(ctx context.Context, joined bool) {
 		value = 1
 	}
 	consumerJoined.set(value)
-}
-
-// SetOutboxBacklogPending 写入 Outbox 待发布积压采样值（记录数）。
-//
-// 只能由后台采样器在「查询成功」后调用：查询失败必须保留上一次有效值，
-// 绝不能把积压错误地覆盖为 0（那会把 Kafka/MySQL 故障伪装成「积压已清空」）。
-// 指标关闭时为空操作。
-func SetOutboxBacklogPending(ctx context.Context, pending int64) {
-	if !Enabled(ctx) {
-		return
-	}
-	if pending < 0 {
-		pending = 0
-	}
-	outboxBacklogPending.set(float64(pending))
 }
 
 // Handler 返回 Prometheus 指标采集 handler（默认 registry 的文本格式）。

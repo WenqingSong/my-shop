@@ -1,0 +1,50 @@
+﻿[
+    {
+        "headers":  {
+                        "dlq_reason":  "parse_error",
+                        "dlq_error":  "解析秒杀请求事件: unexpected end of JSON input",
+                        "dlq_source_topic":  "surgecart.flashsale.order.requested.v1",
+                        "dlq_source_partition":  "0",
+                        "dlq_source_offset":  "130",
+                        "dlq_retry_count":  "0"
+                    },
+        "key":  "null",
+        "value":  "{\"this is\":\"not valid json\""
+    },
+    {
+        "headers":  {
+                        "dlq_reason":  "schema_version",
+                        "dlq_error":  "不支持的 schema_version 99（仅支持 1）",
+                        "dlq_source_topic":  "surgecart.flashsale.order.requested.v1",
+                        "dlq_source_partition":  "0",
+                        "dlq_source_offset":  "131",
+                        "dlq_retry_count":  "0"
+                    },
+        "key":  "null",
+        "value":  "{\"occurred_at\":\"2026-11-10T10:35:48Z\",\"schema_version\":99,\"idempotency_key\":\"t504d-bad-schema\",\"event_type\":\"flashsale.order.requested\",\"request_hash\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"event_id\":\"flashsale.requested:99999999\",\"sku_id\":21,\"activity_id\":23,\"request_id\":99999999,\"user_id\":1}"
+    },
+    {
+        "headers":  {
+                        "dlq_reason":  "event_type",
+                        "dlq_error":  "不支持的 event_type \"flashsale.order.created\"（期望 \"flashsale.order.requested\"）",
+                        "dlq_source_topic":  "surgecart.flashsale.order.requested.v1",
+                        "dlq_source_partition":  "0",
+                        "dlq_source_offset":  "132",
+                        "dlq_retry_count":  "0"
+                    },
+        "key":  "null",
+        "value":  "{\"occurred_at\":\"2026-11-10T10:35:48Z\",\"schema_version\":1,\"idempotency_key\":\"t504d-bad-type\",\"event_type\":\"flashsale.order.created\",\"request_hash\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"event_id\":\"flashsale.requested:99999999\",\"sku_id\":21,\"activity_id\":23,\"request_id\":99999999,\"user_id\":1}"
+    },
+    {
+        "headers":  {
+                        "dlq_reason":  "request_missing",
+                        "dlq_error":  "请求 99999999 与消息不一致或不存在（request_missing）",
+                        "dlq_source_topic":  "surgecart.flashsale.order.requested.v1",
+                        "dlq_source_partition":  "0",
+                        "dlq_source_offset":  "133",
+                        "dlq_retry_count":  "0"
+                    },
+        "key":  "null",
+        "value":  "{\"occurred_at\":\"2026-11-10T10:35:48Z\",\"schema_version\":1,\"idempotency_key\":\"t504d-missing\",\"event_type\":\"flashsale.order.requested\",\"request_hash\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"event_id\":\"flashsale.requested:99999999\",\"sku_id\":21,\"activity_id\":23,\"request_id\":99999999,\"user_id\":1}"
+    }
+]

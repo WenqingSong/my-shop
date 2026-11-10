@@ -1,0 +1,2 @@
+﻿Warning: Immediate deletion does not wait for confirmation that the running resource has been terminated. The resource may continue to run on the cluster indefinitely.
+pod "surgecart-7d4d84b88-lhsg8" force deleted from surgecart namespace
