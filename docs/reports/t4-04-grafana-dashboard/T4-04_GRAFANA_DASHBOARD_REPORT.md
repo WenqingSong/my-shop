@@ -414,7 +414,8 @@ done
 | 分支 | `feat/k8s-t4-04-grafana-dashboard` |
 | 基线 | `982705a95b184082c4a41f1d76f44ae222309a14`（未合并 main，未重写历史，未 force push） |
 | 提交 1（实现） | `cf3f761863f83238490f4d210ac768c16f867a50` — feat(monitoring): T4-04 在 Kubernetes 内部署 Grafana 并完成 SurgeCart 监控看板 |
-| 提交 2（报告） | 见 `git log`（本文件所在提交） |
+| 提交 2（报告） | `eb91393d94b05c5006544da0ada61b399d1e8947` — docs(monitoring): T4-04 Grafana 部署与看板交付报告 |
+| 提交 3（元数据） | 仅回填本表与本文件 `FINAL_HEAD_SHA` 字段；该提交 SHA 无法写入自身内容，以远端分支 HEAD 为准 |
 | 改动范围 | 仅新增 `manifest/kubernetes/monitoring/grafana/**`、`test/manifest/grafana_test.go`、`docs/development/grafana.md`、本报告 |
 | 凭据检查 | 未包含任何真实凭据（无 Secret、无密码、无 token） |
 | 业务代码 | 未修改任何 Go 业务代码 |
@@ -429,7 +430,7 @@ TASK=T4-04
 
 BASELINE_SHA=982705a95b184082c4a41f1d76f44ae222309a14
 FINAL_BRANCH=feat/k8s-t4-04-grafana-dashboard
-FINAL_HEAD_SHA=<见推送后回填提交>
+FINAL_HEAD_SHA=eb91393d94b05c5006544da0ada61b399d1e8947（内容提交；其后仅有一个回填本字段的元数据提交，分支 HEAD 以远端为准）
 
 GRAFANA_VERSION=11.2.2
 GRAFANA_DEPLOYMENT_STATUS=PASS（deployment/grafana 1/1 Ready，Running）
