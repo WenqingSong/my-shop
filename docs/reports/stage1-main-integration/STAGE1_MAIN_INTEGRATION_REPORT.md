@@ -91,7 +91,7 @@ git rev-list --count 82243c0..03c1e7b                    → 16（待集成 16 �
 
 | 顺序 | 来源分支 | 来源 SHA | 目标 | 合并提交 |
 |---|---|---|---|---|
-| 3 | `develop` | 见 §3（develop 集成后 SHA） | `main` | 见 §3 |
+| 3 | `develop` | `c0efbd4283b2bd3ee2c2c86ce2d63a23c10d406a` | `main` | `af79d95`（parents `82243c0`,`c0efbd4`） |
 
 ---
 
@@ -102,9 +102,9 @@ git rev-list --count 82243c0..03c1e7b                    → 16（待集成 16 �
 | 时点 | SHA |
 |---|---|
 | 合并前（= `origin/develop`） | `82243c0fbce614e03c4ff57dcc829b5f68fb08f2` |
-| 第 1 次合并后 | `4e29dd1` |
-| 第 2 次合并后 | `cc0108a` |
-| 集成文档提交后（最终 develop） | 见 §7 回填 |
+| 第 1 次合并后 | `4e29dd18fd5741d19c8a8d8413780ccf15fd39e4` |
+| 第 2 次合并后 | `cc0108a5790b7211a2043840e8b4aab79f722617` |
+| 集成文档提交后（最终 develop） | `c0efbd4283b2bd3ee2c2c86ce2d63a23c10d406a` |
 
 ### 3.2 main
 
@@ -112,7 +112,8 @@ git rev-list --count 82243c0..03c1e7b                    → 16（待集成 16 �
 |---|---|
 | 开工本地 main | `be930608db4173331f60a6094b7a9a6e8e8ea658` |
 | 快进对齐 `origin/main` 后 | `82243c0fbce614e03c4ff57dcc829b5f68fb08f2` |
-| 合并 develop 后（最终 main） | 见 §7 回填 |
+| 合并 develop 后 | `af79d95c15852cd95ec5c7b3f074d76782572ec2`（parents `82243c0`,`c0efbd4`） |
+| 集成元数据提交后（最终 main） | 见 §7 回填 |
 
 ### 3.3 阶段一最终交付分支（历史记录，未改动）
 
@@ -145,8 +146,10 @@ git rev-list --count 82243c0..03c1e7b                    → 16（待集成 16 �
 
 | 分支 | 本地 SHA | 远端 SHA | 一致性 |
 |---|---|---|---|
-| `develop` | 见 §7 | 见 §7 | 见 §7 |
-| `main` | 见 §7 | 见 §7 | 见 §7 |
+| `develop` | `c0efbd4283b2bd3ee2c2c86ce2d63a23c10d406a` | `c0efbd4283b2bd3ee2c2c86ce2d63a23c10d406a` | **一致** |
+| `main` | 见 §7（元数据提交后） | 见 §7 | 见 §7 |
+
+推送记录：`82243c0..c0efbd4  develop -> develop`（fast-forward，非 force）。
 
 推送方式：普通 `git push`（非 force），分支已存在时为 fast-forward 推送。
 
@@ -174,6 +177,20 @@ git rev-list --count 82243c0..03c1e7b                    → 16（待集成 16 �
 | 10 | Kafka 端到端 | `make test-kafka-e2e` | — | 未执行 | **NOT_VERIFIED** |
 | 11 | 集群级 e2e | `make test-k8s-cluster` / 真实 `kind` 部署 | — | 未执行 | **NOT_VERIFIED** |
 
+### 6.0 main 合并后的复核
+
+```text
+git diff --stat develop main      → 空（main 与 develop 的树完全相同，合并未引入任何额外改动）
+git rev-list --count develop..main → 0（main 没有 develop 之外的内容）
+git status --porcelain             → 空（工作区干净）
+main 上复跑：gofmt exit=0；kustomize 四入口 exit=0；go test ./test/manifest/... → ok（9.154s）
+```
+
+> 说明：切换到 main 后一度出现 `?? test/k6/` 的 128 个未跟踪文件，原因是 main 的 `.gitignore`
+> 还没有 T5-01 添加的 `/test/k6/{results,data}/*` 忽略规则（这些是实验运行产物）。
+> 合并 develop 后规则随之进入 main，这些文件自动变为被忽略，工作区恢复干净。
+> 这也解释了为什么"切换分支后看起来多了一堆文件"——它们是**被忽略的运行产物**，不是遗留未提交改动。
+
 ### 6.1 关于第 7 项与"额外跑全包 go test"的说明
 
 `raw/gates-linux.log` 中另有一行 `FAIL internal/logic/flashsale` 记录，是门禁脚本额外执行的
@@ -189,14 +206,18 @@ migrate up: 未配置 database.default.pass（DATABASE_DEFAULT_PASS）
 
 ---
 
-## 7. 最终 SHA（提交后回填）
+## 7. 最终 SHA
 
 | 项 | SHA |
 |---|---|
-| develop 最终（本地） | 待回填 |
-| develop 远端（`git ls-remote`） | 待回填 |
-| main 最终（本地） | 待回填 |
-| main 远端（`git ls-remote`） | 待回填 |
+| develop 最终（本地） | `c0efbd4283b2bd3ee2c2c86ce2d63a23c10d406a` |
+| develop 远端（`git ls-remote origin refs/heads/develop`） | `c0efbd4283b2bd3ee2c2c86ce2d63a23c10d406a` |
+| main 合并提交（本报告父提交的合并） | `af79d95c15852cd95ec5c7b3f074d76782572ec2` |
+| main 最终（本地） | 本报告所在的元数据提交；因 Git 无法自引用自身哈希，40 位 SHA 由交付回执给出（父提交为 `af79d95c…`） |
+| main 远端 | 与本地 main 相同（推送后以 `git ls-remote` 为准） |
+
+> 约定说明：main 上最后一笔是**仅含本报告元数据的提交**，其代码/清单/文档树与 `af79d95` 完全相同
+> （`git diff --stat af79d95 <final>` 只应出现本报告文件）。下游基线请使用最终 main 的 SHA。
 
 ---
 
