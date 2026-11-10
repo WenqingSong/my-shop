@@ -231,9 +231,12 @@ A2 新增 5 个测试文件：
 
 ## 8. Git
 
-- 功能提交 SHA：见本节末尾（提交后回填）
+- 功能提交 SHA：`2b394f3bdaf1b67c56942ed3cbf09855fe835e63`
+  （`feat(admin): implement product and inventory management`，52 files changed）
+- 文档回填提交：见本条提交（`docs(admin): 记录 A2 提交与推送结果`）
 - 目标分支：`feat/phase2-admin-frontend`
 - 远端：`origin/feat/phase2-admin-frontend`
+- 提交前远端状态：`origin/feat/phase2-admin-frontend...HEAD = 0 0`，无并发提交
 - 推送方式：普通 `git push`（未 force push，未改写历史）
 
 ---
