@@ -4,6 +4,12 @@
 - 分支：`feat/phase2-admin-frontend`
 - 代码提交：`a827674a75098a94ffd388bbfb212a79c95e9e69`（`feat(admin): initialize Vue admin frontend`）
 - 执行日期：2026-11-10
+- 配套开发知识文档：`.agent/tasks/dev/A0-admin-frontend-bootstrap.md`
+- 本报告位置：`docs/reports/A0-admin-frontend-bootstrap.md`
+
+> 位置变更说明：本报告最初存放于 `admin/ADMIN_A0_DELIVERY.md`，按最新协作规范迁移至
+> `docs/reports/`。迁移使用 `git mv`，Git 将其识别为重命名（`R`），文件历史可追溯；
+> 迁移前的原始验收结果全部保留，仅补充了提交统计口径的核对说明。
 
 ## 1. 模板来源与版本
 
@@ -13,7 +19,7 @@
 | 版本 | `v7.0.0` |
 | 固定提交 SHA | `b8177a202dceb1412d3bf56f3d15483dc1606c9c` |
 | 许可证 | MIT（原始 `LICENSE` 已保留于 `admin/LICENSE`，版权归 pure-admin 作者） |
-| 引入方式 | 源码复制至 `admin/`；未复制上游 `.git`、`.github`、`.gitpod.yml`、`.husky`、`Dockerfile`、`.vscode`、`.npmrc`、CHANGELOG/README，未触碰本仓库 Git 历史 |
+| 引入方式 | 源码复制至 `admin/`；未复制上游 `.git`、`.github`、`.gitpod.yml`、`.husky`、`Dockerfile`、`.vscode`、`.npmrc`、CHANGELOG，未触碰本仓库 Git 历史。`admin/README.md` 为本项目重新编写，`admin/LICENSE` 保留上游 MIT 原文 |
 
 ## 2. 技术栈
 
@@ -121,12 +127,21 @@ admin/
 
 ### 4.6 从模板移除的内容
 
-- 演示页面：`views/` 下 27 个目录（table、form、flow-chart、editor、chatai、system、permission、result、about 等）全部删除，仅保留 `login`、`error`、新建 `dashboard`。
-- 演示路由模块：23 个 `router/modules/*.ts` 删除，仅保留 `home.ts`（改造为 dashboard）、`remaining.ts`（精简）。
-- 演示组件：删除 17 个（ReCropper、ReEditor、ReFlowChart、ReVxeTableBar、ReMap、ReQrcode、ReTypeit 等），保留布局与权限骨架所需 7 个。
-- 演示 Mock：`mock/` 目录删除，改接 MSW。
-- 依赖清理：移除 43 个运行时依赖（vxe-table、wangeditor、codemirror、xgplayer、mqtt、xlsx、swiper、vuedraggable、@vue-flow/*、@logicflow/*、plus-pro-components、version-rocket、qrcode 等）与 12 个开发依赖（commitlint、husky、lint-staged、faker、dagre、vite-plugin-fake-server 等）。
-- 演示资源：`public/audio`、`public/html`、`public/wasm` 删除。
+以下均可直接在 `admin/` 中核对：
+
+- 演示页面：`src/views/` 现仅存 `dashboard/`、`login/`、`error/`（`403.vue`、`404.vue`、`500.vue`）；
+  模板演示目录（table、form、flow-chart、editor、chatai、system、permission、result、about 等）已全部移除。
+- 演示路由模块：`src/router/modules/` 现仅存 `home.ts`（改造为 dashboard 入口）与 `remaining.ts`（精简）。
+- 演示组件：`src/components/` 现仅存 `ReAuth`、`ReDialog`、`ReDrawer`、`ReIcon`、`RePerms`、
+  `ReSegmented`、`ReText` 共 7 个；ReCropper、ReEditor、ReFlowChart、ReVxeTableBar、ReMap、
+  ReQrcode、ReTypeit 等演示组件已删除。
+- 演示 Mock：模板 `mock/` 目录删除，改接 MSW（`src/mocks/`）。
+- 依赖清理：模板演示依赖已从 `package.json` 移除，当前不含 `vxe-table`、`@pureadmin/table`、
+  `@wangeditor/*`、`codemirror*`、`xgplayer`、`mqtt`、`xlsx`、`swiper`、`vuedraggable`、
+  `@vue-flow/*`、`@logicflow/*`、`plus-pro-components`、`version-rocket`、
+  `vite-plugin-fake-server`、`husky`、`lint-staged` 等条目。
+- 演示资源：`public/` 现仅存 `favicon.ico`、`logo.svg`、`platform-config.json`、
+  `mockServiceWorker.js`；模板的 `public/audio`、`public/html`、`public/wasm` 已删除。
 
 ## 5. 开发启动方式
 
@@ -143,8 +158,9 @@ pnpm dev     # http://localhost:8848/console/
 | 类型检查（strict） | `pnpm typecheck` | 通过，0 error（`tsconfig.json` 中 `strict: true`） |
 | ESLint | `pnpm lint:eslint:check` | 通过，0 error / 0 warning（`--max-warnings 0`） |
 | 单元测试 | `pnpm test` | 通过，2 个测试文件 / 11 个用例全绿 |
-| 生产构建 | `pnpm build` | 成功，`✓ built in 4.21s`，产物约 3 MB |
+| 生产构建 | `pnpm build` | 成功，`✓ built in 4.21s`（文档补齐任务复跑为 `4.17s`），产物约 3 MB |
 | 产物前缀 | 检查 `dist/index.html` | 资源引用为 `/console/static/...`、`/console/favicon.ico` |
+| 生产产物不含 MSW | `grep -rl "setupWorker\|mockServiceWorker" dist/static` | 无匹配（构建期常量折叠后 MSW 被剔除） |
 
 单元测试覆盖：
 
@@ -169,20 +185,54 @@ pnpm dev     # http://localhost:8848/console/
 
 ### 代理验证（实际执行）
 
-`curl -X POST http://127.0.0.1:8848/api/admin/login` 返回 `502`（本机未启动 Go 后端，
-代理已尝试连接 `127.0.0.1:8000` 且被拒），证明 `/api` 由代理接管而非落入前端路由。
+`curl -X POST http://127.0.0.1:8848/api/admin/login` 返回 `502`，同时直连
+`curl http://127.0.0.1:8000/admin/login` 返回 `000`（连接失败，无进程监听）。
+
+结论边界：**只证明"请求已进入代理并被转发至 8000 端口"**，不证明前后端联调成功。
+真实 `/api/admin/login → /admin/login` 的响应验证属于 A1，且需要 Go 后端运行。
 
 > 说明：`vite preview` 对不存在的静态资源也会回退到 `index.html`（返回 200），
 > 这是预览服务器行为；真实部署需要服务器对 `/console/*` 做 SPA fallback，见 README「部署约定」。
 
+### 本次未能验证的项（不得视为已通过）
+
+| 项 | 状态 | 原因 |
+|---|---|---|
+| `/api/admin/login` 的真实后端响应 | NOT_VERIFIED | Go 后端未运行，仅到"代理已转发、连接被拒"层面 |
+| OpenAPI 类型实际生成 | NOT_VERIFIED | `contracts/openapi.yaml` 未交付，脚本无输入 |
+| MSW 在浏览器中实际拦截请求 | NOT_VERIFIED | `VITE_MOCK_ENABLED=false`，未开启 Mock 做真机验证；仅验证了代码路径与"生产产物不含 MSW" |
+| 生产服务器（Nginx 等）SPA 回退 | NOT_IMPLEMENTED | A0 禁止修改部署配置 |
+
 ## 7. Git 提交与推送
 
-- 代码提交：`a827674a75098a94ffd388bbfb212a79c95e9e69`
-- 提交信息：`feat(admin): initialize Vue admin frontend`
-- 变更范围：仅 `admin/**`（204 个文件），未修改 `internal/**`、`api/**`、`migrations/**`、`contracts/**`、`web/**`、`Dockerfile`、`docker-compose.yml`、`deploy/**`、`nginx/`、`prometheus/`、Kubernetes 清单、根目录 `.gitignore`。
-- 推送结果：成功。`git push -u origin feat/phase2-admin-frontend` 以普通 push 创建远端分支
-  （`* [new branch] feat/phase2-admin-frontend -> feat/phase2-admin-frontend`），并已设置 upstream；
-  未使用 force push，未重写历史。
+A0 的实现与报告共产生 3 个提交，统计口径需区分（原报告仅记录了代码提交的文件数，
+与"相对基线的总文件数"是两个不同口径，此处明确对齐）：
+
+| # | 提交 SHA | 提交信息 | 文件数 |
+|---|---|---|---|
+| 1 | `a827674a75098a94ffd388bbfb212a79c95e9e69` | `feat(admin): initialize Vue admin frontend` | 204（`admin/**` 工程代码与配置，+29,134 行） |
+| 2 | `f43a2207197ff43101aed89301d6f79e7bbe8701` | `docs(admin): 新增 A0 交付报告` | 1（`admin/ADMIN_A0_DELIVERY.md`，+215 行） |
+| 3 | `5b396616568b592964671986aec67b8567f36cc7` | `docs(admin): 记录 A0 推送结果` | 1（同一文件 +3/-1） |
+
+统计口径说明：
+
+- **204** = 代码提交（#1）涉及的文件数，是"工程代码规模"的正确口径。
+- **205** = `git diff 82243c0..5b39661` 的文件总数，等于 204 + 1（报告文件），
+  是"相对基线新增的全部文件数"。
+- 两个数字都对，但不能混用。前次执行摘要中的 205 指后者。
+
+基线与范围核对：
+
+- 分支起点基线：`82243c0fbce614e03c4ff57dcc829b5f68fb08f2`。
+- `git diff --name-only 82243c0..5b39661` → 205 个文件，`+29,351` 行。
+- `git diff --name-only 82243c0..5b39661 -- . ':(exclude)admin/'` → **0 个文件**。
+  即本次变更全部落在 `admin/**`，未修改 `internal/**`、`api/**`、`migrations/**`、
+  `contracts/**`、`web/**`、`Dockerfile`、`docker-compose.yml`、`deploy/**`、`nginx/`、
+  `prometheus/`、Kubernetes 清单、根目录 `.gitignore`。
+
+推送结果：成功。`git push -u origin feat/phase2-admin-frontend` 以普通 push 创建远端分支
+（`* [new branch] feat/phase2-admin-frontend -> feat/phase2-admin-frontend`），并已设置 upstream；
+未使用 force push，未重写历史。
 
 ## 8. 尚未解决的问题
 
@@ -201,6 +251,23 @@ pnpm dev     # http://localhost:8848/console/
    （本阶段按边界要求未修改 `nginx/`、`Dockerfile`、`docker-compose.yml`、`deploy/`）。
 8. **browserslist 数据提示**：构建时提示 caniuse-lite 数据 8 个月未更新，不影响构建，未执行
    `update-browserslist-db`（避免引入无关变更）。
+9. **MSW 尚未做浏览器内验证**：`VITE_MOCK_ENABLED` 默认为 `false`，A0 未开启 Mock 做实际拦截验证。
+   已确认的是：启动代码路径存在、worker 文件为 MSW `3.0.4`、生产构建将其剔除。
+   首次真正使用 Mock 时，建议先加一条 `/api/ping` handler 验证拦截链路是否通。
+
+### 8.1 文档交付
+
+| 文档 | 路径 |
+|---|---|
+| 正式工程交付报告 | `docs/reports/A0-admin-frontend-bootstrap.md`（本文件） |
+| 开发知识文档 | `.agent/tasks/dev/A0-admin-frontend-bootstrap.md` |
+
+- 本报告原位于 `admin/ADMIN_A0_DELIVERY.md`，按最新协作规范用 `git mv` 迁移至 `docs/reports/`，
+  Git 记录为重命名（`R`），历史可追溯。
+- 文档补齐提交信息为 `docs(admin): 补齐 A0 文档交付`，具体 SHA 可通过 `git log` 查得
+  （报告无法引用自身所在提交的 SHA）。
+- 本次文档补齐仅新增两份文档、移动报告位置、更新 `admin/README.md` 中的报告链接，
+  未修改 `admin/src/**`、Go 后端、API 契约、Docker/Kubernetes/Nginx 配置。
 
 ## 9. A1 的启动条件
 

@@ -13,7 +13,8 @@ SurgeCart 电商平台的运营管理端前端工程。当前处于 **A0 工程�
 | 许可证 | MIT（原始许可证见本目录 `LICENSE`，版权归 pure-admin 作者所有） |
 | 引入方式 | 源码复制到本仓库 `admin/`，未携带上游 `.git`、`.github`、`husky` 钩子 |
 
-在上游基础上做了以下调整（均记录于 `ADMIN_A0_DELIVERY.md`）：
+在上游基础上做了以下调整（均记录于 `../docs/reports/A0-admin-frontend-bootstrap.md`，
+工程原理与排障过程见 `../.agent/tasks/dev/A0-admin-frontend-bootstrap.md`）：
 
 - 删除与电商管理后台无关的演示页面、演示组件、演示 Mock 与对应依赖。
 - 路由改为纯静态路由，移除演示用的后端动态菜单与 Token 刷新逻辑（属于 A1）。
