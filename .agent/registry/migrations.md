@@ -61,3 +61,4 @@
 | 20261110000012 | bargain | B1-03-03 | RESERVED | bargain_activities + bargain_instances + bargain_help_records 砍价活动/实例/助力（含 down） |
 | 20261110000013 | member | B1-03-03 | RESERVED | member_levels + user_memberships + member_growth_logs 等级/用户会员/成长值流水，不重复创建积分账本（含 down） |
 | 20261110000014 | distribution | B1-03-03 | RESERVED | user_referrals + distribution_commissions 一级推荐关系与订单佣金（含 down） |
+| 20261110000016 | freight | B1-04-03 | RESERVED | freight_templates + freight_template_rules 运费模板与区域计费规则；products 增可空 freight_template_id（含 down）。注：`20261110000015` 未被本任务占用，保持空缺 |

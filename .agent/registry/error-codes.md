@@ -45,3 +45,4 @@
 | 17000-17999 | object-storage-upload | ACTIVE | object-storage-upload 上传/存储域（域序 17 = max(16)+1） |
 | 18000-18999 | order-refund-v1 | ACTIVE | order-refund-v1 退款域（域序 18 = max(17)+1） |
 | 19000-19999 | coupon-v1 | ACTIVE | coupon-v1 优惠券域（域序 19 = max(18)+1） |
+| 20000-20999 | B1-04-03 | RESERVED | 运费与计价域（域序 20 = max(19)+1）：运费模板/区域规则/运费计算与统一计价错误 |
