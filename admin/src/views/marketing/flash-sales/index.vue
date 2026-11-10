@@ -165,7 +165,7 @@ const updateStatusModel = computed<FlashSaleStatus | "">({
       :closable="false"
       show-icon
       title="后端只提供创建与更新接口"
-      description="没有活动列表/详情/删除/独立启停接口。页面无法展示历史活动列表，刷新后也无法回读；下方仅展示本次创建或更新接口返回的真实活动快照。"
+      description="当前支持创建和更新活动，暂不提供历史活动列表、删除及独立启停。本页仅显示本次操作返回的活动信息，刷新页面后不会保留。"
     />
 
     <el-alert
@@ -243,7 +243,8 @@ const updateStatusModel = computed<FlashSaleStatus | "">({
       </el-alert>
 
       <div class="form-actions">
-        <el-button type="primary" :loading="creating" @click="submitCreate">
+        <el-button type="primary" :loading="creating" @click="submitCreate"
+          ><template #loading><BrandLoadingIcon /></template>
           创建活动
         </el-button>
       </div>
@@ -259,7 +260,7 @@ const updateStatusModel = computed<FlashSaleStatus | "">({
         :closable="false"
         show-icon
         title="无详情接口，无法回填历史值"
-        description="更新是部分更新：只提交填写/选择的字段。SKU 绑定只能更新该活动已绑定的 SKU，新增绑定会在创建时完成；秒杀库存不得低于已售数量。"
+        description="只更新本次填写的内容。仅可修改活动已绑定的 SKU，新增绑定需在创建活动时完成；秒杀库存不能低于已售数量。"
       />
 
       <el-form label-width="110px" class="update-form">
@@ -343,7 +344,8 @@ const updateStatusModel = computed<FlashSaleStatus | "">({
       </el-alert>
 
       <div class="form-actions">
-        <el-button type="primary" :loading="updating" @click="submitUpdate">
+        <el-button type="primary" :loading="updating" @click="submitUpdate"
+          ><template #loading><BrandLoadingIcon /></template>
           提交更新
         </el-button>
       </div>

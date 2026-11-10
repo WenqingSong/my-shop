@@ -196,10 +196,10 @@ onMounted(load);
       :closable="false"
       show-icon
       title="退款语义说明"
-      description="审核通过仅进入「待退款」，资金未到账；「确认退款成功」由管理员人工确认（后端 Mock 语义），不是真实支付渠道回调。退款成功后后端才会把订单改为已退款并恢复库存。"
+      description="审核通过后仍为「待退款」，不代表资金到账。本系统使用人工确认方式记录退款结果，未对接真实支付渠道。确认退款成功后，订单将标记为已退款并恢复库存。"
     />
 
-    <el-skeleton v-if="loading" :rows="8" animated />
+    <PageLoading v-if="loading" />
 
     <el-alert
       v-else-if="error"

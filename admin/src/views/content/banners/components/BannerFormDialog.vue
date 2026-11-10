@@ -148,7 +148,8 @@ async function submit() {
 
     <template #footer>
       <el-button @click="visible = false">取消</el-button>
-      <el-button type="primary" :loading="submitting" @click="submit">
+      <el-button type="primary" :loading="submitting" @click="submit"
+        ><template #loading><BrandLoadingIcon /></template>
         保存
       </el-button>
     </template>

@@ -128,7 +128,7 @@ onMounted(load);
       </div>
     </div>
 
-    <el-skeleton v-if="loading" :rows="8" animated />
+    <PageLoading v-if="loading" />
 
     <el-alert
       v-else-if="error"
@@ -297,7 +297,7 @@ onMounted(load);
           :closable="false"
           show-icon
           title="订单操作记录"
-          description="后端未提供订单操作日志接口，因此不展示操作历史；退款审核与执行记录可在「退款管理」中查看。"
+          description="本页暂不提供订单操作历史。退款审核与执行记录请前往「退款管理」查看。"
         />
       </el-card>
 

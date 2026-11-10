@@ -72,9 +72,9 @@ const currentText = computed(() =>
 const quantityHint = computed(() => {
   if (form.quantity === null) return "";
   if (form.type === "increase") {
-    return `增加后库存由后端返回（当前 ${currentText.value}）`;
+    return `调整后的库存以操作结果为准（当前 ${currentText.value}）`;
   }
-  return `扣减数量超过实际库存时，后端会返回「库存不足」`;
+  return `扣减数量不能超过实际库存。`;
 });
 
 watch(
@@ -107,9 +107,9 @@ async function submit() {
 
   const confirmText =
     `确认对「${props.productName} / ${props.sku.name}」${actionLabel} ${quantity} 件库存？` +
-    `当前库存：${currentText.value}，最终结果以后端返回为准。` +
+    `当前库存：${currentText.value}，最终结果以操作完成后的库存为准。` +
     (provisional.reason
-      ? ` 调整原因（仅本地确认，不会提交给后端）：${provisional.reason}`
+      ? ` 调整原因（仅本次确认，不保存）：${provisional.reason}`
       : "");
 
   await run(async () => {
@@ -205,7 +205,7 @@ async function submit() {
           placeholder="选填，仅用于本次操作确认"
         />
         <div class="field-hint field-hint--warning">
-          后端接口不接收原因字段：该内容不会提交，也不会出现在库存流水中。
+          此原因仅用于本次确认，不会保存到库存流水中。
         </div>
       </el-form-item>
     </el-form>
@@ -217,7 +217,7 @@ async function submit() {
         :loading="submitting"
         :disabled="typeOptions.length === 0"
         @click="submit"
-      >
+        ><template #loading><BrandLoadingIcon /></template>
         确认调整
       </el-button>
     </template>

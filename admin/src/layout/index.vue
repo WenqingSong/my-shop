@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useColorMode } from "@/composables/useColorMode";
 import "animate.css";
 // 引入 src/components/ReIcon/src/offlineIcon.ts 文件中所有使用addIcon添加过的本地图标
 import "@/components/ReIcon/src/offlineIcon";
@@ -18,7 +19,6 @@ import {
   defineComponent
 } from "vue";
 import {
-  useDark,
   useGlobal,
   deviceDetection,
   useResizeObserver
@@ -34,7 +34,7 @@ import BackTopIcon from "@/assets/svg/back_top.svg?component";
 
 const { t } = useI18n();
 const appWrapperRef = ref();
-const { isDark } = useDark();
+const { dark: isDark } = useColorMode();
 const { layout } = useLayout();
 const isMobile = deviceDetection();
 const pureSetting = useSettingStoreHook();
@@ -123,7 +123,7 @@ onMounted(() => {
 });
 
 onBeforeMount(() => {
-  useDataThemeChange().dataThemeChange($storage.layout?.themeMode);
+  useDataThemeChange().dataThemeChange();
 });
 
 const LayHeader = defineComponent({

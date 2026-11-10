@@ -1,72 +1,57 @@
 <script setup lang="ts">
 import { getTopMenu } from "@/router/utils";
-import { useNav } from "@/layout/hooks/useNav";
-
-defineProps({
-  collapse: Boolean
-});
-
-const { title, getLogo } = useNav();
+import BrandIdentity from "@/components/BrandIdentity.vue";
+defineProps<{ collapse: boolean }>();
 </script>
 
 <template>
   <div class="sidebar-logo-container" :class="{ collapses: collapse }">
-    <transition name="sidebarLogoFade">
-      <router-link
-        v-if="collapse"
-        key="collapse"
-        :title="title"
-        class="sidebar-logo-link"
-        :to="getTopMenu()?.path ?? '/'"
+    <router-link
+      class="sidebar-logo-link"
+      :to="getTopMenu()?.path ?? '/'"
+      aria-label="Framework · SurgeCart 工作台"
+    >
+      <BrandIdentity :compact="collapse" />
+      <span v-if="!collapse" class="sidebar-product"
+        >SurgeCart <span>管理后台</span></span
       >
-        <img :src="getLogo()" alt="logo" />
-        <span class="sidebar-title">{{ title }}</span>
-      </router-link>
-      <router-link
-        v-else
-        key="expand"
-        :title="title"
-        class="sidebar-logo-link"
-        :to="getTopMenu()?.path ?? '/'"
-      >
-        <img :src="getLogo()" alt="logo" />
-        <span class="sidebar-title">{{ title }}</span>
-      </router-link>
-    </transition>
+    </router-link>
   </div>
 </template>
 
-<style lang="scss" scoped>
+<style scoped>
 .sidebar-logo-container {
-  position: relative;
-  width: 100%;
-  height: 48px;
+  height: 104px;
   overflow: hidden;
-
-  .sidebar-logo-link {
-    display: flex;
-    flex-wrap: nowrap;
-    align-items: center;
-    height: 100%;
-    padding-left: 10px;
-
-    img {
-      display: inline-block;
-      height: 32px;
-    }
-
-    .sidebar-title {
-      display: inline-block;
-      height: 32px;
-      margin: 2px 0 0 12px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      font-size: 18px;
-      font-weight: 600;
-      line-height: 32px;
-      color: var(--pure-theme-sub-menu-active-text);
-      white-space: nowrap;
-    }
-  }
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+.sidebar-logo-link {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 8px;
+  height: 100%;
+  padding: 16px 22px;
+}
+.sidebar-product {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  padding-left: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--el-text-color-primary);
+}
+.sidebar-product > span {
+  padding-left: 9px;
+  border-left: 1px solid var(--el-border-color);
+  color: var(--el-text-color-secondary);
+  font-weight: 400;
+}
+.collapses .sidebar-logo-link {
+  padding: 12px;
+  align-items: center;
 }
 </style>

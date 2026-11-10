@@ -1,3 +1,4 @@
+import { startRouteLoading, stopRouteLoading } from "@/directives/brandLoading";
 import NProgress from "@/utils/progress";
 import { getConfig } from "@/config";
 import { transformI18n } from "@/plugins/i18n";
@@ -122,6 +123,7 @@ export function resetRouter() {
 }
 
 router.beforeEach(async (to: ToRouteType, _from) => {
+  startRouteLoading(to.fullPath);
   to.meta.loaded = loadedPaths.has(to.path);
 
   if (!to.meta.loaded) {
@@ -180,7 +182,10 @@ router.beforeEach(async (to: ToRouteType, _from) => {
   return true;
 });
 
+router.onError(() => stopRouteLoading());
+
 router.afterEach(to => {
+  stopRouteLoading(to.fullPath);
   loadedPaths.add(to.path);
   NProgress.done();
 });

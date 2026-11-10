@@ -309,7 +309,9 @@ onMounted(async () => {
         </p>
       </div>
       <div class="page-actions">
-        <el-button :loading="loading" @click="loadPositions">刷新</el-button>
+        <el-button :loading="loading" @click="loadPositions"
+          ><template #loading><BrandLoadingIcon /></template>刷新</el-button
+        >
         <el-button v-if="canCreate" type="primary" @click="openCreate">
           新增推荐位
         </el-button>
@@ -320,8 +322,8 @@ onMounted(async () => {
       type="info"
       :closable="false"
       show-icon
-      title="数据模型说明"
-      description="推荐位有 code（创建后不可变）；推荐商品关系只存 product_id 与 sort，商品名/图片/价格由商品详情接口补全。排序接口要求提交该位全部商品的有序列表。"
+      title="推荐位使用说明"
+      description="推荐位标识创建后不可修改。调整商品顺序后需保存完整排序，商品信息以最新详情为准。"
     />
 
     <el-card shadow="never">
@@ -419,7 +421,8 @@ onMounted(async () => {
             />
           </el-form-item>
           <el-form-item>
-            <el-button :loading="productLoading" @click="searchProducts">
+            <el-button :loading="productLoading" @click="searchProducts"
+              ><template #loading><BrandLoadingIcon /></template>
               搜索
             </el-button>
           </el-form-item>

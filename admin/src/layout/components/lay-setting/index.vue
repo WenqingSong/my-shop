@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useColorMode } from "@/composables/useColorMode";
 import {
   ref,
   unref,
@@ -6,7 +7,6 @@ import {
   reactive,
   computed,
   nextTick,
-  onUnmounted,
   onBeforeMount
 } from "vue";
 import { useI18n } from "vue-i18n";
@@ -17,7 +17,7 @@ import { useAppStoreHook } from "@/store/modules/app";
 import { useMultiTagsStoreHook } from "@/store/modules/multiTags";
 import Segmented, { type OptionsType } from "@/components/ReSegmented";
 import { useDataThemeChange } from "@/layout/hooks/useDataThemeChange";
-import { useDark, useGlobal, debounce, isNumber } from "@pureadmin/utils";
+import { useGlobal, debounce, isNumber } from "@pureadmin/utils";
 
 import Check from "~icons/ep/check";
 import LeftArrow from "~icons/ri/arrow-left-s-line?width=20&height=20";
@@ -28,7 +28,7 @@ import SystemIcon from "@/assets/svg/system.svg?component";
 
 const { t } = useI18n();
 const { device } = useNav();
-const { isDark } = useDark();
+const { dark: isDark } = useColorMode();
 const { $storage } = useGlobal<GlobalPropertiesApi>();
 
 const mixRef = ref();
@@ -287,34 +287,10 @@ watch($storage, ({ layout }) => {
   }
 });
 
-const mediaQueryList = window.matchMedia("(prefers-color-scheme: dark)");
-
-/** 根据操作系统主题设置平台主题模式 */
-function updateTheme() {
-  if (themeMode.value !== "system") return;
-  if (mediaQueryList.matches) {
-    dataTheme.value = true;
-  } else {
-    dataTheme.value = false;
-  }
-  dataThemeChange(themeMode.value);
-}
-
-function removeMatchMedia() {
-  mediaQueryList.removeEventListener("change", updateTheme);
-}
-
-/** 监听操作系统主题改变 */
-function watchSystemThemeChange() {
-  updateTheme();
-  removeMatchMedia();
-  mediaQueryList.addEventListener("change", updateTheme);
-}
-
 onBeforeMount(() => {
   /* 初始化系统配置 */
   nextTick(() => {
-    watchSystemThemeChange();
+    dataThemeChange();
     settings.greyVal &&
       document.querySelector("html")?.classList.add("html-grey");
     settings.weakVal &&
@@ -323,8 +299,6 @@ onBeforeMount(() => {
     settings.hideFooter && hideFooterChange();
   });
 });
-
-onUnmounted(() => removeMatchMedia);
 </script>
 
 <template>
@@ -338,12 +312,7 @@ onUnmounted(() => removeMatchMedia);
         :options="themeOptions"
         @change="
           theme => {
-            theme.index === 1 && theme.index !== 2
-              ? (dataTheme = true)
-              : (dataTheme = false);
-            themeMode = theme.option.theme;
             dataThemeChange(theme.option.theme);
-            theme.index === 2 && watchSystemThemeChange();
           }
         "
       />

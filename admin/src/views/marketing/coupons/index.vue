@@ -144,7 +144,9 @@ onMounted(load);
         <p class="page-desc">满减券模板管理；领取与核销由用户端和后端完成</p>
       </div>
       <div class="page-actions">
-        <el-button :loading="loading" @click="load">刷新</el-button>
+        <el-button :loading="loading" @click="load"
+          ><template #loading><BrandLoadingIcon /></template>刷新</el-button
+        >
         <el-button v-if="canCreate" type="primary" @click="formVisible = true">
           新建优惠券
         </el-button>
@@ -155,8 +157,8 @@ onMounted(load);
       type="info"
       :closable="false"
       show-icon
-      title="后端能力边界"
-      description="只支持满减固定金额；后台只有创建/列表/停止领取，没有编辑、删除或重新启用接口。列表一次返回全部模板，搜索与分页在前端完整数据上执行。"
+      title="使用说明"
+      description="支持创建满减券和停止领取。创建后无法编辑或删除，停止领取后无法重新启用。"
     />
 
     <el-card shadow="never">

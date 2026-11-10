@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useNav } from "@/layout/hooks/useNav";
 import LaySearch from "../lay-search/index.vue";
-import LayNotice from "../lay-notice/index.vue";
+const demoMode = import.meta.env.VITE_MOCK_ENABLED === "true";
 import LayNavMix from "../lay-sidebar/NavMix.vue";
 import { useTranslationLang } from "@/layout/hooks/useTranslationLang";
 import LaySidebarFullScreen from "../lay-sidebar/components/SidebarFullScreen.vue";
@@ -85,8 +85,7 @@ const { t, locale, translationCh, translationEn } = useTranslationLang();
       </el-dropdown>
       <!-- 全屏 -->
       <LaySidebarFullScreen id="full-screen" />
-      <!-- 消息通知 -->
-      <LayNotice id="header-notice" />
+      <span v-if="demoMode" class="console-demo-badge">演示数据</span>
       <!-- 退出登录 -->
       <el-dropdown trigger="click">
         <span class="el-dropdown-link navbar-bg-hover select-none">
@@ -118,6 +117,16 @@ const { t, locale, translationCh, translationEn } = useTranslationLang();
 </template>
 
 <style lang="scss" scoped>
+.console-demo-badge {
+  flex-shrink: 0;
+  margin: 0 12px;
+  padding: 4px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--el-color-warning);
+  border: 1px solid var(--el-color-warning);
+  border-radius: 3px;
+}
 .navbar {
   width: 100%;
   height: 48px;

@@ -29,6 +29,7 @@ export default {
       component: () => import("@/views/order/index.vue"),
       meta: {
         title: $t("menus.pureOrderList"),
+        keepAlive: true,
         icon: "ep/tickets",
         permissions: [PERMISSION.ORDER_LIST]
       }

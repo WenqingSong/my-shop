@@ -16,11 +16,11 @@ export const injectResponsiveStorage = (app: App, config: PlatformConfigs) => {
       layout: Storage.getData("layout", nameSpace) ?? {
         layout: config.Layout ?? "vertical",
         theme: config.Theme ?? "light",
-        darkMode: config.DarkMode ?? false,
+        darkMode: window.FrameworkTheme?.dark ?? config.DarkMode ?? false,
         sidebarStatus: config.SidebarStatus ?? true,
         epThemeColor: config.EpThemeColor ?? "#409EFF",
         themeColor: config.Theme ?? "light", // 主题色（对应系统配置中的主题色，与theme不同的是它不会受到浅色、深色主题模式切换的影响，只会在手动点击主题色时改变）
-        themeMode: config.ThemeMode ?? "light" // 主题模式（浅色：light、深色：dark、自动：system）
+        themeMode: window.FrameworkTheme?.mode ?? config.ThemeMode ?? "system" // 主题模式（浅色：light、深色：dark、自动：system）
       },
       // 系统配置-界面显示
       configure: Storage.getData("configure", nameSpace) ?? {

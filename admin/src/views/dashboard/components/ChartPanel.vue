@@ -1,10 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
-import {
-  useECharts,
-  type ElementRef,
-  type UtilsEChartsOption
-} from "@pureadmin/utils";
+import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
+import echarts from "@/plugins/echarts";
+import type { EChartsType } from "echarts/core";
 import type { EChartsCoreOption } from "echarts/core";
 import type { SectionError } from "../composables/useAsyncSection";
 
@@ -24,9 +21,8 @@ const props = defineProps<{
 const emit = defineEmits<{ (event: "retry"): void }>();
 
 const chartRef = ref<HTMLDivElement>();
-const { setOptions, resize, clear } = useECharts(
-  chartRef as unknown as ElementRef<HTMLDivElement>
-);
+let chart: EChartsType | undefined;
+let observer: ResizeObserver | undefined;
 
 const canRender = computed(
   () => !props.loading && !props.error && !props.empty && !!props.option
@@ -34,24 +30,21 @@ const canRender = computed(
 
 function render() {
   if (!props.option || !canRender.value) return;
-  // 先清空再渲染：切换数据源时整体替换，避免残留旧系列
-  clear();
-  setOptions(props.option as unknown as UtilsEChartsOption);
-  resize();
+  if (!chartRef.value) return;
+  chart ??= echarts.init(chartRef.value);
+  chart.setOption(props.option, { notMerge: true });
+  chart.resize();
 }
-
-watch(
-  () => props.option,
-  () => render(),
-  { flush: "post" }
-);
-watch(
-  () => props.loading,
-  value => {
-    if (!value) render();
-  }
-);
-onMounted(() => render());
+watch([() => props.option, canRender], render, { flush: "post" });
+onMounted(() => {
+  observer = new ResizeObserver(() => chart?.resize());
+  if (chartRef.value) observer.observe(chartRef.value);
+  render();
+});
+onBeforeUnmount(() => {
+  observer?.disconnect();
+  chart?.dispose();
+});
 </script>
 
 <template>
@@ -61,7 +54,8 @@ onMounted(() => render());
         <span class="panel-title">{{ title }}</span>
         <div class="panel-actions">
           <slot name="extra" />
-          <el-button link :loading="loading" @click="emit('retry')">
+          <el-button link :loading="loading" @click="emit('retry')"
+            ><template #loading><BrandLoadingIcon /></template>
             刷新
           </el-button>
         </div>

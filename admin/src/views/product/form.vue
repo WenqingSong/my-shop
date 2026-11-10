@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, nextTick, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessageBox } from "element-plus";
 import { hasPerms } from "@/utils/auth";
@@ -59,6 +59,7 @@ defineOptions({ name: "ProductFormPage" });
 
 const route = useRoute();
 const router = useRouter();
+const pageRef = ref<HTMLElement>();
 
 const mode = computed<"create" | "edit">(() =>
   route.name === "ProductCreate" ? "create" : "edit"
@@ -219,6 +220,14 @@ async function handleSave() {
 
   if (hasFormErrors(formErrors.value)) {
     message("请检查商品基本信息", { type: "warning" });
+    await nextTick();
+    const firstError = pageRef.value?.querySelector<HTMLElement>(
+      ".el-form-item.is-error"
+    );
+    firstError?.scrollIntoView({ block: "center", behavior: "smooth" });
+    firstError
+      ?.querySelector<HTMLInputElement>("input, textarea")
+      ?.focus({ preventScroll: true });
     return;
   }
 
@@ -312,12 +321,12 @@ onMounted(load);
 </script>
 
 <template>
-  <div class="product-form-page">
+  <div ref="pageRef" class="product-form-page">
     <div class="page-header">
       <div>
         <h2 class="page-title">{{ pageTitle }}</h2>
         <p class="page-desc">
-          商品基本信息与 SKU 分开保存；库存数量请前往「库存管理」调整
+          先维护商品资料，再保存规格；库存数量请前往「库存管理」调整。
         </p>
       </div>
       <div class="page-actions">
@@ -334,7 +343,7 @@ onMounted(load);
           type="primary"
           :loading="submitting"
           @click="handleSave"
-        >
+          ><template #loading><BrandLoadingIcon /></template>
           保存
         </el-button>
       </div>
@@ -346,7 +355,7 @@ onMounted(load);
       :closable="false"
       show-icon
       title="当前管理员没有该操作权限"
-      description="页面入口已按后端权限码隐藏，如需操作请联系超级管理员。"
+      description="如需操作，请联系超级管理员开通相应权限。"
     />
 
     <el-alert
@@ -361,7 +370,7 @@ onMounted(load);
       </template>
     </el-alert>
 
-    <el-skeleton v-if="loading" :rows="8" animated />
+    <PageLoading v-if="loading" />
 
     <template v-else-if="allowed && !loadError">
       <el-alert
@@ -401,7 +410,7 @@ onMounted(load);
                 {{ formatProductStatus(productStatus ?? "draft") }}
               </el-tag>
               <span class="card-sub__hint"
-                >（状态只能通过上架 / 下架接口变更）</span
+                >（请使用上架或下架操作修改状态）</span
               >
             </span>
           </div>
@@ -448,9 +457,7 @@ onMounted(load);
                   placeholder="请选择叶子分类"
                   class="full-width"
                 />
-                <div class="field-hint">
-                  后端只接受「启用中的叶子分类」；父级分类不可选。
-                </div>
+                <div class="field-hint">请选择已启用的末级分类。</div>
               </el-form-item>
             </el-col>
             <el-col :span="12">
@@ -465,9 +472,7 @@ onMounted(load);
                   placeholder="单位：元"
                   class="full-width"
                 />
-                <div class="field-hint">
-                  提交时转换为整数分；当前展示 {{ priceDisplay }}
-                </div>
+                <div class="field-hint">当前价格 {{ priceDisplay }}</div>
               </el-form-item>
             </el-col>
           </el-row>
@@ -495,7 +500,7 @@ onMounted(load);
               :rows="5"
               maxlength="5000"
               show-word-limit
-              placeholder="商品描述 / 详情（纯文本，后端 detail 字段）"
+              placeholder="请输入商品介绍与使用说明（纯文本）"
             />
           </el-form-item>
         </el-form>
@@ -506,7 +511,7 @@ onMounted(load);
           <div class="card-header">
             <span>SKU 与商品规格</span>
             <span class="card-sub">
-              后端 SKU 为平铺模型；规格组合由前端生成后写入 SKU 名称
+              按规格组合生成 SKU，商品资料与规格分别保存。
             </span>
           </div>
         </template>
@@ -536,7 +541,7 @@ onMounted(load);
           type="primary"
           :loading="submitting"
           @click="handleSave"
-        >
+          ><template #loading><BrandLoadingIcon /></template>
           保存
         </el-button>
       </div>

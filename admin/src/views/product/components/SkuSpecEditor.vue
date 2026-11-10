@@ -46,8 +46,8 @@ const hasGroups = computed(() => props.groups.length > 0);
 
 const provisionalTip = computed(
   () =>
-    "规格组 / 规格值结构、SKU 编码、SKU 图片均为前端暂定能力：" +
-    "后端 SKU 目前只持久化「名称 / 价格 / 状态」，SKU 名称按「值1 / 值2」拼接保存。"
+    "规格组合用于辅助编辑，目前仅保存 SKU 名称、价格和状态。" +
+    "规格值按「值1 / 值2」组合为名称；规格组结构、SKU 编码和图片暂不保存。"
 );
 
 function updateGroups(next: SpecGroupDraft[]) {
@@ -187,7 +187,7 @@ function needsNameSync(draft: SkuDraft) {
       :closable="false"
       show-icon
       class="sku-editor__notice"
-      title="SKU 持久化边界"
+      title="规格保存说明"
       :description="provisionalTip"
     />
 

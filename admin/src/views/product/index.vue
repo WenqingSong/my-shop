@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
+import { useListReturn } from "@/composables/useListReturn";
 import { ElMessageBox } from "element-plus";
 import { hasPerms } from "@/utils/auth";
 import { message } from "@/utils/message";
@@ -23,6 +24,7 @@ import ProductDetailDrawer from "./components/ProductDetailDrawer.vue";
 defineOptions({ name: "ProductList" });
 
 const router = useRouter();
+const pageRoot = ref<HTMLElement>();
 
 const canCreate = computed(() => hasPerms(PERMISSION.PRODUCT_CREATE));
 const canEdit = computed(() => hasPerms(PERMISSION.PRODUCT_UPDATE));
@@ -133,16 +135,15 @@ function goCreate() {
 onMounted(async () => {
   await Promise.all([loadCategories(), load()]);
 });
+useListReturn(pageRoot, load);
 </script>
 
 <template>
-  <div class="product-list">
+  <div ref="pageRoot" class="product-list">
     <div class="page-header">
       <div>
         <h2 class="page-title">商品列表</h2>
-        <p class="page-desc">
-          商品基本信息与 SKU 分离维护；上下架通过后端状态迁移接口执行
-        </p>
+        <p class="page-desc">集中管理商品、规格与销售状态。</p>
       </div>
       <el-button v-if="canCreate" type="primary" @click="goCreate">
         新建商品
@@ -198,8 +199,8 @@ onMounted(async () => {
         type="info"
         :closable="false"
         show-icon
-        title="状态筛选由前端跨页过滤实现"
-        description="后端 /admin/products 列表接口没有 status 参数，页面会分页拉取真实数据后在前端过滤。"
+        title="状态筛选范围"
+        description="按状态筛选最多覆盖 500 件商品，建议结合名称或分类查询。"
       />
       <el-alert
         v-if="truncated"
@@ -208,7 +209,7 @@ onMounted(async () => {
         :closable="false"
         show-icon
         title="状态筛选结果可能不完整"
-        description="已达到跨页拉取上限（5 页 × 100 条），请缩小关键词或分类范围。"
+        description="已达到 500 件商品的筛选范围，当前结果可能不完整，请缩小名称或分类范围。"
       />
 
       <el-alert
@@ -225,7 +226,7 @@ onMounted(async () => {
       </el-alert>
 
       <el-table v-loading="loading" :data="rows" border stripe>
-        <el-table-column label="商品" min-width="260">
+        <el-table-column label="商品" min-width="240">
           <template #default="{ row }">
             <div class="product-cell">
               <el-image
@@ -248,37 +249,15 @@ onMounted(async () => {
           </template>
         </el-table-column>
 
-        <el-table-column label="分类" min-width="130">
+        <el-table-column label="分类" min-width="110">
           <template #default="{ row }">
             {{ categoryNameOf(row.categoryId) }}
           </template>
         </el-table-column>
 
-        <el-table-column label="价格" width="130">
+        <el-table-column label="价格" width="110" align="right">
           <template #default="{ row }">
             {{ row.priceText }}
-          </template>
-        </el-table-column>
-
-        <el-table-column label="SKU 数量" width="110" align="center">
-          <template #default="{ row }">
-            <el-tooltip
-              content="列表接口未返回 SKU 数量，页面通过商品详情接口逐条补全"
-              placement="top"
-            >
-              <span>{{ skuCountLabel(row.id) }}</span>
-            </el-tooltip>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="库存" width="90" align="center">
-          <template #default>
-            <el-tooltip
-              content="后端无库存列表接口，请在商品详情中查看每个 SKU 的实时库存"
-              placement="top"
-            >
-              <span>—</span>
-            </el-tooltip>
           </template>
         </el-table-column>
 
@@ -290,13 +269,24 @@ onMounted(async () => {
           </template>
         </el-table-column>
 
+        <el-table-column label="SKU 数量" width="90" align="center">
+          <template #default="{ row }">
+            <el-tooltip
+              content="规格数量单独加载；显示「—」时可打开详情查看。"
+              placement="top"
+            >
+              <span>{{ skuCountLabel(row.id) }}</span>
+            </el-tooltip>
+          </template>
+        </el-table-column>
+
         <el-table-column label="更新时间" min-width="170">
           <template #default="{ row }">
             {{ formatServerDateTime(row.updatedAt) }}
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="220" fixed="right">
+        <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openDetail(row.id)">
               详情

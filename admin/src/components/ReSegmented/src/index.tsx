@@ -1,12 +1,8 @@
+import { useColorMode } from "@/composables/useColorMode";
 import "./index.css";
 import type { OptionsType } from "./type";
 import { useRenderIcon } from "@/components/ReIcon/src/hooks";
-import {
-  useDark,
-  isNumber,
-  isFunction,
-  useResizeObserver
-} from "@pureadmin/utils";
+import { isNumber, isFunction, useResizeObserver } from "@pureadmin/utils";
 import {
   type PropType,
   h,
@@ -57,7 +53,7 @@ export default defineComponent({
   setup(props, { emit }) {
     const width = ref(0);
     const translateX = ref(0);
-    const { isDark } = useDark();
+    const { dark: isDark } = useColorMode();
     const initStatus = ref(false);
     const curMouseActive = ref(-1);
     const segmentedItembg = ref("");

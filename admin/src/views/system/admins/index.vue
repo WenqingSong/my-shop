@@ -229,7 +229,8 @@ onMounted(() => {
           创建管理员、禁用启用、删除与角色分配；超级管理员与自身操作由后端保护
         </p>
       </div>
-      <el-button v-if="canListRoles" :loading="rolesLoading" @click="loadRoles">
+      <el-button v-if="canListRoles" :loading="rolesLoading" @click="loadRoles"
+        ><template #loading><BrandLoadingIcon /></template>
         刷新角色
       </el-button>
     </div>
@@ -238,8 +239,8 @@ onMounted(() => {
       type="info"
       :closable="false"
       show-icon
-      title="后端能力边界"
-      description="Go 后端没有管理员列表/详情接口，本页不展示也不伪造管理员列表：已有管理员通过 ID 定位操作。后端保护规则：任何超级管理员不可被禁用/删除/改角色（2005），管理员不可操作自身（2006）。"
+      title="使用说明"
+      description="输入管理员 ID 执行管理操作，暂不提供管理员列表及详情查询。超级管理员受保护，不能禁用、删除或修改其角色；管理员不能操作自身。"
     />
 
     <el-row :gutter="16">
@@ -282,7 +283,7 @@ onMounted(() => {
                 type="primary"
                 :loading="creating"
                 @click="submitCreate"
-              >
+                ><template #loading><BrandLoadingIcon /></template>
                 创建
               </el-button>
               <el-button :disabled="creating" @click="resetCreate">
@@ -415,7 +416,7 @@ onMounted(() => {
                   :loading="roleSubmitting"
                   :disabled="!roleId"
                   @click="handleAssignRole('assign')"
-                >
+                  ><template #loading><BrandLoadingIcon /></template>
                   分配角色
                 </el-button>
                 <el-button
@@ -423,7 +424,7 @@ onMounted(() => {
                   :loading="roleSubmitting"
                   :disabled="!roleId"
                   @click="handleAssignRole('remove')"
-                >
+                  ><template #loading><BrandLoadingIcon /></template>
                   移除角色
                 </el-button>
               </div>

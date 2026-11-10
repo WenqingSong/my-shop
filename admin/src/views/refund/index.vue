@@ -196,7 +196,7 @@ onMounted(() => {
       :closable="false"
       show-icon
       title="筛选范围说明"
-      description="后端退款列表只支持 订单 ID / 用户 ID / 状态 筛选与分页，没有申请时间参数，因此页面不提供时间筛选；按订单编号搜索会先通过订单列表接口解析订单 ID。"
+      description="支持按订单编号、订单 ID、用户 ID 和状态查询，暂不支持按申请时间筛选。"
     />
 
     <el-card shadow="never">
@@ -236,7 +236,7 @@ onMounted(() => {
             type="primary"
             :loading="loading || resolving"
             @click="search"
-          >
+            ><template #loading><BrandLoadingIcon /></template>
             查询
           </el-button>
           <el-button @click="reset">重置</el-button>

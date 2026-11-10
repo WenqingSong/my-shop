@@ -146,8 +146,8 @@ async function revoke(permission: PermissionView) {
       type="info"
       :closable="false"
       show-icon
-      title="后端能力边界"
-      description="没有「查询角色已有权限」接口，因此本页不显示勾选状态；授予/移除都是幂等写操作，提交后以成功或后端错误为准。权限码全部来自后端 GET /admin/permissions。"
+      title="使用说明"
+      description="当前无法读取角色已拥有的权限。此处选择的是本次要授予或移除的权限，不表示当前授权状态；提交后请以处理结果为准。"
     />
 
     <el-alert
@@ -201,7 +201,7 @@ async function revoke(permission: PermissionView) {
       <div v-loading="loading" class="permission-list">
         <el-empty
           v-if="!loading && !error && total === 0"
-          description="后端暂无权限定义"
+          description="暂无权限定义"
         />
 
         <el-empty
@@ -245,7 +245,7 @@ async function revoke(permission: PermissionView) {
                   :disabled="!canAssign || pendingId !== null"
                   :loading="pendingId === permission.id"
                   @click="grant(permission)"
-                >
+                  ><template #loading><BrandLoadingIcon /></template>
                   授予
                 </el-button>
                 <el-button
