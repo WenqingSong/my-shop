@@ -80,9 +80,11 @@ onMounted(load);
     <div class="page-header">
       <div>
         <h2 class="page-title">文章内容</h2>
-        <p class="page-desc">公开文章浏览；正文为纯文本，不做 HTML 渲染</p>
+        <p class="page-desc">浏览公开文章与正文内容。</p>
       </div>
-      <el-button :loading="loading" @click="load">刷新</el-button>
+      <el-button :loading="loading" @click="load"
+        ><template #loading><BrandLoadingIcon /></template>刷新</el-button
+      >
     </div>
 
     <el-alert
@@ -90,7 +92,7 @@ onMounted(load);
       :closable="false"
       show-icon
       title="当前仅支持只读"
-      description="后端没有管理端文章接口，也没有发布/下架状态、封面、分类字段；文章写接口属于用户侧（作者本人），管理员 token 无法调用。因此未提供新建、编辑、发布、下架、删除。"
+      description="此处仅提供公开文章浏览。文章由作者维护，管理员暂不能创建、编辑、发布、下架或删除文章。"
     />
 
     <el-card shadow="never">

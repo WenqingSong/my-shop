@@ -31,7 +31,9 @@ defineExpose({ reload: load });
         <span class="panel-title">热销商品 TOP {{ TOP_LIMIT }}</span>
         <div class="panel-actions">
           <span class="panel-sub">按有效订单销量统计</span>
-          <el-button link :loading="loading" @click="load">刷新</el-button>
+          <el-button link :loading="loading" @click="load"
+            ><template #loading><BrandLoadingIcon /></template>刷新</el-button
+          >
         </div>
       </div>
     </template>

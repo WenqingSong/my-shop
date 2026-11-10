@@ -74,7 +74,7 @@ async function submit() {
       :closable="false"
       show-icon
       title="发货仅推进订单状态"
-      description="后端发货接口不接收物流公司 / 运单号，本系统也没有物流轨迹查询能力；确认后订单由「已支付」变为「已发货」。"
+      description="确认后订单将由「已支付」变为「已发货」。本次操作不登记物流公司及运单号，也不提供物流轨迹。"
     />
 
     <el-alert
@@ -83,12 +83,13 @@ async function submit() {
       :closable="false"
       show-icon
       title="退款互斥"
-      description="若该订单存在申请中 / 待退款 / 退款失败的退款单，后端会拒绝发货并返回「退款与发货冲突」。"
+      description="若订单存在申请中、待退款或退款失败的退款单，请先处理退款，再进行发货。"
     />
 
     <template #footer>
       <el-button @click="visible = false">取消</el-button>
-      <el-button type="primary" :loading="submitting" @click="submit">
+      <el-button type="primary" :loading="submitting" @click="submit"
+        ><template #loading><BrandLoadingIcon /></template>
         确认发货
       </el-button>
     </template>

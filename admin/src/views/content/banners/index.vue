@@ -141,7 +141,9 @@ onMounted(load);
         </p>
       </div>
       <div class="page-actions">
-        <el-button :loading="loading" @click="load">刷新</el-button>
+        <el-button :loading="loading" @click="load"
+          ><template #loading><BrandLoadingIcon /></template>刷新</el-button
+        >
         <el-button v-if="canCreate" type="primary" @click="openCreate">
           新增轮播图
         </el-button>
@@ -152,8 +154,8 @@ onMounted(load);
       type="info"
       :closable="false"
       show-icon
-      title="后端能力说明"
-      description="后台轮播图列表一次性返回全部状态数据（无分页参数），分页在前端执行；没有展示位置与有效期字段。"
+      title="使用说明"
+      description="管理全部轮播图及其展示顺序，暂不支持按位置投放和定时生效。"
     />
 
     <el-card shadow="never">

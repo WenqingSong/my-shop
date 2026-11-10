@@ -119,7 +119,9 @@ onMounted(load);
         </p>
       </div>
       <div class="page-actions">
-        <el-button :loading="loading" @click="load">刷新</el-button>
+        <el-button :loading="loading" @click="load"
+          ><template #loading><BrandLoadingIcon /></template>刷新</el-button
+        >
         <el-button v-if="canCreate" type="primary" @click="openCreate(0)">
           新增分类
         </el-button>

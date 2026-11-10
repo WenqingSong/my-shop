@@ -197,7 +197,7 @@ function handleClose(
                 button: { btn, index: key }
               })
             "
-          >
+            ><template #loading><BrandLoadingIcon /></template>
             {{ btn?.label }}
           </el-button>
         </template>

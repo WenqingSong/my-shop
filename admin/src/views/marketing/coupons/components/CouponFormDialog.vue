@@ -75,7 +75,7 @@ async function submit() {
       :closable="false"
       show-icon
       title="后端仅支持满减券"
-      description="当前版本只有「满 X 减 Y」固定金额规则，没有折扣率、商品范围、每人限领与领取后有效期。"
+      description="支持「满 X 减 Y」固定金额优惠；暂不支持折扣券、指定商品、每人限领和领取后计时。"
     />
 
     <el-form label-width="110px" class="coupon-form">
@@ -145,7 +145,8 @@ async function submit() {
 
     <template #footer>
       <el-button @click="visible = false">取消</el-button>
-      <el-button type="primary" :loading="submitting" @click="submit">
+      <el-button type="primary" :loading="submitting" @click="submit"
+        ><template #loading><BrandLoadingIcon /></template>
         创建
       </el-button>
     </template>

@@ -1,84 +1,173 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
-    <meta name="renderer" content="webkit" />
-    <meta
-      name="viewport"
-      content="width=device-width,initial-scale=1.0,minimum-scale=1.0,maximum-scale=1.0,user-scalable=0"
-    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f2f2ef" />
     <title>SurgeCart 管理后台</title>
-    <link rel="icon" href="%BASE_URL%favicon.ico" />
+    <script src="/brand/theme.js"></script>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   </head>
-
   <body>
-    <div id="app">
+    <div id="app"></div>
+    <div id="boot-loading">
       <style>
-        html,
-        body,
-        #app {
-          position: relative;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          width: 100%;
-          height: 100%;
-          overflow: hidden;
+        html.dark {
+          --boot-surface: #17191b;
+          --boot-text: #b0b2b3;
+          --boot-ink: #f0f0ed;
         }
-
-        .loader,
-        .loader::before,
-        .loader::after {
-          width: 2.5em;
-          height: 2.5em;
-          border-radius: 50%;
-          animation: load-animation 1.8s infinite ease-in-out;
-          animation-fill-mode: both;
+        .boot-screen {
+          position: fixed;
+          inset: 0;
+          display: grid;
+          align-content: center;
+          justify-items: center;
+          gap: 20px;
+          background: var(--boot-surface, #f2f2ef);
+          color: var(--boot-text, #62656a);
+          font:
+            12px -apple-system,
+            BlinkMacSystemFont,
+            "PingFang SC",
+            sans-serif;
         }
-
-        .loader {
-          position: relative;
-          top: 0;
-          margin: 80px auto;
-          font-size: 10px;
-          color: #406eeb;
-          text-indent: -9999em;
-          transform: translateZ(0);
-          transform: translate(-50%, 0);
-          animation-delay: -0.16s;
+        .boot-screen svg {
+          color: var(--boot-ink, #17191d);
         }
-
-        .loader::before,
-        .loader::after {
-          position: absolute;
-          top: 0;
-          content: "";
+        #boot-loading {
+          position: fixed;
+          inset: 0;
+          z-index: 10000;
         }
-
-        .loader::before {
-          left: -3.5em;
-          animation-delay: -0.32s;
+        .boot-retry {
+          padding: 8px 18px;
+          border: 1px solid currentColor;
+          border-radius: 4px;
+          background: transparent;
+          color: inherit;
+          cursor: pointer;
         }
-
-        .loader::after {
-          left: 3.5em;
-        }
-
-        @keyframes load-animation {
-          0%,
-          80%,
-          100% {
-            box-shadow: 0 2.5em 0 -1.3em;
-          }
-
-          40% {
-            box-shadow: 0 2.5em 0 0;
-          }
+        .boot-screen .boot-symbol {
+          width: 64px;
+          height: 64px;
         }
       </style>
-      <div class="loader"></div>
+      <div class="boot-screen" role="status" aria-live="polite">
+        <svg
+          class="boot-symbol"
+          width="64"
+          height="64"
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 256 256"
+          color="#17191D"
+          role="img"
+          aria-label="Framework 正式图形 v5"
+        >
+          <defs>
+            <clipPath id="mark-left">
+              <path d="M0 0H256V180H106.5V256H0Z" />
+            </clipPath>
+            <clipPath id="mark-spine">
+              <path d="M0 0H256V295.8908L0 148.0892Z" />
+            </clipPath>
+            <clipPath id="mark-right">
+              <path d="M0 0H256V123.84L0 271.64Z" />
+            </clipPath>
+          </defs>
+          <g
+            transform="translate(6 0)"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="10.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path
+              d="M128 28 44 76.4974V173.4923L112.5622 213.077"
+              clip-path="url(#mark-left)"
+            />
+            <path
+              d="M128 28 44 76.4974 128 124.9948V229"
+              clip-path="url(#mark-spine)"
+            />
+            <path d="M128 28 212 76.4974V157" clip-path="url(#mark-right)" />
+          </g>
+        </svg>
+        <svg
+          class="boot-wordmark"
+          width="176"
+          height="30"
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="-40 -40 4638 790"
+          color="#17191D"
+          fill="currentColor"
+          role="img"
+          aria-label="Framework · A PRECISION · wordmark"
+        >
+          <title>Framework · A PRECISION · wordmark</title>
+          <g data-letter="F" transform="translate(0 0)">
+            <path
+              fill-rule="evenodd"
+              d="M0 0H410V84H88V294H366V376H88V700H0Z"
+            />
+          </g>
+          <g data-letter="r" transform="translate(453 0)">
+            <path
+              fill-rule="evenodd"
+              d="M0 204H81V284C116 215 176 182 269 195V279C162 263 87 312 87 423V700H0Z"
+            />
+          </g>
+          <g data-letter="a" transform="translate(758 0)">
+            <path
+              fill-rule="evenodd"
+              d="M28 254C84 211 150 190 229 190C375 190 444 256 444 384V700H363V636C326 686 267 711 195 711C76 711 10 648 10 554C10 449 95 391 249 391H359V375C359 300 315 264 231 264C165 264 115 284 65 319ZM359 459H250C144 459 97 489 97 549C97 605 137 638 205 638C292 638 359 579 359 504Z"
+            />
+          </g>
+          <g data-letter="m" transform="translate(1256 0)">
+            <path
+              fill-rule="evenodd"
+              d="M0 204H82V270C113 219 161 190 222 190C290 190 339 222 361 281C398 223 449 190 519 190C636 190 700 267 700 393V700H614V406C614 313 582 269 515 269C445 269 400 325 400 411V700H314V405C314 313 280 269 214 269C142 269 87 327 87 417V700H0Z"
+            />
+          </g>
+          <g data-letter="e" transform="translate(2000 0)">
+            <path
+              fill-rule="evenodd"
+              d="M469 474H96C102 580 164 637 256 637C318 637 366 617 410 579L453 637C401 686 333 711 250 711C97 711 6 605 6 451C6 297 100 190 240 190C386 190 470 291 470 444ZM96 405H384C375 312 326 264 242 264C163 264 108 314 96 405Z"
+            />
+          </g>
+          <g data-letter="w" transform="translate(2517 0)">
+            <path
+              fill-rule="evenodd"
+              d="M0 204H91L202 597L311 204H389L499 597L610 204H700L551 700H455L349 331L243 700H148Z"
+            />
+          </g>
+          <g data-letter="o" transform="translate(3237 0)">
+            <path
+              fill-rule="evenodd"
+              d="M252 190C403 190 495 295 495 451C495 607 403 711 252 711C101 711 9 607 9 451C9 295 101 190 252 190ZM252 266C155 266 97 336 97 451C97 566 155 635 252 635C349 635 407 566 407 451C407 336 349 266 252 266Z"
+            />
+          </g>
+          <g data-letter="r" transform="translate(3776 0)">
+            <path
+              fill-rule="evenodd"
+              d="M0 204H81V284C116 215 176 182 269 195V279C162 263 87 312 87 423V700H0Z"
+            />
+          </g>
+          <g data-letter="k" transform="translate(4088 0)">
+            <path
+              fill-rule="evenodd"
+              d="M0 0H87V425L323 204H436L218 412L464 700H354L155 469L87 534V700H0Z"
+            />
+          </g>
+        </svg>
+
+        <span class="boot-message">正在准备工作台…</span
+        ><button class="boot-retry" hidden type="button">重新加载</button>
+      </div>
     </div>
+    <script src="/brand/framework-motion-v13.js"></script>
+    <script src="/brand/boot.js"></script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

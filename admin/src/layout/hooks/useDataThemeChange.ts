@@ -1,4 +1,5 @@
-import { ref } from "vue";
+import { ref, watch } from "vue";
+import { useColorMode } from "@/composables/useColorMode";
 import { getConfig } from "@/config";
 import { useLayout } from "./useLayout";
 import { removeToken } from "@/utils/auth";
@@ -33,8 +34,7 @@ export function useDataThemeChange() {
   ]);
 
   const { $storage } = useGlobal<GlobalPropertiesApi>();
-  const dataTheme = ref<boolean>($storage?.layout?.darkMode ?? false);
-  const themeMode = ref<string>($storage?.layout?.themeMode ?? "light");
+  const { dark: dataTheme, mode: themeMode, setMode } = useColorMode();
   const body = document.documentElement as HTMLElement;
 
   function toggleClass(flag: boolean, clsName: string, target?: HTMLElement) {
@@ -81,33 +81,25 @@ export function useDataThemeChange() {
   /** 设置 `element-plus` 主题色 */
   const setEpThemeColor = (color: string) => {
     useEpThemeStoreHook().setEpThemeColor(color);
-    document.documentElement.style.setProperty("--el-color-primary", color);
+    const actual =
+      dataTheme.value && color.toLowerCase() === "#17191d" ? "#e4e5df" : color;
+    document.documentElement.style.setProperty("--el-color-primary", actual);
     for (let i = 1; i <= 2; i++) {
-      setPropertyPrimary("dark", i, color);
+      setPropertyPrimary("dark", i, actual);
     }
     for (let i = 1; i <= 9; i++) {
-      setPropertyPrimary("light", i, color);
+      setPropertyPrimary("light", i, actual);
     }
   };
 
   /** 浅色、深色主题模式切换 */
-  function dataThemeChange(mode?: string) {
-    themeMode.value = mode ?? "light";
-    if (useEpThemeStoreHook().epTheme === "light" && dataTheme.value) {
-      setLayoutThemeColor("default", false);
-    } else {
-      setLayoutThemeColor(useEpThemeStoreHook().epTheme, false);
-    }
-
-    if (dataTheme.value) {
-      document.documentElement.classList.add("dark");
-    } else {
-      if ($storage.layout.themeColor === "light") {
-        setLayoutThemeColor("light", false);
-      }
-      document.documentElement.classList.remove("dark");
-    }
+  function dataThemeChange(mode: ColorMode = themeMode.value) {
+    setMode(mode);
+    setLayoutThemeColor($storage.layout?.theme ?? "light", false);
   }
+  watch([dataTheme, themeMode], () => {
+    setLayoutThemeColor($storage.layout?.theme ?? "light", false);
+  });
 
   /**
    * 清空缓存并返回登录页。

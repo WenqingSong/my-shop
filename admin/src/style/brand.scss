@@ -1,0 +1,462 @@
+/* Framework 的品牌层：业务状态仍沿用 Element Plus 的语义颜色。 */
+:root {
+  --fw-ink: #17191d;
+  --fw-muted: #62656a;
+  --fw-paper: #f2f2ef;
+  --fw-surface: #fff;
+  --fw-line: #dddeda;
+  --fw-soft: #f7f7f4;
+  --fw-link: #315b86;
+  --el-color-primary: #17191d;
+  --el-color-primary-light-3: #5d5f62;
+  --el-color-primary-light-5: #8b8c8e;
+  --el-color-primary-light-7: #b9babb;
+  --el-color-primary-light-8: #d1d1d2;
+  --el-color-primary-light-9: #ededee;
+  --el-color-primary-dark-2: #08090b;
+  --el-color-success: #34745b;
+  --el-color-warning: #a36b20;
+  --el-color-danger: #b64040;
+  --el-text-color-primary: var(--fw-ink);
+  --el-text-color-regular: #42464b;
+  --el-text-color-secondary: var(--fw-muted);
+  --el-text-color-placeholder: #777b80;
+  --el-bg-color: var(--fw-surface);
+  --el-bg-color-page: var(--fw-paper);
+  --el-fill-color-light: var(--fw-soft);
+  --el-fill-color-lighter: #fafaf8;
+  --el-border-color: var(--fw-line);
+  --el-border-color-light: #e8e9e4;
+  --el-border-color-lighter: #eeefea;
+  --el-border-radius-base: 4px;
+  --el-font-family:
+    -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+}
+
+html.dark {
+  --fw-ink: #f0f0ed;
+  --fw-muted: #b0b2b3;
+  --fw-paper: #17191b;
+  --fw-surface: #202326;
+  --fw-line: #3b3e40;
+  --fw-soft: #292c2f;
+  --fw-link: #9dbfe0;
+  --el-color-primary: #e4e5df;
+  --el-color-primary-light-3: #c0c2bd;
+  --el-color-primary-light-9: #34383a;
+  --el-color-primary-dark-2: #fff;
+  --el-text-color-regular: #d2d3d0;
+  --el-text-color-placeholder: #9b9e9f;
+  --el-border-color-light: #34373a;
+  --el-border-color-lighter: #303336;
+  --el-fill-color-lighter: #25282a;
+}
+
+body {
+  color: var(--fw-ink);
+  background: var(--fw-paper);
+  font-family: var(--el-font-family);
+}
+
+html[data-theme="light"] {
+  --pure-theme-menu-bg: var(--fw-surface);
+  --pure-theme-sidebar-logo: var(--fw-surface);
+  --pure-theme-menu-hover: var(--fw-soft);
+  --pure-theme-sub-menu-bg: var(--fw-surface);
+  --pure-theme-menu-text: var(--fw-muted);
+  --pure-theme-menu-title-hover: var(--fw-ink);
+  --pure-theme-sub-menu-active-text: var(--fw-ink);
+  --pure-theme-menu-active-before: var(--fw-ink);
+}
+
+html body .app-wrapper .main-container {
+  background: var(--fw-paper);
+}
+body .navbar {
+  box-shadow: none;
+  border-bottom: 1px solid var(--fw-line);
+  background: var(--fw-surface);
+}
+body .sidebar-container.has-logo > .el-scrollbar {
+  height: calc(100% - 144px);
+}
+body .sidebar-container .el-menu-item,
+body .sidebar-container .el-sub-menu__title {
+  height: 44px;
+  line-height: 44px;
+  font-size: 13px;
+}
+body .sidebar-container .el-menu-item.is-active {
+  font-weight: 600;
+  background: var(--fw-soft);
+}
+body .sidebar-container .outer-most > .el-menu-item,
+body .sidebar-container .outer-most > .el-sub-menu {
+  margin: 3px 8px;
+  border-radius: 4px;
+}
+body .tags-view {
+  background: var(--fw-surface);
+  box-shadow: none;
+}
+
+#app .main-content,
+.app-main-nofixed-header .main-content {
+  margin: 28px;
+  min-width: 0;
+}
+#app .main-content .page-header,
+#app .dashboard-header {
+  gap: 20px;
+  padding: 0 0 22px;
+  border-bottom: 1px solid var(--fw-line);
+  margin-bottom: 6px;
+}
+#app .main-content .page-title,
+#app .dashboard-title {
+  font-size: 26px;
+  line-height: 1.35;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+}
+#app .main-content .page-desc,
+#app .dashboard-desc {
+  margin-top: 9px;
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--fw-muted);
+  max-width: 680px;
+}
+#app .page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+#app .page-actions .el-button + .el-button {
+  margin-left: 0;
+}
+
+.el-card {
+  --el-card-border-radius: 6px;
+  --el-card-padding: 22px;
+  background: var(--fw-surface);
+}
+.el-card__header {
+  padding: 18px 22px;
+  font-weight: 600;
+}
+.el-button {
+  min-height: 34px;
+  font-weight: 500;
+  box-shadow: none;
+  transition:
+    background-color 160ms,
+    border-color 160ms;
+}
+.el-button--primary:not(.is-link):not(.is-text):not(.is-plain) {
+  --el-button-text-color: var(--fw-surface);
+  --el-button-bg-color: var(--fw-ink);
+  --el-button-border-color: var(--fw-ink);
+  --el-button-hover-bg-color: #414449;
+  --el-button-hover-border-color: #414449;
+  --el-button-hover-text-color: #fff;
+}
+.el-button.is-link.el-button--primary {
+  color: var(--fw-link);
+}
+.el-button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--fw-link);
+  outline-offset: 3px;
+}
+.el-input__wrapper,
+.el-select__wrapper {
+  min-height: 36px;
+}
+.el-form-item__label {
+  font-weight: 500;
+}
+.el-tag {
+  font-weight: 500;
+  border-radius: 3px;
+}
+.el-alert {
+  padding: 12px 16px;
+  border-radius: 4px;
+}
+.el-alert__description {
+  line-height: 1.75;
+}
+.el-table {
+  --el-table-header-bg-color: var(--fw-soft);
+  --el-table-row-hover-bg-color: var(--fw-soft);
+  --el-table-border-color: var(--el-border-color-lighter);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.el-table th.el-table__cell {
+  height: 46px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fw-muted);
+}
+.el-table td.el-table__cell {
+  padding-top: 14px;
+  padding-bottom: 14px;
+}
+.el-table .cell {
+  line-height: 1.6;
+}
+.el-dialog,
+.el-drawer {
+  background: var(--fw-surface);
+}
+.el-dialog {
+  --el-dialog-border-radius: 6px;
+  padding: 24px;
+  max-width: calc(100vw - 32px);
+}
+.el-dialog__header,
+.el-drawer__header {
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--fw-line);
+}
+.el-dialog__footer,
+.el-drawer__footer {
+  padding-top: 18px;
+  border-top: 1px solid var(--fw-line);
+}
+.el-descriptions {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 页面共享布局：用限定到内容区的规则覆盖历史页面的重复定义。 */
+#app .main-content .filter-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 14px 18px;
+  padding-bottom: 20px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+#app .filter-form .el-form-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin: 0;
+}
+#app .filter-form .el-form-item__label {
+  justify-content: flex-start;
+  height: auto;
+  padding: 0 0 6px;
+  line-height: 20px;
+  font-size: 12px;
+  color: var(--fw-muted);
+}
+#app .main-content .pagination-bar {
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-top: 18px;
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+#app .el-pagination {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+#app .panel-header,
+#app .panel-actions,
+#app .card-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+#app .panel-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+#app .panel-sub,
+#app .card-sub {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--fw-muted);
+}
+#app .panel-body {
+  min-width: 0;
+}
+#app .dashboard-row > * {
+  min-width: 0;
+}
+#app .metric-value,
+#app .item-value,
+#app .amount {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.025em;
+}
+#app .main-content .product-name {
+  font-size: 14px;
+  font-weight: 500;
+}
+#app .main-content .product-thumb {
+  width: 52px;
+  height: 52px;
+  border-radius: 4px;
+}
+#app .product-form-page .bottom-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  justify-content: flex-end;
+  padding: 16px 22px;
+  background: var(--fw-surface);
+  border: 1px solid var(--fw-line);
+  border-radius: 6px;
+  box-shadow: 0 -4px 20px rgb(0 0 0 / 3%);
+}
+#app .product-form-page .el-card {
+  scroll-margin-top: 100px;
+}
+
+@media (width <= 768px) {
+  #app .main-content,
+  .app-main-nofixed-header .main-content {
+    margin: 18px 14px;
+  }
+  #app .main-content .page-header,
+  #app .dashboard-header {
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+  #app .main-content .page-title,
+  #app .dashboard-title {
+    font-size: 23px;
+  }
+  .el-card {
+    --el-card-padding: 16px;
+  }
+  #app .main-content .filter-form {
+    gap: 14px;
+  }
+  #app .filter-form .el-form-item {
+    flex: 1 1 180px;
+    min-width: 0;
+  }
+  #app .filter-form .el-form-item__content,
+  #app .filter-form .el-input,
+  #app .filter-form .el-select,
+  #app .filter-form .el-input-number,
+  #app .filter-form .el-date-editor {
+    width: 100%;
+    min-width: 0;
+  }
+  #app .filter-form .el-form-item:last-child {
+    flex: 1 0 100%;
+  }
+  .el-drawer {
+    max-width: 100%;
+  }
+  .el-dialog {
+    width: calc(100vw - 28px);
+  }
+  #app .panel-actions {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* 导航沿用现有折叠逻辑，提高品牌覆盖规则的优先级。 */
+html[data-theme="light"] .sidebar-container .el-menu-item.is-active {
+  color: var(--fw-ink);
+  background: var(--fw-soft);
+}
+html[data-theme="light"] .sidebar-container .el-menu-item.is-active > * {
+  color: var(--fw-ink);
+}
+html body .sidebar-container.has-logo .el-scrollbar.pc {
+  height: calc(100% - 144px);
+}
+html body .sidebar-container.has-logo .el-scrollbar.mobile {
+  height: calc(100% - 104px);
+}
+
+html[data-theme="light"] .sidebar-container .el-menu-item.is-active::before {
+  background: var(--fw-soft) !important;
+  border-left: 2px solid var(--fw-ink);
+}
+html[data-theme="light"] .sidebar-container .el-menu-item.is-active > * {
+  color: var(--fw-ink) !important;
+}
+
+/* 模板使用伪元素绘制选中底色，必须与文字一起覆盖。 */
+#app .sidebar-container .el-menu-item.is-active,
+#app .sidebar-container .el-menu-item.is-active::before {
+  background: var(--fw-soft) !important;
+}
+#app .sidebar-container .el-menu-item.is-active::before {
+  border-left: 2px solid var(--fw-ink);
+}
+#app .sidebar-container .el-menu-item.is-active > * {
+  color: var(--fw-ink) !important;
+}
+
+/* 同一套品牌播放器用于局部加载和按钮；不旋转整个品牌图形。 */
+.brand-loading-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 64px;
+  background: var(--fw-surface);
+  color: var(--fw-muted);
+  font-size: 12px;
+  cursor: progress;
+}
+.brand-loading-mark {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  color: var(--fw-ink);
+}
+.brand-loading-mark svg {
+  width: 100%;
+  height: 100%;
+  color: inherit;
+}
+#app .el-button .el-icon.is-loading {
+  animation: none;
+}
+#app .el-button .brand-loading-icon {
+  width: 20px;
+  height: 20px;
+}
+#app .el-button .el-icon:has(.brand-loading-icon) {
+  width: 20px;
+  height: 20px;
+}
+html.dark {
+  --pure-theme-sub-menu-bg: var(--fw-surface);
+  --pure-theme-menu-bg: var(--fw-surface);
+  --pure-theme-sidebar-logo: var(--fw-surface);
+  --pure-theme-sub-menu-active-text: var(--fw-ink);
+  --pure-theme-menu-text: var(--fw-muted);
+  --pure-theme-menu-title-hover: var(--fw-ink);
+  --pure-theme-menu-hover: var(--fw-soft);
+}

@@ -114,7 +114,9 @@ onMounted(load);
         </p>
       </div>
       <div class="page-actions">
-        <el-button :loading="loading" @click="load">刷新</el-button>
+        <el-button :loading="loading" @click="load"
+          ><template #loading><BrandLoadingIcon /></template>刷新</el-button
+        >
         <el-button v-if="canCreate" type="primary" @click="openCreate">
           新建角色
         </el-button>
@@ -125,8 +127,8 @@ onMounted(load);
       type="info"
       :closable="false"
       show-icon
-      title="后端能力边界"
-      description="roles 表只有 id/name/description：没有角色状态、没有详情接口、没有「角色已有权限」查询接口，也没有系统内置角色保护。权限数量无法计算，因此不展示该列。"
+      title="使用说明"
+      description="维护角色名称与说明，并执行权限授予或移除。暂不支持查询角色已拥有的权限和权限数量，请谨慎操作。"
     />
 
     <el-card shadow="never">
@@ -179,7 +181,7 @@ onMounted(load);
         </el-table-column>
 
         <template #empty>
-          <el-empty description="暂无角色（后端未返回任何角色）" />
+          <el-empty description="暂无角色" />
         </template>
       </el-table>
     </el-card>

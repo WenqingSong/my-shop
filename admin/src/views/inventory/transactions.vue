@@ -210,7 +210,7 @@ onMounted(async () => {
       :closable="false"
       show-icon
       title="关于调整原因"
-      description="后端增减库存的请求体只有 quantity，没有 reason，因此流水「原因」恒为空；页面不做伪造填充。"
+      description="库存调整暂不保存原因，因此历史流水中的原因栏为空。"
     />
 
     <el-card shadow="never">
@@ -225,7 +225,8 @@ onMounted(async () => {
           />
         </el-form-item>
         <el-form-item>
-          <el-button :loading="productLoading" @click="searchProducts">
+          <el-button :loading="productLoading" @click="searchProducts"
+            ><template #loading><BrandLoadingIcon /></template>
             搜索商品
           </el-button>
         </el-form-item>

@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted } from "vue";
+import { useColorMode } from "@/composables/useColorMode";
 import { getDashboardOrderTrend } from "@/api/modules/dashboard";
 import { useAsyncSection } from "../composables/useAsyncSection";
 import { buildOrderTrendOption } from "../utils/chart-options";
 import ChartPanel from "./ChartPanel.vue";
+
+const { dark } = useColorMode();
 
 defineOptions({ name: "DashboardOrderTrendPanel" });
 
@@ -16,7 +19,9 @@ const empty = computed(
 );
 
 const option = computed(() =>
-  data.value?.days?.length ? buildOrderTrendOption(data.value.days) : null
+  data.value?.days?.length
+    ? buildOrderTrendOption(data.value.days, dark.value)
+    : null
 );
 
 onMounted(load);

@@ -1,31 +1,24 @@
-<script setup lang="ts">
-import { getConfig } from "@/config";
-
-const TITLE = getConfig("Title");
-</script>
-
 <template>
-  <footer
-    class="layout-footer text-[rgba(0,0,0,0.6)] dark:text-[rgba(220,220,242,0.8)]"
-  >
-    Copyright © 2020-present
-    <a
-      class="hover:text-primary!"
-      href="https://github.com/pure-admin"
-      target="_blank"
-    >
-      &nbsp;{{ TITLE }}
-    </a>
+  <footer class="layout-footer">
+    <span>Framework <span class="footer-divider">/</span> SurgeCart</span
+    ><span>运营管理工作台</span>
   </footer>
 </template>
-
-<style lang="scss" scoped>
+<style scoped>
 .layout-footer {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 100%;
-  padding: 0 0 8px;
-  font-size: 14px;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 28px;
+  padding: 18px 0;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--el-text-color-secondary);
+  border-top: 1px solid var(--el-border-color);
+}
+.footer-divider {
+  margin: 0 10px;
+  color: var(--el-text-color-placeholder);
 }
 </style>

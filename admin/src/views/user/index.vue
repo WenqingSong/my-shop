@@ -130,11 +130,8 @@ function retry() {
           按用户 ID 查询账号状态并执行禁用/启用；不涉及用户密码与认证数据
         </p>
       </div>
-      <el-button
-        v-if="lastAttemptId !== null"
-        :loading="loading"
-        @click="retry"
-      >
+      <el-button v-if="lastAttemptId !== null" :loading="loading" @click="retry"
+        ><template #loading><BrandLoadingIcon /></template>
         刷新
       </el-button>
     </div>
@@ -143,7 +140,7 @@ function retry() {
       type="info"
       :closable="false"
       show-icon
-      title="后端能力边界"
+      title="使用说明"
       description="Go 后端只提供 /admin/users/:id/status 的查询与修改，没有用户列表/详情/搜索/分页/删除接口；users 表也没有昵称、手机号、最后登录时间字段。本页因此按 ID 查询，不提供列表。"
     />
 
@@ -159,7 +156,8 @@ function retry() {
           />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" :loading="loading" @click="handleQuery">
+          <el-button type="primary" :loading="loading" @click="handleQuery"
+            ><template #loading><BrandLoadingIcon /></template>
             查询状态
           </el-button>
           <el-button @click="reset">重置</el-button>
@@ -213,7 +211,7 @@ function retry() {
           type="danger"
           :loading="submitting"
           @click="changeStatus(0)"
-        >
+          ><template #loading><BrandLoadingIcon /></template>
           禁用用户
         </el-button>
         <el-button
@@ -221,7 +219,7 @@ function retry() {
           type="success"
           :loading="submitting"
           @click="changeStatus(1)"
-        >
+          ><template #loading><BrandLoadingIcon /></template>
           启用用户
         </el-button>
         <span v-else class="muted">

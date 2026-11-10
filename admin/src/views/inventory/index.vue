@@ -242,9 +242,7 @@ onMounted(loadProducts);
     <div class="page-header">
       <div>
         <h2 class="page-title">库存查询</h2>
-        <p class="page-desc">
-          按商品 → SKU 逐条查询后端真实库存；调整库存请使用增量接口
-        </p>
+        <p class="page-desc">按商品查看各规格库存，并执行增加或扣减。</p>
       </div>
       <el-button @click="loadProducts">刷新</el-button>
     </div>
@@ -254,7 +252,7 @@ onMounted(loadProducts);
       :closable="false"
       show-icon
       title="关于库存口径"
-      description="后端只提供当前库存数量，没有锁定库存 / 可售库存字段，页面不做推导；也不存在“设置库存总量”的接口。"
+      description="库存数量为当前记录值，不区分锁定库存与可售库存。调整时请输入增加或扣减的数量，不能直接设置总量。"
     />
 
     <el-card shadow="never">

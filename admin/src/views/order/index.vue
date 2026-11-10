@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
+import { useListReturn } from "@/composables/useListReturn";
 import { hasPerms } from "@/utils/auth";
 import { message } from "@/utils/message";
 import { resolveErrorMessage } from "@/utils/error-message";
@@ -30,6 +31,7 @@ import ShipOrderDialog from "./components/ShipOrderDialog.vue";
 defineOptions({ name: "OrderList" });
 
 const router = useRouter();
+const pageRoot = ref<HTMLElement>();
 
 const canShipOrder = computed(() => hasPerms(PERMISSION.ORDER_SHIP));
 
@@ -64,7 +66,7 @@ const statusOptions = [
   ...ORDER_STATUS_OPTIONS
 ];
 
-async function enrichRows(items: OrderListRowView[]) {
+async function enrichRows(items: OrderListRowView[], token: number) {
   const queue = [...items];
 
   const workers = Array.from(
@@ -72,16 +74,18 @@ async function enrichRows(items: OrderListRowView[]) {
     async () => {
       for (;;) {
         const next = queue.shift();
-        if (!next) return;
+        if (!next || token !== loadToken) return;
         enrichment[next.id] = { summary: "…", count: -1, failed: false };
         try {
           const detail = await getOrder(next.id);
+          if (token !== loadToken) return;
           enrichment[next.id] = {
             summary: buildItemsSummary(detail.items),
             count: sumItemQuantity(detail.items),
             failed: false
           };
         } catch {
+          if (token !== loadToken) return;
           enrichment[next.id] = { summary: "—", count: -1, failed: true };
         }
       }
@@ -112,7 +116,7 @@ async function load() {
 
     rows.value = (result.items ?? []).map(toOrderListRowView);
     total.value = result.total;
-    void enrichRows(rows.value);
+    void enrichRows(rows.value, token);
   } catch (cause) {
     if (token !== loadToken) return;
     rows.value = [];
@@ -177,16 +181,15 @@ function handleShipped() {
 }
 
 onMounted(load);
+useListReturn(pageRoot, load);
 </script>
 
 <template>
-  <div class="order-list-page">
+  <div ref="pageRoot" class="order-list-page">
     <div class="page-header">
       <div>
         <h2 class="page-title">订单列表</h2>
-        <p class="page-desc">
-          普通订单查询；状态只能通过后端发货等业务接口变更
-        </p>
+        <p class="page-desc">查询普通订单，查看交易状态并处理发货。</p>
       </div>
       <el-button @click="load">刷新</el-button>
     </div>
@@ -196,7 +199,7 @@ onMounted(load);
       :closable="false"
       show-icon
       title="查询范围说明"
-      description="后端 /admin/orders 只查询普通订单（orders 表），秒杀订单在独立表中不在此列表；用户筛选仅支持用户 ID 精确匹配，不支持用户名搜索。"
+      description="本页展示普通订单，不包含秒杀订单。用户查询需填写准确的用户 ID。"
     />
 
     <el-card shadow="never">
@@ -243,7 +246,7 @@ onMounted(load);
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="loading" @click="search"
-            >查询</el-button
+            ><template #loading><BrandLoadingIcon /></template>查询</el-button
           >
           <el-button @click="reset">重置</el-button>
         </el-form-item>
@@ -270,10 +273,17 @@ onMounted(load);
             </el-button>
           </template>
         </el-table-column>
+        <el-table-column label="状态" width="110">
+          <template #default="{ row }">
+            <el-tag :type="row.statusTagType" size="small">
+              {{ row.statusLabel }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="用户" width="110">
           <template #default="{ row }">用户 #{{ row.userId }}</template>
         </el-table-column>
-        <el-table-column label="商品摘要" min-width="200">
+        <el-table-column label="商品摘要" min-width="180">
           <template #default="{ row }">
             {{ summaryOf(row.id) }}
           </template>
@@ -288,17 +298,10 @@ onMounted(load);
             <span class="amount">{{ row.totalText }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="110">
-          <template #default="{ row }">
-            <el-tag :type="row.statusTagType" size="small">
-              {{ row.statusLabel }}
-            </el-tag>
-          </template>
-        </el-table-column>
         <el-table-column label="下单时间" min-width="170">
           <template #default="{ row }">{{ row.createdText }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="130" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openDetail(row.id)">
               详情

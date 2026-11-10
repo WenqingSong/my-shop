@@ -131,7 +131,7 @@ function addBinding() {
         :loading="productLoading"
         :disabled="disabled"
         @click="searchProducts"
-      >
+        ><template #loading><BrandLoadingIcon /></template>
         搜索商品
       </el-button>
       <el-select

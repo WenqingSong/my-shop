@@ -138,7 +138,9 @@ onMounted(load);
         </p>
       </div>
       <div class="page-actions">
-        <el-button :loading="loading" @click="load">刷新</el-button>
+        <el-button :loading="loading" @click="load"
+          ><template #loading><BrandLoadingIcon /></template>刷新</el-button
+        >
         <el-button v-if="canCreate" type="primary" @click="openCreate">
           新建权限
         </el-button>
@@ -149,8 +151,8 @@ onMounted(load);
       type="info"
       :closable="false"
       show-icon
-      title="后端能力边界"
-      description="GET /admin/permissions 返回系统全部权限定义（不是当前管理员的有效权限，也不是某个角色已有的权限）。后端没有权限树/菜单数据，业务域由真实权限码前缀推导；列表无分页参数，筛选与分页在前端完整数据上执行。"
+      title="使用说明"
+      description="这里展示系统全部权限定义，按业务域分类。它不代表当前管理员或某个角色已拥有的权限。"
     />
 
     <el-card shadow="never">

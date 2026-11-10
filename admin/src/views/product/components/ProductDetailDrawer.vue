@@ -165,7 +165,7 @@ function inventoryText(skuId: number) {
 
 <template>
   <el-drawer v-model="visible" title="商品详情" size="62%" destroy-on-close>
-    <el-skeleton v-if="loading" :rows="8" animated />
+    <PageLoading v-if="loading" />
 
     <el-alert
       v-else-if="error"
@@ -208,7 +208,7 @@ function inventoryText(skuId: number) {
             v-if="canToggleShelf"
             :loading="submitting"
             @click="toggleShelf"
-          >
+            ><template #loading><BrandLoadingIcon /></template>
             {{ shelfLabel }}
           </el-button>
         </div>

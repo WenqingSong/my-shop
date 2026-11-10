@@ -20,35 +20,35 @@ const cards = computed(() => {
   const overview = data.value;
   return [
     {
-      key: "user_total",
-      label: "用户总数",
-      value: overview ? formatThousands(overview.user_total) : "-"
-    },
-    {
-      key: "today_new_users",
-      label: "今日新增用户",
-      value: overview ? formatThousands(overview.today_new_users) : "-"
-    },
-    {
-      key: "product_total",
-      label: "商品总数",
-      value: overview ? formatThousands(overview.product_total) : "-"
-    },
-    {
-      key: "order_total",
-      label: "订单总数",
-      value: overview ? formatThousands(overview.order_total) : "-"
+      key: "today_order_amount",
+      label: "今日已支付订单金额",
+      value: overview ? formatCentsAsCny(overview.today_order_amount) : "—",
+      hint: "今日已支付订单的金额合计，未扣除退款。"
     },
     {
       key: "today_new_orders",
       label: "今日新增订单",
-      value: overview ? formatThousands(overview.today_new_orders) : "-"
+      value: overview ? formatThousands(overview.today_new_orders) : "—"
     },
     {
-      key: "today_order_amount",
-      label: "今日已支付订单金额",
-      value: overview ? formatCentsAsCny(overview.today_order_amount) : "-",
-      hint: "单位：元（后端以分返回，已换算）"
+      key: "today_new_users",
+      label: "今日新增用户",
+      value: overview ? formatThousands(overview.today_new_users) : "—"
+    },
+    {
+      key: "order_total",
+      label: "订单总数",
+      value: overview ? formatThousands(overview.order_total) : "—"
+    },
+    {
+      key: "product_total",
+      label: "商品总数",
+      value: overview ? formatThousands(overview.product_total) : "—"
+    },
+    {
+      key: "user_total",
+      label: "用户总数",
+      value: overview ? formatThousands(overview.user_total) : "—"
     }
   ];
 });
@@ -67,7 +67,9 @@ defineExpose({ reload: load });
         <span class="panel-title">核心业务指标</span>
         <div class="panel-actions">
           <span class="panel-sub">今日数据按业务时区切分</span>
-          <el-button link :loading="loading" @click="load">刷新</el-button>
+          <el-button link :loading="loading" @click="load"
+            ><template #loading><BrandLoadingIcon /></template>刷新</el-button
+          >
         </div>
       </div>
     </template>
@@ -88,7 +90,14 @@ defineExpose({ reload: load });
       <el-empty v-else-if="isEmpty" description="暂无统计数据" />
 
       <div v-else class="metric-grid">
-        <div v-for="card in cards" :key="card.key" class="metric-item">
+        <div
+          v-for="card in cards"
+          :key="card.key"
+          class="metric-item"
+          :class="{
+            'metric-item--featured': card.key === 'today_order_amount'
+          }"
+        >
           <div class="metric-label">
             {{ card.label }}
             <el-tooltip v-if="card.hint" :content="card.hint" placement="top">
@@ -105,12 +114,13 @@ defineExpose({ reload: load });
 <style lang="scss" scoped>
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: 1.5fr repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
 .metric-item {
-  padding: 14px 16px;
+  padding: 20px;
+  border: 1px solid var(--el-border-color-light);
   background: var(--el-fill-color-lighter);
   border-radius: 6px;
 }
@@ -138,11 +148,16 @@ defineExpose({ reload: load });
 
 .metric-value {
   margin-top: 8px;
-  font-size: 22px;
+  font-size: clamp(22px, 2vw, 32px);
   font-weight: 600;
   line-height: 1.2;
   color: var(--el-text-color-primary);
-  word-break: break-all;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-item--featured {
+  border-top: 2px solid var(--fw-ink);
 }
 
 @media (width <= 1440px) {

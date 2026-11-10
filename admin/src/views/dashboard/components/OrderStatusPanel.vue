@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted } from "vue";
+import { useColorMode } from "@/composables/useColorMode";
 import {
   getDashboardOrderStatus,
   getDefaultDashboardStatusQuery
@@ -8,6 +9,8 @@ import { useAsyncSection } from "../composables/useAsyncSection";
 import { buildOrderStatusOption } from "../utils/chart-options";
 import { formatThousands } from "@/utils/number";
 import ChartPanel from "./ChartPanel.vue";
+
+const { dark } = useColorMode();
 
 defineOptions({ name: "DashboardOrderStatusPanel" });
 
@@ -32,7 +35,7 @@ const empty = computed(
 
 const option = computed(() =>
   distribution.value.some(item => item.count > 0)
-    ? buildOrderStatusOption(distribution.value)
+    ? buildOrderStatusOption(distribution.value, dark.value)
     : null
 );
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { ref } from "vue";
 import MetricCards from "./components/MetricCards.vue";
 import OrderTrendPanel from "./components/OrderTrendPanel.vue";
 import OrderStatusPanel from "./components/OrderStatusPanel.vue";
@@ -28,6 +28,7 @@ const topRef = ref<InstanceType<typeof TopProductsPanel>>();
 const flashRef = ref<InstanceType<typeof FlashSalePanel>>();
 
 const refreshing = ref(false);
+const refreshedAt = ref("");
 
 async function refreshAll() {
   if (refreshing.value) return;
@@ -41,25 +42,32 @@ async function refreshAll() {
       flashRef.value?.reload()
     ]);
   } finally {
+    refreshedAt.value = new Date().toLocaleTimeString("zh-CN", {
+      hour: "2-digit",
+      minute: "2-digit"
+    });
     refreshing.value = false;
   }
 }
-
-onMounted(() => {
-  void refreshAll();
-});
 </script>
 
 <template>
   <div class="dashboard">
     <div class="dashboard-header">
       <div>
-        <h2 class="dashboard-title">运营工作台</h2>
+        <p class="dashboard-eyebrow">OVERVIEW / 运营概览</p>
+        <h2 class="dashboard-title">每一笔业务，清晰在握。</h2>
         <p class="dashboard-desc">
-          用户、商品、订单与秒杀运营数据概览（数据以后端实时聚合为准）
+          关注今日表现，掌握商品、订单与秒杀活动的运营状态。
         </p>
       </div>
-      <el-button :loading="refreshing" @click="refreshAll">刷新全部</el-button>
+      <div class="dashboard-refresh">
+        <span v-if="refreshedAt">最近刷新 {{ refreshedAt }}</span
+        ><el-button :loading="refreshing" @click="refreshAll"
+          ><template #loading><BrandLoadingIcon /></template>刷新数据
+          ↻</el-button
+        >
+      </div>
     </div>
 
     <MetricCards ref="metricRef" />
@@ -77,6 +85,22 @@ onMounted(() => {
 </template>
 
 <style lang="scss" scoped>
+.dashboard-eyebrow {
+  margin-bottom: 12px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--el-text-color-secondary);
+}
+.dashboard-refresh {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+}
 .dashboard {
   display: flex;
   flex-direction: column;

@@ -65,7 +65,9 @@ defineExpose({ reload: load });
         <span class="panel-title">秒杀运营统计</span>
         <div class="panel-actions">
           <span class="panel-sub">活动状态与请求处理分布</span>
-          <el-button link :loading="loading" @click="load">刷新</el-button>
+          <el-button link :loading="loading" @click="load"
+            ><template #loading><BrandLoadingIcon /></template>刷新</el-button
+          >
         </div>
       </div>
     </template>

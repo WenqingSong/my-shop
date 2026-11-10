@@ -27,6 +27,7 @@ export default {
       component: () => import("@/views/product/index.vue"),
       meta: {
         title: $t("menus.pureProductList"),
+        keepAlive: true,
         icon: "ep/list"
       }
     },

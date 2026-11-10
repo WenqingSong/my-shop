@@ -89,7 +89,7 @@ html.dark {
 
   .app-main,
   .app-main-nofixed-header {
-    background: #020409 !important;
+    background: var(--fw-paper, #17191b) !important;
   }
 
   .logic-flow-view,

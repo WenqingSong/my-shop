@@ -171,7 +171,7 @@ async function submit() {
         :type="meta.danger ? 'danger' : 'primary'"
         :loading="submitting"
         @click="submit"
-      >
+        ><template #loading><BrandLoadingIcon /></template>
         {{ meta.submitLabel }}
       </el-button>
     </template>

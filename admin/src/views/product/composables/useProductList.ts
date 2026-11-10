@@ -28,6 +28,7 @@ export function useProductList() {
   const page = ref(1);
   const size = ref(10);
   const loading = ref(false);
+  let loadToken = 0;
   const enriching = ref(false);
   const error = ref<string | null>(null);
   /** 状态筛选跨页拉取是否达到页数上限 */
@@ -48,7 +49,7 @@ export function useProductList() {
 
   const hasStatusFilter = computed(() => filters.status !== "");
 
-  async function enrichSkuCounts(items: ProductDTO[]) {
+  async function enrichSkuCounts(items: ProductDTO[], token: number) {
     if (items.length === 0) return;
     enriching.value = true;
 
@@ -58,13 +59,14 @@ export function useProductList() {
       async () => {
         for (;;) {
           const next = queue.shift();
-          if (!next) return;
+          if (!next || token !== loadToken) return;
           skuCounts[next.id] = null;
           try {
             const detail = await getProduct(next.id);
-            skuCounts[next.id] = detail.skus?.length ?? 0;
+            if (token === loadToken)
+              skuCounts[next.id] = detail.skus?.length ?? 0;
           } catch {
-            skuCounts[next.id] = -1;
+            if (token === loadToken) skuCounts[next.id] = -1;
           }
         }
       }
@@ -73,7 +75,7 @@ export function useProductList() {
     try {
       await Promise.all(workers);
     } finally {
-      enriching.value = false;
+      if (token === loadToken) enriching.value = false;
     }
   }
 
@@ -82,6 +84,8 @@ export function useProductList() {
   }
 
   async function load() {
+    const token = ++loadToken;
+    enriching.value = false;
     loading.value = true;
     error.value = null;
     truncated.value = false;
@@ -94,13 +98,14 @@ export function useProductList() {
           sort: "id",
           order: "desc"
         });
+        if (token !== loadToken) return;
         const filtered = filterProductsByStatus(scan.items, filters.status);
         truncated.value = scan.truncated;
         total.value = filtered.length;
 
         const pageItems = slicePage(filtered, page.value, size.value);
         applyRows(pageItems);
-        void enrichSkuCounts(pageItems);
+        void enrichSkuCounts(pageItems, token);
         return;
       }
 
@@ -115,15 +120,17 @@ export function useProductList() {
         })
       );
 
+      if (token !== loadToken) return;
       total.value = result.total;
       applyRows(result.items ?? []);
-      void enrichSkuCounts(result.items ?? []);
+      void enrichSkuCounts(result.items ?? [], token);
     } catch (cause) {
+      if (token !== loadToken) return;
       rows.value = [];
       total.value = 0;
       error.value = resolveErrorMessage(cause, "商品列表加载失败");
     } finally {
-      loading.value = false;
+      if (token === loadToken) loading.value = false;
     }
   }
 

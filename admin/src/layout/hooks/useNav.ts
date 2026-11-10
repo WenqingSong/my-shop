@@ -1,3 +1,4 @@
+import brandSymbol from "@/assets/brand/symbol.svg?url";
 import { storeToRefs } from "pinia";
 import { getConfig } from "@/config";
 import { useRouter } from "vue-router";
@@ -141,7 +142,7 @@ export function useNav() {
 
   /** 获取`logo` */
   function getLogo() {
-    return new URL("/logo.svg", import.meta.url).href;
+    return brandSymbol;
   }
 
   return {
