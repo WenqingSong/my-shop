@@ -45,4 +45,4 @@
 | 17000-17999 | object-storage-upload | ACTIVE | object-storage-upload 上传/存储域（域序 17 = max(16)+1） |
 | 18000-18999 | order-refund-v1 | ACTIVE | order-refund-v1 退款域（域序 18 = max(17)+1） |
 | 19000-19999 | coupon-v1 | ACTIVE | coupon-v1 优惠券域（域序 19 = max(18)+1） |
-| 20000-20999 | distribution-v1 | RESERVED | B1-04-05 一级分销域（域序 20 = max(19)+1）：20001 自荐/20002 推荐人不可用/20003 已绑定不可改绑 |
+| 20000-20999 | distribution-v1 | RESERVED | B1-04-05 一级分销域（域序 20 = max(19)+1）：20001 自荐/20002 推荐人不可用/20003 已绑定不可改绑。B1-04 八分支集成（2026-11-11）已并入 feat/p2-backend，尚未进入 develop，故状态保持 RESERVED；该域不可再分配，下一个空闲域序为 21（21000-21999） |

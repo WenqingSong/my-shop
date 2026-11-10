@@ -64,6 +64,7 @@ SurgeCart 基于 GoFrame v2 提供 HTTP API，MySQL 保存交易与身份数据�
 | 模块 | 职责 | 主要实现位置 |
 | --- | --- | --- |
 | IAM（身份与权限） | 前台用户与后台管理员两套独立身份域；JWT 签发 + Redis 会话、Refresh Token 轮换与会话撤销；管理员 RBAC（角色/权限/超级管理员） | `internal/auth`、`internal/middleware`、`controller/iam`、`controller/admin`、`logic/iam`、`logic/admin` |
+| 用户资料与地区 | 当前登录用户资料读取/更新（昵称、头像、手机号唯一、生日）；省/市/区地区字典只读查询；地址以 `region_id` 软引用地区字典（文本字段保留兼容） | `controller/profile`、`controller/region`、`controller/address`、`logic/profile`、`logic/region`、`logic/address` |
 | 订单 | 普通订单下单（服务端定价、快照、幂等、状态机）、支付（模拟）、取消、发货、收货；购物车与收货地址作为下单前置 | `controller/order`、`controller/cart`、`controller/address`、`logic/order`、`logic/cart`、`logic/address` |
 | 库存 | SKU 库存查询、增减与流水；条件扣减防超卖；与订单/秒杀共享库存事实 | `controller/inventory`、`controller/sku`、`logic/inventory`、`logic/sku` |
 | 优惠券 | 优惠券模板管理与用户领券/查询（核销与订单的耦合边界见领域设计） | `controller/coupon`、`logic/coupon` |
@@ -80,7 +81,7 @@ SurgeCart 基于 GoFrame v2 提供 HTTP API，MySQL 保存交易与身份数据�
 
 路由组织（`internal/cmd/routes_frontend.go`、`routes_admin.go`）：
 
-- **前台**：公开接口（注册/登录/刷新/分类/商品/轮播图/文章等）+ 登录用户接口（`Auth`）+ 登出（`AuthSignatureOnly`，仅验签幂等撤销）。
+- **前台**：公开接口（注册/登录/刷新/地区字典/分类/商品/轮播图/文章等）+ 登录用户接口（`Auth`，含 `/profile`、地址、订单、分销等）+ 登出（`AuthSignatureOnly`，仅验签幂等撤销）。
 - **后台**：`/admin` 前缀，公开登录 + `AdminAuth` + `RequirePermission(code)` 双层保护；超级管理员 `IsSuper` 直接放行，其余按角色持有的权限 code 判断，DB 查询失败 fail-closed。
 
 ## 3. 核心业务流程

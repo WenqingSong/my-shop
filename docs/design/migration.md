@@ -84,6 +84,8 @@ B1-03-02 的六项交易与资金迁移、B1-04-01 的 profile_region_address）
 | `20261110000014` | `distribution` | `user_referrals` + `distribution_commissions`（一级推荐关系/订单佣金；含 down） |
 | `20261110000015` | `profile_region_address` | `users` 增 `birthday DATE NULL`；`addresses` 增 `region_id`（可空，软引用 `regions.level=3`）+ `idx_region_id`（含 down；不重建/不回填 `regions`） |
 
+**版本分配（B1-04 八分支集成核实，2026-11-11）**：集成时逐一核对实际 SQL 文件、Registry 与已知数据库的 `schema_migrations`——`20261110000015` 仅由 B1-04-01（`profile_region_address`）使用；`my_shop_b104_test`、`my_shop_b10401_migrate` 上的版本 15 对应同一 Schema（`users.birthday` + `addresses.region_id`），未出现同一版本号对应不同 Schema 的数据库。当前最高版本为 `20261110000015`，下一个可用版本为 `20261110000016`；新增迁移必须按 Registry 规则单独领取，不得复用已被实现占用的版本号。
+
 ### 2.2 baseline 模型
 
 baseline 内容 = 迁移前 `boot.go` 中 7 张既有表的等价 DDL（`users`、`categories`、`admins`、`roles`、`permissions`、`admin_roles`、`role_permissions`），多语句单文件，唯一差异是去掉 `IF NOT EXISTS`；字段/类型/约束/引擎/字符集严格等价（`ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`）。
