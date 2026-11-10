@@ -15,7 +15,8 @@
 
 CLI **不提供 `down` 子命令**（只有 `up`/`force`/`version`）。历史批次多数只有 `.up.sql`；
 自 `20261001000024` 起按需提供 `.down.sql`（outbox、B1-03-01 的 product_spec/user_profile/regions、
-B1-03-02 的六项交易与资金迁移），仅用于测试库验证与人工显式回滚，生产发布流程不执行 down。
+B1-03-02 的六项交易与资金迁移、B1-04-01 的 profile_region_address），仅用于测试库验证与人工显式回滚，
+生产发布流程不执行 down。
 
 ### 1.1 独立执行（T2-05）
 
@@ -81,6 +82,7 @@ B1-03-02 的六项交易与资金迁移），仅用于测试库验证与人工�
 | `20261110000012` | `bargain` | `bargain_activities` + `bargain_instances` + `bargain_help_records`（砍价活动/实例/助力；含 down） |
 | `20261110000013` | `member` | `member_levels` + `user_memberships` + `member_growth_logs`（等级/用户会员/成长值流水；不重复创建积分账本；含 down） |
 | `20261110000014` | `distribution` | `user_referrals` + `distribution_commissions`（一级推荐关系/订单佣金；含 down） |
+| `20261110000015` | `profile_region_address` | `users` 增 `birthday DATE NULL`；`addresses` 增 `region_id`（可空，软引用 `regions.level=3`）+ `idx_region_id`（含 down；不重建/不回填 `regions`） |
 
 ### 2.2 baseline 模型
 

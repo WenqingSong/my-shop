@@ -33,6 +33,7 @@ const (
 	CodeRefreshTokenExpired Code = 2013 // refresh token 已过期 → 401
 	CodeRefreshTokenReuse   Code = 2014 // refresh token 被重放（已轮换 token 再次提交）→ 401
 	CodeUserNotFound        Code = 2015 // 用户状态管理目标用户不存在 → 404
+	CodePhoneExists         Code = 2016 // 手机号已被使用（users.uk_phone 唯一约束冲突）→ 409
 
 	// 后台管理员身份与 RBAC（IAM 段扩展）。
 	CodeAdminNotFound          Code = 2003 // 管理员不存在 → 404
@@ -171,6 +172,7 @@ var codeTable = map[Code]codeInfo{
 	CodeRefreshTokenExpired:    {http.StatusUnauthorized, "refresh token 已过期"},
 	CodeRefreshTokenReuse:      {http.StatusUnauthorized, "refresh token 已失效，请重新登录"},
 	CodeUserNotFound:           {http.StatusNotFound, "用户不存在"},
+	CodePhoneExists:            {http.StatusConflict, "手机号已被使用"},
 	CodeAdminNotFound:          {http.StatusNotFound, "管理员不存在"},
 	CodeAdminUsernameExists:    {http.StatusConflict, "管理员用户名已存在"},
 	CodeSuperAdminProtected:    {http.StatusForbidden, "超级管理员受保护"},

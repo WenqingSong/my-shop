@@ -167,7 +167,42 @@ migration `20261110000002_user_profile` 在 `users` 上以纯加列方式补齐�
   未设置一律写 NULL（第二个空串会撞唯一键）。手机号格式（大陆 11 位）由应用层校验，DB 不引入 CHECK，避免阻塞国际号码扩展。
 - `username` 仍是唯一登录凭证；`phone` 不作为登录标识，也不参与会话/JWT 声明。
 - 资料字段是「账号数据的附属信息」，与 `refresh_tokens`/`user_status_audits` 无关联；删除用户时随行删除（当前无用户删除接口）。
-- 当前尚无资料读写接口（`GET /me` 仍只返回 id/username），资料接口属后续任务，见 `docs/dev/iam.md`。
+- 资料读写接口于 B1-04-01 落地，见 §3.9；`GET /me` 保持原有 `id`/`username` 契约不变（兼容旧客户端）。
+
+### 3.9 用户资料读写（B1-04-01）
+
+`profile` 是独立模块（`api/profile/v1` + `internal/controller/profile` + `internal/logic/profile`），
+数据仍落在 `users` 表，**不新建 `user_profiles` 表**，不复用也不改变任何认证逻辑。
+
+| 字段 | 列类型 | 业务语义 |
+| --- | --- | --- |
+| `nickname` | VARCHAR(32) NOT NULL DEFAULT '' | 空串=未设置；可清空 |
+| `avatar_url` | VARCHAR(512) NOT NULL DEFAULT '' | 空串=未设置；非空须 http/https 绝对 URL；可清空 |
+| `phone` | VARCHAR(20) NULL | NULL=未设置；`uk_phone` 全局唯一；可清空（写 NULL） |
+| `birthday` | DATE NULL | `YYYY-MM-DD` 日期语义，无时间/时区；NULL=未设置；可清空 |
+
+API：
+
+| 方法/路径 | 认证 | 说明 |
+| --- | --- | --- |
+| `GET /profile` | `Auth` | 查询当前登录用户资料；用户 id 取自 `Principal.UserID` |
+| `PUT /profile` | `Auth` | 更新当前登录用户资料；字段省略=不修改，空串=清空 |
+
+语义与不变量：
+
+- **身份隔离**：请求体/查询参数均不接受 `user_id`；归属恒为 `Principal.UserID`，未认证 401（1002）。
+- **字段区分**：DTO 全部使用指针字段；`nil`（省略/null）=不修改，`""`=主动清空
+  （`nickname`/`avatar_url` 清为空串，`phone`/`birthday` 清为 NULL）。
+- **手机号唯一**：由 `uk_phone` 在 DB 层保证；并发写入同一号码时后到者命中 1062 →
+  `2016 PHONE_EXISTS`（409）。不做「先查再写」的判定。
+- **手机号格式**：应用层 `^1[3-9]\d{9}$`；空串表示清空（写 NULL），绝不写空串。
+- **生日**：严格 `YYYY-MM-DD`（拒绝未补零与 `02-30` 溢出）；返回统一该格式。
+- **头像**：`http`/`https` 绝对 URL 且 ≤512 字符，拒绝 `javascript:`/`data:` 等协议。
+- **不返回敏感字段**：响应只含 `id`/`username`/`nickname`/`avatar_url`/`phone`/`birthday`，
+  不含 `password_hash`、`status`、`auth_epoch`。
+- **用户不存在**：更新/查询目标行缺失返回 `2015 USER_NOT_FOUND`（404）；正常请求下由 `Auth`
+  中间件保证用户存在，该分支为防御性处理。
+- 错误码：字段非法 `1001`（400）、未认证 `1002`（401）、手机号冲突 `2016`（409）、内部错误 `1000`（500）。
 
 ## 4. 鉴权与登出流程
 
@@ -282,6 +317,7 @@ migration `20261110000002_user_profile` 在 `users` 上以纯加列方式补齐�
 | refresh token 过期 | 2013 | 401 |
 | refresh token 重放（已轮换 token 再次提交） | 2014 | 401 |
 | 用户状态管理目标用户不存在 | 2015 | 404 |
+| 手机号已被使用（`uk_phone` 唯一约束冲突） | 2016 | 409 |
 
 ## 7. 失败与一致性语义
 
@@ -294,7 +330,7 @@ migration `20261110000002_user_profile` 在 `users` 上以纯加列方式补齐�
 - reuse：撤销该用户全部 refresh families + 全部 access sessions，为 MySQL 更新 + Redis Lua 撤销，非跨系统事务（Redis 失败时 family 已撤销、session 由 TTL/后续校验兜底）。
 - 用户状态管理：`status`/`auth_epoch`/审计/family 撤销在同一 MySQL 事务内全有或全无；`SELECT ... FOR UPDATE` 串行化并发状态变更，区分「不存在（404）/已一致（幂等）/实际迁移（更新+审计+禁用撤销 family）」三态；仅实际禁用递增 `auth_epoch`；Redis 会话撤销在事务提交后 best-effort（失败仅日志，由每请求 status/版本校验兜底）。
 - 手机号唯一：由 `users.uk_phone` 在 DB 层保证（多个 NULL 允许）；并发写入同一手机号时后到者命中 1062，
-  调用方须映射为业务冲突。资料字段当前无写入接口，故该映射尚未在 HTTP 层落地。
+  资料更新接口将其映射为 `2016`（409），不做「先查再写」，最终唯一性只依赖数据库约束。
 - 无 MQ、无异步；MySQL 与 Redis 间为顺序写，无跨系统事务。
 
 ## 8. 配置
@@ -317,6 +353,7 @@ migration `20261110000002_user_profile` 在 `users` 上以纯加列方式补齐�
 | 后台鉴权中间件 | `internal/middleware/auth.go`（`AdminAuth` / `AdminAuthSignatureOnly` / `RequirePermission`） |
 | 身份注入 | `internal/middleware/principal.go` |
 | 前台登录/登出/刷新/会话列表/撤销业务 | `internal/logic/iam/iam.go` |
+| 用户资料读写（昵称/头像/手机号/生日） | `internal/logic/profile/profile.go`、`internal/controller/profile/profile.go`、`api/profile/v1/profile.go` |
 | 后台登录/登出与 RBAC 业务 | `internal/logic/admin/admin.go` |
 | 前台路由 | `internal/cmd/routes_frontend.go` |
 | 后台路由 | `internal/cmd/routes_admin.go` |
