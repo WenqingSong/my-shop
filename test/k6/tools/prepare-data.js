@@ -37,6 +37,50 @@ const inventoryQty = envInt('INVENTORY_QTY', 0);
 const skuPrice = envInt('SKU_PRICE', 19900);
 const flashPrice = envInt('FLASH_PRICE', 9900);
 
+// envSignedInt 读取可为负的整数（时间偏移需要负值，envInt 只接受正整数）。
+// 允许微调活动时间窗是 T5-03 的硬需求：一旦发现活动被判定为「不在时间窗」，
+// 必须能用参数修正后重建，而不是改代码或直接改数据库。
+function envSignedInt(name, fallback) {
+  const raw = __ENV[name];
+  if (raw === undefined || String(raw).trim() === '') {
+    return fallback;
+  }
+  const value = Number(String(raw).trim());
+  if (!isFinite(value) || Math.floor(value) !== value) {
+    throw new Error(`[prepare-data] 环境变量 ${name}=${raw} 非法：必须为整数（可为负）`);
+  }
+  return value;
+}
+
+// 活动时间窗（相对当前时刻的秒数偏移）：默认「1 分钟前开始、1 小时后结束」。
+const startOffset = envSignedInt('FLASH_START_OFFSET', -60);
+const endOffset = envSignedInt('FLASH_END_OFFSET', 3600);
+if (endOffset <= startOffset) {
+  throw new Error('[prepare-data] FLASH_END_OFFSET 必须大于 FLASH_START_OFFSET');
+}
+
+// T5-03 关键修正：时间窗必须按「应用 MySQL 会话时区」的墙钟时间提交。
+//
+// 实测事实（本任务证据链）：
+//   - 应用把 MySQL 会话时区设为 dashboard.timezone（默认 Asia/Shanghai，+08:00）；
+//   - 写库时 DATETIME 由驱动按 UTC 格式化（DSN 无 loc/parseTime）；
+//   - 于是「按 UTC 墙钟写入」的时间被读成 +08:00，UNIX_TIMESTAMP 少了 8 小时。
+// 后果：用 RFC3339(UTC=Z) 创建的 2 小时活动，在闸门看来已经结束 8 小时 →
+// 预热阶段直接走 invalidation，所有下单请求返回 12001（活动不存在）。
+//
+// 正确做法：把期望的时间点换算成 Asia/Shanghai 墙钟再提交（默认 +8h），
+// 这样写进 DATETIME 的字面量与会话时区的解释一致。
+// 这不是「改业务逻辑」，而是让测试数据符合部署环境的时区契约。
+const tzOffsetSeconds = envSignedInt('FLASH_TZ_OFFSET_SECONDS', 28800);
+
+// wallClock 返回「带时区偏移的墙钟时间」字符串（YYYY-MM-DD HH:MM:SS，不带 Z）。
+// 为什么不用 RFC3339：带 Z 的字符串会被解析成绝对时刻，再由驱动格式化成 UTC 墙钟，
+// 恰好重现上面那个 -8h 偏差。
+function wallClock(offsetSeconds) {
+  const ms = Date.now() + (offsetSeconds + tzOffsetSeconds) * 1000;
+  return new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+}
+
 const tag = shortRunId(cfg.runId);
 
 export const options = {
@@ -131,12 +175,15 @@ export function setup() {
   }
 
   // 4) 秒杀活动：时间窗覆盖「现在」，因此立即可下单；
-  //    start/end 用 RFC3339 UTC，避免容器时区与宿主机时区不一致导致窗口偏移。
+  //    start/end 用 RFC3339 UTC（带 Z）。是否与 MySQL 的会话时区一致，必须实测核对，
+  //    不能靠推断：T3-02 曾因 UTC 与 +08:00 不一致把活动判成「已结束」。
+  //    本次核验方法见 README/报告：创建后立刻查
+  //    UNIX_TIMESTAMP(start_time) <= UNIX_TIMESTAMP(NOW()) < UNIX_TIMESTAMP(end_time)。
   const activity = mustOk(
     biz.createFlashSale(admin, {
       name: cfg.dataPrefix + '-flash-' + tag,
-      start_time: biz.isoSeconds(-60),
-      end_time: biz.isoSeconds(3600),
+      start_time: wallClock(startOffset),
+      end_time: wallClock(endOffset),
       skus: [{ sku_id: sku.id, flash_price: flashPrice, total_stock: totalStock }],
     }),
     '创建测试秒杀活动'
@@ -153,6 +200,8 @@ export function setup() {
     activity_id: activity.id,
     activity_start_time: activity.start_time,
     activity_end_time: activity.end_time,
+    start_offset_seconds: startOffset,
+    end_offset_seconds: endOffset,
     flash_price: flashPrice,
     total_stock: totalStock,
     inventory_qty: inventoryQty,

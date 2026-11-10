@@ -126,6 +126,10 @@ $passthrough = @(
     'ACTIVITY_ID', 'SKU_ID', 'PRODUCT_ID', 'CATEGORY_ID',
     'FLASH_USERS', 'FLASH_TOTAL_STOCK', 'INVENTORY_QTY', 'SKU_PRICE', 'FLASH_PRICE',
     'FLASH_IDEMPOTENCY_REPLAY', 'FLASH_VERIFY', 'FLASH_POLL_ATTEMPTS', 'FLASH_POLL_INTERVAL_MS',
+    # T5-03 正确性实验开关：漏传会让「once 形态」静默退化成 stages 负载形态
+    # （真实发生过：实验跑成了持续压测，只能终止重来）。
+    'FLASH_EXECUTOR', 'FLASH_ITERATIONS', 'FLASH_VUS', 'FLASH_SHARED_USER', 'FLASH_FIXED_KEY', 'FLASH_TRACE',
+    'FLASH_MAX_DURATION', 'FLASH_START_OFFSET', 'FLASH_END_OFFSET',
     'LOAD_PROFILE', 'LOAD_VUS', 'THINK_TIME_MS', 'HTTP_TIMEOUT_MS', 'K6_RAW_JSON'
 )
 foreach ($name in $passthrough) {
@@ -157,7 +161,15 @@ $dockerArgs += @("/scripts/$scriptRel")
 $startedAt = (Get-Date).ToUniversalTime().ToString('o')
 $logPath = Join-Path $resultsDir "$RunId.k6.log"
 Write-Host "[k6-run] scenario=$Scenario run_id=$RunId profile=$($envMap['LOAD_PROFILE']) base_url=$BaseUrl"
-Write-Host "[k6-run] docker $($dockerArgs -join ' ')"
+# T5-03：打印的 docker 命令行必须脱敏。
+# 正确性实验需要 ADMIN_PASSWORD / K6_TEST_PASSWORD，若原样打印，凭据会进入终端、
+# 结果日志与 CI 输出。这里只对输出做掩码，实际传给 docker 的仍是真实值。
+$displayArgs = foreach ($arg in $dockerArgs) {
+    # 注意键名允许数字：K6_TEST_PASSWORD / FLASH_SALE_* 都含数字，
+    # 只写 [A-Za-z_] 会让 K6_TEST_PASSWORD 漏出明文（真实发生过）。
+    if ($arg -match '^([A-Za-z0-9_]*(PASSWORD|SECRET|TOKEN)[A-Za-z0-9_]*)=(.+)$') { "$($Matches[1])=***" } else { $arg }
+}
+Write-Host "[k6-run] docker $($displayArgs -join ' ')"
 
 # k6 把 console 日志写到 stderr，而 PowerShell 5.1 在 $ErrorActionPreference='Stop'
 # 下会把原生命令的 stderr 当终止错误。这里局部降为 Continue 并统一转成字符串，
@@ -210,12 +222,21 @@ $meta | ConvertTo-Json -Depth 4 | Set-Content -Path $metaPath -Encoding utf8
 
 # ---- 数据文件抽取（仅 prepare-data） -----------------------------------------
 if ($Scenario -eq 'prepare-data') {
-    $marker = $output | Where-Object { $_ -like 'K6_DATA_MARKER *' } | Select-Object -Last 1
+    # T5-03 修正：k6 的 console 输出是结构化日志行
+    #   time="..." level=info msg="K6_DATA_MARKER {\"activity_id\":7,...}" source=console
+    # 因此不能假设「行以 K6_DATA_MARKER 开头」，也不能直接按 JSON 解析（引号被转义）。
+    # 这里按「包含标记 → 取行内最后一个 JSON 对象 → 还原转义」的方式提取。
+    $marker = $output | Where-Object { $_ -match 'K6_DATA_MARKER ' } | Select-Object -Last 1
     if ($marker) {
-        $json = $marker.ToString().Substring('K6_DATA_MARKER '.Length)
-        $dataPath = Join-Path $dataDir "$RunId.data.json"
-        $json | Set-Content -Path $dataPath -Encoding utf8
-        Write-Host "[k6-run] 已写入 $dataPath"
+        $match = [regex]::Match($marker.ToString(), '\{.*\}')
+        if ($match.Success) {
+            $json = $match.Value -replace '\\"', '"'
+            $dataPath = Join-Path $dataDir "$RunId.data.json"
+            $json | Set-Content -Path $dataPath -Encoding utf8
+            Write-Host "[k6-run] 已写入 $dataPath"
+        } else {
+            Write-Warning '找到 K6_DATA_MARKER 但无法解析其中的 JSON，请检查日志。'
+        }
     } else {
         Write-Warning '未在输出中找到 K6_DATA_MARKER，数据准备可能未完成，请检查日志。'
     }

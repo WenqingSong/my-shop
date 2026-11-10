@@ -101,14 +101,19 @@ export function defaultRunId() {
 
 // shortRunId 把 run_id 压缩成 6 位 alnum，用于拼接测试用户名。
 // 为什么要压缩：IAM 用户名规则是 ^[a-zA-Z0-9]{3,24}$，run_id 带 '-'/'t' 且可能很长。
+//
+// T5-03 修正：原实现用 FNV-1a（hash * 0x01000193 >>> 0），乘积超过 2^53 后
+// 在 JS 双精度里丢精度，实测对 't503-a-data' 这类输入退化成全 0，
+// 导致不同实验拿到同一段用户名（静默失去用户隔离）。改为「模 36^6」的多项式哈希：
+// 每一步都保持在 2^31 以内，无精度问题，且结果稳定可复现。
+const SHORT_ID_MOD = 2176782336; // 36^6
 export function shortRunId(runId) {
-  let hash = 0x811c9dc5;
+  let hash = 0;
   for (let i = 0; i < runId.length; i++) {
-    hash ^= runId.charCodeAt(i);
-    hash = (hash * 0x01000193) >>> 0;
+    hash = (hash * 31 + runId.charCodeAt(i)) % SHORT_ID_MOD;
   }
   const base36 = hash.toString(36);
-  return (base36 + '000000').slice(-6);
+  return ('000000' + base36).slice(-6);
 }
 
 // loadConfig 汇总本次运行的全部配置；overrides 由场景脚本传入（如固定的 scenario 名），
