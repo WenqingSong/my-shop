@@ -1,4 +1,4 @@
-import { Menu, ShoppingCart } from 'lucide-react'
+import { Menu, Package, ShoppingCart } from 'lucide-react'
 import { Link } from 'react-router'
 
 import { useAuthStatus, useLogout } from '@/auth/use-auth'
@@ -93,6 +93,12 @@ export function MobileNav() {
 
             {status === 'authenticated' && user ? (
               <>
+                <DialogClose asChild>
+                  <Link to="/account/orders" className={cn(linkClass, 'flex items-center gap-2')}>
+                    <Package className="size-4" aria-hidden="true" />
+                    我的订单
+                  </Link>
+                </DialogClose>
                 <DialogClose asChild>
                   <Link to="/account" className={linkClass}>
                     账户（{user.username}）

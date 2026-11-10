@@ -1,5 +1,5 @@
 import type { Address } from '@/api/types'
-import type { Order, OrderItem } from '@/api/orders'
+import type { Order, OrderItem, OrderStatus } from '@/api/orders'
 import { listMockAddresses } from '@/mocks/data/addresses'
 import { listMockCart, removeMockCartItemsBySkuIds } from '@/mocks/data/cart'
 import { mockProducts, mockSkusFor } from '@/mocks/data/catalog'
@@ -45,6 +45,13 @@ let createPayloads: Record<string, unknown>[] = []
 
 function nowText(): string {
   return new Date().toISOString().slice(0, 19).replace('T', ' ')
+}
+
+/** 与后端 order.pay_timeout 默认值一致的支付超时（秒），仅用于 Mock 生成 expire_at。 */
+const MOCK_PAY_TIMEOUT_SECONDS = 900
+
+function timeTextAfter(seconds: number): string {
+  return new Date(Date.now() + seconds * 1000).toISOString().slice(0, 19).replace('T', ' ')
 }
 
 function resolveSku(skuId: number): MockSkuInfo | undefined {
@@ -218,7 +225,8 @@ export function createMockOrder(userId: number, input: MockCreateOrderInput): Mo
     district: address.district,
     detail: address.detail,
     address_id: address.id,
-    expire_at: null,
+    // 与真实后端一致：expire_at = 下单时间 + order.pay_timeout（默认 900s）。
+    expire_at: timeTextAfter(MOCK_PAY_TIMEOUT_SECONDS),
     cancel_reason: null,
     paid_at: null,
     shipped_at: null,
@@ -243,4 +251,102 @@ export function createMockOrder(userId: number, input: MockCreateOrderInput): Mo
 
 export function getMockOrder(userId: number, orderId: number): Order | undefined {
   return orders.find((order) => order.user_id === userId && order.id === orderId)
+}
+
+/**
+ * 本人订单列表（与后端 `GET /orders` 一致：仅本人、按 id 倒序、无分页无筛选）。
+ * 返回副本，避免测试断言时被后续写入影响。
+ */
+export function listMockOrders(userId: number): Order[] {
+  return orders
+    .filter((order) => order.user_id === userId)
+    .sort((a, b) => b.id - a.id)
+    .map((order) => ({ ...order, items: [...order.items] }))
+}
+
+export interface MockSeedOrderInput {
+  status?: OrderStatus
+  created_at?: string
+  expire_at?: string | null
+  original_amount?: number
+  discount_amount?: number
+  total_amount?: number
+  items?: OrderItem[]
+  recipient_name?: string
+  phone?: string
+  province?: string
+  city?: string
+  district?: string
+  detail?: string
+  paid_at?: string | null
+  shipped_at?: string | null
+  received_at?: string | null
+  completed_at?: string | null
+  cancelled_at?: string | null
+  refunded_at?: string | null
+  cancel_reason?: number | null
+  user_coupon_id?: number | null
+}
+
+const DEFAULT_SEED_ITEM: Omit<OrderItem, 'id'> = {
+  sku_id: 9_001,
+  product_id: 9_001,
+  sku_name: '默认规格',
+  product_name: '测试商品',
+  product_main_image: '',
+  price: 1_000,
+  quantity: 1,
+}
+
+/**
+ * 测试专用：直接写入一条指定状态的订单（真实后端不存在该入口）。
+ *
+ * 用于构造待支付/待发货/待收货/已完成/已取消/已退款等展示场景，
+ * 避免测试必须走完整履约链路才能看到对应状态。
+ */
+export function seedMockOrder(userId: number, input: MockSeedOrderInput = {}): Order {
+  sequence += 1
+  const createdAt = input.created_at ?? nowText()
+  const items =
+    input.items ??
+    [{ ...DEFAULT_SEED_ITEM, id: sequence * 100 + 1 }].map((item) => ({ ...item }))
+  const originalAmount =
+    input.original_amount ?? items.reduce((total, item) => total + item.price * item.quantity, 0)
+  const discountAmount = input.discount_amount ?? 0
+
+  const order: MockOrderRecord = {
+    id: sequence,
+    order_no: `${String(Date.now())}${Math.random().toString(16).slice(2, 14).padEnd(12, '0')}`,
+    user_id: userId,
+    status: input.status ?? 'pending_payment',
+    total_amount: input.total_amount ?? originalAmount - discountAmount,
+    original_amount: originalAmount,
+    discount_amount: discountAmount,
+    user_coupon_id: input.user_coupon_id ?? null,
+    idempotency_key: `seed-${String(sequence)}`,
+    request_hash: `seed-${String(sequence)}`,
+    recipient_name: input.recipient_name ?? '张三',
+    phone: input.phone ?? '13800138000',
+    province: input.province ?? '广东省',
+    city: input.city ?? '深圳市',
+    district: input.district ?? '南山区',
+    detail: input.detail ?? '科技园路 1 号',
+    address_id: 1,
+    expire_at:
+      input.expire_at === undefined ? timeTextAfter(MOCK_PAY_TIMEOUT_SECONDS) : input.expire_at,
+    cancel_reason: input.cancel_reason ?? null,
+    paid_at: input.paid_at ?? null,
+    shipped_at: input.shipped_at ?? null,
+    received_at: input.received_at ?? null,
+    completed_at: input.completed_at ?? null,
+    cancelled_at: input.cancelled_at ?? null,
+    refunded_at: input.refunded_at ?? null,
+    created_at: createdAt,
+    updated_at: createdAt,
+    items,
+  }
+
+  orders = [...orders, order]
+
+  return { ...order, items: [...order.items] }
 }

@@ -1,4 +1,4 @@
-import { Loader2, LogOut, UserRound } from 'lucide-react'
+import { Loader2, LogOut, Package, UserRound } from 'lucide-react'
 import { Link } from 'react-router'
 
 import { useAuthStatus, useLogout } from '@/auth/use-auth'
@@ -46,6 +46,10 @@ export function HeaderAuthControl() {
   if (status === 'authenticated' && user) {
     return (
       <div className="flex items-center gap-0.5">
+        <Link to="/account/orders" aria-label="我的订单" title="我的订单" className={actionClass}>
+          <Package className="size-5" aria-hidden="true" />
+          <span className="hidden lg:inline">我的订单</span>
+        </Link>
         <Link to="/account" aria-label={`账户：${user.username}`} className={actionClass}>
           <UserRound className="size-5" aria-hidden="true" />
           <span className="hidden max-w-[96px] truncate lg:inline">{user.username}</span>

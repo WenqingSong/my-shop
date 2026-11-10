@@ -21,6 +21,7 @@ import {
   createMockOrder,
   getMockOrder,
   getMockOrderRequestDelay,
+  listMockOrders,
 } from '@/mocks/data/orders'
 import {
   createMockAddress,
@@ -308,7 +309,18 @@ export const handlers = [
     return result.ok ? HttpResponse.json(ok({})) : fail(result.status, result.code, result.message)
   }),
 
-  // 订单：W3-02 只使用创建与详情；金额与库存均由 Mock「服务端」计算。
+  // 订单：金额与库存均由 Mock「服务端」计算。
+  // 列表与真实后端一致：仅本人、按 id 倒序、**无分页无状态筛选**（筛选是纯前端行为）。
+  http.get(`${API}/orders`, ({ request }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    return HttpResponse.json(ok({ items: listMockOrders(user.id) }))
+  }),
+
   http.post(`${API}/orders`, async ({ request }) => {
     const user = findMockUserByAccessToken(bearerToken(request))
 

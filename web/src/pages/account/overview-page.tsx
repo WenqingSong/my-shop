@@ -1,4 +1,4 @@
-import { Heart, MapPin, UserRound } from 'lucide-react'
+import { Heart, MapPin, Package, UserRound } from 'lucide-react'
 import { Link } from 'react-router'
 
 import { useAuthStatus, useLogout } from '@/auth/use-auth'
@@ -6,6 +6,12 @@ import { Button } from '@/components/ui/button'
 import { useDocumentTitle } from '@/hooks/use-document-title'
 
 const entries = [
+  {
+    to: '/account/orders',
+    title: '我的订单',
+    description: '按状态查看订单、商品明细、金额与收货快照。',
+    icon: Package,
+  },
   {
     to: '/account/profile',
     title: '个人资料',

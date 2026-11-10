@@ -51,3 +51,13 @@ export const AddressesPage = lazy(() =>
 export const FavoritesPage = lazy(() =>
   import('@/pages/account/favorites-page').then((module) => ({ default: module.FavoritesPage })),
 )
+
+export const OrdersPage = lazy(() =>
+  import('@/pages/account/orders-page').then((module) => ({ default: module.OrdersPage })),
+)
+
+export const OrderDetailPage = lazy(() =>
+  import('@/pages/account/order-detail-page').then((module) => ({
+    default: module.OrderDetailPage,
+  })),
+)

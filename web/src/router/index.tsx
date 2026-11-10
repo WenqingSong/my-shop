@@ -17,6 +17,8 @@ import {
   CheckoutSuccessPage,
   FavoritesPage,
   LoginPage,
+  OrderDetailPage,
+  OrdersPage,
   ProductDetailPage,
   ProductsPage,
   ProfilePage,
@@ -119,6 +121,18 @@ export const routes: RouteObject[] = [
           {
             path: 'favorites',
             element: withRouteLoading(<FavoritesPage />),
+            errorElement: <RouteErrorPage />,
+          },
+          {
+            // 订单中心：GET /orders 与 GET /orders/:id 都在 Auth 分组下，
+            // 外层 /account 已由 RequireAuth 保护，这里只做懒加载。
+            path: 'orders',
+            element: withRouteLoading(<OrdersPage />),
+            errorElement: <RouteErrorPage />,
+          },
+          {
+            path: 'orders/:id',
+            element: withRouteLoading(<OrderDetailPage />),
             errorElement: <RouteErrorPage />,
           },
         ],

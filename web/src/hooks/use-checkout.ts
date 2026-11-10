@@ -43,6 +43,9 @@ export function useCreateOrder() {
     onSuccess: (order) => {
       // 成功页先用创建响应即时渲染，再以后端详情为最终数据源。
       queryClient.setQueryData(queryKeys.orders.detail(order.id), order)
+      // 订单列表缓存必须失效：W4-01 的订单中心是另一个已缓存的视图，
+      // 不失效会让「刚下的单」在列表里缺失，直到下一次窗口聚焦/重新进入。
+      void queryClient.invalidateQueries({ queryKey: queryKeys.orders.list() })
       // 后端在创建事务内删除「已勾选的已购条目」，未勾选条目保留：
       // 失效整份购物车缓存，让 Header 徽标与购物车页面与服务端一致。
       // 不阻塞跳转：成功页立刻展示，购物车在后台刷新。

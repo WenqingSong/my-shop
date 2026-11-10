@@ -94,6 +94,30 @@ export function createOrder(payload: CreateOrderPayload): Promise<Order> {
   return authPostData<Order>('/orders', payload)
 }
 
+/**
+ * GET /orders 响应 data。
+ *
+ * 后端只返回本人全部订单（`internal/logic/order/order.go` 的 List：`WHERE user_id = ? ORDER BY id DESC`），
+ * **没有分页字段（无 total/page/size）、没有状态筛选参数**。
+ * 因此列表页的状态筛选与分页全部在浏览器本地完成，不能向后端发送 status/page/size
+ * （即使发送也会被静默忽略，不会报错——更危险，容易被误认为"服务端已筛选"）。
+ */
+export interface OrderListResult {
+  items: Order[]
+}
+
+/**
+ * GET /orders：查询本人订单列表（无需参数）。
+ *
+ * 注意：
+ * - 每条订单都内嵌 `items[]`（后端逐单查询订单项，属 N+1 查询），因此一次请求会带回全部明细；
+ * - 后端不做超时懒取消（只有 GET /orders/:id 会），列表里的 `pending_payment` 可能已经
+ *   超过 `expire_at`，展示时必须允许这种状态存在，不能自行判定为已取消。
+ */
+export function fetchOrders(signal?: AbortSignal): Promise<OrderListResult> {
+  return authGetData<OrderListResult>('/orders', { signal })
+}
+
 /** GET /orders/:id：查询本人订单详情；不存在或非本人统一 404/9001。 */
 export function fetchOrder(orderId: number, signal?: AbortSignal): Promise<Order> {
   return authGetData<Order>(`/orders/${String(orderId)}`, { signal })

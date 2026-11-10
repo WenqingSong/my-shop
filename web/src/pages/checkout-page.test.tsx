@@ -361,6 +361,11 @@ describe('下单成功页', () => {
     expect(within(info).getByText(result.order.order_no)).toBeInTheDocument()
     expect(within(info).getByText('待支付')).toBeInTheDocument()
     expect(within(info).getByText('4,299')).toBeInTheDocument()
-    expect(screen.getByText(/支付与订单管理将在后续阶段开放/)).toBeInTheDocument()
+    expect(screen.getByText(/支付与售后操作将在后续阶段开放/)).toBeInTheDocument()
+    // W4-01：成功页提供进入订单详情的入口。
+    expect(screen.getByRole('link', { name: '查看订单' })).toHaveAttribute(
+      'href',
+      `/account/orders/${String(result.order.id)}`,
+    )
   })
 })

@@ -208,14 +208,17 @@ export function CheckoutSuccessPage() {
           </section>
 
           <p className="mt-4 text-xs leading-5 text-muted-foreground">
-            支付与订单管理将在后续阶段开放；本页仅展示本次创建结果。
+            支付与售后操作将在后续阶段开放；可在订单中心查看该订单的完整快照与当前状态。
           </p>
 
           <div className="mt-6 flex flex-wrap gap-3">
             <Button asChild size="lg">
-              <Link to="/products">继续购物</Link>
+              <Link to={`/account/orders/${String(order.id)}`}>查看订单</Link>
             </Button>
             <Button asChild variant="outline" size="lg">
+              <Link to="/products">继续购物</Link>
+            </Button>
+            <Button asChild variant="ghost" size="lg">
               <Link to="/cart">查看购物车</Link>
             </Button>
           </div>

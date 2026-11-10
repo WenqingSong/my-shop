@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest'
 
 import { fetchCart } from '@/api/cart'
 import { ApiError } from '@/api/client'
-import { createOrder, fetchOrder } from '@/api/orders'
+import { createOrder, fetchOrder, fetchOrders } from '@/api/orders'
 import { createMockAddress } from '@/mocks/data/addresses'
 import { mockCartSkuId, seedMockCartItem } from '@/mocks/data/cart'
-import { getMockOrderCreatePayloads } from '@/mocks/data/orders'
+import { getMockOrderCreatePayloads, seedMockOrder } from '@/mocks/data/orders'
 import { signInAsDemo } from '@/test/auth'
 
 const DEMO_USER_ID = 1
@@ -154,5 +154,38 @@ describe('订单 API（MSW Mock，非真实后端）', () => {
     const error = await catchError(() => fetchOrder(999_999))
     expect(error.status).toBe(404)
     expect(error.code).toBe('9001')
+  })
+})
+
+describe('订单列表 API（GET /orders，MSW Mock）', () => {
+  it('未登录访问返回 401', async () => {
+    const error = await catchError(() => fetchOrders())
+
+    expect(error.status).toBe(401)
+    expect(error.code).toBe('1002')
+  })
+
+  it('仅返回本人订单，按 id 倒序，且每条都带商品明细', async () => {
+    await signInAsDemo()
+
+    const first = seedMockOrder(DEMO_USER_ID, { status: 'completed' })
+    const second = seedMockOrder(DEMO_USER_ID, { status: 'pending_payment' })
+    // 其他用户的订单不得出现在当前用户列表里（服务端 WHERE user_id = ?）。
+    seedMockOrder(DEMO_USER_ID + 1, { status: 'paid' })
+
+    const result = await fetchOrders()
+
+    expect(result.items.map((order) => order.id)).toEqual([second.id, first.id])
+    expect(result.items.every((order) => order.user_id === DEMO_USER_ID)).toBe(true)
+    expect(result.items[0]?.items).toHaveLength(1)
+    expect(result.items[0]?.items[0]?.sku_name).toBe('默认规格')
+  })
+
+  it('空列表返回空数组，不是 null', async () => {
+    await signInAsDemo()
+
+    const result = await fetchOrders()
+
+    expect(result.items).toEqual([])
   })
 })
