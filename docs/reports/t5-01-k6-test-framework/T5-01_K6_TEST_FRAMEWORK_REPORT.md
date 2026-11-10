@@ -268,6 +268,10 @@ PASS k6_envelope_errors count==0
 **结论边界**：本结果只证明「测试框架 + 运行环境 + 指标导出」链路可用，
 **不能**据此声称系统支持任何 QPS。
 
+复跑证据：提交推送后，用仓库中的最终版本（LF + UTF-8 BOM）再次执行
+`run_id=r20261110t041500`，结果同为 `checks rate=1.0000 passes=51 fails=0`、9 个请求、
+三条阈值 PASS，说明交付物本身（而非工作区临时状态）可运行。
+
 ### 7.3 配置缺失的错误处理 — VERIFIED
 
 | 触发 | 输出 | 退出码 | 副作用 |
@@ -325,7 +329,7 @@ test/k6/results/r20261110t040200.summary.txt   791 B
 | 基线分支 | `feat/k8s-t4-04-grafana-dashboard` |
 | 基线 SHA | `0062c4a5a5da2b637967591988b4bfde246d1d58` |
 | `main` SHA（未合并，未改动） | `82243c0fbce614e03c4ff57dcc829b5f68fb08f2` |
-| 本任务实现提交 | 见 §12（本文件随实现提交一同入库，SHA 在回填提交中补齐） |
+| 本任务实现提交 | `00680155c44fa56bcfa88a5d5686223f2f49226c` |
 | 远端 | `origin https://cnb.cool/framework-station/my-shop` |
 
 基线核验方式：`git status` / `git branch --show-current` / `git rev-parse HEAD` /
@@ -405,7 +409,7 @@ test/k6/results/r20261110t040200.summary.txt   791 B
 |---|---|
 | 分支 | `feat/k8s-t5-01-k6-test-framework` |
 | 提交信息 | `test(k6): add reusable performance testing framework` |
-| 提交 SHA | 待回填（§12.3） |
+| 提交 SHA | `00680155c44fa56bcfa88a5d5686223f2f49226c` |
 
 ### 12.2 变更内容
 
@@ -421,9 +425,17 @@ test/k6/results/r20261110t040200.summary.txt   791 B
 | 项 | 值 |
 |---|---|
 | 远端分支 | `origin/feat/k8s-t5-01-k6-test-framework` |
-| 远端 SHA | 待回填 |
-| 本地/远端同步 | 待回填 |
-| 工作区状态 | 待回填 |
+| 远端 SHA | `00680155c44fa56bcfa88a5d5686223f2f49226c`（与本地一致） |
+| upstream | 已设置（`git push -u`） |
+| 本地/远端同步 | 同步（`## feat/k8s-t5-01-k6-test-framework...origin/feat/k8s-t5-01-k6-test-framework`，无 ahead/behind） |
+| 工作区状态 | clean（回填提交前） |
+| force push | 未使用 |
+| 合并 main | 未执行（按要求保留独立分支） |
+| 删除历史分支 | 未执行 |
+
+推送后复核：把仓库中的 `test/k6/scripts/run.ps1`（LF 换行 + UTF-8 BOM）重新检出后
+再执行一次 Smoke（`run_id=r20261110t041500`），结果 `checks rate=1.0000 passes=51 fails=0`，
+三条阈值全部 PASS，证明入库后的交付物本身可用（不只是提交前的工作区版本可用）。
 
 > 本节的 SHA、推送状态与同步结论由后续「报告回填」提交补齐（与 T4-03/T4-04 的做法一致），
 > 因为这些值在提交动作完成之前不可能存在。回填只修改本节元数据，不改动任何实现。
