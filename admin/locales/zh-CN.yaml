@@ -69,6 +69,14 @@ panel:
   pureMultiTagsCache: 页签持久化
 menus:
   pureDashboard: 运营工作台
+  pureProduct: 商品管理
+  pureProductList: 商品列表
+  pureProductCreate: 新建商品
+  pureProductEdit: 编辑商品
+  pureCategory: 商品分类
+  pureInventory: 库存管理
+  pureInventoryList: 库存查询
+  pureInventoryTransactions: 库存流水
   pureHome: 首页
   pureLogin: 登录
   pureEmpty: 无Layout页

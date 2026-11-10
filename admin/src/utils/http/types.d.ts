@@ -16,6 +16,15 @@ export type RequestMethods = Extract<
 
 export interface PureHttpError extends AxiosError {
   isCancelRequest?: boolean;
+  /**
+   * HTTP 状态非 2xx 时，后端 envelope 中的业务码。
+   *
+   * 后端对商品/库存等业务错误会使用 400/404/409 等 HTTP 状态，
+   * 真正的错误语义在 `{code,message}` 里，这里提取出来供 UI 展示与断言。
+   */
+  businessCode?: number;
+  /** HTTP 状态非 2xx 时，后端 envelope 中的 message */
+  businessMessage?: string;
 }
 
 export interface PureHttpResponse extends AxiosResponse {

@@ -69,6 +69,14 @@ panel:
   pureMultiTagsCache: MultiTags Cache
 menus:
   pureDashboard: Operations Dashboard
+  pureProduct: Product Management
+  pureProductList: Product List
+  pureProductCreate: Create Product
+  pureProductEdit: Edit Product
+  pureCategory: Categories
+  pureInventory: Inventory
+  pureInventoryList: Inventory Query
+  pureInventoryTransactions: Inventory Logs
   pureHome: Home
   pureLogin: Login
   pureEmpty: Empty Page

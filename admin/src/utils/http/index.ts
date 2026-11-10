@@ -106,10 +106,19 @@ function handleUnauthorized(error?: PureHttpError): Promise<void> {
   return unauthorizedTask;
 }
 
-/** 规范化错误文案：优先超时，其次 HTTP 状态码，最后网络异常 */
+/**
+ * 规范化错误文案：优先超时，其次后端 envelope message，最后 HTTP 状态码。
+ *
+ * 为什么优先后端 message：商品/库存等接口在业务失败时会同时返回
+ * HTTP 400/404/409 与 `{code,message}`，例如「库存不足」「有子分类不能删除」。
+ * 只按状态码展示会把这类可操作的信息抹掉。
+ */
 function resolveErrorText(error: PureHttpError): string {
   if (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT") {
     return "请求超时，请稍后重试";
+  }
+  if (error.businessMessage) {
+    return error.businessMessage;
   }
   if (error.response) {
     const status = error.response.status;
@@ -220,6 +229,19 @@ class PureHttp {
         if ($error.isCancelRequest) return Promise.reject($error);
 
         const status = $error.response?.status;
+
+        /**
+         * 非 2xx 响应也可能带统一 envelope（后端错误码映射到 400/404/409）。
+         * 这里只做**附加信息提取**，不改变 reject 类型与原有提示逻辑。
+         */
+        const failurePayload = $error.response?.data;
+        if (
+          isApiEnvelope(failurePayload) &&
+          failurePayload.code !== API_SUCCESS_CODE
+        ) {
+          $error.businessCode = failurePayload.code;
+          $error.businessMessage = failurePayload.message;
+        }
 
         /**
          * 401：登录态失效。

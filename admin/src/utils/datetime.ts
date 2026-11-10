@@ -36,3 +36,32 @@ export function getRecentDaysRFC3339(days = 7, now: Date = new Date()) {
   const { start, end } = getRecentDaysRange(days, now);
   return { start_time: toRFC3339(start), end_time: toRFC3339(end) };
 }
+
+/**
+ * 格式化后端返回的时间。
+ *
+ * GoFrame `gtime.Time` 默认序列化为 `2006-01-02 15:04:05`（无时区标记），
+ * 也可能在后续版本变成 RFC3339。这里都按"本地时间直接展示"处理，
+ * 不做时区换算，避免把后端已经本地化的时间再偏移一次。
+ *
+ * @returns 空值返回 `"—"`
+ */
+export function formatServerDateTime(
+  value: string | number | Date | null | undefined
+): string {
+  if (value === null || value === undefined || value === "") return "—";
+  if (value instanceof Date) {
+    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(
+      value.getDate()
+    )} ${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(
+      value.getSeconds()
+    )}`;
+  }
+  const text = String(value).trim();
+  if (!text) return "—";
+  // ISO / RFC3339：截断到秒并去掉 T
+  if (text.includes("T")) {
+    return text.replace("T", " ").replace(/(\.\d+)?(Z|[+-]\d{2}:\d{2})$/, "");
+  }
+  return text;
+}

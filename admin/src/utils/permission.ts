@@ -16,8 +16,36 @@
  * 这样可以避免 `router → router/utils → store → router` 的循环依赖。
  */
 
-/** 权限码：工作台只读 */
-export const PERMISSION_DASHBOARD_VIEW = "dashboard:view";
+/**
+ * 权限码（**全部来自 Go 后端真实定义**）。
+ *
+ * 来源：
+ * - `internal/boot/seed.go` 的权限种子；
+ * - `internal/cmd/routes_admin.go` 中 `RequirePermission(code)` 的实际参数。
+ *
+ * 注意：后端**没有** `product:read` / `category:read` / `sku:read` /
+ * `inventory:read` 这类读权限码。商品、库存的查询接口只要求 AdminAuth，
+ * 分类树更是公开接口。因此前端**不能**为页面访问编造读权限码，
+ * 页面访问由登录态保证，写操作按钮按下列真实码控制。
+ */
+export const PERMISSION = {
+  DASHBOARD_VIEW: "dashboard:view",
+  PRODUCT_CREATE: "product:create",
+  PRODUCT_UPDATE: "product:update",
+  PRODUCT_ON_SHELF: "product:on_shelf",
+  PRODUCT_OFF_SHELF: "product:off_shelf",
+  CATEGORY_CREATE: "category:create",
+  CATEGORY_UPDATE: "category:update",
+  CATEGORY_DELETE: "category:delete",
+  SKU_CREATE: "sku:create",
+  SKU_UPDATE: "sku:update",
+  SKU_DELETE: "sku:delete",
+  INVENTORY_INCREASE: "inventory:increase",
+  INVENTORY_DEDUCT: "inventory:deduct"
+} as const;
+
+/** 权限码：工作台只读（保留 A1 的命名，避免调用方改动） */
+export const PERMISSION_DASHBOARD_VIEW = PERMISSION.DASHBOARD_VIEW;
 
 /**
  * 角色 → 权限码映射（集中配置）。
