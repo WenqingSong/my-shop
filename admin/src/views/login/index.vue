@@ -1,32 +1,80 @@
 <script setup lang="ts">
 import { reactive, ref } from "vue";
-import { useRouter } from "vue-router";
-import { message } from "@/utils/message";
+import { useRoute, useRouter } from "vue-router";
+import type { FormInstance, FormRules } from "element-plus";
 import { getConfig } from "@/config";
+import { useUserStoreHook } from "@/store/modules/user";
+import { BusinessError } from "@/api/types/envelope";
 
 defineOptions({
   name: "Login"
 });
 
 const router = useRouter();
+const route = useRoute();
+const userStore = useUserStoreHook();
+
+const formRef = ref<FormInstance>();
+const loading = ref(false);
+const errorText = ref("");
 
 const form = reactive({
   username: "",
   password: ""
 });
 
-const loading = ref(false);
+const rules: FormRules = {
+  username: [
+    { required: true, message: "请输入管理员用户名", trigger: "blur" }
+  ],
+  password: [{ required: true, message: "请输入密码", trigger: "blur" }]
+};
 
 /**
- * A0 阶段不实现管理员登录：不调用任何后端接口、不写入任何 Token。
- * 登录契约（请求/响应 envelope、Token 字段）待后端 B0 交付 OpenAPI 后，
- * 于 A1 阶段在此接入 `src/api/modules/admin` 的请求方法。
+ * 登录失败文案归一化。
+ *
+ * - 业务错误（HTTP 200 + code !== 0）：优先展示后端 message，便于排查
+ * - HTTP 错误：401 视为账号密码错误，其余给出通用提示
+ * - 其它：网络或未知异常
  */
+function resolveLoginMessage(error: unknown): string {
+  if (error instanceof BusinessError) {
+    return error.serverMessage || "登录失败，请稍后重试";
+  }
+  const status = (error as { response?: { status?: number } })?.response
+    ?.status;
+  if (status === 401) return "用户名或密码错误";
+  if (status === 400) return "请求参数有误，请检查输入";
+  if (status) return `登录失败（HTTP ${status}）`;
+  return "网络异常，请检查网络连接后重试";
+}
+
+/** 只允许站内跳转，避免 redirect 参数被用于开放重定向 */
+function resolveRedirectTarget(): string {
+  const redirect = route.query.redirect;
+  if (typeof redirect !== "string") return "/dashboard";
+  if (!redirect.startsWith("/") || redirect.startsWith("//"))
+    return "/dashboard";
+  if (redirect.startsWith("/login")) return "/dashboard";
+  return redirect;
+}
+
 async function handleSubmit() {
+  if (loading.value) return;
+
+  const valid = await formRef.value?.validate().catch(() => false);
+  if (!valid) return;
+
+  errorText.value = "";
   loading.value = true;
   try {
-    message("管理员登录将在 A1 阶段接入后端契约后启用", { type: "info" });
-    await router.push("/dashboard");
+    await userStore.login({
+      username: form.username.trim(),
+      password: form.password
+    });
+    await router.replace(resolveRedirectTarget());
+  } catch (error) {
+    errorText.value = resolveLoginMessage(error);
   } finally {
     loading.value = false;
   }
@@ -44,40 +92,52 @@ async function handleSubmit() {
         </div>
       </div>
 
-      <el-form :model="form" label-position="top" @submit.prevent>
-        <el-form-item label="用户名">
+      <el-form
+        ref="formRef"
+        :model="form"
+        :rules="rules"
+        label-position="top"
+        @submit.prevent="handleSubmit"
+      >
+        <el-form-item label="用户名" prop="username">
           <el-input
             v-model="form.username"
-            placeholder="请输入用户名"
+            placeholder="请输入管理员用户名"
             autocomplete="username"
+            :disabled="loading"
           />
         </el-form-item>
-        <el-form-item label="密码">
+        <el-form-item label="密码" prop="password">
           <el-input
             v-model="form.password"
             type="password"
             placeholder="请输入密码"
             show-password
             autocomplete="current-password"
+            :disabled="loading"
+            @keyup.enter="handleSubmit"
           />
         </el-form-item>
+
+        <el-alert
+          v-if="errorText"
+          class="error"
+          type="error"
+          :closable="false"
+          show-icon
+          :title="errorText"
+        />
+
         <el-button
           class="submit"
           type="primary"
+          native-type="submit"
           :loading="loading"
           @click="handleSubmit"
         >
-          进入控制台
+          登录
         </el-button>
       </el-form>
-
-      <el-alert
-        class="hint"
-        type="info"
-        :closable="false"
-        show-icon
-        title="当前为 A0 工程初始化阶段，未接入登录认证与权限控制（A1 实现）。"
-      />
     </div>
   </div>
 </template>
@@ -124,11 +184,11 @@ async function handleSubmit() {
   }
 }
 
-.submit {
-  width: 100%;
+.error {
+  margin-bottom: 16px;
 }
 
-.hint {
-  margin-top: 20px;
+.submit {
+  width: 100%;
 }
 </style>

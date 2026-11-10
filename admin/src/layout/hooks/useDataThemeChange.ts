@@ -8,6 +8,7 @@ import type { themeColorsType } from "../types";
 import { useAppStoreHook } from "@/store/modules/app";
 import { useEpThemeStoreHook } from "@/store/modules/epTheme";
 import { useMultiTagsStoreHook } from "@/store/modules/multiTags";
+import { useUserStoreHook } from "@/store/modules/user";
 import { darken, lighten, useGlobal, storageLocal } from "@pureadmin/utils";
 
 export function useDataThemeChange() {
@@ -108,9 +109,15 @@ export function useDataThemeChange() {
     }
   }
 
-  /** 清空缓存并返回登录页 */
+  /**
+   * 清空缓存并返回登录页。
+   *
+   * A1 起除清 token 与本地缓存外，还需要重置 Pinia 中的管理员身份与权限快照，
+   * 否则刷新后守卫会误判 `profileLoaded` 而跳过 `/admin/me` 校验。
+   */
   function onReset() {
     removeToken();
+    useUserStoreHook().RESET_AUTH_STATE();
     storageLocal().clear();
     const { Grey, Weak, MultiTagsCache, EpThemeColor, Layout } = getConfig();
     useAppStoreHook().setLayout(Layout ?? "vertical");

@@ -1,5 +1,5 @@
 import App from "./App.vue";
-import router from "./router";
+import router, { resetRouter } from "./router";
 import { initRouter } from "./router/utils";
 import { setupStore } from "@/store";
 import { useI18n } from "@/plugins/i18n";
@@ -9,6 +9,12 @@ import { useEcharts } from "@/plugins/echarts";
 import { createApp, type Directive } from "vue";
 import { useElementPlus } from "@/plugins/elementPlus";
 import { injectResponsiveStorage } from "@/utils/responsive";
+import { setUnauthorizedHandler } from "@/utils/http";
+import { clearAccessToken } from "@/utils/auth";
+import { message } from "@/utils/message";
+import { useUserStoreHook } from "@/store/modules/user";
+import { useMultiTagsStoreHook } from "@/store/modules/multiTags";
+import { routerArrays } from "@/layout/types";
 
 // 引入重置样式
 import "./style/reset.scss";
@@ -20,6 +26,32 @@ import "element-plus/dist/index.css";
 // 导入字体图标
 import "./assets/iconfont/iconfont.js";
 import "./assets/iconfont/iconfont.css";
+
+/**
+ * 注册 HTTP 401 统一处理：清理本地登录态 → 重置路由与标签页 → 回到登录页。
+ *
+ * 放在模块顶层的原因是它只注册回调，真正执行时（任意请求返回 401）
+ * Pinia 与路由都已初始化完成。
+ * 并发/连续 401 的合并由 `src/utils/http` 内部保证，这里只负责"一次完整清理"。
+ */
+setUnauthorizedHandler(async () => {
+  const currentPath = router.currentRoute.value.fullPath;
+  clearAccessToken();
+  useUserStoreHook().RESET_AUTH_STATE();
+  useMultiTagsStoreHook().handleTags("equal", [...routerArrays]);
+  resetRouter();
+
+  if (router.currentRoute.value.path !== "/login") {
+    await router.replace({
+      path: "/login",
+      query:
+        currentPath && currentPath !== "/"
+          ? { redirect: currentPath }
+          : undefined
+    });
+  }
+  message("登录已过期，请重新登录", { type: "warning" });
+});
 
 const app = createApp(App);
 

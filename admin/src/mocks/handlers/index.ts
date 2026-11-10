@@ -1,11 +1,15 @@
 import type { HttpHandler } from "msw";
+import { adminHandlers } from "./admin";
+import { dashboardHandlers } from "./dashboard";
 
 /**
  * Mock 处理器集合。
  *
- * A0 阶段刻意保持为空：不编造任何电商业务数据，也不影子实现生产 API。
- * 后续阶段需要 Mock 时，在本目录新增文件（例如 `admin.ts`），
- * 使用 `http.get("/api/xxx", resolver)` 定义并加入下方数组即可，
- * 请求仍由真实 `src/utils/http` 的 Axios 实例发出，Mock 只做网络层拦截。
+ * 约定：
+ * - 只覆盖**已经确认契约**的接口（管理员认证、运营工作台），
+ *   不影子实现在后续阶段才会出现的业务接口。
+ * - handler 中的数值是演示夹具，不是真实业务数据；
+ *   单元测试可以 `server.use(...)` 覆盖成空数据、403 等场景。
+ * - 请求仍由真实 `src/utils/http` 的 Axios 实例发出，Mock 只在网络层拦截。
  */
-export const handlers: HttpHandler[] = [];
+export const handlers: HttpHandler[] = [...adminHandlers, ...dashboardHandlers];

@@ -18,7 +18,7 @@ export default {
       name: "Dashboard",
       component: () => import("@/views/dashboard/index.vue"),
       meta: {
-        title: $t("menus.pureHome"),
+        title: $t("menus.pureDashboard"),
         icon: "ep/odometer"
       }
     }

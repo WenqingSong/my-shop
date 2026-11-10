@@ -13,6 +13,7 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     include: ["tests/**/*.{test,spec}.ts"],
+    setupFiles: ["tests/setup.ts"],
     // 与 .env.* 保持一致的关键变量，保证测试环境可断言部署路径
     env: {
       VITE_PUBLIC_PATH: "/console/",

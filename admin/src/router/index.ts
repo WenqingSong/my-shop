@@ -18,6 +18,7 @@ import {
   type RouteComponent,
   createRouter
 } from "vue-router";
+import { resolveAuthGuard } from "./guard";
 
 /**
  * 自动导入全部静态路由，无需再手动引入！
@@ -97,7 +98,7 @@ export function resetRouter() {
   resetLoadedPaths();
 }
 
-router.beforeEach((to: ToRouteType, _from) => {
+router.beforeEach(async (to: ToRouteType, _from) => {
   to.meta.loaded = loadedPaths.has(to.path);
 
   if (!to.meta.loaded) {
@@ -122,15 +123,22 @@ router.beforeEach((to: ToRouteType, _from) => {
     });
   }
 
-  /**
-   * A0 阶段不实现登录认证与权限过滤（属于 A1）：
-   * 这里仅放行外部链接，其余路由直接进入。
-   * A1 接入认证后，在此处恢复 token 校验与 `meta.roles` 判断。
-   */
+  /** 外部链接：直接打开，不参与路由渲染 */
   if (isUrl(to?.name as string)) {
     openLink(to?.name as string);
     NProgress.done();
     return false;
+  }
+
+  /** 认证守卫：决策逻辑见 `./guard.ts`（可单测） */
+  const decision = await resolveAuthGuard(to);
+  if (decision.type === "redirect") {
+    NProgress.done();
+    return {
+      path: decision.path,
+      query: decision.query,
+      replace: true
+    };
   }
 
   return true;

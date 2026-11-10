@@ -25,6 +25,23 @@ export interface PureHttpResponse extends AxiosResponse {
 export interface PureHttpRequestConfig extends AxiosRequestConfig {
   beforeRequestCallback?: (request: PureHttpRequestConfig) => void;
   beforeResponseCallback?: (response: PureHttpResponse) => void;
+  /**
+   * 静默模式：请求失败（业务错误 / HTTP 错误 / 网络异常）时不触发全局错误提示，
+   * 由调用方自行渲染错误状态。
+   *
+   * 用于：登录表单（错误内联展示）、工作台分区（展示"权限不足/加载失败 + 重试"）。
+   * 注意：静默模式**不影响** 401 的登录态失效处理。
+   */
+  silent?: boolean;
+  /** 登录接口等场景跳过 Authorization 头注入 */
+  skipAuth?: boolean;
+  /**
+   * 跳过全局 401 失效处理。
+   *
+   * 仅用于"登录请求本身"：登录失败（401）应作为登录错误由表单展示，
+   * 不能被当成"已登录会话失效"而触发全局清理与跳转。
+   */
+  skipUnauthorizedHandling?: boolean;
 }
 
 export default class PureHttp {

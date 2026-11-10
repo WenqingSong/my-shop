@@ -38,11 +38,21 @@ export type setType = {
 };
 
 export type userType = {
+  /** 管理员 id（后端 `/admin/me` 的 `id`） */
+  adminId?: number | null;
   avatar?: string;
   username?: string;
   nickname?: string;
+  /** 是否超级管理员（后端 `is_super`） */
+  isSuper?: boolean;
   roles?: Array<string>;
-  permissions?: Array<string>;
+  /**
+   * 后端下发的权限码。
+   * `null` 表示后端当前未提供该字段（A1 现状），此时回退到角色映射。
+   */
+  permissions?: Array<string> | null;
+  /** 是否已通过 `/admin/me` 完成会话校验 */
+  profileLoaded?: boolean;
   verifyCode?: string;
   currentPage?: number;
   isRemembered?: boolean;

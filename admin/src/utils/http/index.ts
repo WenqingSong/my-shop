@@ -11,15 +11,22 @@ import type {
 } from "./types.d";
 import { stringify } from "qs";
 import { message } from "@/utils/message";
+import { formatToken, getAccessToken } from "@/utils/auth";
+import {
+  API_SUCCESS_CODE,
+  BusinessError,
+  isApiEnvelope
+} from "@/api/types/envelope";
 
 /**
  * 统一 `Axios` 实例。
  *
- * 约定（A0）：
- * - 基础地址取自 `VITE_API_BASE_URL`，默认 `/api`，由 Vite 代理或网关转发到 Go 后端。
- * - 只负责「传输层」：超时、JSON 请求头、HTTP 错误与网络异常归一化。
- * - 不假设后端响应 envelope、业务错误码、Token 字段，这些等待后端 OpenAPI 契约确认；
- *   业务层通过 `src/api/modules` 自行解析并声明类型。
+ * 职责边界（A1 起）：
+ * - 传输层：超时、JSON 请求头、HTTP 错误与网络异常归一化。
+ * - 认证层：注入 `Authorization: Bearer <token>`；识别 401 并触发统一的登录态失效处理。
+ * - 契约层：解析后端统一 envelope `{code,message,data}`，`code === 0` 时只返回 `data`。
+ *
+ * 不负责：业务语义判断、权限菜单、路由跳转（由 store / router 承担）。
  */
 
 /** HTTP 状态码 → 默认提示文案 */
@@ -40,7 +47,7 @@ const httpStatusMessages: Record<number, string> = {
 };
 
 /** 统一错误提示入口，默认使用 Element Plus `Message` 弹出错误提示 */
-export type HttpErrorHandler = (text: string, error: PureHttpError) => void;
+export type HttpErrorHandler = (text: string, error?: unknown) => void;
 
 let errorHandler: HttpErrorHandler = (text: string) => {
   message(text, { type: "error" });
@@ -54,7 +61,52 @@ export function setHttpErrorHandler(handler: HttpErrorHandler) {
   errorHandler = handler;
 }
 
-/** 规范化错误文案：优先 HTTP 状态码映射，其次超时/网络异常 */
+/**
+ * 登录态失效（HTTP 401）处理器。
+ *
+ * 由应用启动时注册（见 `src/main.ts`），内部完成：清理本地 token、重置 Pinia
+ * 管理员状态、跳转登录页。请求层不直接依赖 store / router，避免循环依赖。
+ */
+export type UnauthorizedHandler = (
+  error?: PureHttpError
+) => void | Promise<void>;
+
+let unauthorizedHandler: UnauthorizedHandler | null = null;
+/** 进行中的失效处理，保证并发 401 只清理一次 */
+let unauthorizedTask: Promise<void> | null = null;
+
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
+  unauthorizedHandler = handler;
+  // 更换处理器时重置进行中标记：新处理器需要能重新接管下一次 401
+  unauthorizedTask = null;
+}
+
+/** 是否存在正在执行的 401 处理流程（测试与调试用） */
+export function isHandlingUnauthorized(): boolean {
+  return unauthorizedTask !== null;
+}
+
+/**
+ * 触发登录态失效处理（幂等）。
+ *
+ * 多个并发请求同时 401 时只会执行一次清理与跳转；处理结束后短暂保持，
+ * 避免同一批请求的尾随 401 再次触发重复清理。
+ */
+function handleUnauthorized(error?: PureHttpError): Promise<void> {
+  if (unauthorizedTask) return unauthorizedTask;
+  unauthorizedTask = Promise.resolve(unauthorizedHandler?.(error))
+    .catch(() => {
+      // 处理器自身异常不应影响请求链
+    })
+    .then(() => {
+      setTimeout(() => {
+        unauthorizedTask = null;
+      }, 500);
+    });
+  return unauthorizedTask;
+}
+
+/** 规范化错误文案：优先超时，其次 HTTP 状态码，最后网络异常 */
 function resolveErrorText(error: PureHttpError): string {
   if (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT") {
     return "请求超时，请稍后重试";
@@ -100,10 +152,17 @@ class PureHttp {
     return PureHttp.axiosInstance;
   }
 
-  /** 请求拦截 */
+  /** 请求拦截：注入 Bearer Token */
   private httpInterceptorsRequest(): void {
     PureHttp.axiosInstance.interceptors.request.use(
       (config: PureHttpRequestConfig): any => {
+        // 登录接口等显式声明 skipAuth 的请求不注入 token
+        const token = getAccessToken();
+        if (token && !config.skipAuth) {
+          config.headers = config.headers ?? {};
+          config.headers.Authorization = formatToken(token);
+        }
+
         if (typeof config.beforeRequestCallback === "function") {
           config.beforeRequestCallback(config);
           return config;
@@ -112,38 +171,67 @@ class PureHttp {
           PureHttp.initConfig.beforeRequestCallback(config);
           return config;
         }
-        /**
-         * 认证相关（注入 Token、刷新 Token）属于 A1。
-         * 届时在此处统一附加请求头，避免业务代码重复处理。
-         */
         return config;
       },
       error => Promise.reject(error)
     );
   }
 
-  /** 响应拦截 */
+  /** 响应拦截：解析 envelope + 认证失效处理 */
   private httpInterceptorsResponse(): void {
     const instance = PureHttp.axiosInstance;
     instance.interceptors.response.use(
       (response: PureHttpResponse) => {
         const $config = response.config;
+
         if (typeof $config.beforeResponseCallback === "function") {
           $config.beforeResponseCallback(response);
-          return response.data;
-        }
-        if (PureHttp.initConfig.beforeResponseCallback) {
+        } else if (PureHttp.initConfig.beforeResponseCallback) {
           PureHttp.initConfig.beforeResponseCallback(response);
-          return response.data;
         }
-        return response.data;
+
+        const payload = response.data;
+
+        // 非 envelope 响应（文件流、纯文本、第三方静态 JSON）原样返回
+        if (!isApiEnvelope(payload)) return payload;
+
+        if (payload.code === API_SUCCESS_CODE) return payload.data;
+
+        /**
+         * 业务失败：HTTP 状态可能是 200。
+         * 这里在成功拦截器中抛出，不会再进入下方 error 分支，避免重复提示。
+         */
+        const businessError = new BusinessError(payload.code, payload.message);
+        if (!$config.silent) {
+          errorHandler(businessError.message, businessError);
+        }
+        return Promise.reject(businessError);
       },
       (error: PureHttpError) => {
         const $error = error;
+        // Axios 的 error.config 类型是 InternalAxiosRequestConfig，
+        // 这里需要读回自定义字段（silent / skipUnauthorizedHandling）
+        const requestConfig = $error.config as
+          | PureHttpRequestConfig
+          | undefined;
         $error.isCancelRequest = Axios.isCancel($error);
 
-        // 主动取消的请求（如路由切换）不提示
-        if (!$error.isCancelRequest) {
+        // 主动取消的请求（如路由切换）不提示、不触发登录态处理
+        if ($error.isCancelRequest) return Promise.reject($error);
+
+        const status = $error.response?.status;
+
+        /**
+         * 401：登录态失效。
+         * 只触发统一的失效处理（清理 + 跳转），不在这里重复弹错误提示，
+         * 也**不**因为 403 而清理登录态（403 由业务层渲染"权限不足"）。
+         */
+        if (status === 401 && !requestConfig?.skipUnauthorizedHandling) {
+          void handleUnauthorized($error);
+          return Promise.reject($error);
+        }
+
+        if (!requestConfig?.silent) {
           errorHandler(resolveErrorText($error), $error);
         }
 

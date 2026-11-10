@@ -98,7 +98,8 @@ export function useNav() {
 
   /** 退出登录 */
   function logout() {
-    useUserStoreHook().logOut();
+    // 登出包含服务端撤销 + 本地清理 + 跳转，异常由 store 内部兜底
+    void useUserStoreHook().logOut();
   }
 
   function backTopMenu() {

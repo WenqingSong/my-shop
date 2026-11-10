@@ -68,6 +68,7 @@ panel:
   pureHiddenFooter: Hidden Footer
   pureMultiTagsCache: MultiTags Cache
 menus:
+  pureDashboard: Operations Dashboard
   pureHome: Home
   pureLogin: Login
   pureEmpty: Empty Page
