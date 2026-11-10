@@ -11,6 +11,17 @@ import EpMonitor from "~icons/ep/monitor?raw";
 import EpLollipop from "~icons/ep/lollipop?raw";
 import EpHistogram from "~icons/ep/histogram?raw";
 import EpHomeFilled from "~icons/ep/home-filled?raw";
+// A2 商品 / 库存
+import EpGoods from "~icons/ep/goods?raw";
+import EpList from "~icons/ep/list?raw";
+import EpFiles from "~icons/ep/files?raw";
+import EpBox from "~icons/ep/box?raw";
+import EpCoin from "~icons/ep/coin?raw";
+import EpTickets from "~icons/ep/tickets?raw";
+// A3 订单 / 售后
+import EpShoppingCart from "~icons/ep/shopping-cart?raw";
+import EpService from "~icons/ep/service?raw";
+import EpMoney from "~icons/ep/money?raw";
 
 // https://icon-sets.iconify.design/ri/?keyword=ri
 import RiMindMap from "~icons/ri/mind-map?raw";
@@ -51,6 +62,15 @@ const icons = [
   ["ep/lollipop", EpLollipop],
   ["ep/histogram", EpHistogram],
   ["ep/home-filled", EpHomeFilled],
+  ["ep/goods", EpGoods],
+  ["ep/list", EpList],
+  ["ep/files", EpFiles],
+  ["ep/box", EpBox],
+  ["ep/coin", EpCoin],
+  ["ep/tickets", EpTickets],
+  ["ep/shopping-cart", EpShoppingCart],
+  ["ep/service", EpService],
+  ["ep/money", EpMoney],
   // Remix Icon: https://github.com/Remix-Design/RemixIcon
   ["ri/mind-map", RiMindMap],
   ["ri/admin-fill", RiAdminFill],

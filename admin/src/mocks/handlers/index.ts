@@ -5,6 +5,8 @@ import { productHandlers } from "./product";
 import { categoryHandlers } from "./category";
 import { inventoryHandlers } from "./inventory";
 import { uploadHandlers } from "./upload";
+import { orderHandlers } from "./order";
+import { refundHandlers } from "./refund";
 
 /**
  * Mock 处理器集合。
@@ -23,5 +25,7 @@ export const handlers: HttpHandler[] = [
   ...productHandlers,
   ...categoryHandlers,
   ...inventoryHandlers,
-  ...uploadHandlers
+  ...uploadHandlers,
+  ...orderHandlers,
+  ...refundHandlers
 ];

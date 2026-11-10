@@ -23,10 +23,11 @@
  * - `internal/boot/seed.go` 的权限种子；
  * - `internal/cmd/routes_admin.go` 中 `RequirePermission(code)` 的实际参数。
  *
- * 注意：后端**没有** `product:read` / `category:read` / `sku:read` /
- * `inventory:read` 这类读权限码。商品、库存的查询接口只要求 AdminAuth，
- * 分类树更是公开接口。因此前端**不能**为页面访问编造读权限码，
- * 页面访问由登录态保证，写操作按钮按下列真实码控制。
+ * 注意：
+ * - 商品/分类/SKU/库存**没有** `*:read` 权限码，查询接口只要求 AdminAuth；
+ * - A3 的订单与退款**有**独立读权限码（`order:list` / `order:view` /
+ *   `refund:list` / `refund:view`），以 `routes_admin.go` 为准。
+ * 前端不为页面访问编造权限码；写操作按钮按下列真实码控制。
  */
 export const PERMISSION = {
   DASHBOARD_VIEW: "dashboard:view",
@@ -41,7 +42,14 @@ export const PERMISSION = {
   SKU_UPDATE: "sku:update",
   SKU_DELETE: "sku:delete",
   INVENTORY_INCREASE: "inventory:increase",
-  INVENTORY_DEDUCT: "inventory:deduct"
+  INVENTORY_DEDUCT: "inventory:deduct",
+  ORDER_LIST: "order:list",
+  ORDER_VIEW: "order:view",
+  ORDER_SHIP: "order:ship",
+  REFUND_LIST: "refund:list",
+  REFUND_VIEW: "refund:view",
+  REFUND_REVIEW: "refund:review",
+  REFUND_EXECUTE: "refund:execute"
 } as const;
 
 /** 权限码：工作台只读（保留 A1 的命名，避免调用方改动） */

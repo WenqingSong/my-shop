@@ -3,6 +3,8 @@
 const home = 0, // 平台规定只有 home 路由的 rank 才能为 0 ，所以后端在返回 rank 的时候需要从非 0 开始
   productAdmin = 1, // A2 商品与分类
   inventoryAdmin = 2, // A2 库存
+  orderAdmin = 3, // A3 订单
+  aftersalesAdmin = 4, // A3 退款售后
   chatai = 1,
   vueflow = 2,
   ganttastic = 3,
@@ -35,6 +37,8 @@ export {
   home,
   productAdmin,
   inventoryAdmin,
+  orderAdmin,
+  aftersalesAdmin,
   chatai,
   vueflow,
   ganttastic,

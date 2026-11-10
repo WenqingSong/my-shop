@@ -77,6 +77,12 @@ menus:
   pureInventory: 库存管理
   pureInventoryList: 库存查询
   pureInventoryTransactions: 库存流水
+  pureOrder: 订单管理
+  pureOrderList: 订单列表
+  pureOrderDetail: 订单详情
+  pureAfterSales: 售后管理
+  pureRefundList: 退款管理
+  pureRefundDetail: 退款详情
   pureHome: 首页
   pureLogin: 登录
   pureEmpty: 无Layout页

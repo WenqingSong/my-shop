@@ -77,6 +77,12 @@ menus:
   pureInventory: Inventory
   pureInventoryList: Inventory Query
   pureInventoryTransactions: Inventory Logs
+  pureOrder: Orders
+  pureOrderList: Order List
+  pureOrderDetail: Order Detail
+  pureAfterSales: After-sales
+  pureRefundList: Refunds
+  pureRefundDetail: Refund Detail
   pureHome: Home
   pureLogin: Login
   pureEmpty: Empty Page
