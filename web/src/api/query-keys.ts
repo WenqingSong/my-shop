@@ -79,4 +79,21 @@ export const queryKeys = {
     details: () => ['orders', 'detail'] as const,
     detail: (orderId: number) => ['orders', 'detail', String(orderId)] as const,
   },
+  /**
+   * 退款：W4-03 新增。
+   *
+   * - `list()` 不带参数：`GET /refunds` 没有分页与状态筛选，状态筛选是纯浏览器行为，
+   *   不应该产生新的缓存 key；
+   * - `list(orderId)` 对应后端真实支持的 `?order_id=` 服务端过滤，
+   *   用于订单详情页的「关联退款记录」，与全量列表是两份不同的服务端结果；
+   * - 详情 key 用 String(id) 归一化，与订单保持一致的约定。
+   */
+  refunds: {
+    all: ['refunds'] as const,
+    lists: () => ['refunds', 'list'] as const,
+    list: (orderId?: number) =>
+      ['refunds', 'list', orderId && orderId > 0 ? String(orderId) : 'all'] as const,
+    details: () => ['refunds', 'detail'] as const,
+    detail: (refundId: number) => ['refunds', 'detail', String(refundId)] as const,
+  },
 } as const

@@ -118,10 +118,14 @@ export function useLogout() {
       } finally {
         clearAuthTokens()
         // 立即清理所有用户私有缓存，避免下一个登录用户看到上一位用户的数据。
+        // 订单与退款（W4-03）同样是账号私有数据，必须在登出时一并清除：
+        // 两者 key 不含 user id，若保留缓存，下一位登录用户会在 refetch 完成前短暂看到上一位用户的数据。
         queryClient.removeQueries({ queryKey: queryKeys.auth.all })
         queryClient.removeQueries({ queryKey: queryKeys.addresses.all })
         queryClient.removeQueries({ queryKey: queryKeys.favorites.all })
         queryClient.removeQueries({ queryKey: queryKeys.cart.all })
+        queryClient.removeQueries({ queryKey: queryKeys.orders.all })
+        queryClient.removeQueries({ queryKey: queryKeys.refunds.all })
       }
     },
     onSuccess: () => {

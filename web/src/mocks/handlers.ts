@@ -28,6 +28,13 @@ import {
   receiveMockOrder,
 } from '@/mocks/data/orders'
 import {
+  applyMockRefund,
+  getMockRefund,
+  getMockRefundDelay,
+  listMockRefunds,
+  revokeMockRefund,
+} from '@/mocks/data/refunds'
+import {
   createMockAddress,
   deleteMockAddress,
   listMockAddresses,
@@ -417,6 +424,74 @@ export const handlers = [
 
     return result.ok
       ? HttpResponse.json(ok(result.order))
+      : fail(result.status, result.code, result.message)
+  }),
+
+  // 退款：与 internal/cmd/routes_frontend.go:98-103 对应，全部需要登录。
+  // 状态闸门、金额派生与归属隔离对齐 internal/logic/refund/refund.go。
+  http.post(`${API}/orders/:id/refund`, async ({ request, params }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    const body = await readJsonObject(request)
+    const wait = getMockRefundDelay()
+
+    if (wait > 0) {
+      await delay(wait)
+    }
+
+    const result = applyMockRefund(user.id, Number(params.id), body.reason)
+
+    return result.ok
+      ? HttpResponse.json(ok(result.refund))
+      : fail(result.status, result.code, result.message)
+  }),
+
+  http.get(`${API}/refunds`, ({ request }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    const rawOrderId = new URL(request.url).searchParams.get('order_id')
+    const orderId = rawOrderId && /^\d+$/.test(rawOrderId) ? Number(rawOrderId) : undefined
+
+    return HttpResponse.json(ok({ items: listMockRefunds(user.id, orderId) }))
+  }),
+
+  http.get(`${API}/refunds/:id`, ({ request, params }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    const refund = getMockRefund(user.id, Number(params.id))
+
+    return refund ? HttpResponse.json(ok(refund)) : fail(404, 18001, '退款申请不存在')
+  }),
+
+  http.post(`${API}/refunds/:id/revoke`, async ({ request, params }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    const wait = getMockRefundDelay()
+
+    if (wait > 0) {
+      await delay(wait)
+    }
+
+    const result = revokeMockRefund(user.id, Number(params.id))
+
+    return result.ok
+      ? HttpResponse.json(ok(result.refund))
       : fail(result.status, result.code, result.message)
   }),
 

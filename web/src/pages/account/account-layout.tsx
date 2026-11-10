@@ -1,4 +1,4 @@
-import { Heart, MapPin, Package, UserRound, LayoutDashboard } from 'lucide-react'
+import { Heart, MapPin, Package, ReceiptText, UserRound, LayoutDashboard } from 'lucide-react'
 import { NavLink, Outlet } from 'react-router'
 
 import { PageContainer } from '@/components/common/page-container'
@@ -8,6 +8,8 @@ const accountNavItems = [
   { to: '/account', label: '账户概览', icon: LayoutDashboard, end: true },
   // 订单详情 /account/orders/:id 属于订单中心，因此不设置 end，保证子路由也高亮。
   { to: '/account/orders', label: '我的订单', icon: Package, end: false },
+  // 退款详情 /account/refunds/:id 同理，保证子路由高亮。
+  { to: '/account/refunds', label: '我的退款', icon: ReceiptText, end: false },
   { to: '/account/profile', label: '个人资料', icon: UserRound, end: false },
   { to: '/account/addresses', label: '收货地址', icon: MapPin, end: false },
   { to: '/account/favorites', label: '我的收藏', icon: Heart, end: false },
@@ -24,7 +26,7 @@ export function AccountLayout() {
         <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">Account</p>
         <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">账户</h1>
         <p className="text-sm leading-6 text-muted-foreground">
-          查看订单、管理个人资料、收货地址与收藏商品。
+          查看订单与退款、管理个人资料、收货地址与收藏商品。
         </p>
       </div>
 

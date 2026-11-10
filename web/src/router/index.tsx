@@ -22,6 +22,8 @@ import {
   ProductDetailPage,
   ProductsPage,
   ProfilePage,
+  RefundDetailPage,
+  RefundsPage,
   RegisterPage,
 } from '@/router/lazy-pages'
 
@@ -133,6 +135,18 @@ export const routes: RouteObject[] = [
           {
             path: 'orders/:id',
             element: withRouteLoading(<OrderDetailPage />),
+            errorElement: <RouteErrorPage />,
+          },
+          {
+            // 退款中心：GET /refunds、GET /refunds/:id 都在 Auth 分组下，
+            // 外层 /account 已由 RequireAuth 保护，这里只做懒加载。
+            path: 'refunds',
+            element: withRouteLoading(<RefundsPage />),
+            errorElement: <RouteErrorPage />,
+          },
+          {
+            path: 'refunds/:id',
+            element: withRouteLoading(<RefundDetailPage />),
             errorElement: <RouteErrorPage />,
           },
         ],

@@ -58,7 +58,7 @@ function describeActionsHint(status: Order['status']): string {
     case 'pending_payment':
       return '可进行模拟支付或取消订单。支付为项目内置模拟能力，不对接任何支付渠道。'
     case 'paid':
-      return '订单已支付，等待商家发货。发货后可在本页确认收货。'
+      return '订单已支付，等待商家发货。未发货前可以在「退款」区域申请整单退款；发货后可在本页确认收货。'
     case 'shipped':
       return '商家已发货。收到商品后可在本页确认收货。'
     case 'received':

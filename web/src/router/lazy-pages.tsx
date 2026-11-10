@@ -61,3 +61,13 @@ export const OrderDetailPage = lazy(() =>
     default: module.OrderDetailPage,
   })),
 )
+
+export const RefundsPage = lazy(() =>
+  import('@/pages/account/refunds-page').then((module) => ({ default: module.RefundsPage })),
+)
+
+export const RefundDetailPage = lazy(() =>
+  import('@/pages/account/refund-detail-page').then((module) => ({
+    default: module.RefundDetailPage,
+  })),
+)

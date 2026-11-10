@@ -11,15 +11,24 @@ import { OrderActions } from '@/components/order/order-actions'
 import { OrderProgress } from '@/components/order/order-progress'
 import { OrderStatusBadge } from '@/components/order/order-status-badge'
 import { ProductImage } from '@/components/product/product-image'
+import { ApplyRefundDialog } from '@/components/refund/apply-refund-dialog'
+import { RefundStatusBadge } from '@/components/refund/refund-status-badge'
 import { Button } from '@/components/ui/button'
 import { useDocumentTitle } from '@/hooks/use-document-title'
 import { useOrderDetail } from '@/hooks/use-orders'
+import { useRefundList } from '@/hooks/use-refunds'
 import {
   describeCancelReason,
   formatOrderAddress,
   formatOrderTime,
   orderTotalQuantity,
 } from '@/utils/orders'
+import {
+  canApplyRefund,
+  describeRefundStatus,
+  findActiveRefund,
+  formatRefundTime,
+} from '@/utils/refunds'
 
 /** 时间节点：只展示后端实际返回（非 null）的字段，缺失时整行不渲染。 */
 function buildTimeline(order: Order): { label: string; value: string }[] {
@@ -36,6 +45,112 @@ function buildTimeline(order: Order): { label: string; value: string }[] {
   return entries
     .filter((entry): entry is { label: string; value: string } => entry.value !== null)
     .map((entry) => ({ label: entry.label, value: formatOrderTime(entry.value) }))
+}
+
+/**
+ * 订单与退款的联动区（W4-03）。
+ *
+ * 数据全部来自 `GET /refunds?order_id=`（后端真实支持的服务端过滤），
+ * 不使用订单结构里不存在的退款字段。
+ *
+ * 申请入口规则（严格对齐后端前置条件）：
+ * - 订单必须是 `paid(20)`（`internal/logic/refund/refund.go:159-161`）；
+ * - 同一订单至多一条有效申请（applying/pending_refund/refund_failed），
+ *   已存在有效申请时不再展示入口，避免必然触发的 18004；
+ * - 退款列表尚未加载完成时不展示入口（避免给出"可能点不通"的操作）。
+ */
+function OrderRefundSection({ order }: { order: Order }) {
+  const refundsQuery = useRefundList(order.id)
+  const refunds = refundsQuery.data?.items ?? []
+  const activeRefund = findActiveRefund(refunds)
+  const showApplyEntry = refundsQuery.isSuccess && canApplyRefund(order) && !activeRefund
+
+  return (
+    <section
+      aria-labelledby="order-refund-heading"
+      className="rounded-xl border border-border bg-surface p-4 shadow-card sm:p-5"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 id="order-refund-heading" className="text-sm font-semibold text-foreground">
+          退款
+        </h3>
+        <Button asChild variant="ghost" size="sm">
+          <Link to="/account/refunds">全部退款记录</Link>
+        </Button>
+      </div>
+
+      {refundsQuery.isPending ? (
+        <p className="mt-2 text-sm text-muted-foreground">正在加载该订单的退款信息…</p>
+      ) : null}
+
+      {refundsQuery.isError ? (
+        <p role="alert" className="mt-2 text-sm text-danger">
+          该订单的退款信息加载失败，暂时无法判断是否可以申请退款，请稍后刷新页面重试。
+        </p>
+      ) : null}
+
+      {refundsQuery.isSuccess && refunds.length === 0 ? (
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          该订单没有退款申请。
+          {order.status === 'paid'
+            ? '订单已支付且未发货，可以申请整单退款。'
+            : '只有「已支付且未发货」的订单可以申请退款。'}
+        </p>
+      ) : null}
+
+      {refunds.length > 0 ? (
+        <ul className="mt-3 divide-y divide-border">
+          {refunds.map((refund) => (
+            <li key={refund.id} className="flex flex-wrap items-center justify-between gap-2 py-3 first:pt-0 last:pb-0">
+              <div className="min-w-0">
+                <p className="flex flex-wrap items-center gap-2">
+                  <span className="font-mono text-[13px] font-medium text-foreground">
+                    退款 #{String(refund.id)}
+                  </span>
+                  <RefundStatusBadge status={refund.status} />
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  申请时间 {formatRefundTime(refund.created_at)} · 原因：{refund.reason || '—'}
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <PriceDisplay value={refund.amount} size="sm" tone="neutral" />
+                <Button asChild variant="outline" size="sm">
+                  <Link
+                    to={`/account/refunds/${String(refund.id)}`}
+                    aria-label={`查看退款 ${String(refund.id)} 详情`}
+                  >
+                    查看详情
+                  </Link>
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {showApplyEntry ? (
+        <div className="mt-4">
+          <ApplyRefundDialog order={order} />
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">
+            仅支持整单退款；提交后需要商家审核，申请成功不代表退款完成或资金已退回。
+          </p>
+        </div>
+      ) : null}
+
+      {activeRefund ? (
+        <p className="mt-3 text-sm leading-6 text-muted-foreground">
+          该订单存在处理中的退款申请（{describeRefundStatus(activeRefund.status)}），暂不可重复申请。
+        </p>
+      ) : null}
+
+      {order.status === 'refunded' ? (
+        <p className="mt-3 text-sm leading-6 text-muted-foreground">
+          该订单已完成退款处理，订单状态为「已退款」。
+        </p>
+      ) : null}
+    </section>
+  )
 }
 
 function OrderDetailContent({ order }: { order: Order }) {
@@ -64,6 +179,8 @@ function OrderDetailContent({ order }: { order: Order }) {
       </div>
 
       <OrderActions order={order} />
+
+      <OrderRefundSection order={order} />
 
       <section
         aria-labelledby="order-progress-heading"
@@ -205,7 +322,7 @@ function OrderDetailContent({ order }: { order: Order }) {
       </section>
 
       <p className="text-xs leading-5 text-muted-foreground">
-        本页提供订单查询与订单操作（模拟支付 / 取消 / 确认收货）；退款与优惠券属于后续阶段。
+        本页提供订单查询、订单操作（模拟支付 / 取消 / 确认收货）与整单退款申请。
         当前订单共 {quantity} 件商品。
       </p>
     </div>

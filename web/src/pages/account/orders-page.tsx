@@ -2,6 +2,7 @@ import { Package, RefreshCw } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
 
+import type { Refund } from '@/api/refunds'
 import { EmptyState } from '@/components/common/empty-state'
 import { ErrorState } from '@/components/common/error-state'
 import { LoadingState } from '@/components/common/loading-state'
@@ -10,6 +11,7 @@ import { OrderCard } from '@/components/order/order-card'
 import { Button } from '@/components/ui/button'
 import { useDocumentTitle } from '@/hooks/use-document-title'
 import { useOrderList } from '@/hooks/use-orders'
+import { useRefundList } from '@/hooks/use-refunds'
 import { cn } from '@/utils/cn'
 import {
   ORDER_STATUS_GROUPS,
@@ -35,6 +37,27 @@ export function OrdersPage() {
   const ordersQuery = useOrderList()
   // 稳定引用：useMemo 的依赖是 orders，避免每次渲染都生成新数组导致重复计算。
   const orders = useMemo(() => ordersQuery.data?.items ?? [], [ordersQuery.data])
+
+  /**
+   * 退款状态映射（W4-03）。
+   *
+   * 订单结构里没有退款字段，因此用一次 `GET /refunds`（本人全部退款，按 id 倒序）
+   * 建立 order_id → 最新退款 的映射，在卡片上展示真实的退款状态。
+   * 退款列表加载失败时不展示徽标，不影响订单列表本身。
+   */
+  const refundsQuery = useRefundList()
+  const latestRefundByOrder = useMemo(() => {
+    const map = new Map<number, Refund>()
+
+    for (const refund of refundsQuery.data?.items ?? []) {
+      // 列表按 id 倒序：首次出现的即为该订单最新一条退款。
+      if (!map.has(refund.order_id)) {
+        map.set(refund.order_id, refund)
+      }
+    }
+
+    return map
+  }, [refundsQuery.data])
 
   // 每个分组在本地的订单数：仅用于筛选标签上的计数，不代表服务端统计。
   const groupCounts = useMemo(() => {
@@ -165,7 +188,7 @@ export function OrdersPage() {
           <ul className="flex flex-col gap-4">
             {pageItems.map((order) => (
               <li key={order.id}>
-                <OrderCard order={order} />
+                <OrderCard order={order} latestRefund={latestRefundByOrder.get(order.id)} />
               </li>
             ))}
           </ul>

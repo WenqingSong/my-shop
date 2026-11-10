@@ -1,4 +1,4 @@
-import { Heart, MapPin, Package, UserRound } from 'lucide-react'
+import { Heart, MapPin, Package, ReceiptText, UserRound } from 'lucide-react'
 import { Link } from 'react-router'
 
 import { useAuthStatus, useLogout } from '@/auth/use-auth'
@@ -11,6 +11,12 @@ const entries = [
     title: '我的订单',
     description: '按状态查看订单、商品明细、金额与收货快照。',
     icon: Package,
+  },
+  {
+    to: '/account/refunds',
+    title: '我的退款',
+    description: '查看退款申请、审核与处理进度，撤销申请中的退款。',
+    icon: ReceiptText,
   },
   {
     to: '/account/profile',
