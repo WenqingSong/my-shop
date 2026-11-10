@@ -1,3 +1,5 @@
+import { Link } from 'react-router'
+
 import { PriceDisplay } from '@/components/common/price-display'
 import { Button } from '@/components/ui/button'
 import type { CartSummary } from '@/utils/cart'
@@ -12,11 +14,12 @@ export interface CartSummaryPanelProps {
  * 这里的「商品合计（预估）」= 已勾选且可购买条目的（当前单价 × 数量）之和，
  * 仅用于购物车展示：
  * - 不含运费、优惠券、活动价与库存最终裁决；
- * - 与 W3-02 的订单试算结果无关，最终应付金额以 Go 后端为准；
- * - 「去结算」在 W3-02 开放前保持禁用，不制造死链，也不提前实现结算。
+ * - 不是订单试算结果：后端没有独立试算接口，最终应付金额只在创建订单事务中计算；
+ * - 存在不可购买商品时不提供结算入口（后端会 9003 拒绝），避免必然失败的提交。
  */
 export function CartSummaryPanel({ summary }: CartSummaryPanelProps) {
   const hasSelected = summary.selectedCount > 0
+  const blocked = summary.blockedSelectedCount > 0
 
   return (
     <aside
@@ -39,26 +42,37 @@ export function CartSummaryPanel({ summary }: CartSummaryPanelProps) {
       </dl>
 
       <p className="mt-3 text-xs leading-5 text-muted-foreground">
-        运费、优惠与最终应付金额以订单试算结果为准，购物车金额仅供预览。
+        运费与优惠暂未接入；最终应付金额以提交订单后服务端返回为准，购物车金额仅供预览。
       </p>
 
-      {summary.blockedSelectedCount > 0 ? (
+      {blocked ? (
         <p className="mt-2 text-xs leading-5 text-warning">
-          已勾选商品中有 {summary.blockedSelectedCount} 件不可购买，未计入预估金额。
+          已勾选商品中有 {summary.blockedSelectedCount} 件不可购买，无法结算，请取消勾选或删除后再试。
         </p>
       ) : null}
 
-      <Button
-        size="lg"
-        className="mt-5 w-full"
-        disabled
-        aria-describedby="cart-checkout-note"
-        title="订单试算与结算将在 W3-02 开放"
-      >
-        {hasSelected ? '去结算' : '请选择商品'}
-      </Button>
+      {!hasSelected ? (
+        <Button size="lg" className="mt-5 w-full" disabled aria-describedby="cart-checkout-note">
+          请选择商品
+        </Button>
+      ) : blocked ? (
+        <Button
+          size="lg"
+          className="mt-5 w-full"
+          disabled
+          aria-describedby="cart-checkout-note"
+          title="存在不可购买商品，请先调整购物车"
+        >
+          去结算
+        </Button>
+      ) : (
+        <Button asChild size="lg" className="mt-5 w-full">
+          <Link to="/checkout">去结算</Link>
+        </Button>
+      )}
+
       <p id="cart-checkout-note" className="mt-2 text-xs leading-5 text-muted-foreground">
-        订单试算、结算与下单将在 W3-02 开放，本期购物车不会创建订单。
+        结算页会按已勾选商品与收货地址发起下单，金额由服务端计算。
       </p>
     </aside>
   )

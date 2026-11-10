@@ -55,9 +55,11 @@ describe('购物车页面', () => {
     // 汇总金额与已选件数
     expect(within(summaryPanel()).getByText('8,598')).toBeInTheDocument()
     expect(within(summaryPanel()).getByText('2 件')).toBeInTheDocument()
-    // 结算入口在 W3-02 前保持禁用，避免提前实现订单能力。
-    expect(screen.getByRole('button', { name: '去结算' })).toBeDisabled()
-    expect(screen.getByText(/订单试算、结算与下单将在 W3-02 开放/)).toBeInTheDocument()
+    // W3-02 起结算入口指向 /checkout，金额仍以服务端下单结果为准。
+    expect(screen.getByRole('link', { name: '去结算' })).toHaveAttribute('href', '/checkout')
+    expect(
+      screen.getByText(/最终应付金额以提交订单后服务端返回为准/),
+    ).toBeInTheDocument()
   })
 
   it('通过步进器修改数量并同步小计与服务端状态', async () => {
@@ -214,6 +216,9 @@ describe('购物车页面', () => {
     // 预估金额不包含已下架商品：仅 1,999 × 2
     expect(within(summaryPanel()).getByText('3,998')).toBeInTheDocument()
     expect(within(summaryPanel()).getByText(/1 件不可购买/)).toBeInTheDocument()
+    // 存在不可购买商品时不提供结算入口，避免必然失败的 9003 提交。
+    expect(screen.queryByRole('link', { name: '去结算' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '去结算' })).toBeDisabled()
   })
 
   it('SKU 被删除时保留条目、展示价格不可用且不参与金额汇总', async () => {

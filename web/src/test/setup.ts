@@ -8,6 +8,7 @@ import { resetMockAddresses } from '@/mocks/data/addresses'
 import { resetMockAuthState } from '@/mocks/data/auth'
 import { resetMockCart } from '@/mocks/data/cart'
 import { resetMockFavorites } from '@/mocks/data/favorites'
+import { resetMockOrders } from '@/mocks/data/orders'
 import { server } from '@/mocks/server'
 
 beforeAll(() => {
@@ -33,6 +34,7 @@ afterEach(() => {
   resetMockAddresses()
   resetMockFavorites()
   resetMockCart()
+  resetMockOrders()
 })
 
 afterAll(() => {

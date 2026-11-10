@@ -13,6 +13,8 @@ import {
   AccountOverviewPage,
   AddressesPage,
   CartPage,
+  CheckoutPage,
+  CheckoutSuccessPage,
   FavoritesPage,
   LoginPage,
   ProductDetailPage,
@@ -53,6 +55,25 @@ export const routes: RouteObject[] = [
         element: withRouteLoading(
           <RequireAuth>
             <CartPage />
+          </RequireAuth>,
+        ),
+        errorElement: <RouteErrorPage />,
+      },
+      {
+        // 结算与下单结果都依赖登录态（POST /orders、GET /orders/:id 均在 Auth 分组）。
+        path: 'checkout',
+        element: withRouteLoading(
+          <RequireAuth>
+            <CheckoutPage />
+          </RequireAuth>,
+        ),
+        errorElement: <RouteErrorPage />,
+      },
+      {
+        path: 'checkout/success',
+        element: withRouteLoading(
+          <RequireAuth>
+            <CheckoutSuccessPage />
           </RequireAuth>,
         ),
         errorElement: <RouteErrorPage />,

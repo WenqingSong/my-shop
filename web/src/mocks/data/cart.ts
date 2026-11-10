@@ -323,6 +323,17 @@ export function updateMockCartSelected(
   return { ok: true, item: toCartItem(record) }
 }
 
+/** 下单成功后清理已购条目（模拟后端在订单事务内按 sku_id 删除已勾选条目）。 */
+export function removeMockCartItemsBySkuIds(userId: number, skuIds: readonly number[]): number {
+  const before = records.length
+  const purchased = new Set(skuIds)
+  records = records.filter(
+    (record) => !(record.userId === userId && purchased.has(record.skuId)),
+  )
+
+  return before - records.length
+}
+
 export function deleteMockCartItem(
   userId: number,
   itemId: number,

@@ -16,6 +16,16 @@ export const CartPage = lazy(() =>
   import('@/pages/cart-page').then((module) => ({ default: module.CartPage })),
 )
 
+export const CheckoutPage = lazy(() =>
+  import('@/pages/checkout-page').then((module) => ({ default: module.CheckoutPage })),
+)
+
+export const CheckoutSuccessPage = lazy(() =>
+  import('@/pages/checkout-success-page').then((module) => ({
+    default: module.CheckoutSuccessPage,
+  })),
+)
+
 export const LoginPage = lazy(() =>
   import('@/pages/login-page').then((module) => ({ default: module.LoginPage })),
 )

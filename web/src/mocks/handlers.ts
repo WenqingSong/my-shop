@@ -18,6 +18,11 @@ import {
   updateMockCartSelected,
 } from '@/mocks/data/cart'
 import {
+  createMockOrder,
+  getMockOrder,
+  getMockOrderRequestDelay,
+} from '@/mocks/data/orders'
+import {
   createMockAddress,
   deleteMockAddress,
   listMockAddresses,
@@ -301,6 +306,40 @@ export const handlers = [
     const result = deleteMockCartItem(user.id, Number(params.id))
 
     return result.ok ? HttpResponse.json(ok({})) : fail(result.status, result.code, result.message)
+  }),
+
+  // 订单：W3-02 只使用创建与详情；金额与库存均由 Mock「服务端」计算。
+  http.post(`${API}/orders`, async ({ request }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    const body = await readJsonObject(request)
+    const wait = getMockOrderRequestDelay()
+
+    if (wait > 0) {
+      await delay(wait)
+    }
+
+    const result = createMockOrder(user.id, body)
+
+    return result.ok
+      ? HttpResponse.json(ok(result.order))
+      : fail(result.status, result.code, result.message)
+  }),
+
+  http.get(`${API}/orders/:id`, ({ request, params }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    const order = getMockOrder(user.id, Number(params.id))
+
+    return order ? HttpResponse.json(ok(order)) : fail(404, 9001, '订单不存在')
   }),
 
   http.get(`${API}/addresses`, ({ request }) => {

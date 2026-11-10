@@ -56,7 +56,7 @@ test.describe('购物车', () => {
     await expect(row).toContainText('8,598')
     await expect(summary).toContainText('2 件')
     await expect(summary).toContainText('8,598')
-    await expect(page.getByRole('button', { name: '去结算' })).toBeDisabled()
+    await expect(page.getByRole('link', { name: '去结算' })).toHaveAttribute('href', '/checkout')
 
     // 数量 +1 → 3 × ¥4,299.00
     await row.getByRole('button', { name: `增加数量（${PRODUCT_NAME}）` }).click()
