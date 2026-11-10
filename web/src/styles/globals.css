@@ -1,0 +1,267 @@
+@import 'tailwindcss';
+
+/* =============================================================================
+ * SurgeCart 设计 Token
+ * 规范说明见 web/DESIGN_SYSTEM.md。
+ * 原始色板 -> 语义 Token -> Tailwind Theme 三层结构，组件只使用语义 Token。
+ * ========================================================================== */
+
+:root {
+  /* ---- 品牌蓝（Primary） ---- */
+  --brand-50: #eff5ff;
+  --brand-100: #dbe8fe;
+  --brand-200: #bfd6fe;
+  --brand-300: #93b9fd;
+  --brand-400: #6094fa;
+  --brand-500: #3b76f6;
+  --brand-600: #1e5ae8;
+  --brand-700: #1a4bcc;
+  --brand-800: #1b3fa6;
+  --brand-900: #1c3a83;
+
+  /* ---- 中性灰（Neutral） ---- */
+  --gray-25: #fafbfc;
+  --gray-50: #f5f7fa;
+  --gray-100: #eef1f5;
+  --gray-200: #e5e7eb;
+  --gray-300: #d5dae2;
+  --gray-400: #9aa3b2;
+  --gray-500: #6b7280;
+  --gray-600: #4b5563;
+  --gray-700: #374151;
+  --gray-900: #111827;
+
+  /* ---- 语义色 ---- */
+  --background: var(--gray-50);
+  --surface: #ffffff;
+  --foreground: var(--gray-900);
+  --muted: var(--gray-100);
+  --muted-foreground: var(--gray-500);
+  --border: var(--gray-200);
+  --border-strong: var(--gray-300);
+
+  --primary: var(--brand-600);
+  --primary-hover: var(--brand-700);
+  --primary-active: var(--brand-800);
+  --primary-foreground: #ffffff;
+  --primary-soft: var(--brand-50);
+  --ring: var(--brand-600);
+
+  --success: #0f9d63;
+  --success-soft: #ecfdf3;
+  --warning: #b45309;
+  --warning-soft: #fffaeb;
+  --danger: #dc2626;
+  --danger-hover: #b91c1c;
+  --danger-soft: #fef2f2;
+
+  /* 促销标签与价格：与品牌蓝形成明确对比，不用于正文 */
+  --promo: #e5484d;
+  --price: #d92d3a;
+
+  /* ---- 圆角 ---- */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+
+  /* ---- 阴影（克制使用，不做大投影） ---- */
+  --shadow-xs: 0 1px 2px 0 rgb(17 24 39 / 0.04);
+  --shadow-card: 0 1px 2px 0 rgb(17 24 39 / 0.04), 0 2px 8px -2px rgb(17 24 39 / 0.06);
+  --shadow-popover: 0 12px 32px -8px rgb(17 24 39 / 0.16), 0 2px 8px -2px rgb(17 24 39 / 0.08);
+
+  /* ---- 布局 ---- */
+  --page-max-width: 1440px;
+  --header-height: 64px;
+}
+
+/* Tailwind Theme 映射：生成 bg-* / text-* / border-* / shadow-* 等工具类 */
+@theme inline {
+  --color-brand-50: var(--brand-50);
+  --color-brand-100: var(--brand-100);
+  --color-brand-200: var(--brand-200);
+  --color-brand-300: var(--brand-300);
+  --color-brand-400: var(--brand-400);
+  --color-brand-500: var(--brand-500);
+  --color-brand-600: var(--brand-600);
+  --color-brand-700: var(--brand-700);
+  --color-brand-800: var(--brand-800);
+  --color-brand-900: var(--brand-900);
+
+  --color-gray-25: var(--gray-25);
+  --color-gray-50: var(--gray-50);
+  --color-gray-100: var(--gray-100);
+  --color-gray-200: var(--gray-200);
+  --color-gray-300: var(--gray-300);
+  --color-gray-400: var(--gray-400);
+  --color-gray-500: var(--gray-500);
+  --color-gray-600: var(--gray-600);
+  --color-gray-700: var(--gray-700);
+  --color-gray-900: var(--gray-900);
+
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-active: var(--primary-active);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-soft: var(--primary-soft);
+  --color-ring: var(--ring);
+
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-hover: var(--danger-hover);
+  --color-danger-soft: var(--danger-soft);
+
+  --color-promo: var(--promo);
+  --color-price: var(--price);
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-2xl: var(--radius-2xl);
+
+  --shadow-xs: var(--shadow-xs);
+  --shadow-card: var(--shadow-card);
+  --shadow-popover: var(--shadow-popover);
+
+  --font-sans:
+    'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Source Han Sans SC',
+    system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'JetBrains Mono', Menlo, Consolas, monospace;
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after,
+  ::backdrop {
+    border-color: var(--border);
+  }
+
+  html {
+    scroll-behavior: smooth;
+    scroll-padding-top: 96px;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  ::selection {
+    background-color: var(--brand-100);
+    color: var(--brand-900);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+/* Dialog 动效：短时长、弱位移，避免干扰阅读 */
+@layer components {
+  .sc-dialog-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background-color: rgb(17 24 39 / 0.45);
+  }
+
+  .sc-dialog-overlay[data-state='open'] {
+    animation: sc-fade-in 160ms ease-out;
+  }
+
+  .sc-dialog-overlay[data-state='closed'] {
+    animation: sc-fade-out 120ms ease-in;
+  }
+
+  .sc-dialog-content[data-state='open'] {
+    animation: sc-dialog-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .sc-dialog-content[data-state='closed'] {
+    animation: sc-dialog-out 120ms ease-in;
+  }
+}
+
+@keyframes sc-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes sc-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* 仅做透明度过渡：内容使用 translate 居中，避免 transform 动画覆盖定位 */
+@keyframes sc-dialog-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes sc-dialog-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
