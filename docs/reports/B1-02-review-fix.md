@@ -223,8 +223,8 @@
 
 ## 8. 已知限制
 
-1. **D1 条数与决策文档不一致（需 Owner 确认）**：D1.2 表述 13 条，实际 14 条。契约已按实际行为补标，
-   但决策正文按"不改已批准内容"原则未动，建议 Owner 在下一次决策修订时同步条数。
+1. **D1 条数与决策文档不一致**：D1.2 原表述 13 条，实际 14 条。**已闭环**：B1-02-DOC-FIX 已将
+   `B1-02_CONTRACT_DECISIONS.md` 的统计与接口清单修正为 14 条，决策内容与批准状态不变，详见 §10。
 2. **静态分析仍是上界**：同包按名匹配存在误报/漏报，跨包靠人工登记；`x-error-codes` 不应被当作
    "运行时只会返回这些码"的依据。
 3. **白名单维护成本**：新增 API 会新增一个未引用 Request Schema，需在白名单追加一行，
@@ -247,3 +247,51 @@
 - 本报告：`docs/reports/B1-02-review-fix.md`
 
 等待 Owner 与 GPT-6 复审。
+
+---
+
+## 10. 后续勘误记录：D1 事实勘误（B1-02-DOC-FIX）
+
+本节记录 §3.1/§8 遗留项在独立任务 B1-02-DOC-FIX 中的闭环结果。
+
+### 10.1 勘误内容
+
+| 项 | 勘误前 | 勘误后 |
+|---|---|---|
+| D1 受影响接口数 | 13 条（`B1-01 §15.1` 原统计） | **14 条** |
+| 接口清单 | 未含 `POST /admin/roles/:id/permissions` | 补入 `POST /admin/roles/:id/permissions`（body 字段 `permission_id` 带 `v:"required"`） |
+
+依据：B1-02-REVIEW-FIX 对全部 142 条 API 的 Req DTO 反查"非 path 的 `v:"required"` 字段"，
+命中 14 条；GoFrame 在 controller 执行前完成绑定 + gvalid，第 14 条与其余 13 条同属
+`gvalid → 51 → HTTP 500 + "内部错误"` 路径（契约中已带 `x-known-issue`）。
+
+### 10.2 性质说明
+
+- **仅事实勘误**：不改变 D1.3 的目标规范（`400/1001`）、D1.4 的双轨记录方式、D1.7 的改造建议；
+- **不改技术实现**：未修改 OpenAPI 契约、Go 生产代码、生成器、Migration 或其他业务实现；
+- **保留审批记录**：`APPROVED / Owner / 2026-11-10` 不变，审批备注仅补注"条数经勘误，原记 13 条"；
+- **保留历史**：决策文档 D1.2 增加勘误说明（原 13 → 14），文档头部新增"勘误记录"行，
+  原统计口径可追溯，未删除任何历史信息。
+
+### 10.3 修改文件清单
+
+| 文件 | 改动 |
+|---|---|
+| `docs/phase2/B1-02_CONTRACT_DECISIONS.md` | D1.2 接口清单补入第 14 条 + 勘误说明；D1.4/D1.6/§7 禁止事项/§8.1 审批备注中的 13 → 14；头部新增"勘误记录"行 |
+| `docs/phase2/B1-02_CONTRACT_REPORT.md` | §1.2 决策确认表、§5.1 落地表 13 → 14；顶部"整改记录"后追加勘误说明 |
+| `.agent/tasks/dev/openapi-contract.md` | 已知限制表 D1 行补注"决策文档已勘误为 14 条" |
+| `docs/reports/B1-02-review-fix.md` | 本 §10 与 §8 遗留项状态更新 |
+
+未修改（刻意保留为历史快照）：`docs/phase2/B1-02_GPT6_REVIEW_HANDOFF.md`（交接时点的统计口径）、
+`.agent/tasks/dev/B1-02-review-fix.md` §1/§8（描述审查发现过程时引用的"原 13 条"）。
+
+仍存在的同类漏项（本次未处理，超出任务范围）：`docs/phase2/B1-01_API_INVENTORY.md` §15.1 的
+"受影响"清单同样只有 13 条，且未包含 `POST /admin/roles/:id/permissions`。该文档未引用 D1 的统计数字，
+属于上游证据文档的独立事实问题，建议后续任务或 Owner 决定是否一并勘误。
+
+### 10.4 Git
+
+- 分支：`feat/p2-backend`，无 force push、不改写历史；
+- 文档勘误提交：`4e47f16d514ff8ce4521af45759bb63f73942e80`
+  （`docs(phase2): D1 事实勘误 13 → 14（B1-02-DOC-FIX）`）；
+- 本报告补记提交为该提交的后续提交，二者均推送至 `origin/feat/p2-backend`（fast-forward）。
