@@ -425,7 +425,8 @@ test/k6/results/r20261110t040200.summary.txt   791 B
 | 项 | 值 |
 |---|---|
 | 远端分支 | `origin/feat/k8s-t5-01-k6-test-framework` |
-| 远端 SHA | `00680155c44fa56bcfa88a5d5686223f2f49226c`（与本地一致） |
+| 实现提交 SHA（本地=远端） | `00680155c44fa56bcfa88a5d5686223f2f49226c` |
+| 分支 tip | 实现提交之后的文档回填提交（内容仅为 §8/§12 元数据，不含任何代码或测试变更） |
 | upstream | 已设置（`git push -u`） |
 | 本地/远端同步 | 同步（`## feat/k8s-t5-01-k6-test-framework...origin/feat/k8s-t5-01-k6-test-framework`，无 ahead/behind） |
 | 工作区状态 | clean（回填提交前） |
