@@ -5,8 +5,8 @@
 ## 1. 当前实现状态
 
 - `addresses` 的增删改查、默认地址唯一（生成列 `default_key` + `uk_user_default`）已完整。
-- 地区字典 `regions`（省/市/区三级）**只有数据库结构**（migration `20261110000003_regions`）：
-  没有导入数据、没有业务代码、`addresses` 也没有 `region_id` 或外键。
+- 地区字典 `regions`（省/市/区三级）已有结构（migration `20261110000003_regions`）并由 B1-03-04
+  从 `system_city` 导入 3938 条数据；仍没有业务代码，`addresses` 也没有 `region_id` 或外键。
 - 因此地址接口仍只接收省/市/区自由文本，行为与之前完全一致。
 
 ## 2. 代码入口

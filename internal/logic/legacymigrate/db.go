@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net"
+	"time"
 
 	go_mysql "github.com/go-sql-driver/mysql"
 
@@ -86,5 +87,9 @@ func buildDSN(host, port, user, pass, name string) string {
 	cfg.DBName = name
 	cfg.Params = map[string]string{"charset": "utf8mb4"}
 	cfg.MultiStatements = false
+	// DATETIME 解析为 time.Time：迁移需保留历史创建/支付/发货时间；
+	// 未开启 ParseTime 时驱动返回 []byte，无法写入目标 DATETIME 列。
+	cfg.ParseTime = true
+	cfg.Loc = time.Local
 	return cfg.FormatDSN()
 }

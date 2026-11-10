@@ -137,5 +137,6 @@ SKU 状态为二态 `enabled`/`disabled`（不复用 SPU 三态），创建默�
 - 前台详情仅返回 `enabled` SKU：若未来需要前台展示「已停用但历史可售」SKU 需回改规则（当前不处理）。
 - 规格能力当前只有**数据库结构**：`internal/logic/sku` 与 `api/sku/v1` 尚未读写规格表，`spec_signature` 的生成/校验、
   规格组与规格值的维护接口、商品详情返回规格结构均属后续任务（见 `docs/dev/product-sku.md`）。
-- 历史数据不自动回填：存量 SKU 保持 `spec_signature=NULL` 且无规格关联；从遗留库补录规格需由迁移工具显式写入，
-  不得在迁移脚本中猜测组合。
+- 历史数据不自动回填：B1-03-04 之前的存量 SKU 保持 `spec_signature=NULL` 且无规格关联；B1-03-04 已由
+  `legacymigrate` 从遗留 `store_product_attr_result` 显式导入商品规格、`sku_spec_values` 与 `spec_signature`，
+  无法唯一匹配组合的 SKU 不写规格关联，不猜测组合。无规格商品的 SKU 仍保持 NULL。

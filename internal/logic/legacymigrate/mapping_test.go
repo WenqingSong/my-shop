@@ -1,6 +1,8 @@
 package legacymigrate
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"testing"
 )
@@ -45,6 +47,47 @@ func TestYuanToCents(t *testing.T) {
 				t.Fatalf("YuanToCents(%q) = %d, 期望 %d", c.in, got, c.want)
 			}
 		})
+	}
+}
+
+// TestSpecSignature 覆盖 sku.md §2.4 指纹算法：spec_id 升序、逗号连接、小写 MD5。
+func TestSpecSignature(t *testing.T) {
+	got := SpecSignature([]SpecAssociation{{SpecID: 2, ValueID: 21}, {SpecID: 1, ValueID: 11}})
+	sum := md5.Sum([]byte("1:11,2:21"))
+	want := hex.EncodeToString(sum[:])
+	if got != want {
+		t.Fatalf("SpecSignature = %q, 期望 %q", got, want)
+	}
+	if SpecSignature(nil) != "" {
+		t.Fatalf("无规格关联应返回空串")
+	}
+	if SpecSignature([]SpecAssociation{{SpecID: 1, ValueID: 11}, {SpecID: 2, ValueID: 21}}) != got {
+		t.Fatalf("指纹应与输入顺序无关")
+	}
+}
+
+// TestSplitLegacyAddress 覆盖订单地址四段拆分与回退。
+func TestSplitLegacyAddress(t *testing.T) {
+	r := splitLegacyAddress("北京市 东城区 北京市 123")
+	if r.Province != "北京市" || r.City != "东城区" || r.District != "北京市" || r.Detail != "123" {
+		t.Fatalf("四段拆分错误: %+v", r)
+	}
+	r = splitLegacyAddress("unknown")
+	if r.Province != "" || r.Detail != "unknown" {
+		t.Fatalf("单段回退错误: %+v", r)
+	}
+}
+
+// TestMapLegacyPayType 覆盖历史支付方式映射：未支付空串、yue→balance。
+func TestMapLegacyPayType(t *testing.T) {
+	if got := mapLegacyPayType("yue", 1, statusPaid); got != "balance" {
+		t.Fatalf("已支付 yue 应映射 balance, 实际 %q", got)
+	}
+	if got := mapLegacyPayType("yue", 0, statusPendingPayment); got != "" {
+		t.Fatalf("待支付订单 pay_type 应为空, 实际 %q", got)
+	}
+	if got := mapLegacyPayType("", 1, statusPaid); got != "balance" {
+		t.Fatalf("已支付但源为空应回退 balance, 实际 %q", got)
 	}
 }
 
