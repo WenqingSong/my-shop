@@ -13,11 +13,11 @@
 
 | 指标 | 数值 |
 |---|---|
-| DTO 结构体总数 | 343 |
-| Request 结构体 | 150 |
-| Response 结构体 | 149 |
-| 业务实体结构体 | 44 |
-| 已登记 API | 150 |
+| DTO 结构体总数 | 356 |
+| Request 结构体 | 155 |
+| Response 结构体 | 154 |
+| 业务实体结构体 | 47 |
+| 已登记 API | 155 |
 | OperationId 唯一性 | 通过（生成期强制校验） |
 | 无法确认的字段 | 0（遇到未登记类型直接失败，不猜测） |
 
@@ -51,14 +51,14 @@
 
 | Schema | Go 类型 | 类型 | 字段数 | 金额字段 | 枚举字段 | 时间字段 | 可空字段 |
 |---|---|---|---|---|---|---|---|
-| `Address` | `address.Address` | Entity | 10 | - | - | `created_at`<br>`updated_at` | `created_at`<br>`updated_at` |
-| `AddressCreateRequest` | `address.CreateReq` | Request | 7 | - | - | - | `is_default` |
+| `Address` | `address.Address` | Entity | 11 | - | - | `created_at`<br>`updated_at` | `region_id`<br>`created_at`<br>`updated_at` |
+| `AddressCreateRequest` | `address.CreateReq` | Request | 8 | - | - | - | `region_id`<br>`is_default` |
 | `AddressCreateResponse` | `address.CreateRes` | Response | 1 | - | - | - | - |
 | `AddressListRequest` | `address.ListReq` | Request | 0 | - | - | - | - |
 | `AddressListResponse` | `address.ListRes` | Response | 1 | - | - | - | - |
 | `AddressDetailRequest` | `address.DetailReq` | Request | 1 | - | - | - | - |
 | `AddressDetailResponse` | `address.DetailRes` | Response | 1 | - | - | - | - |
-| `AddressUpdateRequest` | `address.UpdateReq` | Request | 8 | - | - | - | `recipient_name`<br>`phone`<br>`province`<br>`city`<br>`district`<br>`detail`<br>`is_default` |
+| `AddressUpdateRequest` | `address.UpdateReq` | Request | 9 | - | - | - | `recipient_name`<br>`phone`<br>`province`<br>`city`<br>`district`<br>`region_id`<br>`detail`<br>`is_default` |
 | `AddressUpdateResponse` | `address.UpdateRes` | Response | 1 | - | - | - | - |
 | `AddressDeleteRequest` | `address.DeleteReq` | Request | 1 | - | - | - | - |
 | `AddressDeleteResponse` | `address.DeleteRes` | Response | 0 | - | - | - | - |
@@ -327,6 +327,11 @@
 | `ProductOnShelfResponse` | `product.OnShelfRes` | Response | 1 | - | - | - | - |
 | `ProductOffShelfRequest` | `product.OffShelfReq` | Request | 1 | - | - | - | - |
 | `ProductOffShelfResponse` | `product.OffShelfRes` | Response | 1 | - | - | - | - |
+| `UserProfile` | `profile.Profile` | Entity | 6 | - | - | - | `phone`<br>`birthday` |
+| `ProfileGetRequest` | `profile.GetReq` | Request | 0 | - | - | - | - |
+| `ProfileGetResponse` | `profile.GetRes` | Response | 1 | - | - | - | - |
+| `ProfileUpdateRequest` | `profile.UpdateReq` | Request | 4 | - | - | - | `nickname`<br>`avatar_url`<br>`phone`<br>`birthday` |
+| `ProfileUpdateResponse` | `profile.UpdateRes` | Response | 1 | - | - | - | - |
 | `RecommendItemSnapshot` | `recommendation.ItemSnapshot` | Entity | 5 | `price` | - | - | - |
 | `RecommendItem` | `recommendation.Item` | Entity | 6 | - | - | `created_at`<br>`updated_at` | `created_at`<br>`updated_at` |
 | `RecommendPosition` | `recommendation.Position` | Entity | 6 | - | `status` | `created_at`<br>`updated_at` | `created_at`<br>`updated_at` |
@@ -370,6 +375,14 @@
 | `RefundExecuteResponse` | `refund.ExecuteRes` | Response | 1 | - | - | - | - |
 | `RefundCloseRequest` | `refund.CloseReq` | Request | 2 | - | - | - | - |
 | `RefundCloseResponse` | `refund.CloseRes` | Response | 1 | - | - | - | - |
+| `Region` | `region.Region` | Entity | 4 | - | - | - | - |
+| `RegionListRequest` | `region.ListReq` | Request | 1 | - | - | - | - |
+| `RegionListResponse` | `region.ListRes` | Response | 1 | - | - | - | - |
+| `RegionTreeNode` | `region.TreeNode` | Entity | 2 | - | - | - | - |
+| `RegionTreeRequest` | `region.TreeReq` | Request | 0 | - | - | - | - |
+| `RegionTreeResponse` | `region.TreeRes` | Response | 2 | - | - | - | - |
+| `RegionDetailRequest` | `region.DetailReq` | Request | 1 | - | - | - | - |
+| `RegionDetailResponse` | `region.DetailRes` | Response | 4 | - | - | - | `province`<br>`city`<br>`district` |
 | `ReviewItem` | `review.ReviewItem` | Entity | 7 | - | - | `created_at` | `created_at` |
 | `Review` | `review.Review` | Entity | 9 | - | `status` | `created_at` | `created_at` |
 | `ReviewListRequest` | `review.ListReq` | Request | 3 | - | - | - | - |
@@ -564,14 +577,17 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 
 | Schema | 字段 |
 |---|---|
+| `Address` | `region_id` |
 | `Address` | `created_at` |
 | `Address` | `updated_at` |
+| `AddressCreateRequest` | `region_id` |
 | `AddressCreateRequest` | `is_default` |
 | `AddressUpdateRequest` | `recipient_name` |
 | `AddressUpdateRequest` | `phone` |
 | `AddressUpdateRequest` | `province` |
 | `AddressUpdateRequest` | `city` |
 | `AddressUpdateRequest` | `district` |
+| `AddressUpdateRequest` | `region_id` |
 | `AddressUpdateRequest` | `detail` |
 | `AddressUpdateRequest` | `is_default` |
 | `AdminUpdateRoleRequest` | `name` |
@@ -694,6 +710,12 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 | `ProductUpdateRequest` | `detail` |
 | `ProductUpdateRequest` | `status` |
 | `ProductUpdateRequest` | `images` |
+| `UserProfile` | `phone` |
+| `UserProfile` | `birthday` |
+| `ProfileUpdateRequest` | `nickname` |
+| `ProfileUpdateRequest` | `avatar_url` |
+| `ProfileUpdateRequest` | `phone` |
+| `ProfileUpdateRequest` | `birthday` |
 | `RecommendItem` | `created_at` |
 | `RecommendItem` | `updated_at` |
 | `RecommendPosition` | `created_at` |
@@ -713,6 +735,9 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 | `RefundAdminListRequest` | `order_id` |
 | `RefundAdminListRequest` | `user_id` |
 | `RefundAudit` | `created_at` |
+| `RegionDetailResponse` | `province` |
+| `RegionDetailResponse` | `city` |
+| `RegionDetailResponse` | `district` |
 | `ReviewItem` | `created_at` |
 | `Review` | `created_at` |
 | `Sku` | `created_at` |

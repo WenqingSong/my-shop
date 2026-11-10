@@ -229,8 +229,10 @@ codes:
       - like
       - order
       - product
+      - profile
       - recommendation
       - refund
+      - region
       - review
       - sku
   - code: 1001
@@ -253,7 +255,9 @@ codes:
       - like
       - order
       - product
+      - profile
       - refund
+      - region
       - review
       - sku
   - code: 2002
@@ -336,6 +340,13 @@ codes:
     domain: iam
     reused_by_domains:
       - admin
+  - code: 2016
+    constant: CodePhoneExists
+    http_status: 409
+    message: 手机号已被使用
+    domain: iam
+    reused_by_domains:
+      - profile
   - code: 4007
     constant: CodeProductCategoryDisabled
     http_status: 400
@@ -569,6 +580,8 @@ codes:
     http_status: 404
     message: 用户不存在
     domain: iam
+    reused_by_domains:
+      - profile
   - code: 2001
     constant: CodeUsernameExists
     http_status: 409

@@ -11,10 +11,11 @@ import (
 // 契约基线（B1-01 冻结的 HEAD）。
 const contractBaseline = "82243c0fbce614e03c4ff57dcc829b5f68fb08f2"
 
-// 常驻 API 的期望分布：B1-01 §3.1 的 142 条 + B1-04-05 一级分销新增 8 条（前台 4、后台 4）。
+// 常驻 API 的期望分布：B1-01 §3.1 的 142 条 + B1-04-05 一级分销新增 8 条（前台 4、后台 4）
+// + B1-04-01 用户资料与地区字典新增 5 条（前台 5：/profile 2 条、/regions 3 条）。
 const (
-	expectedTotal    = 150
-	expectedFrontend = 71
+	expectedTotal    = 155
+	expectedFrontend = 76
 	expectedAdmin    = 77
 	expectedHealth   = 2
 )
@@ -23,7 +24,7 @@ var codesByValue = map[int]*ErrorCode{}
 
 // pathFileOrder 固定分域视图文件的输出顺序。
 var pathFileOrder = []string{
-	"iam", "admin", "categories", "product", "sku", "inventory", "address",
+	"iam", "profile", "admin", "categories", "product", "sku", "inventory", "address", "region",
 	"cart", "order", "refund", "coupon", "distribution", "flashsale", "banner",
 	"recommendation", "article", "review", "favorite", "like", "upload", "dashboard", "health",
 }
@@ -34,7 +35,9 @@ var tagDescriptions = []struct {
 	Desc string
 }{
 	{"IAM", "用户注册、登录、刷新、会话管理与后台用户状态"},
+	{"用户资料", "当前登录用户的资料读取与更新（仅本人）"},
 	{"收货地址", "用户收货地址 CRUD（仅本人）"},
+	{"地区", "省/市/区三级地区字典（只读）"},
 	{"后台认证", "管理员登录/登出/当前身份"},
 	{"管理员", "管理员账号与角色分配"},
 	{"角色", "角色 CRUD 与角色权限分配"},

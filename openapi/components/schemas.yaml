@@ -11,6 +11,7 @@ Address:
     - province
     - city
     - district
+    - region_id
     - detail
     - is_default
     - created_at
@@ -36,6 +37,11 @@ Address:
     district:
       type: string
       description: 区（自由文本）
+    region_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 结构化地区 id（区/县级，regions.level=3）；null 表示历史地址或未使用结构化地区
     detail:
       type: string
       description: 详细地址
@@ -68,13 +74,18 @@ AddressCreateRequest:
       description: 手机号，格式 ^1[3-9]\d{9}$
     province:
       type: string
-      description: 省（自由文本，非空）
+      description: 省（自由文本；提供 region_id 时可省略，服务端以字典为准）
     city:
       type: string
-      description: 市（自由文本，非空）
+      description: 市（自由文本；提供 region_id 时可省略，服务端以字典为准）
     district:
       type: string
-      description: 区（自由文本，非空）
+      description: 区（自由文本；提供 region_id 时可省略，服务端以字典为准）
+    region_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 结构化地区 id（区/县级，regions.level=3）；提供时省/市/区文本由字典填充
     detail:
       type: string
       description: 详细地址，trim 后 1~255 字符
@@ -141,13 +152,18 @@ AddressUpdateRequest:
       description: 手机号
     province:
       type: [string, "null"]
-      description: 省（自由文本）
+      description: 省（自由文本；未传 region_id 时修改文本会清空结构化地区引用）
     city:
       type: [string, "null"]
       description: 市（自由文本）
     district:
       type: [string, "null"]
       description: 区（自由文本）
+    region_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 结构化地区 id（区/县级）；省略表示不修改，0 表示清空；非 0 时省/市/区文本以字典为准
     detail:
       type: [string, "null"]
       description: 详细地址
@@ -4979,6 +4995,68 @@ ProductOffShelfResponse:
   description: OffShelfRes 下架商品响应。
   allOf:
     - $ref: '#/Product'
+UserProfile:
+  type: object
+  description: Profile 当前登录用户的可对外资料。不含密码哈希、认证版本、状态等内部认证信息。
+  required:
+    - id
+    - username
+    - nickname
+    - avatar_url
+    - phone
+    - birthday
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 用户 id
+    username:
+      type: string
+      description: 用户名（登录标识，只读）
+    nickname:
+      type: string
+      description: 昵称；空串表示未设置
+    avatar_url:
+      type: string
+      description: 头像地址；空串表示未设置
+    phone:
+      type: [string, "null"]
+      description: 手机号；null 表示未设置
+    birthday:
+      type: [string, "null"]
+      description: 生日，YYYY-MM-DD；null 表示未设置
+ProfileGetRequest:
+  type: object
+  description: GetReq 查询当前登录用户资料请求。用户 id 来自已认证 Principal，不接受请求参数指定。
+  properties: {}
+  additionalProperties: false
+ProfileGetResponse:
+  type: object
+  description: GetRes 查询当前登录用户资料响应。
+  allOf:
+    - $ref: '#/UserProfile'
+ProfileUpdateRequest:
+  type: object
+  description: UpdateReq 更新当前登录用户资料请求。用户 id 来自已认证 Principal，不接受请求体指定。 字段省略（null/未提供）表示不修改；空串表示主动清空（nickname/avatar_url 清为空串， phone/birthday 清为 NULL）。
+  properties:
+    nickname:
+      type: [string, "null"]
+      description: 昵称；省略表示不修改，空串表示清空；trim 后 ≤32 字符
+    avatar_url:
+      type: [string, "null"]
+      description: 头像 URL；省略表示不修改，空串表示清空；非空须为 http/https 且 ≤512 字符
+    phone:
+      type: [string, "null"]
+      description: 手机号；省略表示不修改，空串表示清空为未设置；格式 ^1[3-9]\d{9}$
+    birthday:
+      type: [string, "null"]
+      description: 生日；省略表示不修改，空串表示清空；格式 YYYY-MM-DD
+ProfileUpdateResponse:
+  type: object
+  description: UpdateRes 更新当前登录用户资料响应（返回更新后的完整资料）。
+  allOf:
+    - $ref: '#/UserProfile'
 RecommendItemSnapshot:
   type: object
   description: ItemSnapshot 前台推荐商品快照（仅 on_shelf 商品，查询时 JOIN products 实时快照）。
@@ -5777,6 +5855,122 @@ RefundCloseResponse:
   description: CloseRes 关闭退款响应。
   allOf:
     - $ref: '#/Refund'
+Region:
+  type: object
+  description: Region 地区字典项（只读）。level：1=省、2=市、3=区/县；省级 parent_id=0。
+  required:
+    - id
+    - parent_id
+    - level
+    - name
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 地区 id（沿用历史 city_id）
+    parent_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 父级地区 id；省级为 0
+    level:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 层级：1=省、2=市、3=区/县
+    name:
+      type: string
+      description: 地区名称
+RegionListRequest:
+  type: object
+  description: ListReq 按父级查询直接子级请求。parent_id 缺省或为 0 时返回省级列表。
+  properties:
+    parent_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: query
+      default: 0
+      description: 父级地区 id；0 或缺省返回省级列表
+RegionListResponse:
+  type: object
+  description: ListRes 按父级查询直接子级响应（按 id 升序，顺序稳定）。
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/Region'}, {type: "null"}]
+      description: 地区列表（按 id 升序）
+RegionTreeNode:
+  type: object
+  description: TreeNode 地区树节点。children 为该节点的直接子级；区/县节点 children 为空数组。
+  allOf:
+    - $ref: '#/Region'
+  required:
+    - children
+  properties:
+    children:
+      type: array
+      items:
+        oneOf: [{$ref: '#/RegionTreeNode'}, {type: "null"}]
+      description: 直接子级
+RegionTreeRequest:
+  type: object
+  description: TreeReq 查询省/市/区三级树请求（只读全量字典）。
+  properties: {}
+  additionalProperties: false
+RegionTreeResponse:
+  type: object
+  description: TreeRes 查询省/市/区三级树响应。total 为树中全部节点数（省份+城市+区县）。
+  required:
+    - items
+    - total
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/RegionTreeNode'}, {type: "null"}]
+      description: 省级节点列表（按 id 升序，子级按 id 升序）
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 树中全部节点数
+RegionDetailRequest:
+  type: object
+  description: DetailReq 查询单个地区及其完整三级链路请求。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required|min:1
+      description: 地区 id
+RegionDetailResponse:
+  type: object
+  description: DetailRes 地区详情：province/city/district 对应 1/2/3 级，链上不存在的层级为 null。
+  allOf:
+    - $ref: '#/Region'
+  required:
+    - province
+    - city
+    - district
+  properties:
+    province:
+      oneOf: [{$ref: '#/Region'}, {type: "null"}]
+      description: 省级地区；level=1 时为自身
+    city:
+      oneOf: [{$ref: '#/Region'}, {type: "null"}]
+      description: 市级地区；level>=2 时存在
+    district:
+      oneOf: [{$ref: '#/Region'}, {type: "null"}]
+      description: 区/县级地区；level=3 时为自身
 ReviewItem:
   type: object
   description: ReviewItem 公开评价条目（仅 status=published，供商品详情页公开列表）。

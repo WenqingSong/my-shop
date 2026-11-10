@@ -131,6 +131,12 @@ groups:
       - ProductOffShelfRequest
       - ProductOnShelfRequest
       - ProductUpdateRequest
+      # B1-04-01 用户资料与地区字典：5 条 API 的完整请求 DTO（同样按字段位置内联生成）。
+      - ProfileGetRequest
+      - ProfileUpdateRequest
+      - RegionDetailRequest
+      - RegionListRequest
+      - RegionTreeRequest
       - RecommendAddItemRequest
       - RecommendAdminDetailRequest
       - RecommendAdminListRequest

@@ -31,13 +31,18 @@
                 description: 手机号，格式 ^1[3-9]\d{9}$
               province:
                 type: string
-                description: 省（自由文本，非空）
+                description: 省（自由文本；提供 region_id 时可省略，服务端以字典为准）
               city:
                 type: string
-                description: 市（自由文本，非空）
+                description: 市（自由文本；提供 region_id 时可省略，服务端以字典为准）
               district:
                 type: string
-                description: 区（自由文本，非空）
+                description: 区（自由文本；提供 region_id 时可省略，服务端以字典为准）
+              region_id:
+                type: [integer, "null"]
+                format: int64
+                x-go-type: int64
+                description: 结构化地区 id（区/县级，regions.level=3）；提供时省/市/区文本由字典填充
               detail:
                 type: string
                 description: 详细地址，trim 后 1~255 字符
@@ -216,13 +221,18 @@
                 description: 手机号
               province:
                 type: [string, "null"]
-                description: 省（自由文本）
+                description: 省（自由文本；未传 region_id 时修改文本会清空结构化地区引用）
               city:
                 type: [string, "null"]
                 description: 市（自由文本）
               district:
                 type: [string, "null"]
                 description: 区（自由文本）
+              region_id:
+                type: [integer, "null"]
+                format: int64
+                x-go-type: int64
+                description: 结构化地区 id（区/县级）；省略表示不修改，0 表示清空；非 0 时省/市/区文本以字典为准
               detail:
                 type: [string, "null"]
                 description: 详细地址

@@ -48,6 +48,7 @@ var domainByConstantPrefix = []struct {
 	{"CodeUsernameExists", "iam"},
 	{"CodeSessionNotFound", "iam"},
 	{"CodeUserNotFound", "iam"},
+	{"CodePhoneExists", "iam"},
 	{"CodeAdmin", "iam"},
 	{"CodeRole", "iam"},
 	{"CodeCategory", "category"},

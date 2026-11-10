@@ -16,8 +16,12 @@ servers:
 tags:
   - name: IAM
     description: 用户注册、登录、刷新、会话管理与后台用户状态
+  - name: 用户资料
+    description: 当前登录用户的资料读取与更新（仅本人）
   - name: 收货地址
     description: 用户收货地址 CRUD（仅本人）
+  - name: 地区
+    description: 省/市/区三级地区字典（只读）
   - name: 后台认证
     description: 管理员登录/登出/当前身份
   - name: 管理员
@@ -1189,6 +1193,133 @@ paths:
           $ref: '#/components/responses/BadRequest'
         "500":
           $ref: '#/components/responses/InternalError'
+  /regions:
+    get:
+      tags:
+        - 地区
+      summary: 查询地区列表
+      description: 公开接口，无需认证。
+      operationId: regionList
+      security: []
+      x-auth: public
+      x-handler: region.List
+      x-source: routes_frontend.go
+      parameters:
+        - name: parent_id
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+            default: 0
+          description: 父级地区 id；0 或缺省返回省级列表
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/RegionListResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /regions/tree:
+    get:
+      tags:
+        - 地区
+      summary: 查询地区三级树
+      description: 公开接口，无需认证。
+      operationId: regionTree
+      security: []
+      x-auth: public
+      x-handler: region.Tree
+      x-source: routes_frontend.go
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/RegionTreeResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /regions/{id}:
+    get:
+      tags:
+        - 地区
+      summary: 查询地区详情与层级链
+      description: 公开接口，无需认证。
+      operationId: regionDetail
+      security: []
+      x-auth: public
+      x-handler: region.Detail
+      x-source: routes_frontend.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 地区 id
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/RegionDetailResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "500":
+          $ref: '#/components/responses/InternalError'
   /me:
     get:
       tags:
@@ -1232,6 +1363,119 @@ paths:
           $ref: '#/components/responses/Forbidden'
         "500":
           $ref: '#/components/responses/InternalError'
+  /profile:
+    get:
+      tags:
+        - 用户资料
+      summary: 查询当前登录用户资料
+      description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+      operationId: profileGet
+      security:
+        - bearerAuth: []
+      x-auth: user
+      x-handler: profile.Get
+      x-source: routes_frontend.go
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ProfileGetResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 2015
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "500":
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags:
+        - 用户资料
+      summary: 更新当前登录用户资料
+      description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+      operationId: profileUpdate
+      security:
+        - bearerAuth: []
+      x-auth: user
+      x-handler: profile.Update
+      x-source: routes_frontend.go
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nickname:
+                  type: [string, "null"]
+                  description: 昵称；省略表示不修改，空串表示清空；trim 后 ≤32 字符
+                avatar_url:
+                  type: [string, "null"]
+                  description: 头像 URL；省略表示不修改，空串表示清空；非空须为 http/https 且 ≤512 字符
+                phone:
+                  type: [string, "null"]
+                  description: 手机号；省略表示不修改，空串表示清空为未设置；格式 ^1[3-9]\d{9}$
+                birthday:
+                  type: [string, "null"]
+                  description: 生日；省略表示不修改，空串表示清空；格式 YYYY-MM-DD
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ProfileUpdateResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 2015
+            - 2016
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+        "500":
+          $ref: '#/components/responses/InternalError'
   /addresses:
     post:
       tags:
@@ -1259,13 +1503,18 @@ paths:
                   description: 手机号，格式 ^1[3-9]\d{9}$
                 province:
                   type: string
-                  description: 省（自由文本，非空）
+                  description: 省（自由文本；提供 region_id 时可省略，服务端以字典为准）
                 city:
                   type: string
-                  description: 市（自由文本，非空）
+                  description: 市（自由文本；提供 region_id 时可省略，服务端以字典为准）
                 district:
                   type: string
-                  description: 区（自由文本，非空）
+                  description: 区（自由文本；提供 region_id 时可省略，服务端以字典为准）
+                region_id:
+                  type: [integer, "null"]
+                  format: int64
+                  x-go-type: int64
+                  description: 结构化地区 id（区/县级，regions.level=3）；提供时省/市/区文本由字典填充
                 detail:
                   type: string
                   description: 详细地址，trim 后 1~255 字符
@@ -1444,13 +1693,18 @@ paths:
                   description: 手机号
                 province:
                   type: [string, "null"]
-                  description: 省（自由文本）
+                  description: 省（自由文本；未传 region_id 时修改文本会清空结构化地区引用）
                 city:
                   type: [string, "null"]
                   description: 市（自由文本）
                 district:
                   type: [string, "null"]
                   description: 区（自由文本）
+                region_id:
+                  type: [integer, "null"]
+                  format: int64
+                  x-go-type: int64
+                  description: 结构化地区 id（区/县级）；省略表示不修改，0 表示清空；非 0 时省/市/区文本以字典为准
                 detail:
                   type: [string, "null"]
                   description: 详细地址
@@ -9973,6 +10227,16 @@ components:
       $ref: ./components/schemas.yaml#/ProductOffShelfRequest
     ProductOffShelfResponse:
       $ref: ./components/schemas.yaml#/ProductOffShelfResponse
+    UserProfile:
+      $ref: ./components/schemas.yaml#/UserProfile
+    ProfileGetRequest:
+      $ref: ./components/schemas.yaml#/ProfileGetRequest
+    ProfileGetResponse:
+      $ref: ./components/schemas.yaml#/ProfileGetResponse
+    ProfileUpdateRequest:
+      $ref: ./components/schemas.yaml#/ProfileUpdateRequest
+    ProfileUpdateResponse:
+      $ref: ./components/schemas.yaml#/ProfileUpdateResponse
     RecommendItemSnapshot:
       $ref: ./components/schemas.yaml#/RecommendItemSnapshot
     RecommendItem:
@@ -10059,6 +10323,22 @@ components:
       $ref: ./components/schemas.yaml#/RefundCloseRequest
     RefundCloseResponse:
       $ref: ./components/schemas.yaml#/RefundCloseResponse
+    Region:
+      $ref: ./components/schemas.yaml#/Region
+    RegionListRequest:
+      $ref: ./components/schemas.yaml#/RegionListRequest
+    RegionListResponse:
+      $ref: ./components/schemas.yaml#/RegionListResponse
+    RegionTreeNode:
+      $ref: ./components/schemas.yaml#/RegionTreeNode
+    RegionTreeRequest:
+      $ref: ./components/schemas.yaml#/RegionTreeRequest
+    RegionTreeResponse:
+      $ref: ./components/schemas.yaml#/RegionTreeResponse
+    RegionDetailRequest:
+      $ref: ./components/schemas.yaml#/RegionDetailRequest
+    RegionDetailResponse:
+      $ref: ./components/schemas.yaml#/RegionDetailResponse
     ReviewItem:
       $ref: ./components/schemas.yaml#/ReviewItem
     Review:
@@ -10146,8 +10426,8 @@ components:
       $ref: ./components/security.yaml#/bearerAuth
 x-contract-baseline: 82243c0fbce614e03c4ff57dcc829b5f68fb08f2
 x-api-count:
-  total: 150
-  frontend: 71
+  total: 155
+  frontend: 76
   admin: 77
   health: 2
   conditional: 1

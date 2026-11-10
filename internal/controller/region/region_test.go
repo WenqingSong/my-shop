@@ -23,8 +23,19 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
 )
 
-// safeTestDB 本任务专用独立测试库；地区字典为只读数据，测试不 DELETE regions。
-const safeTestDB = "my_shop_b104_test"
+// safeTestDBs 是允许执行测试的隔离测试库白名单（逐库显式列名，绝不落到 my_shop）；
+// 地区字典为只读数据，测试不 DELETE regions。
+var safeTestDBs = []string{"my_shop_b104_test", "my_shop_b104_integration"}
+
+// isSafeTestDB 判断库名是否属于本任务的隔离测试库。
+func isSafeTestDB(name string) bool {
+	for _, s := range safeTestDBs {
+		if name == s {
+			return true
+		}
+	}
+	return false
+}
 
 const (
 	testJWTSecret     = "test-secret-0123456789-0123456789-0123456789"
@@ -87,8 +98,8 @@ func assertOK(t *testing.T, res apiResult, op string) {
 // requireIsolatedTestDB 写库（Bootstrap seed/migration）前核实目标库。
 func requireIsolatedTestDB(t *testing.T) {
 	t.Helper()
-	if got := os.Getenv("DATABASE_DEFAULT_NAME"); got != safeTestDB {
-		t.Fatalf("拒绝在非测试库执行：DATABASE_DEFAULT_NAME=%q，必须为 %q", got, safeTestDB)
+	if got := os.Getenv("DATABASE_DEFAULT_NAME"); !isSafeTestDB(got) {
+		t.Fatalf("拒绝在非测试库执行：DATABASE_DEFAULT_NAME=%q，必须为隔离测试库 %v", got, safeTestDBs)
 	}
 }
 
@@ -98,8 +109,8 @@ func requireActualDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("查询当前数据库失败: %v", err)
 	}
-	if got := v.String(); got != safeTestDB {
-		t.Fatalf("拒绝在非测试库执行：实际连接库为 %q，不是 %q", got, safeTestDB)
+	if got := v.String(); !isSafeTestDB(got) {
+		t.Fatalf("拒绝在非测试库执行：实际连接库为 %q，不是隔离测试库 %v", got, safeTestDBs)
 	}
 }
 

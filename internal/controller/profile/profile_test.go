@@ -29,9 +29,19 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/service"
 )
 
-// safeTestDB 本任务专用的独立测试库。测试会 DELETE users/addresses，
-// 必须在写操作前核实真实连接库名，绝不落到 my_shop / my_shop_b10304_verify。
-const safeTestDB = "my_shop_b104_test"
+// safeTestDBs 是允许执行破坏性测试的隔离测试库白名单（逐库显式列名，绝不落到 my_shop）。
+// 测试会 DELETE users/addresses，必须在写操作前核实真实连接库名。
+var safeTestDBs = []string{"my_shop_b104_test", "my_shop_b104_integration"}
+
+// isSafeTestDB 判断库名是否属于本任务的隔离测试库。
+func isSafeTestDB(name string) bool {
+	for _, s := range safeTestDBs {
+		if name == s {
+			return true
+		}
+	}
+	return false
+}
 
 const (
 	testJWTSecret     = "test-secret-0123456789-0123456789-0123456789"
@@ -114,8 +124,8 @@ func authHeader(token string) map[string]string {
 // requireIsolatedTestDB 在迁移/写库之前做第一道隔离检查：只允许本任务测试库。
 func requireIsolatedTestDB(t *testing.T) {
 	t.Helper()
-	if got := os.Getenv("DATABASE_DEFAULT_NAME"); got != safeTestDB {
-		t.Fatalf("拒绝执行破坏性测试：DATABASE_DEFAULT_NAME=%q，必须显式设为独立测试库 %q", got, safeTestDB)
+	if got := os.Getenv("DATABASE_DEFAULT_NAME"); !isSafeTestDB(got) {
+		t.Fatalf("拒绝执行破坏性测试：DATABASE_DEFAULT_NAME=%q，必须显式设为隔离测试库 %v", got, safeTestDBs)
 	}
 }
 
@@ -126,8 +136,8 @@ func requireActualDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("查询当前数据库失败: %v", err)
 	}
-	if got := v.String(); got != safeTestDB {
-		t.Fatalf("拒绝执行破坏性测试：实际连接库为 %q，不是独立测试库 %q", got, safeTestDB)
+	if got := v.String(); !isSafeTestDB(got) {
+		t.Fatalf("拒绝执行破坏性测试：实际连接库为 %q，不是隔离测试库 %v", got, safeTestDBs)
 	}
 }
 

@@ -14,8 +14,8 @@ import (
 // baselineVersion 是内嵌 baseline 迁移的版本号（14 位时间戳）。
 const baselineVersion = uint(20261001000001)
 
-// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + … + distribution）。
-const latestMigrationVersion = uint(20261110000014)
+// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + … + profile_region_address）。
+const latestMigrationVersion = uint(20261110000015)
 
 // businessTables 是 migration 应建立的 60 张业务表。
 // 注意顺序：wallet_transactions 通过外键引用 wallet_accounts（ON DELETE RESTRICT），故排在 wallet_accounts 之前；
@@ -475,6 +475,8 @@ var expectedSchema = []tableSpec{
 			{Name: "nickname", Type: "varchar(32)", Default: strPtr("")},
 			{Name: "avatar_url", Type: "varchar(512)", Default: strPtr("")},
 			{Name: "phone", Type: "varchar(20)", Nullable: true},
+			// B1-04-01 profile_region_address：生日列（可空，历史用户保持 NULL）。
+			{Name: "birthday", Type: "date", Nullable: true},
 			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
 			{Name: "updated_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"},
 			{Name: "status", Type: "tinyint", Default: strPtr("1")},
