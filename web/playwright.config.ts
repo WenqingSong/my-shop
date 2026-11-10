@@ -8,7 +8,9 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  // MSW Service Worker 注册与 Vite 首次依赖优化并行时会出现空页面，
+  // 统一串行执行，保证本地与 CI 结果一致（用例规模小，耗时可控）。
+  workers: 1,
   reporter: [['list'], ['html', { open: 'never' }]],
   timeout: 30_000,
   expect: { timeout: 5_000 },
@@ -28,5 +30,11 @@ export default defineConfig({
     url: BASE_URL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
+    // E2E 使用 MSW Mock 数据，避免依赖本地后端进程；
+    // 推荐位 code 同时在此开启，以覆盖首页推荐区块渲染。
+    env: {
+      VITE_ENABLE_MOCK: 'true',
+      VITE_HOME_RECOMMEND_CODE: 'home',
+    },
   },
 })

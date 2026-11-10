@@ -1,197 +1,288 @@
-import {
-  ArrowRight,
-  Boxes,
-  Check,
-  Database,
-  FileCode,
-  Server,
-  ShieldCheck,
-  Sparkles,
-} from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { ArrowRight, ChevronRight, LayoutGrid } from 'lucide-react'
+import { type ReactNode, useState } from 'react'
+import { Link } from 'react-router'
 
+import { fetchBanners } from '@/api/banners'
+import { fetchCategoryTree } from '@/api/categories'
+import { fetchProductList, HOME_PRODUCT_LIMIT } from '@/api/products'
+import { queryKeys } from '@/api/query-keys'
+import { fetchRecommendation } from '@/api/recommendations'
+import type { BannerItem, Category } from '@/api/types'
+import { EmptyState } from '@/components/common/empty-state'
+import { ErrorState } from '@/components/common/error-state'
 import { PageContainer } from '@/components/common/page-container'
+import { ProductGrid, ProductGridSkeleton } from '@/components/product/product-grid'
 import { Button } from '@/components/ui/button'
+import { homeRecommendCode } from '@/config/env'
 import { useDocumentTitle } from '@/hooks/use-document-title'
-import { ComponentShowcaseSection } from '@/pages/home/component-showcase-section'
-import { DesignBaselineSection } from '@/pages/home/design-baseline-section'
 import { SectionHeading } from '@/pages/home/section-primitives'
+import { catalogHref } from '@/utils/catalog-search'
+import { collectLeafCategories } from '@/utils/category-tree'
+import { cn } from '@/utils/cn'
 
-const deliveryItems = [
-  '设计系统与 Tailwind Theme 落地',
-  '商城 Header / Footer / 内容容器',
-  'API Client 与 TanStack Query 接入',
-  'Vitest、MSW、Playwright 测试工程',
-]
+const HOME_LATEST_QUERY = {
+  page: 1,
+  size: HOME_PRODUCT_LIMIT,
+  sort: 'created_at',
+  order: 'desc',
+} as const
 
-const stackStats = [
-  { label: '框架', value: 'React 19' },
-  { label: '构建', value: 'Vite' },
-  { label: '类型', value: 'TS strict' },
-  { label: '样式', value: 'Tailwind 4' },
-]
+function BannerTile({
+  banner,
+  className,
+  eager = false,
+}: {
+  banner: BannerItem
+  className?: string
+  eager?: boolean
+}) {
+  const [imageFailed, setImageFailed] = useState(false)
 
-const engineeringItems = [
-  {
-    icon: Server,
-    title: 'API Client',
-    description: '默认 /api 基础路径，15s 超时，统一 ApiError 与 Token 扩展点，业务层不直接调用 fetch。',
-  },
-  {
-    icon: Database,
-    title: '数据层职责',
-    description: 'TanStack Query 管理后端数据与缓存失效；Zustand 只保存导航开关等轻量 UI 状态。',
-  },
-  {
-    icon: ShieldCheck,
-    title: '质量保障',
-    description: 'Vitest + Testing Library 覆盖组件，MSW 拦截请求，Playwright 校验真实浏览器行为。',
-  },
-  {
-    icon: FileCode,
-    title: '契约优先',
-    description: 'openapi-typescript 已配置生成命令，等待后端 B0 提供正式 OpenAPI 契约后再生成业务类型。',
-  },
-]
+  const content = (
+    <div
+      className={cn(
+        'relative isolate flex w-full overflow-hidden rounded-2xl border border-border bg-gray-100',
+        className,
+      )}
+    >
+      {!imageFailed ? (
+        <img
+          src={banner.image_url}
+          alt=""
+          loading={eager ? 'eager' : 'lazy'}
+          decoding="async"
+          onError={() => setImageFailed(true)}
+          className="absolute inset-0 size-full object-cover"
+        />
+      ) : null}
+      <div className="absolute inset-0 bg-gray-900/35" aria-hidden="true" />
+      <div className="relative mt-auto w-full p-4 sm:p-5">
+        <p className="text-base font-semibold text-white">{banner.title}</p>
+        {banner.link_url ? (
+          <span className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-white/90">
+            查看活动
+            <ChevronRight className="size-3.5" aria-hidden="true" />
+          </span>
+        ) : null}
+      </div>
+    </div>
+  )
 
-const roadmap = [
-  { stage: 'W0', title: '工程初始化与设计基线', state: '本期交付' },
-  { stage: 'W1', title: '商品浏览与分类', state: '待启动' },
-  { stage: 'W2', title: '商品详情与搜索', state: '待启动' },
-  { stage: 'W3', title: '购物车', state: '待启动' },
-  { stage: 'W4', title: '下单与结算', state: '待启动' },
-  { stage: 'W5', title: '订单与账户', state: '待启动' },
-]
+  if (!banner.link_url) {
+    return content
+  }
 
-function Hero() {
+  if (/^https?:\/\//i.test(banner.link_url)) {
+    return (
+      <a href={banner.link_url} target="_blank" rel="noreferrer noopener" className="block">
+        {content}
+      </a>
+    )
+  }
+
+  return (
+    <Link to={banner.link_url.startsWith('/') ? banner.link_url : `/${banner.link_url}`} className="block">
+      {content}
+    </Link>
+  )
+}
+
+function Hero({ banners }: { banners: BannerItem[] }) {
+  const [primaryBanner, ...secondaryBanners] = banners
+
   return (
     <section className="border-b border-border bg-surface">
-      <PageContainer className="grid gap-10 py-14 lg:grid-cols-[minmax(0,1fr)_400px] lg:items-center lg:gap-16 lg:py-20">
+      <PageContainer className="grid gap-10 py-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,480px)] lg:items-center lg:gap-16 lg:py-16">
         <div>
           <span className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-primary-soft px-3 py-1 text-xs font-medium text-primary">
-            <Sparkles className="size-3.5" aria-hidden="true" />
-            W0 · 前端工程基线
+            <LayoutGrid className="size-3.5" aria-hidden="true" />
+            SurgeCart 商城
           </span>
           <h1 className="mt-5 text-3xl font-semibold leading-tight tracking-tight text-foreground sm:text-4xl lg:text-5xl lg:leading-[1.15]">
             把好物，<span className="text-primary">稳稳</span>送到手
           </h1>
           <p className="mt-5 max-w-xl text-base leading-7 text-muted-foreground">
-            SurgeCart 用户商城前端基线版本：设计系统、公共布局、接口基础设施与测试工程已经就绪，为商品浏览、购物车与订单流程打好底座。
+            浏览在售商品与分类，查看真实价格与规格信息。搜索、筛选与商品详情均来自商城后端实时数据。
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-3">
             <Button asChild size="lg">
-              <a href="#design-baseline">
-                查看设计基线
+              <Link to="/products">
+                浏览全部商品
                 <ArrowRight aria-hidden="true" />
-              </a>
+              </Link>
             </Button>
             <Button asChild size="lg" variant="outline">
-              <a href="#components">组件与状态</a>
+              <a href="#categories">按分类选购</a>
             </Button>
           </div>
-          <dl className="mt-10 grid max-w-xl grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
-            {stackStats.map((stat) => (
-              <div key={stat.label}>
-                <dt className="text-xs text-muted-foreground">{stat.label}</dt>
-                <dd className="mt-1 text-sm font-semibold text-foreground">{stat.value}</dd>
-              </div>
-            ))}
-          </dl>
         </div>
 
-        <div className="rounded-2xl border border-border bg-gray-25 p-6 shadow-card">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-foreground">本期交付</h2>
-            <span className="rounded-full bg-surface px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
-              W0 / 6
-            </span>
-          </div>
-          <ul className="mt-5 space-y-3.5">
-            {deliveryItems.map((item) => (
-              <li key={item} className="flex items-start gap-2.5 text-sm leading-6 text-foreground">
-                <span className="mt-1 grid size-4 shrink-0 place-items-center rounded-full bg-success-soft text-success">
-                  <Check className="size-3" aria-hidden="true" />
-                </span>
-                {item}
-              </li>
-            ))}
-          </ul>
-          <p className="mt-5 border-t border-border pt-4 text-xs leading-5 text-muted-foreground">
-            本阶段不包含登录、商品列表、购物车与下单等业务实现，这些能力将按 W1–W5 排期接入。
-          </p>
+        <div className="flex flex-col gap-3">
+          {primaryBanner ? (
+            <>
+              <BannerTile banner={primaryBanner} eager className="aspect-[16/9]" />
+              {secondaryBanners.length > 0 ? (
+                <div className="grid grid-cols-2 gap-3">
+                  {secondaryBanners.slice(0, 2).map((banner) => (
+                    <BannerTile key={banner.id} banner={banner} className="aspect-[16/9]" />
+                  ))}
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <div className="rounded-2xl border border-border bg-gray-25 p-6 shadow-card">
+              <h2 className="text-base font-semibold text-foreground">按分类快速选购</h2>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                当前没有配置中的轮播图，可直接从商品分类进入列表。
+              </p>
+              <Button asChild variant="outline" className="mt-4">
+                <Link to="/products">查看全部商品</Link>
+              </Button>
+            </div>
+          )}
         </div>
       </PageContainer>
     </section>
   )
 }
 
-function EngineeringSection() {
+function CategorySection({
+  categories,
+  isPending,
+  isError,
+  onRetry,
+}: {
+  categories: Category[]
+  isPending: boolean
+  isError: boolean
+  onRetry: () => void
+}) {
+  return (
+    <section id="categories" className="border-b border-border bg-background py-14 lg:py-16">
+      <PageContainer className="flex flex-col gap-8">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <SectionHeading
+            eyebrow="Categories"
+            title="商品分类"
+            description="按分类浏览在售商品；分类数据来自商城分类树接口，仅展示启用项。"
+          />
+          <Link
+            to="/products"
+            className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:text-primary-hover"
+          >
+            查看全部商品
+            <ArrowRight className="size-4" aria-hidden="true" />
+          </Link>
+        </div>
+
+        {isPending ? (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-hidden="true">
+            {Array.from({ length: 4 }, (_, index) => (
+              <div key={index} className="h-36 animate-pulse rounded-xl border border-border bg-surface" />
+            ))}
+          </div>
+        ) : null}
+
+        {isError ? (
+          <ErrorState
+            title="分类加载失败"
+            description="商品分类暂时无法获取，可稍后重试。"
+            onRetry={onRetry}
+            className="py-10"
+          />
+        ) : null}
+
+        {!isPending && !isError && categories.length === 0 ? (
+          <EmptyState title="暂无商品分类" description="分类正在整理中，请稍后查看。" />
+        ) : null}
+
+        {!isError && categories.length > 0 ? (
+          <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {categories.map((category) => {
+              const leaves = category.children?.length
+                ? collectLeafCategories(category.children)
+                : [category]
+              const preview = leaves.slice(0, 6)
+
+              return (
+                <li
+                  key={category.id}
+                  className="flex flex-col rounded-xl border border-border bg-surface p-5 shadow-card"
+                >
+                  <h3 className="text-base font-semibold text-foreground">{category.name}</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">共 {leaves.length} 个可选购分类</p>
+                  <ul className="mt-4 flex flex-wrap gap-2">
+                    {preview.map((leaf) => (
+                      <li key={leaf.id}>
+                        <Link
+                          to={catalogHref({ categoryId: leaf.id })}
+                          className="inline-flex h-8 items-center rounded-full border border-border bg-gray-25 px-3 text-xs text-muted-foreground transition-colors duration-150 hover:border-brand-300 hover:text-primary"
+                        >
+                          {leaf.name}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                  {leaves.length > preview.length ? (
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      另有 {leaves.length - preview.length} 个分类，可在商品列表页查看。
+                    </p>
+                  ) : null}
+                </li>
+              )
+            })}
+          </ul>
+        ) : null}
+      </PageContainer>
+    </section>
+  )
+}
+
+function LatestProductsSection({
+  children,
+  isPending,
+  isError,
+  onRetry,
+  isEmpty,
+}: {
+  children: ReactNode
+  isPending: boolean
+  isError: boolean
+  onRetry: () => void
+  isEmpty: boolean
+}) {
   return (
     <section className="border-b border-border bg-surface py-14 lg:py-16">
       <PageContainer className="flex flex-col gap-8">
-        <SectionHeading
-          eyebrow="Engineering"
-          title="工程能力"
-          description="先行建立请求、状态、测试与契约四条基础设施，避免后续业务开发反复返工。"
-        />
-        <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {engineeringItems.map((item) => (
-            <li key={item.title} className="rounded-xl border border-border bg-background p-5">
-              <span className="grid size-10 place-items-center rounded-lg bg-primary-soft text-primary">
-                <item.icon className="size-5" aria-hidden="true" />
-              </span>
-              <h3 className="mt-4 text-sm font-semibold text-foreground">{item.title}</h3>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.description}</p>
-            </li>
-          ))}
-        </ul>
-      </PageContainer>
-    </section>
-  )
-}
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <SectionHeading
+            eyebrow="New Arrivals"
+            title="最新上架"
+            description="按上架时间排序的在售商品，点击卡片查看详情与可选规格。"
+          />
+          <Link
+            to="/products"
+            className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:text-primary-hover"
+          >
+            查看全部
+            <ArrowRight className="size-4" aria-hidden="true" />
+          </Link>
+        </div>
 
-function RoadmapSection() {
-  return (
-    <section className="border-b border-border bg-background py-14 lg:py-16">
-      <PageContainer className="flex flex-col gap-8">
-        <SectionHeading
-          eyebrow="Roadmap"
-          title="阶段规划"
-          description="排期以后端契约与主 Chat 计划为准；本页只说明前端工程的分阶段边界。"
-        />
-        <ol className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {roadmap.map((item) => {
-            const isCurrent = item.stage === 'W0'
-
-            return (
-              <li
-                key={item.stage}
-                className={
-                  isCurrent
-                    ? 'rounded-xl border border-brand-200 bg-primary-soft p-5'
-                    : 'rounded-xl border border-border bg-surface p-5'
-                }
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-xs font-semibold text-primary">{item.stage}</span>
-                  <span
-                    className={
-                      isCurrent
-                        ? 'rounded-full bg-surface px-2 py-0.5 text-[11px] font-medium text-primary'
-                        : 'rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-muted-foreground'
-                    }
-                  >
-                    {item.state}
-                  </span>
-                </div>
-                <p className="mt-3 text-sm font-medium text-foreground">{item.title}</p>
-              </li>
-            )
-          })}
-        </ol>
-        <p className="flex items-start gap-2 text-xs leading-5 text-muted-foreground">
-          <Boxes className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-          前端不会自行定义后端接口：商品、库存、订单等数据契约均由后端 B0 输出，前端通过 openapi-typescript 生成类型。
-        </p>
+        {isPending ? <ProductGridSkeleton count={5} /> : null}
+        {isError ? (
+          <ErrorState
+            title="商品加载失败"
+            description="商品列表暂时无法获取，请稍后重试。"
+            onRetry={onRetry}
+            className="py-10"
+          />
+        ) : null}
+        {isEmpty ? (
+          <EmptyState title="暂无在售商品" description="商品正在上架中，请稍后查看。" />
+        ) : null}
+        {!isError ? children : null}
       </PageContainer>
     </section>
   )
@@ -200,13 +291,69 @@ function RoadmapSection() {
 export function HomePage() {
   useDocumentTitle('SurgeCart 商城 | 品质好物，稳定抵达')
 
+  const categoriesQuery = useQuery({
+    queryKey: queryKeys.categories.tree(),
+    queryFn: ({ signal }) => fetchCategoryTree(signal),
+  })
+  const bannersQuery = useQuery({
+    queryKey: queryKeys.banners.list(),
+    queryFn: ({ signal }) => fetchBanners(signal),
+  })
+  const latestQuery = useQuery({
+    queryKey: queryKeys.products.list(HOME_LATEST_QUERY),
+    queryFn: ({ signal }) => fetchProductList(HOME_LATEST_QUERY, signal),
+  })
+  const recommendationQuery = useQuery({
+    queryKey: queryKeys.recommendations.byCode(homeRecommendCode),
+    queryFn: ({ signal }) => fetchRecommendation(homeRecommendCode, signal),
+    enabled: homeRecommendCode !== '',
+  })
+
+  const banners = bannersQuery.data?.items ?? []
+  const categories = categoriesQuery.data?.items ?? []
+  const latestProducts = latestQuery.data?.items ?? []
+  const recommendation = recommendationQuery.data
+  const recommendationItems = recommendation?.items ?? []
+
   return (
     <>
-      <Hero />
-      <DesignBaselineSection />
-      <ComponentShowcaseSection />
-      <EngineeringSection />
-      <RoadmapSection />
+      <Hero banners={banners} />
+
+      <CategorySection
+        categories={categories}
+        isPending={categoriesQuery.isPending}
+        isError={categoriesQuery.isError}
+        onRetry={() => void categoriesQuery.refetch()}
+      />
+
+      <LatestProductsSection
+        isPending={latestQuery.isPending}
+        isError={latestQuery.isError}
+        onRetry={() => void latestQuery.refetch()}
+        isEmpty={!latestQuery.isPending && !latestQuery.isError && latestProducts.length === 0}
+      >
+        {latestProducts.length > 0 ? <ProductGrid products={latestProducts} /> : null}
+      </LatestProductsSection>
+
+      {recommendation && recommendationItems.length > 0 ? (
+        <section className="bg-background py-14 lg:py-16">
+          <PageContainer className="flex flex-col gap-8">
+            <SectionHeading
+              eyebrow="Recommended"
+              title={recommendation.name || '为你推荐'}
+              description="运营在后台推荐位中配置的商品，仅展示在售商品。"
+            />
+            <ProductGrid
+              products={recommendationItems.map((item) => ({
+                id: item.product_id,
+                name: item.name,
+                main_image: item.main_image,
+                price: item.price,
+              }))}
+            />
+          </PageContainer>
+        </section>
+      ) : null}
     </>
   )
 }

@@ -1,6 +1,6 @@
 import { LayoutGrid, ShoppingCart, UserRound } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { NavLink } from 'react-router'
+import { Link, NavLink } from 'react-router'
 
 import { PageContainer } from '@/components/common/page-container'
 import { BrandLogo } from '@/components/layout/brand-logo'
@@ -30,11 +30,11 @@ function HeaderAction({ icon, label, hint }: HeaderActionProps) {
   )
 }
 
-function NavItem({ to, children }: { to: string; children: ReactNode }) {
+function NavItem({ to, children, end = false }: { to: string; children: ReactNode; end?: boolean }) {
   return (
     <NavLink
       to={to}
-      end
+      end={end}
       className={({ isActive }) =>
         cn(
           'rounded-sm py-1 text-sm font-medium transition-colors duration-150',
@@ -58,36 +58,33 @@ export function SiteHeader() {
           <HeaderAction
             icon={<ShoppingCart className="size-5" aria-hidden="true" />}
             label="购物车"
-            hint="购物车将在 W1 阶段开放"
+            hint="购物车将在 W3 阶段开放"
           />
           <span className="hidden h-6 w-px bg-border sm:block" aria-hidden="true" />
           <HeaderAction
             icon={<UserRound className="size-5" aria-hidden="true" />}
             label="登录 / 注册"
-            hint="账号体系将在后续阶段接入"
+            hint="账号体系将在 W2 阶段接入"
           />
         </div>
       </PageContainer>
 
       <div className="border-t border-border">
         <PageContainer className="flex h-12 items-center gap-4 sm:gap-6">
-          <button
-            type="button"
-            disabled
-            title="商品分类将在 W1 阶段接入"
-            className="inline-flex cursor-not-allowed items-center gap-1.5 text-sm font-medium text-muted-foreground"
+          <Link
+            to="/products"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
           >
             <LayoutGrid className="size-4" aria-hidden="true" />
             全部商品分类
-          </button>
+          </Link>
           <span className="h-4 w-px bg-border" aria-hidden="true" />
           <nav aria-label="主导航" className="flex items-center gap-5">
-            <NavItem to="/">首页</NavItem>
+            <NavItem to="/" end>
+              首页
+            </NavItem>
+            <NavItem to="/products">全部商品</NavItem>
           </nav>
-          <span className="ml-auto hidden items-center gap-1.5 rounded-full bg-primary-soft px-2.5 py-1 text-[11px] font-medium text-primary sm:inline-flex">
-            <span className="size-1.5 rounded-full bg-primary" aria-hidden="true" />
-            W0 工程基线
-          </span>
         </PageContainer>
       </div>
 

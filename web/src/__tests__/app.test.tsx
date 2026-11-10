@@ -1,40 +1,27 @@
-import { render, screen } from '@testing-library/react'
-import { createMemoryRouter, RouterProvider } from 'react-router'
+import { screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
-import { createQueryClient } from '@/api/query-client'
-import { AppProviders } from '@/providers/app-providers'
-import { routes } from '@/router'
-
-function renderApp(initialRoute = '/') {
-  const router = createMemoryRouter(routes, { initialEntries: [initialRoute] })
-
-  return render(
-    <AppProviders client={createQueryClient()}>
-      <RouterProvider router={router} />
-    </AppProviders>,
-  )
-}
+import { renderApp } from '@/test/render'
 
 describe('App', () => {
-  it('渲染首页与公共布局', () => {
-    renderApp()
+  it('首页渲染公共布局与主导航', () => {
+    renderApp('/')
 
     expect(screen.getByRole('banner')).toBeInTheDocument()
     expect(screen.getByRole('contentinfo')).toBeInTheDocument()
     expect(screen.getByRole('main')).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 1, name: /把好物/ })).toBeInTheDocument()
-    expect(screen.getByRole('navigation', { name: '主导航' })).toBeInTheDocument()
-    expect(screen.getByText('W0 工程基线')).toBeInTheDocument()
+
+    const navigation = screen.getByRole('navigation', { name: '主导航' })
+    expect(navigation).toHaveTextContent('首页')
+    expect(navigation).toHaveTextContent('全部商品')
   })
 
-  it('首页展示设计基线与组件基线区块', () => {
-    renderApp()
+  it('商品列表路由按需加载并可访问', async () => {
+    renderApp('/products')
 
-    expect(screen.getByRole('heading', { name: '设计基线' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '组件与交互状态' })).toBeInTheDocument()
-    expect(screen.getAllByText('1,299').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('.00').length).toBeGreaterThan(0)
+    expect(await screen.findByRole('heading', { level: 1, name: '全部商品' })).toBeInTheDocument()
+    expect(screen.getByRole('banner')).toBeInTheDocument()
   })
 
   it('未知路由展示 404 页面并保留公共布局', () => {

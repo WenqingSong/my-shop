@@ -25,7 +25,7 @@ export function SiteFooter() {
         <div className="max-w-sm">
           <BrandLogo />
           <p className="mt-4 text-sm leading-6 text-muted-foreground">
-            SurgeCart 用户商城，面向真实消费者的 PC 优先电商体验。前端基线已完成设计系统、公共布局与接口基础设施。
+            SurgeCart 用户商城，面向真实消费者的 PC 优先电商体验。当前已开放商品分类、商品搜索与商品详情浏览。
           </p>
           <p className="mt-4 font-mono text-[11px] uppercase tracking-wide text-gray-400">
             React 19 · TypeScript · Tailwind CSS 4
@@ -49,7 +49,7 @@ export function SiteFooter() {
       <div className="border-t border-border">
         <PageContainer className="flex flex-col gap-2 py-5 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
           <p>© {currentYear} SurgeCart · 用户商城</p>
-          <p>当前为 W0 工程基线，部分导航与业务功能将在后续阶段接入。</p>
+          <p>商品浏览已开放，购物车、下单与账号功能将在后续阶段接入。</p>
         </PageContainer>
       </div>
     </footer>

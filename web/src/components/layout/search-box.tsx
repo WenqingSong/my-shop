@@ -1,8 +1,10 @@
 import { Search } from 'lucide-react'
 import type { FormEvent } from 'react'
+import { useLocation, useNavigate, useSearchParams } from 'react-router'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { catalogHref } from '@/utils/catalog-search'
 import { cn } from '@/utils/cn'
 
 export interface SearchBoxProps {
@@ -10,13 +12,20 @@ export interface SearchBoxProps {
 }
 
 /**
- * 搜索框视觉组件。
- * W0 只交付控件与交互态，不连接任何商品搜索接口：
- * 输入可正常使用，提交按钮保持 disabled 并说明开放阶段。
+ * 商品搜索入口：提交后跳转 /products?q=关键词。
+ * 输入框默认值跟随当前列表页关键词，切换页面或清空筛选后自动复位。
  */
 export function SearchBox({ className }: SearchBoxProps) {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const [searchParams] = useSearchParams()
+  const currentKeyword = location.pathname === '/products' ? (searchParams.get('q') ?? '') : ''
+
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    const formData = new FormData(event.currentTarget)
+    const keyword = String(formData.get('q') ?? '').trim()
+    navigate(catalogHref({ q: keyword }))
   }
 
   return (
@@ -32,20 +41,17 @@ export function SearchBox({ className }: SearchBoxProps) {
           aria-hidden="true"
         />
         <Input
+          key={currentKeyword}
           type="search"
           name="q"
+          defaultValue={currentKeyword}
           aria-label="搜索关键词"
-          placeholder="搜索商品 / 品牌 / 分类"
+          placeholder="搜索商品 / 品牌"
           autoComplete="off"
           className="h-11 rounded-r-none border-r-0 pl-10 pr-3 focus-visible:relative focus-visible:z-10"
         />
       </div>
-      <Button
-        type="submit"
-        className="h-11 shrink-0 rounded-l-none px-6"
-        disabled
-        title="商品搜索将在 W1 阶段接入"
-      >
+      <Button type="submit" className="h-11 shrink-0 rounded-l-none px-6">
         搜索
       </Button>
     </form>

@@ -107,8 +107,15 @@ async function readErrorPayload(
         const record = payload as Record<string, unknown>
         return {
           message: typeof record.message === 'string' ? record.message : undefined,
-          code: typeof record.code === 'string' ? record.code : undefined,
-          details: record.details,
+          // 后端统一响应的 code 为数字业务码（internal/middleware/response.go），
+          // 统一转成字符串存入 ApiError，调用方只需按业务码比较。
+          code:
+            typeof record.code === 'string'
+              ? record.code
+              : typeof record.code === 'number'
+                ? String(record.code)
+                : undefined,
+          details: record.data ?? record.details,
         }
       }
     } catch {
@@ -125,7 +132,10 @@ async function readErrorPayload(
  */
 export function createApiClient(config: ApiClientConfig): ApiClient {
   const defaultTimeout = config.timeoutMs ?? DEFAULT_TIMEOUT_MS
-  const fetchImpl = config.fetchImpl ?? globalThis.fetch.bind(globalThis)
+  // 调用时再取全局 fetch：测试环境会在启动 MSW 后替换 globalThis.fetch，
+  // 模块加载时绑定会导致拦截器被绕过。
+  const fetchImpl: typeof fetch =
+    config.fetchImpl ?? ((input, init) => globalThis.fetch(input, init))
 
   async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
     const {
@@ -250,6 +260,15 @@ export function setAuthTokenProvider(provider: TokenProvider | null): void {
   authTokenProvider = provider
 }
 
+/**
+ * 默认 /api：前端页面路由（/products、/products/:id）与后端契约路径同名，
+ * 必须用独立的 API 前缀，才能让 SPA 直接访问/刷新商品页而不被代理拦截。
+ *
+ * 后端路由本身不带 /api 前缀（internal/cmd/routes_frontend.go），
+ * 因此转发到后端的环节需要剥离该前缀：
+ * - 本地开发：vite.config.ts 的 proxy rewrite；
+ * - 生产部署：由网关/反向代理配置等价规则（当前 nginx/nginx.conf 未配置，已在交付文档记录）。
+ */
 function resolveBaseUrl(): string {
   const configured = import.meta.env.VITE_API_BASE_URL
   return configured && configured.trim() !== '' ? configured.trim() : '/api'

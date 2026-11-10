@@ -12,7 +12,12 @@ import {
 import { Button } from '@/components/ui/button'
 import { useUiStore } from '@/stores/ui-store'
 
-const placeholderItems = ['全部商品分类', '购物车', '登录 / 注册']
+const navigationItems = [
+  { to: '/', label: '首页' },
+  { to: '/products', label: '全部商品' },
+]
+
+const unavailableItems = ['购物车（W3 开放）', '登录 / 注册（W2 接入）']
 
 /** 移动端导航抽屉：复用 Dialog 的可访问性能力（focus trap / Esc / 遮罩关闭）。 */
 export function MobileNav() {
@@ -30,19 +35,21 @@ export function MobileNav() {
         <div className="border-b border-border px-5 py-4">
           <DialogTitle className="text-base">商城导航</DialogTitle>
           <DialogDescription className="mt-1 text-xs leading-5">
-            W0 阶段仅开放首页，商品与账户能力将在后续阶段接入。
+            商品浏览已开放，购物车与账号能力将在后续阶段接入。
           </DialogDescription>
         </div>
         <nav aria-label="移动端主导航" className="flex flex-col gap-0.5 p-2">
-          <DialogClose asChild>
-            <Link
-              to="/"
-              className="rounded-md px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-gray-100"
-            >
-              首页
-            </Link>
-          </DialogClose>
-          {placeholderItems.map((item) => (
+          {navigationItems.map((item) => (
+            <DialogClose asChild key={item.to}>
+              <Link
+                to={item.to}
+                className="rounded-md px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-gray-100"
+              >
+                {item.label}
+              </Link>
+            </DialogClose>
+          ))}
+          {unavailableItems.map((item) => (
             <span
               key={item}
               aria-disabled="true"

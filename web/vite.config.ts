@@ -24,7 +24,15 @@ export default defineConfig({
     port: 5173,
     strictPort: false,
     proxy: {
+      // 后端契约路径不带 /api 前缀，dev 代理负责剥离；
+      // SPA 自身使用 /products、/categories 作为页面路由，因此不能用同源根路径直连后端。
       '/api': {
+        target: devProxyTarget,
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
+      // 轮播图等本地静态资源（后端 /storage/banners/*）。
+      '/storage': {
         target: devProxyTarget,
         changeOrigin: true,
       },
