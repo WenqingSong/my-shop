@@ -47,3 +47,17 @@
 | 20261001000022 | order_coupon_amounts | coupon-v1 | ACTIVE | orders 增 original_amount/discount_amount/user_coupon_id 三列 + 回填 |
 | 20261001000023 | legacy_id_map | legacy-data-migration | ACTIVE | 目标库新增 legacy_id_map 旧 ID→新 ID 映射表 |
 | 20261001000024 | flash_sale_request_outbox | flashsale-kafka-b2 | RESERVED | flash_sale_order_requests 增发布标记/租约/退避列及领取索引 idx_outbox_claim |
+| 20261110000001 | product_spec | B1-03-01 | RESERVED | product_specs + product_spec_values + sku_spec_values 规格三表；skus 增 image_url/spec_signature + uk_product_signature（含 down） |
+| 20261110000002 | user_profile | B1-03-01 | RESERVED | users 增 nickname/avatar_url/phone + uk_phone（含 down） |
+| 20261110000003 | regions | B1-03-01 | RESERVED | regions 省/市/区三级地区字典，仅结构不导数据（含 down） |
+| 20261110000004 | order_shipping_payment | B1-03-02 | RESERVED | orders 增 shipping_fee/pay_type/transaction_no/delivery_type/delivery_name/delivery_sn；order_items 增 spec_text（无回填；含 down） |
+| 20261110000005 | order_status_logs | B1-03-02 | RESERVED | order_status_logs 订单状态流水表，append-only（含 down） |
+| 20261110000006 | wallet | B1-03-02 | RESERVED | wallet_accounts + wallet_transactions 钱包账户与资金流水（含 down） |
+| 20261110000007 | recharge_orders | B1-03-02 | RESERVED | recharge_orders Mock 充值订单（含 down） |
+| 20261110000008 | points | B1-03-02 | RESERVED | user_points_accounts + user_points_logs 积分账户与流水（含 down） |
+| 20261110000009 | coupon_snapshot | B1-03-02 | RESERVED | user_coupons 增 coupon_title/coupon_price/use_min_price/end_time 可空快照列（无回填；含 down） |
+| 20261110000010 | coupon_batch | B1-03-03 | RESERVED | coupon_templates 增 discount_type/discount_rate_bp/per_user_limit；新增 coupon_batches + coupon_template_scopes；user_coupons 增 batch_id/claim_no，uk_user_template 替换为 uk_user_template_claim（含 down） |
+| 20261110000011 | group_buy | B1-03-03 | RESERVED | group_buy_activities + group_buy_teams + group_buy_participants 拼团活动/团/参与记录（含 down） |
+| 20261110000012 | bargain | B1-03-03 | RESERVED | bargain_activities + bargain_instances + bargain_help_records 砍价活动/实例/助力（含 down） |
+| 20261110000013 | member | B1-03-03 | RESERVED | member_levels + user_memberships + member_growth_logs 等级/用户会员/成长值流水，不重复创建积分账本（含 down） |
+| 20261110000014 | distribution | B1-03-03 | RESERVED | user_referrals + distribution_commissions 一级推荐关系与订单佣金（含 down） |
