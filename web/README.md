@@ -1,16 +1,29 @@
 # SurgeCart 用户商城前端
 
-SurgeCart 用户商城的 PC 优先前端工程。当前处于 **W2-02：个人中心、收货地址与商品收藏**，
-已开放商城浏览、注册/登录/退出、个人中心、只读个人资料、收货地址 CRUD 与收藏管理；
-购物车（W3）、下单与订单（W4/W5）尚未开放。
+SurgeCart 用户商城的 PC 优先前端工程。**W0—W4 业务开发已完成，W5 完成最终验收**，
+当前覆盖完整用户链路：
+
+- 商品浏览：首页（轮播/分类/推荐/最新上架）、商品列表与搜索、商品详情与 SKU、评价；
+- 认证：注册、登录、当前用户、401 单飞刷新、退出登录、受保护路由；
+- 个人中心：账户概览、只读资料、收货地址 CRUD 与默认地址、收藏；
+- 购物车：加购、数量、勾选/全选、删除、库存与不可购买提示；
+- 订单：结算、地址选择、幂等下单、成功页、订单列表与状态筛选、订单详情；
+- 履约：模拟支付、取消订单、确认收货；
+- 退款：整单退款申请、我的退款、退款详情、撤销申请；
+- 优惠券：我的优惠券、结算页选券、用券下单、锁定/核销/释放。
 
 - 设计规范：[`DESIGN_SYSTEM.md`](./DESIGN_SYSTEM.md)
+- W5 最终验收报告：[`../docs/reports/w5-final-validation/DELIVERY_REPORT.md`](../docs/reports/w5-final-validation/DELIVERY_REPORT.md)
+- W5 开发知识文档：[`../.agent/tasks/dev/W5-final-validation.md`](../.agent/tasks/dev/W5-final-validation.md)
+- W4-04 交付报告：[`../docs/reports/w4-04-coupon-center/DELIVERY_REPORT.md`](../docs/reports/w4-04-coupon-center/DELIVERY_REPORT.md)
+- W4-03 交付报告：[`../docs/reports/w4-03-refund-center/DELIVERY_REPORT.md`](../docs/reports/w4-03-refund-center/DELIVERY_REPORT.md)
+- W4-02 交付报告：[`../docs/reports/w4-02-order-fulfillment/DELIVERY_REPORT.md`](../docs/reports/w4-02-order-fulfillment/DELIVERY_REPORT.md)
+- W4-01 交付报告：[`../docs/reports/w4-01-order-center/DELIVERY_REPORT.md`](../docs/reports/w4-01-order-center/DELIVERY_REPORT.md)
+- W3-02 交付报告：[`../docs/reports/w3-02-order-checkout/DELIVERY_REPORT.md`](../docs/reports/w3-02-order-checkout/DELIVERY_REPORT.md)
+- W3-01 交付报告：[`../docs/reports/w3-01-shopping-cart/DELIVERY_REPORT.md`](../docs/reports/w3-01-shopping-cart/DELIVERY_REPORT.md)
 - W2-02 交付报告：[`../docs/reports/w2-02-user-center/DELIVERY_REPORT.md`](../docs/reports/w2-02-user-center/DELIVERY_REPORT.md)
-- W2-02 开发知识文档：[`../.agent/tasks/dev/W2-02-user-center.md`](../.agent/tasks/dev/W2-02-user-center.md)
 - W2-01 交付报告：[`../docs/reports/w2-01-user-authentication/DELIVERY_REPORT.md`](../docs/reports/w2-01-user-authentication/DELIVERY_REPORT.md)
-- W2-01 开发知识文档：[`../.agent/tasks/dev/W2-01-user-authentication.md`](../.agent/tasks/dev/W2-01-user-authentication.md)
 - W1 交付报告：[`../docs/reports/w1-01-product-browsing/DELIVERY_REPORT.md`](../docs/reports/w1-01-product-browsing/DELIVERY_REPORT.md)
-- W1 开发知识文档：[`../.agent/tasks/dev/W1-01-product-browsing.md`](../.agent/tasks/dev/W1-01-product-browsing.md)
 - W0 交付报告：[`../docs/reports/w0-frontend-foundation/DELIVERY_REPORT.md`](../docs/reports/w0-frontend-foundation/DELIVERY_REPORT.md)
 - 后端工程：仓库根目录的 Go 服务（本工程只通过 `/api` 访问，不修改其后端代码）
 
@@ -82,16 +95,21 @@ web/
 │   ├── components/
 │   │   ├── account/            # 地址表单弹窗
 │   │   ├── auth/               # 登录/注册卡片、密码输入
+│   │   ├── cart/               # 购物车条目行、数量步进器、汇总
+│   │   ├── checkout/           # 地址选择、商品清单、优惠券选择、金额摘要
 │   │   ├── common/             # 容器、金额、空/错/加载、分页、错误边界
+│   │   ├── coupon/             # 优惠券卡片与状态徽标
 │   │   ├── layout/             # Header、Footer、认证入口、搜索、移动导航
+│   │   ├── order/              # 订单卡片、操作区、进度、状态徽标
 │   │   ├── product/            # 商品卡片、栅格、图册、SKU、收藏、评价、分类筛选
+│   │   ├── refund/             # 退款卡片、状态徽标、申请/撤销弹窗
 │   │   └── ui/                 # shadcn/ui 风格基础组件
 │   ├── config/                 # 前端运行时配置（推荐位 code 等）
-│   ├── hooks/                  # 通用 hooks（收藏状态/切换等）
+│   ├── hooks/                  # 购物车/结算/订单/退款/优惠券/收藏/标题
 │   ├── layouts/                # 路由布局
-│   ├── mocks/                  # MSW handlers 与 Mock 数据（商品/认证/地址/收藏）
-│   ├── pages/                  # 首页、列表、详情、登录、注册、404
-│   │   └── account/            # 个人中心布局、概览、资料、地址、收藏
+│   ├── mocks/                  # MSW handlers 与 Mock 数据（商品/认证/地址/收藏/购物车/订单/退款/优惠券）
+│   ├── pages/                  # 首页、商品列表/详情、购物车、结算与成功页、登录、注册、404
+│   │   └── account/            # 个人中心布局、概览、资料、地址、收藏、订单、退款、优惠券
 │   ├── providers/              # 全局 Provider
 │   ├── router/                 # 路由表与路由级懒加载
 │   ├── stores/                 # Zustand 客户端状态
@@ -135,7 +153,7 @@ const data = await fetchProductList({ page: 1, size: 12, keyword: '耳机' })
 - `src/api/client.ts`：纯传输层，处理超时、AbortSignal、Token、错误归类；`204` 返回 `undefined`。
 - `src/api/envelope.ts`：解包后端统一响应 `{code,message,data}`；`code !== 0` 抛 `ApiError`。
 - `src/api/auth-request.ts`：需要登录态的请求包装，401 时单飞刷新并重试一次，失败后清空 Token。
-- `src/api/*.ts`：按域封装的业务 API（products / categories / banners / reviews / recommendations / auth / account / addresses / favorites），组件禁止直接 `fetch`。
+- `src/api/*.ts`：按域封装的业务 API（products / categories / banners / reviews / recommendations / auth / account / addresses / favorites / cart / orders / refunds / coupons），组件禁止直接 `fetch`。
 - `src/api/types.ts`：DTO 定义，字段逐一对应 Go 后端 JSON tag；仓库没有 `contracts/openapi.yaml`，因此不做代码生成。
 - `src/api/query-keys.ts`：统一 Query Key 工厂，列表 key 携带完整查询参数，认证用户 key 为 `['auth','me']`。
 - 统一抛出 `ApiError`，`kind` 为 `http | network | timeout | aborted | parse`，带 `status` / `code` / `details`；后端数字业务码统一转为字符串。
@@ -153,11 +171,12 @@ const data = await fetchProductList({ page: 1, size: 12, keyword: '耳机' })
 
 ## 状态管理边界
 
-- **TanStack Query**：后端数据（商品、分类、评价、当前用户）唯一权威缓存，负责请求状态与失效。
+- **TanStack Query**：后端数据（商品、分类、评价、当前用户、购物车、订单、退款、优惠券）唯一权威缓存，负责请求状态与失效。
 - **URL**：商品列表的关键词、分类、排序、分页以 URL 查询参数为唯一事实来源。
 - **内存 Token Store**：认证凭证的唯一事实来源，通过 `useSyncExternalStore` 驱动 Header 与路由守卫。
-- **用户私有缓存**：地址 `['addresses']`、收藏 `['favorites']` 通过 Query Key 分层管理；
-  会话结束（退出或 refresh 失败）时统一清理，避免切换账号看到上一位用户的数据。
+- **账号私有缓存**：地址、收藏、购物车、订单、退款、优惠券通过 Query Key 分层管理；
+  会话结束（主动退出或 refresh 失败）时由 `clearUserScopedQueries()` 统一清理同一份清单，
+  避免切换账号看到上一位用户的数据。新增私有数据必须加入该清单。
 - **Zustand**：仅存放轻量 UI 状态（当前为移动端导航开关），不保存认证或业务数据。
 - **React Hook Form + Zod**：登录/注册/地址表单状态与前端校验。
 
@@ -170,14 +189,39 @@ npm run test        # 单元 + 组件测试（MSW 拦截网络）
 npm run test:e2e    # Playwright，自动启动带 MSW 的 dev server
 ```
 
-- `src/mocks/handlers.ts` 按真实后端结构提供分类、商品、SKU、评价、轮播图、推荐位与认证 Mock；
+- `src/mocks/handlers.ts` 按真实后端结构提供商品、分类、SKU、评价、轮播、推荐、认证、
+  地址、收藏、购物车、订单、退款与优惠券 Mock；
   `keyword=__error__` 是仅用于错误态验证的 Mock 钩子，真实后端不存在。
+- 订单/退款/优惠券 Mock 实现与 Go 后端一致的状态闸门、幂等指纹（含 `coupon_id`）、
+  库存与券的锁定/核销/释放语义；`seedMockOrder`/`seedMockRefund`/`seedMockCoupon`
+  等仅测试可用的造数钩子不会进入生产构建。
 - 认证 Mock 覆盖注册、登录、`/me`、refresh 轮换、logout；默认测试账号为 `demo / demo12345`。
-- 地址与收藏 Mock 使用内存状态，覆盖默认地址、CRUD、收藏可用性（下架/删除）与取消幂等。
-- E2E 通过 `VITE_ENABLE_MOCK=true` 启用浏览器 MSW，不依赖本地后端；
-  推荐位区块通过 `VITE_HOME_RECOMMEND_CODE=home` 启用。
+- 当前规模：45 个单元/组件测试文件、317 个用例；10 个 E2E spec、46 个用例。
+- E2E 通过 `VITE_ENABLE_MOCK=true` 启用浏览器 MSW，**不代表真实后端**；
+  真实后端联调结果见 W5 交付报告。推荐位区块通过 `VITE_HOME_RECOMMEND_CODE=home` 启用。
 - E2E 串行执行（`workers: 1`），避免 MSW Service Worker 注册与 Vite 依赖优化并发导致空页面。
 - 视口 1440×900，另含 390×844 移动端用例；需要图形依赖时执行 `npx playwright install-deps chromium`。
+
+## 生产构建与部署
+
+```bash
+npm run build     # tsc -b + vite build → dist/
+npm run preview   # 本地验证 dist（含 SPA history fallback）
+```
+
+- 构建产物：`dist/` 约 896 KB，主 chunk `index-*.js` 371.2 KB（gzip 117.8 KB）+ CSS 44.6 KB，
+  其余为按路由/页面拆分的懒加载 chunk。
+- Mock 隔离：
+  - 运行时 `main.tsx` 只有 `VITE_ENABLE_MOCK === 'true'` 才动态加载 MSW，生产默认关闭；
+  - 构建插件 `stripMockArtifacts` 会从 `dist/` 删除 `mockServiceWorker.js` 与 `mock/` 图片，
+    生产产物不包含任何 Mock 资源。
+- API 基础路径固定 `/api`，转发层必须剥离该前缀（Go 路由本身不带 `/api`）。
+- **部署缺口（基础设施职责，未在本工程修复）**：仓库 `nginx/nginx.conf` 的 `location /`
+  原样 `proxy_pass` 到后端，既未剥离 `/api`，也未托管前端 `dist/` 与 `try_files` 回退。
+  生产上线前需要基础设施线补齐：
+  1. `location /api/ { proxy_pass http://my_shop_backend/; }`（尾部斜杠剥离前缀）；
+  2. `location / { root <dist>; try_files $uri $uri/ /index.html; }`；
+  3. 保留现有 `/storage/` 静态资源反代与安全响应头。
 
 ## OpenAPI 类型生成
 

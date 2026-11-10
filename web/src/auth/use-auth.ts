@@ -12,6 +12,7 @@ import {
   setAuthTokens,
   subscribeAuthSession,
 } from '@/auth/token-store'
+import { clearUserScopedQueries } from '@/auth/user-cache'
 
 export type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'error'
 
@@ -117,16 +118,9 @@ export function useLogout() {
         // 本地登出优先，忽略服务端错误（文档记录该失败语义）。
       } finally {
         clearAuthTokens()
-        // 立即清理所有用户私有缓存，避免下一个登录用户看到上一位用户的数据。
-        // 订单与退款（W4-03）同样是账号私有数据，必须在登出时一并清除：
-        // 两者 key 不含 user id，若保留缓存，下一位登录用户会在 refetch 完成前短暂看到上一位用户的数据。
-        queryClient.removeQueries({ queryKey: queryKeys.auth.all })
-        queryClient.removeQueries({ queryKey: queryKeys.addresses.all })
-        queryClient.removeQueries({ queryKey: queryKeys.favorites.all })
-        queryClient.removeQueries({ queryKey: queryKeys.cart.all })
-        queryClient.removeQueries({ queryKey: queryKeys.orders.all })
-        queryClient.removeQueries({ queryKey: queryKeys.refunds.all })
-        queryClient.removeQueries({ queryKey: queryKeys.coupons.all })
+        // 立即清理所有账号私有缓存（与 useAuthCacheReset 共用同一份清单），
+        // 避免下一个登录用户看到上一位用户的数据。
+        clearUserScopedQueries(queryClient)
       }
     },
     onSuccess: () => {
