@@ -148,6 +148,20 @@ const (
 	CodeCouponClaimUnavailable Code = 19005 // 未开始/已结束/已停止，不可领取 → 409
 	CodeCouponClaimSoldOut     Code = 19006 // 发放总量已满 → 409
 	CodeCouponUnavailable      Code = 19007 // 下单用券：已使用/被占用/不在使用期/未达门槛 → 409
+
+	// 运费与统一计价域（Freight / Pricing）20000-20999。
+	CodeFreightTemplateNotFound   Code = 20001 // 运费模板不存在 → 404
+	CodeFreightTemplateNameExists Code = 20002 // 模板名已存在 → 409
+	CodeFreightTemplateInvalid    Code = 20003 // 模板参数非法（名称/阈值/状态）→ 400
+	CodeFreightTemplateDisabled   Code = 20004 // 模板已停用，不可用于计价 → 409
+	CodeFreightRuleNotFound       Code = 20005 // 区域运费规则不存在 → 404
+	CodeFreightRuleDuplicate      Code = 20006 // 同一模板下区域规则重复配置 → 409
+	CodeFreightRuleInvalid        Code = 20007 // 规则参数非法（首件/续件数量为 0、金额越界）→ 400
+	CodeFreightRegionNotFound     Code = 20008 // 地区不存在 → 404
+	CodeFreightRegionRuleMissing  Code = 20009 // 模板无匹配当前地区的规则，拒绝静默免费 → 409
+	CodePricingInvalidAmount      Code = 20010 // 计价金额非法（负数/超上限）→ 400
+	CodePricingDiscountExceeds    Code = 20011 // 优惠累计超过可优惠金额 → 400
+	CodePricingAmountOverflow     Code = 20012 // 计价金额溢出 int64 安全区间 → 400
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -264,6 +278,19 @@ var codeTable = map[Code]codeInfo{
 	CodeCouponClaimUnavailable: {http.StatusConflict, "优惠券暂不可领取"},
 	CodeCouponClaimSoldOut:     {http.StatusConflict, "优惠券已领完"},
 	CodeCouponUnavailable:      {http.StatusConflict, "优惠券不可用"},
+
+	CodeFreightTemplateNotFound:   {http.StatusNotFound, "运费模板不存在"},
+	CodeFreightTemplateNameExists: {http.StatusConflict, "运费模板名称已存在"},
+	CodeFreightTemplateInvalid:    {http.StatusBadRequest, "运费模板参数非法"},
+	CodeFreightTemplateDisabled:   {http.StatusConflict, "运费模板已停用"},
+	CodeFreightRuleNotFound:       {http.StatusNotFound, "运费区域规则不存在"},
+	CodeFreightRuleDuplicate:      {http.StatusConflict, "该地区规则已存在"},
+	CodeFreightRuleInvalid:        {http.StatusBadRequest, "运费规则参数非法"},
+	CodeFreightRegionNotFound:     {http.StatusNotFound, "地区不存在"},
+	CodeFreightRegionRuleMissing:  {http.StatusConflict, "该地区未配置运费规则"},
+	CodePricingInvalidAmount:      {http.StatusBadRequest, "计价金额非法"},
+	CodePricingDiscountExceeds:    {http.StatusBadRequest, "优惠金额超过可优惠金额"},
+	CodePricingAmountOverflow:     {http.StatusBadRequest, "计价金额溢出"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。
