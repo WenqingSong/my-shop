@@ -9,10 +9,12 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/cart"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/coupon"
+	distributionCtrl "cnb.cool/go-cloud-devops/my-shop/internal/controller/distribution"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/favorite"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/flashsale"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/like"
+	memberCtrl "cnb.cool/go-cloud-devops/my-shop/internal/controller/member"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/order"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/product"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/recommendation"
@@ -47,6 +49,8 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	uploadCtrlV1 := uploadCtrl.NewV1()
 	refundCtrlV1 := refundCtrl.NewV1()
 	couponCtrl := coupon.NewV1()
+	memberCtrlV1 := memberCtrl.NewV1()
+	distributionCtrlV1 := distributionCtrl.NewV1()
 
 	// 前台公开接口：注册、登录、刷新、分类查询、商品查询、轮播图列表（无需 token）。
 	root.POST("/register", iamCtrl.Register)
@@ -140,6 +144,17 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 		// 优惠券（仅登录用户，作用于本人数据）。
 		user.POST("/coupons/:template_id/claim", couponCtrl.Claim)
 		user.GET("/my/coupons", couponCtrl.ListMine)
+
+		// 会员等级与权益（仅登录用户；等级配置为只读，会员信息作用于本人）。
+		user.GET("/members/levels", memberCtrlV1.Levels)
+		user.GET("/my/membership", memberCtrlV1.My)
+		user.GET("/my/membership/growth-logs", memberCtrlV1.GrowthLogs)
+
+		// 一级分销（仅登录用户；绑定作用于本人，佣金只读本人受益部分）。
+		user.POST("/referrals/bind", distributionCtrlV1.Bind)
+		user.GET("/my/referral", distributionCtrlV1.MyReferral)
+		user.GET("/my/commissions", distributionCtrlV1.MyCommissions)
+		user.GET("/my/commissions/summary", distributionCtrlV1.MyCommissionSummary)
 
 		user.GET("/sessions", iamCtrl.ListSessions)
 		user.DELETE("/sessions/:sid", iamCtrl.RevokeSession)

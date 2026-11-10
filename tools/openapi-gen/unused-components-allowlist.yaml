@@ -14,7 +14,7 @@
 version: 1
 
 groups:
-  # 142 条常驻 API 的完整请求 DTO。operation 的 requestBody/parameters 是「按字段位置拆分的
+  # 158 条常驻 API 的完整请求 DTO。operation 的 requestBody/parameters 是「按字段位置拆分的
   # 内联子集」（path/query/body 分开生成），因此不会 $ref 完整 Req Schema。
   # 保留用途：DTO 全量覆盖审计（B1-02_DTO_SCHEMA_INVENTORY.md 与 components/schemas.yaml 双向核对）。
   - type: schemas
@@ -84,6 +84,14 @@ groups:
       - DashboardStatusRequest
       - DashboardTopRequest
       - DashboardTrendRequest
+      - DistributionAdminCommissionRequest
+      - DistributionAdminCommissionsRequest
+      - DistributionAdminReferralsRequest
+      - DistributionAdminSettleCommissionRequest
+      - DistributionBindRequest
+      - DistributionMyCommissionSummaryRequest
+      - DistributionMyCommissionsRequest
+      - DistributionMyReferralRequest
       - FavoriteAddRequest
       - FavoriteCheckRequest
       - FavoriteListRequest
@@ -104,6 +112,14 @@ groups:
       - LikeCheckRequest
       - LikeCountRequest
       - LikeLikeRequest
+      - MemberAdminCreateLevelRequest
+      - MemberAdminDeleteLevelRequest
+      - MemberAdminListLevelsRequest
+      - MemberAdminMemberRequest
+      - MemberAdminUpdateLevelRequest
+      - MemberGrowthLogsRequest
+      - MemberLevelsRequest
+      - MemberMyRequest
       - OrderAdminListRequest
       - OrderAdminOrderDetailRequest
       - OrderAdminOrderStatsRequest
@@ -164,8 +180,6 @@ groups:
       - UserRevokeSessionRequest
       - UserUpdateUserStatusRequest
 
-  # handler 显式返回 nil 的写接口：实际响应 data 为 null（operation 内声明 type: null），
-  # 因此不会 $ref 空对象形态的 Res Schema。保留用途同上（DTO 全量覆盖审计）。
   - type: schemas
     category: dto-null-response
     reason: "handler 返回 nil，operation 的 data 声明为 null，空对象 Res Schema 仅用于 DTO 全量覆盖审计"

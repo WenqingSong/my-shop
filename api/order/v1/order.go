@@ -30,33 +30,34 @@ const (
 
 // Order 订单结构（查询与写接口复用）。
 type Order struct {
-	Id             int64        `json:"id" dc:"订单 id"`
-	OrderNo        string       `json:"order_no" dc:"全局唯一订单号"`
-	UserId         int64        `json:"user_id" dc:"归属用户 id"`
-	Status         string       `json:"status" dc:"状态：pending_payment/paid/shipped/received/completed/cancelled/refunded"`
-	TotalAmount    int64        `json:"total_amount" dc:"应付金额（整数分，快照 = original_amount - discount_amount）"`
-	OriginalAmount int64        `json:"original_amount" dc:"优惠前金额（整数分，快照 = Σ 订单项 price×quantity）"`
-	DiscountAmount int64        `json:"discount_amount" dc:"优惠金额（整数分，快照，无券为 0）"`
-	UserCouponId   *int64       `json:"user_coupon_id" dc:"下单时使用的用户券 id（软引用，快照，无券为空）"`
-	IdempotencyKey string       `json:"idempotency_key" dc:"幂等键"`
-	RecipientName  string       `json:"recipient_name" dc:"收货人姓名快照"`
-	Phone          string       `json:"phone" dc:"手机号快照"`
-	Province       string       `json:"province" dc:"省快照"`
-	City           string       `json:"city" dc:"市快照"`
-	District       string       `json:"district" dc:"区快照"`
-	Detail         string       `json:"detail" dc:"详细地址快照"`
-	AddressId      *int64       `json:"address_id" dc:"下单时地址 id（软引用，可空）"`
-	ExpireAt       *gtime.Time  `json:"expire_at" dc:"支付截止时间"`
-	CancelReason   *int         `json:"cancel_reason" dc:"取消原因：1=用户、2=超时；未取消为 null"`
-	PaidAt         *gtime.Time  `json:"paid_at" dc:"支付时间"`
-	ShippedAt      *gtime.Time  `json:"shipped_at" dc:"发货时间"`
-	ReceivedAt     *gtime.Time  `json:"received_at" dc:"收货时间"`
-	CompletedAt    *gtime.Time  `json:"completed_at" dc:"完成时间"`
-	CancelledAt    *gtime.Time  `json:"cancelled_at" dc:"取消时间"`
-	RefundedAt     *gtime.Time  `json:"refunded_at" dc:"退款时间"`
-	CreatedAt      *gtime.Time  `json:"created_at" dc:"创建时间"`
-	UpdatedAt      *gtime.Time  `json:"updated_at" dc:"更新时间"`
-	Items          []*OrderItem `json:"items" dc:"订单项列表"`
+	Id                   int64        `json:"id" dc:"订单 id"`
+	OrderNo              string       `json:"order_no" dc:"全局唯一订单号"`
+	UserId               int64        `json:"user_id" dc:"归属用户 id"`
+	Status               string       `json:"status" dc:"状态：pending_payment/paid/shipped/received/completed/cancelled/refunded"`
+	TotalAmount          int64        `json:"total_amount" dc:"应付金额（整数分，快照 = original_amount - discount_amount - member_discount_amount）"`
+	OriginalAmount       int64        `json:"original_amount" dc:"优惠前金额（整数分，快照 = Σ 订单项 price×quantity）"`
+	DiscountAmount       int64        `json:"discount_amount" dc:"优惠券优惠金额（整数分，快照，无券为 0）"`
+	MemberDiscountAmount int64        `json:"member_discount_amount" dc:"会员等级折扣金额（整数分，快照，无会员权益/无折扣为 0；不占用 discount_amount 的券语义）"`
+	UserCouponId         *int64       `json:"user_coupon_id" dc:"下单时使用的用户券 id（软引用，快照，无券为空）"`
+	IdempotencyKey       string       `json:"idempotency_key" dc:"幂等键"`
+	RecipientName        string       `json:"recipient_name" dc:"收货人姓名快照"`
+	Phone                string       `json:"phone" dc:"手机号快照"`
+	Province             string       `json:"province" dc:"省快照"`
+	City                 string       `json:"city" dc:"市快照"`
+	District             string       `json:"district" dc:"区快照"`
+	Detail               string       `json:"detail" dc:"详细地址快照"`
+	AddressId            *int64       `json:"address_id" dc:"下单时地址 id（软引用，可空）"`
+	ExpireAt             *gtime.Time  `json:"expire_at" dc:"支付截止时间"`
+	CancelReason         *int         `json:"cancel_reason" dc:"取消原因：1=用户、2=超时；未取消为 null"`
+	PaidAt               *gtime.Time  `json:"paid_at" dc:"支付时间"`
+	ShippedAt            *gtime.Time  `json:"shipped_at" dc:"发货时间"`
+	ReceivedAt           *gtime.Time  `json:"received_at" dc:"收货时间"`
+	CompletedAt          *gtime.Time  `json:"completed_at" dc:"完成时间"`
+	CancelledAt          *gtime.Time  `json:"cancelled_at" dc:"取消时间"`
+	RefundedAt           *gtime.Time  `json:"refunded_at" dc:"退款时间"`
+	CreatedAt            *gtime.Time  `json:"created_at" dc:"创建时间"`
+	UpdatedAt            *gtime.Time  `json:"updated_at" dc:"更新时间"`
+	Items                []*OrderItem `json:"items" dc:"订单项列表"`
 }
 
 // OrderItem 订单项（商品/SKU/价格快照，自足）。

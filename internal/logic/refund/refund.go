@@ -522,6 +522,15 @@ func (s *sRefund) Execute(ctx context.Context, adminID int64, req *v1.ExecuteReq
 			if affected, _ := result.RowsAffected(); affected == 0 {
 				return codes.New(codes.CodeRefundInvalidStatusTransition)
 			}
+			// 一级分销佣金冲回：条件更新 status IN (10,20) → 30，无佣金记录时 no-op。
+			// 与退款状态推进同事务，任一步失败整体回滚，不产生「退款成功但佣金未冲回」的账实不符。
+			if e := service.Distribution().ReverseForRefundInTx(ctx, tx, r.OrderId, req.Id); e != nil {
+				return e
+			}
+			// 会员成长值扣减：按该订单当初发放额原额扣减（幂等键 growth:refund_deduct:<refund_id>）。
+			if e := service.Member().DeductForRefundInTx(ctx, tx, r.OrderId, req.Id); e != nil {
+				return e
+			}
 			return s.insertAudit(ctx, tx, req.Id, auditActionExecuteSuccess, operatorTypeAdmin, adminID, username, before, refundStatusRefundSucceeded, reason)
 		})
 		if err != nil {

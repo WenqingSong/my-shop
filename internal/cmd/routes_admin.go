@@ -8,9 +8,11 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/coupon"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/dashboard"
+	distributionAdminCtrl "cnb.cool/go-cloud-devops/my-shop/internal/controller/distribution"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/flashsale"
 	iamController "cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/inventory"
+	memberAdminCtrl "cnb.cool/go-cloud-devops/my-shop/internal/controller/member"
 	orderController "cnb.cool/go-cloud-devops/my-shop/internal/controller/order"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/product"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/recommendation"
@@ -47,6 +49,8 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 	dashboardCtrl := dashboard.NewV1()
 	refundAdminCtrl := refundController.NewAdminV1()
 	couponAdminCtrl := coupon.NewAdminV1()
+	memberAdminCtrlV1 := memberAdminCtrl.NewAdminV1()
+	distributionAdminCtrlV1 := distributionAdminCtrl.NewAdminV1()
 
 	// 后台公开接口：管理员登录（无需 token）。
 	root.POST("/admin/login", adminCtrl.Login)
@@ -185,5 +189,18 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 		require("coupon:create").POST("/admin/coupons", couponAdminCtrl.AdminCreate)
 		require("coupon:list").GET("/admin/coupons", couponAdminCtrl.AdminList)
 		require("coupon:stop").POST("/admin/coupons/:id/stop", couponAdminCtrl.AdminStop)
+
+		// 会员等级后台维护（AdminAuth + RequirePermission）。
+		require("member:list").GET("/admin/member-levels", memberAdminCtrlV1.AdminListLevels)
+		require("member:create").POST("/admin/member-levels", memberAdminCtrlV1.AdminCreateLevel)
+		require("member:update").PUT("/admin/member-levels/:id", memberAdminCtrlV1.AdminUpdateLevel)
+		require("member:delete").DELETE("/admin/member-levels/:id", memberAdminCtrlV1.AdminDeleteLevel)
+		require("member:view").GET("/admin/members/:user_id", memberAdminCtrlV1.AdminMember)
+
+		// 一级分销后台只读查询与人工结算（AdminAuth + RequirePermission）。
+		require("distribution:list").GET("/admin/referrals", distributionAdminCtrlV1.AdminReferrals)
+		require("distribution:list").GET("/admin/commissions", distributionAdminCtrlV1.AdminCommissions)
+		require("distribution:view").GET("/admin/commissions/:id", distributionAdminCtrlV1.AdminCommission)
+		require("distribution:settle").POST("/admin/commissions/:id/settle", distributionAdminCtrlV1.AdminSettleCommission)
 	})
 }

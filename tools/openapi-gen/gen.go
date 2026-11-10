@@ -11,11 +11,11 @@ import (
 // 契约基线（B1-01 冻结的 HEAD）。
 const contractBaseline = "82243c0fbce614e03c4ff57dcc829b5f68fb08f2"
 
-// 142 条常驻 API 的期望分布（B1-01 §3.1）。
+// 158 条常驻 API 的期望分布（B1-01 §3.1 基线 142，B1-04-08 新增会员 8 条与分销 8 条）。
 const (
-	expectedTotal    = 142
-	expectedFrontend = 67
-	expectedAdmin    = 73
+	expectedTotal    = 158
+	expectedFrontend = 74
+	expectedAdmin    = 82
 	expectedHealth   = 2
 )
 
@@ -25,7 +25,7 @@ var codesByValue = map[int]*ErrorCode{}
 var pathFileOrder = []string{
 	"iam", "admin", "categories", "product", "sku", "inventory", "address",
 	"cart", "order", "refund", "coupon", "flashsale", "banner", "recommendation",
-	"article", "review", "favorite", "like", "upload", "dashboard", "health",
+	"article", "review", "favorite", "like", "upload", "dashboard", "member", "distribution", "health",
 }
 
 // tagDescriptions 是 tag 的稳定说明与展示顺序。
@@ -47,6 +47,8 @@ var tagDescriptions = []struct {
 	{"订单", "订单创建、支付、取消、收货与后台管理"},
 	{"退款", "退款申请、撤销、审核、执行与审计"},
 	{"优惠券", "优惠券模板管理与用户领取"},
+	{"会员", "会员等级配置、会员权益与成长值"},
+	{"分销", "一级推荐关系与订单佣金"},
 	{"秒杀", "秒杀活动管理与下单"},
 	{"轮播图", "轮播图查询与后台管理"},
 	{"推荐位", "推荐位查询与后台管理"},

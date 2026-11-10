@@ -97,6 +97,16 @@ codes:
     domain: category
     reused_by_domains:
       - categories
+  - code: 21007
+    constant: CodeCommissionInvalidStatus
+    http_status: 409
+    message: 佣金状态迁移非法
+    domain: distribution
+  - code: 21006
+    constant: CodeCommissionNotFound
+    http_status: 404
+    message: 佣金记录不存在
+    domain: distribution
   - code: 19004
     constant: CodeCouponAlreadyClaimed
     http_status: 409
@@ -206,16 +216,17 @@ codes:
       - categories
       - coupon
       - dashboard
+      - distribution
       - favorite
       - flashsale
       - iam
       - inventory
       - like
+      - member
       - order
       - product
       - recommendation
       - refund
-      - region
       - review
       - sku
   - code: 1001
@@ -231,14 +242,15 @@ codes:
       - categories
       - coupon
       - dashboard
+      - distribution
       - favorite
       - flashsale
       - iam
       - like
+      - member
       - order
       - product
       - refund
-      - region
       - review
       - sku
   - code: 2002
@@ -263,6 +275,31 @@ codes:
     http_status: 409
     message: 商品不可点赞
     domain: like
+  - code: 20005
+    constant: CodeMemberGrowthInsufficient
+    http_status: 409
+    message: 成长值不足
+    domain: member
+  - code: 20004
+    constant: CodeMemberLevelDuplicate
+    http_status: 409
+    message: 会员等级序号或成长值门槛已存在
+    domain: member
+  - code: 20003
+    constant: CodeMemberLevelInUse
+    http_status: 409
+    message: 会员等级已被用户使用，不能删除
+    domain: member
+  - code: 20002
+    constant: CodeMemberLevelInvalid
+    http_status: 400
+    message: 会员等级配置非法
+    domain: member
+  - code: 20001
+    constant: CodeMemberLevelNotFound
+    http_status: 404
+    message: 会员等级不存在
+    domain: member
   - code: 1004
     constant: CodeNotFound
     http_status: 404
@@ -270,7 +307,6 @@ codes:
     domain: common
     reused_by_domains:
       - flashsale
-      - region
   - code: 0
     constant: CodeOK
     http_status: 200
@@ -322,13 +358,6 @@ codes:
     domain: iam
     reused_by_domains:
       - admin
-  - code: 2016
-    constant: CodePhoneExists
-    http_status: 409
-    message: 手机号已被使用
-    domain: unknown
-    reused_by_domains:
-      - iam
   - code: 4007
     constant: CodeProductCategoryDisabled
     http_status: 400
@@ -400,6 +429,31 @@ codes:
     http_status: 404
     message: 推荐位不存在
     domain: recommendation
+  - code: 21002
+    constant: CodeReferralAlreadyBound
+    http_status: 409
+    message: 已绑定推荐人，不可改绑
+    domain: distribution
+  - code: 21004
+    constant: CodeReferralCycle
+    http_status: 409
+    message: 推荐关系成环
+    domain: distribution
+  - code: 21005
+    constant: CodeReferralInvalidReferrer
+    http_status: 400
+    message: 推荐人不存在或不可用
+    domain: distribution
+  - code: 21001
+    constant: CodeReferralNotFound
+    http_status: 404
+    message: 推荐关系不存在
+    domain: distribution
+  - code: 21003
+    constant: CodeReferralSelfBind
+    http_status: 400
+    message: 不能绑定自己为推荐人
+    domain: distribution
   - code: 2013
     constant: CodeRefreshTokenExpired
     http_status: 401
@@ -540,6 +594,7 @@ codes:
     domain: common
     reused_by_domains:
       - admin
+      - distribution
       - iam
   - code: 17002
     constant: CodeUploadConfigInvalid

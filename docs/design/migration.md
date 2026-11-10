@@ -81,6 +81,7 @@ B1-03-02 的六项交易与资金迁移），仅用于测试库验证与人工�
 | `20261110000012` | `bargain` | `bargain_activities` + `bargain_instances` + `bargain_help_records`（砍价活动/实例/助力；含 down） |
 | `20261110000013` | `member` | `member_levels` + `user_memberships` + `member_growth_logs`（等级/用户会员/成长值流水；不重复创建积分账本；含 down） |
 | `20261110000014` | `distribution` | `user_referrals` + `distribution_commissions`（一级推荐关系/订单佣金；含 down） |
+| `20261110000015` | `order_member_discount` | `orders` 增 `member_discount_amount`（会员折扣金额快照，默认 0、无回填；含 down） |
 
 ### 2.2 baseline 模型
 

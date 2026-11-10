@@ -61,3 +61,4 @@
 | 20261110000012 | bargain | B1-03-03 | RESERVED | bargain_activities + bargain_instances + bargain_help_records 砍价活动/实例/助力（含 down） |
 | 20261110000013 | member | B1-03-03 | RESERVED | member_levels + user_memberships + member_growth_logs 等级/用户会员/成长值流水，不重复创建积分账本（含 down） |
 | 20261110000014 | distribution | B1-03-03 | RESERVED | user_referrals + distribution_commissions 一级推荐关系与订单佣金（含 down） |
+| 20261110000015 | order_member_discount | B1-04-08 | RESERVED | orders 增 member_discount_amount（会员折扣金额快照，默认 0、无回填；含 down） |

@@ -72,9 +72,15 @@ var opMetaByKey = map[string]*opMeta{
 	"GET /favorites":                      {Pagination: "clamp"},
 	"GET /admin/inventories/:sku_id/logs": {Pagination: "clamp"},
 
+	// ---- 分页：形态 A（静默归一）----
+	"GET /my/membership/growth-logs": {Pagination: "clamp"},
+	"GET /my/commissions":            {Pagination: "clamp"},
+
 	// ---- 分页：形态 B（严格校验）----
-	"GET /admin/orders":  {Pagination: "strict"},
-	"GET /admin/refunds": {Pagination: "strict"},
+	"GET /admin/orders":      {Pagination: "strict"},
+	"GET /admin/refunds":     {Pagination: "strict"},
+	"GET /admin/referrals":   {Pagination: "strict"},
+	"GET /admin/commissions": {Pagination: "strict"},
 
 	// ---- 幂等：body 字段（现状，未支持 Header）----
 	"POST /orders": {

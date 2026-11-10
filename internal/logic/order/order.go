@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -54,6 +55,11 @@ const (
 	maxOrderQuantity = 999
 	// maxOrderNoRetry 订单号撞号重试次数（uk_order_no 兜底，撞号概率极低）。
 	maxOrderNoRetry = 3
+
+	// memberDiscountBaseBp 是会员折扣率的万分比基数（10000 = 原价、不打折）。
+	memberDiscountBaseBp int64 = 10000
+	// maxSafeAmountForRate 是参与比例计算的安全金额上限：original × 10000 不会溢出 int64。
+	maxSafeAmountForRate int64 = math.MaxInt64 / memberDiscountBaseBp
 )
 
 type sOrder struct{}
@@ -69,33 +75,34 @@ func New() *sOrder {
 
 // orderRow 是 orders 表的一条记录。
 type orderRow struct {
-	Id             int64       `json:"id"`
-	OrderNo        string      `json:"order_no"`
-	UserId         int64       `json:"user_id"`
-	Status         int         `json:"status"`
-	TotalAmount    int64       `json:"total_amount"`
-	OriginalAmount int64       `json:"original_amount"`
-	DiscountAmount int64       `json:"discount_amount"`
-	UserCouponId   *int64      `json:"user_coupon_id"`
-	IdempotencyKey string      `json:"idempotency_key"`
-	RequestHash    string      `json:"request_hash"`
-	RecipientName  string      `json:"recipient_name"`
-	Phone          string      `json:"phone"`
-	Province       string      `json:"province"`
-	City           string      `json:"city"`
-	District       string      `json:"district"`
-	Detail         string      `json:"detail"`
-	AddressId      *int64      `json:"address_id"`
-	ExpireAt       *gtime.Time `json:"expire_at"`
-	CancelReason   *int        `json:"cancel_reason"`
-	PaidAt         *gtime.Time `json:"paid_at"`
-	ShippedAt      *gtime.Time `json:"shipped_at"`
-	ReceivedAt     *gtime.Time `json:"received_at"`
-	CompletedAt    *gtime.Time `json:"completed_at"`
-	CancelledAt    *gtime.Time `json:"cancelled_at"`
-	RefundedAt     *gtime.Time `json:"refunded_at"`
-	CreatedAt      *gtime.Time `json:"created_at"`
-	UpdatedAt      *gtime.Time `json:"updated_at"`
+	Id                   int64       `json:"id"`
+	OrderNo              string      `json:"order_no"`
+	UserId               int64       `json:"user_id"`
+	Status               int         `json:"status"`
+	TotalAmount          int64       `json:"total_amount"`
+	OriginalAmount       int64       `json:"original_amount"`
+	DiscountAmount       int64       `json:"discount_amount"`
+	MemberDiscountAmount int64       `json:"member_discount_amount"`
+	UserCouponId         *int64      `json:"user_coupon_id"`
+	IdempotencyKey       string      `json:"idempotency_key"`
+	RequestHash          string      `json:"request_hash"`
+	RecipientName        string      `json:"recipient_name"`
+	Phone                string      `json:"phone"`
+	Province             string      `json:"province"`
+	City                 string      `json:"city"`
+	District             string      `json:"district"`
+	Detail               string      `json:"detail"`
+	AddressId            *int64      `json:"address_id"`
+	ExpireAt             *gtime.Time `json:"expire_at"`
+	CancelReason         *int        `json:"cancel_reason"`
+	PaidAt               *gtime.Time `json:"paid_at"`
+	ShippedAt            *gtime.Time `json:"shipped_at"`
+	ReceivedAt           *gtime.Time `json:"received_at"`
+	CompletedAt          *gtime.Time `json:"completed_at"`
+	CancelledAt          *gtime.Time `json:"cancelled_at"`
+	RefundedAt           *gtime.Time `json:"refunded_at"`
+	CreatedAt            *gtime.Time `json:"created_at"`
+	UpdatedAt            *gtime.Time `json:"updated_at"`
 }
 
 // orderItemRow 是 order_items 表的一条记录。
@@ -173,7 +180,14 @@ func (s *sOrder) Create(ctx context.Context, userID int64, req *v1.CreateReq) (*
 		cid := req.CouponId
 		couponID = &cid
 	}
-	totalAmount := originalAmount - discountAmount
+
+	// 会员折扣：按用户当前等级折扣率作用于商品金额，结果写入独立快照列 member_discount_amount，
+	// 不改写 discount_amount 的券语义（见 docs/design/pricing.md §5、docs/design/order.md §2.3）。
+	memberDiscountAmount, err := resolveMemberDiscount(ctx, userID, originalAmount, discountAmount)
+	if err != nil {
+		return nil, err
+	}
+	totalAmount := originalAmount - discountAmount - memberDiscountAmount
 
 	hash := requestHash(source, req.AddressId, req.CouponId, lines)
 
@@ -181,7 +195,7 @@ func (s *sOrder) Create(ctx context.Context, userID int64, req *v1.CreateReq) (*
 	for attempt := 0; attempt < maxOrderNoRetry; attempt++ {
 		orderNo := generateOrderNo()
 		createdID, err = s.insertOrder(ctx, userID, source, req.AddressId, idempotencyKey, hash,
-			originalAmount, discountAmount, totalAmount, couponID, orderNo, &address.Address, lines)
+			originalAmount, discountAmount, memberDiscountAmount, totalAmount, couponID, orderNo, &address.Address, lines)
 		if err == nil {
 			break
 		}
@@ -214,6 +228,45 @@ func (s *sOrder) Create(ctx context.Context, userID int64, req *v1.CreateReq) (*
 		"total_amount": o.TotalAmount,
 	})
 	return &v1.CreateRes{Order: *o}, nil
+}
+
+// resolveMemberDiscount 计算会员等级折扣金额（整数分，向下取整）。
+//
+// 公式与边界（docs/design/pricing.md §5）：
+//
+//	raw = floor(original_amount × (10000 - rate_bp) / 10000)
+//	member_discount_amount = min(raw, original_amount - coupon_discount)
+//
+// 第二条夹紧保证「各项优惠累计 ≤ 商品金额」：会员折扣不会把应付金额压成负数，
+// 也不会突破订单金额边界（total_amount ≥ 0 恒成立）。
+// 无等级权益（rate_bp = 10000）或原始金额为 0 时返回 0，不产生任何会员副作用。
+func resolveMemberDiscount(ctx context.Context, userID, originalAmount, couponDiscount int64) (int64, error) {
+	if originalAmount <= 0 {
+		return 0, nil
+	}
+	if originalAmount > maxSafeAmountForRate {
+		return 0, codes.Wrap(codes.CodeInternalError, fmt.Errorf("订单商品金额 %d 超出会员折扣计算范围", originalAmount))
+	}
+	remaining := originalAmount - couponDiscount
+	if remaining <= 0 {
+		return 0, nil
+	}
+
+	rateBp, err := service.Member().DiscountRateBp(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	if rateBp <= 0 || int64(rateBp) >= memberDiscountBaseBp {
+		return 0, nil
+	}
+	discount := originalAmount * (memberDiscountBaseBp - int64(rateBp)) / memberDiscountBaseBp
+	if discount > remaining {
+		discount = remaining
+	}
+	if discount < 0 {
+		discount = 0
+	}
+	return discount, nil
 }
 
 // buildLines 依据来源组装行项目：直接购买取单个 SKU；购物车购买取全部勾选项。
@@ -295,7 +348,7 @@ func (s *sOrder) insertOrder(
 	source string,
 	addressID int64,
 	idempotencyKey, hash string,
-	originalAmount, discountAmount, totalAmount int64,
+	originalAmount, discountAmount, memberDiscountAmount, totalAmount int64,
 	couponID *int64,
 	orderNo string,
 	address *addressv1.Address,
@@ -304,21 +357,22 @@ func (s *sOrder) insertOrder(
 	var orderID int64
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		data := g.Map{
-			"order_no":        orderNo,
-			"user_id":         userID,
-			"status":          statusPendingPayment,
-			"total_amount":    totalAmount,
-			"original_amount": originalAmount,
-			"discount_amount": discountAmount,
-			"idempotency_key": idempotencyKey,
-			"request_hash":    hash,
-			"recipient_name":  address.RecipientName,
-			"phone":           address.Phone,
-			"province":        address.Province,
-			"city":            address.City,
-			"district":        address.District,
-			"detail":          address.Detail,
-			"address_id":      addressID,
+			"order_no":               orderNo,
+			"user_id":                userID,
+			"status":                 statusPendingPayment,
+			"total_amount":           totalAmount,
+			"original_amount":        originalAmount,
+			"discount_amount":        discountAmount,
+			"member_discount_amount": memberDiscountAmount,
+			"idempotency_key":        idempotencyKey,
+			"request_hash":           hash,
+			"recipient_name":         address.RecipientName,
+			"phone":                  address.Phone,
+			"province":               address.Province,
+			"city":                   address.City,
+			"district":               address.District,
+			"detail":                 address.Detail,
+			"address_id":             addressID,
 			// 支付截止时间用 MySQL NOW() 计算，避免 Go 进程与 MySQL 的时区不一致导致过期判定偏移。
 			"expire_at": gdb.Raw("DATE_ADD(NOW(), INTERVAL " + strconv.FormatInt(payTimeout(ctx), 10) + " SECOND)"),
 		}
@@ -473,7 +527,8 @@ func (s *sOrder) Pay(ctx context.Context, userID, id int64) (*v1.PayRes, error) 
 		}
 		return &v1.PayRes{Order: *o}, nil
 	case statusPendingPayment:
-		// 事务：订单 10→20（条件更新）+ 若用券则核销（locked→used），原子完成，重复支付不重复核销。
+		// 事务：订单 10→20（条件更新）+ 若用券则核销（locked→used）+ 会员成长值 + 一级分销佣金，
+		// 全部原子完成；重复支付不重复核销、不重复加成长值、不重复计佣。
 		err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 			result, e := tx.Model("orders").Ctx(ctx).
 				Where("id", id).
@@ -491,6 +546,14 @@ func (s *sOrder) Pay(ctx context.Context, userID, id int64) (*v1.PayRes, error) 
 				if e := service.Coupon().MarkUsedInTx(ctx, tx, *row.UserCouponId); e != nil {
 					return e
 				}
+			}
+			// 会员成长值：成长值流水幂等键 growth:order_reward:<order_id>，重复支付不会重复发放。
+			if e := service.Member().AccrueForOrderInTx(ctx, tx, id); e != nil {
+				return e
+			}
+			// 一级分销佣金：uk_order_id 保证一单至多一条佣金，重复支付不会重复计提。
+			if e := service.Distribution().AccrueForOrderInTx(ctx, tx, id); e != nil {
+				return e
 			}
 			return nil
 		})
@@ -845,33 +908,34 @@ func (s *sOrder) toOrder(ctx context.Context, r *orderRow) (*v1.Order, error) {
 		return nil, err
 	}
 	return &v1.Order{
-		Id:             r.Id,
-		OrderNo:        r.OrderNo,
-		UserId:         r.UserId,
-		Status:         statusToString(r.Status),
-		TotalAmount:    r.TotalAmount,
-		OriginalAmount: r.OriginalAmount,
-		DiscountAmount: r.DiscountAmount,
-		UserCouponId:   r.UserCouponId,
-		IdempotencyKey: r.IdempotencyKey,
-		RecipientName:  r.RecipientName,
-		Phone:          r.Phone,
-		Province:       r.Province,
-		City:           r.City,
-		District:       r.District,
-		Detail:         r.Detail,
-		AddressId:      r.AddressId,
-		ExpireAt:       r.ExpireAt,
-		CancelReason:   r.CancelReason,
-		PaidAt:         r.PaidAt,
-		ShippedAt:      r.ShippedAt,
-		ReceivedAt:     r.ReceivedAt,
-		CompletedAt:    r.CompletedAt,
-		CancelledAt:    r.CancelledAt,
-		RefundedAt:     r.RefundedAt,
-		CreatedAt:      r.CreatedAt,
-		UpdatedAt:      r.UpdatedAt,
-		Items:          items,
+		Id:                   r.Id,
+		OrderNo:              r.OrderNo,
+		UserId:               r.UserId,
+		Status:               statusToString(r.Status),
+		TotalAmount:          r.TotalAmount,
+		OriginalAmount:       r.OriginalAmount,
+		DiscountAmount:       r.DiscountAmount,
+		MemberDiscountAmount: r.MemberDiscountAmount,
+		UserCouponId:         r.UserCouponId,
+		IdempotencyKey:       r.IdempotencyKey,
+		RecipientName:        r.RecipientName,
+		Phone:                r.Phone,
+		Province:             r.Province,
+		City:                 r.City,
+		District:             r.District,
+		Detail:               r.Detail,
+		AddressId:            r.AddressId,
+		ExpireAt:             r.ExpireAt,
+		CancelReason:         r.CancelReason,
+		PaidAt:               r.PaidAt,
+		ShippedAt:            r.ShippedAt,
+		ReceivedAt:           r.ReceivedAt,
+		CompletedAt:          r.CompletedAt,
+		CancelledAt:          r.CancelledAt,
+		RefundedAt:           r.RefundedAt,
+		CreatedAt:            r.CreatedAt,
+		UpdatedAt:            r.UpdatedAt,
+		Items:                items,
 	}, nil
 }
 

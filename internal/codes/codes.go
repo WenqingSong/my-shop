@@ -148,6 +148,22 @@ const (
 	CodeCouponClaimUnavailable Code = 19005 // 未开始/已结束/已停止，不可领取 → 409
 	CodeCouponClaimSoldOut     Code = 19006 // 发放总量已满 → 409
 	CodeCouponUnavailable      Code = 19007 // 下单用券：已使用/被占用/不在使用期/未达门槛 → 409
+
+	// 会员等级/成长值域（Member）20000-20999。
+	CodeMemberLevelNotFound      Code = 20001 // 会员等级配置不存在 → 404
+	CodeMemberLevelInvalid       Code = 20002 // 等级配置非法（名称/门槛/折扣率/状态/单调性）→ 400
+	CodeMemberLevelInUse         Code = 20003 // 等级被用户会员记录引用，不可删除 → 409
+	CodeMemberLevelDuplicate     Code = 20004 // 等级序号或成长值门槛已被占用 → 409
+	CodeMemberGrowthInsufficient Code = 20005 // 成长值扣减超过当前余额（防御性拒绝）→ 409
+
+	// 一级分销域（Distribution）21000-21999。
+	CodeReferralNotFound        Code = 21001 // 推荐关系不存在或不可见 → 404
+	CodeReferralAlreadyBound    Code = 21002 // 已绑定其他推荐人，关系不可改绑 → 409
+	CodeReferralSelfBind        Code = 21003 // 不能绑定自己为推荐人 → 400
+	CodeReferralCycle           Code = 21004 // 绑定会形成推荐关系环 → 409
+	CodeReferralInvalidReferrer Code = 21005 // 推荐人不存在或已禁用 → 400
+	CodeCommissionNotFound      Code = 21006 // 佣金记录不存在 → 404
+	CodeCommissionInvalidStatus Code = 21007 // 佣金状态迁移非法（已冲回不可结算等）→ 409
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -264,6 +280,20 @@ var codeTable = map[Code]codeInfo{
 	CodeCouponClaimUnavailable: {http.StatusConflict, "优惠券暂不可领取"},
 	CodeCouponClaimSoldOut:     {http.StatusConflict, "优惠券已领完"},
 	CodeCouponUnavailable:      {http.StatusConflict, "优惠券不可用"},
+
+	CodeMemberLevelNotFound:      {http.StatusNotFound, "会员等级不存在"},
+	CodeMemberLevelInvalid:       {http.StatusBadRequest, "会员等级配置非法"},
+	CodeMemberLevelInUse:         {http.StatusConflict, "会员等级已被用户使用，不能删除"},
+	CodeMemberLevelDuplicate:     {http.StatusConflict, "会员等级序号或成长值门槛已存在"},
+	CodeMemberGrowthInsufficient: {http.StatusConflict, "成长值不足"},
+
+	CodeReferralNotFound:        {http.StatusNotFound, "推荐关系不存在"},
+	CodeReferralAlreadyBound:    {http.StatusConflict, "已绑定推荐人，不可改绑"},
+	CodeReferralSelfBind:        {http.StatusBadRequest, "不能绑定自己为推荐人"},
+	CodeReferralCycle:           {http.StatusConflict, "推荐关系成环"},
+	CodeReferralInvalidReferrer: {http.StatusBadRequest, "推荐人不存在或不可用"},
+	CodeCommissionNotFound:      {http.StatusNotFound, "佣金记录不存在"},
+	CodeCommissionInvalidStatus: {http.StatusConflict, "佣金状态迁移非法"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。

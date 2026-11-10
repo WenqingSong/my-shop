@@ -231,8 +231,8 @@ func TestParseRouteFilesAndControllers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseRouteFiles: %v", err)
 	}
-	if len(routes) != 140 {
-		t.Errorf("routes_*.go 注册路由数 = %d, want 140（142 减去自动绑定的 2 条 health）", len(routes))
+	if len(routes) != 156 {
+		t.Errorf("routes_*.go 注册路由数 = %d, want 156（158 减去自动绑定的 2 条 health）", len(routes))
 	}
 	cms, err := parseControllers(root)
 	if err != nil {

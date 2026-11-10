@@ -48,7 +48,7 @@ func collectRoutes(t *testing.T) map[string]bool {
 	return got
 }
 
-// fullRouteTable 是 142 条常驻 JSON API 的完整清单（B1-01 §3.1 冻结，B1-02-04 补齐）。
+// fullRouteTable 是 158 条常驻 JSON API 的完整清单（B1-01 §3.1 冻结，B1-02-04 补齐，B1-04-08 增补会员/分销）。
 // 任何新增、删除或路径/方法变更都必须同步更新本清单与 openapi/。
 //
 // 不计入本清单的路由：
@@ -124,6 +124,13 @@ func fullRouteTable() []string {
 		"GET /my/articles/favorites",
 		"POST /coupons/:template_id/claim",
 		"GET /my/coupons",
+		"GET /members/levels",
+		"GET /my/membership",
+		"GET /my/membership/growth-logs",
+		"POST /referrals/bind",
+		"GET /my/referral",
+		"GET /my/commissions",
+		"GET /my/commissions/summary",
 		"GET /sessions",
 		"DELETE /sessions/:sid",
 		"POST /sessions/revoke-others",
@@ -239,17 +246,30 @@ func fullRouteTable() []string {
 		"POST /admin/coupons",
 		"GET /admin/coupons",
 		"POST /admin/coupons/:id/stop",
+
+		// ---- 会员等级后台（5）----
+		"GET /admin/member-levels",
+		"POST /admin/member-levels",
+		"PUT /admin/member-levels/:id",
+		"DELETE /admin/member-levels/:id",
+		"GET /admin/members/:user_id",
+
+		// ---- 一级分销后台（4）----
+		"GET /admin/referrals",
+		"GET /admin/commissions",
+		"GET /admin/commissions/:id",
+		"POST /admin/commissions/:id/settle",
 	}
 }
 
 // TestRouteTable 双向锁定最终路由表：
-// 期望的 142 条必须存在，且不允许出现任何未登记的额外路由。
+// 期望的 158 条必须存在，且不允许出现任何未登记的额外路由。
 func TestRouteTable(t *testing.T) {
 	got := collectRoutes(t)
 	want := fullRouteTable()
 
-	if len(want) != 142 {
-		t.Fatalf("期望路由清单为 142 条，实际 %d 条（清单本身写错了）", len(want))
+	if len(want) != 158 {
+		t.Fatalf("期望路由清单为 158 条，实际 %d 条（清单本身写错了）", len(want))
 	}
 
 	wantSet := make(map[string]bool, len(want))
@@ -320,8 +340,8 @@ func TestRouteTableMatchesContract(t *testing.T) {
 			t.Errorf("OpenAPI 中的 %q 不是实际注册路由（虚构接口）", route)
 		}
 	}
-	if len(contract) != 142 {
-		t.Errorf("OpenAPI 实际 API 数为 %d，期望 142", len(contract))
+	if len(contract) != 158 {
+		t.Errorf("OpenAPI 实际 API 数为 %d，期望 158", len(contract))
 	}
 }
 
@@ -418,10 +438,10 @@ func TestRouteCountByScope(t *testing.T) {
 			frontend++
 		}
 	}
-	if frontend != 67 || admin != 73 || healthCount != 2 {
-		t.Errorf("路由分布 frontend=%d admin=%d health=%d，期望 67/73/2", frontend, admin, healthCount)
+	if frontend != 74 || admin != 82 || healthCount != 2 {
+		t.Errorf("路由分布 frontend=%d admin=%d health=%d，期望 74/82/2", frontend, admin, healthCount)
 	}
-	if total := frontend + admin + healthCount; total != 142 {
-		t.Errorf("常驻路由总数为 %d，期望 142: %s", total, fmt.Sprint(got))
+	if total := frontend + admin + healthCount; total != 158 {
+		t.Errorf("常驻路由总数为 %d，期望 158: %s", total, fmt.Sprint(got))
 	}
 }
