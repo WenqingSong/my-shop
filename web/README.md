@@ -1,12 +1,14 @@
 # SurgeCart 用户商城前端
 
-SurgeCart 用户商城的 PC 优先前端工程。当前处于 **W2：用户认证与登录体系**，
-已开放商城首页、商品浏览、注册/登录/退出、当前用户信息与受保护账户页；
-个人中心、收货地址、收藏（W2-02）与购物车（W3）尚未开放。
+SurgeCart 用户商城的 PC 优先前端工程。当前处于 **W2-02：个人中心、收货地址与商品收藏**，
+已开放商城浏览、注册/登录/退出、个人中心、只读个人资料、收货地址 CRUD 与收藏管理；
+购物车（W3）、下单与订单（W4/W5）尚未开放。
 
 - 设计规范：[`DESIGN_SYSTEM.md`](./DESIGN_SYSTEM.md)
-- W2 交付报告：[`../docs/reports/w2-01-user-authentication/DELIVERY_REPORT.md`](../docs/reports/w2-01-user-authentication/DELIVERY_REPORT.md)
-- W2 开发知识文档：[`../.agent/tasks/dev/W2-01-user-authentication.md`](../.agent/tasks/dev/W2-01-user-authentication.md)
+- W2-02 交付报告：[`../docs/reports/w2-02-user-center/DELIVERY_REPORT.md`](../docs/reports/w2-02-user-center/DELIVERY_REPORT.md)
+- W2-02 开发知识文档：[`../.agent/tasks/dev/W2-02-user-center.md`](../.agent/tasks/dev/W2-02-user-center.md)
+- W2-01 交付报告：[`../docs/reports/w2-01-user-authentication/DELIVERY_REPORT.md`](../docs/reports/w2-01-user-authentication/DELIVERY_REPORT.md)
+- W2-01 开发知识文档：[`../.agent/tasks/dev/W2-01-user-authentication.md`](../.agent/tasks/dev/W2-01-user-authentication.md)
 - W1 交付报告：[`../docs/reports/w1-01-product-browsing/DELIVERY_REPORT.md`](../docs/reports/w1-01-product-browsing/DELIVERY_REPORT.md)
 - W1 开发知识文档：[`../.agent/tasks/dev/W1-01-product-browsing.md`](../.agent/tasks/dev/W1-01-product-browsing.md)
 - W0 交付报告：[`../docs/reports/w0-frontend-foundation/DELIVERY_REPORT.md`](../docs/reports/w0-frontend-foundation/DELIVERY_REPORT.md)
@@ -78,16 +80,18 @@ web/
 │   ├── api/                    # Client、响应解包、401 刷新、Query Key、按域 API 模块
 │   ├── auth/                   # 内存 Token、刷新、Auth 状态、路由守卫、校验/错误映射
 │   ├── components/
+│   │   ├── account/            # 地址表单弹窗
 │   │   ├── auth/               # 登录/注册卡片、密码输入
 │   │   ├── common/             # 容器、金额、空/错/加载、分页、错误边界
 │   │   ├── layout/             # Header、Footer、认证入口、搜索、移动导航
-│   │   ├── product/            # 商品卡片、栅格、图册、SKU、评价、分类筛选
+│   │   ├── product/            # 商品卡片、栅格、图册、SKU、收藏、评价、分类筛选
 │   │   └── ui/                 # shadcn/ui 风格基础组件
 │   ├── config/                 # 前端运行时配置（推荐位 code 等）
-│   ├── hooks/                  # 通用 hooks
+│   ├── hooks/                  # 通用 hooks（收藏状态/切换等）
 │   ├── layouts/                # 路由布局
-│   ├── mocks/                  # MSW handlers 与 Mock 数据（商品 + 认证）
-│   ├── pages/                  # 首页、列表、详情、登录、注册、账户、404
+│   ├── mocks/                  # MSW handlers 与 Mock 数据（商品/认证/地址/收藏）
+│   ├── pages/                  # 首页、列表、详情、登录、注册、404
+│   │   └── account/            # 个人中心布局、概览、资料、地址、收藏
 │   ├── providers/              # 全局 Provider
 │   ├── router/                 # 路由表与路由级懒加载
 │   ├── stores/                 # Zustand 客户端状态
@@ -131,7 +135,7 @@ const data = await fetchProductList({ page: 1, size: 12, keyword: '耳机' })
 - `src/api/client.ts`：纯传输层，处理超时、AbortSignal、Token、错误归类；`204` 返回 `undefined`。
 - `src/api/envelope.ts`：解包后端统一响应 `{code,message,data}`；`code !== 0` 抛 `ApiError`。
 - `src/api/auth-request.ts`：需要登录态的请求包装，401 时单飞刷新并重试一次，失败后清空 Token。
-- `src/api/*.ts`：按域封装的业务 API（products / categories / banners / reviews / recommendations / auth / account），组件禁止直接 `fetch`。
+- `src/api/*.ts`：按域封装的业务 API（products / categories / banners / reviews / recommendations / auth / account / addresses / favorites），组件禁止直接 `fetch`。
 - `src/api/types.ts`：DTO 定义，字段逐一对应 Go 后端 JSON tag；仓库没有 `contracts/openapi.yaml`，因此不做代码生成。
 - `src/api/query-keys.ts`：统一 Query Key 工厂，列表 key 携带完整查询参数，认证用户 key 为 `['auth','me']`。
 - 统一抛出 `ApiError`，`kind` 为 `http | network | timeout | aborted | parse`，带 `status` / `code` / `details`；后端数字业务码统一转为字符串。
@@ -152,8 +156,10 @@ const data = await fetchProductList({ page: 1, size: 12, keyword: '耳机' })
 - **TanStack Query**：后端数据（商品、分类、评价、当前用户）唯一权威缓存，负责请求状态与失效。
 - **URL**：商品列表的关键词、分类、排序、分页以 URL 查询参数为唯一事实来源。
 - **内存 Token Store**：认证凭证的唯一事实来源，通过 `useSyncExternalStore` 驱动 Header 与路由守卫。
-- **Zustand**：仅存放轻量 UI 状态（当前为移动端导航开关），不保存认证数据。
-- **React Hook Form + Zod**：登录/注册表单状态与前端校验。
+- **用户私有缓存**：地址 `['addresses']`、收藏 `['favorites']` 通过 Query Key 分层管理；
+  会话结束（退出或 refresh 失败）时统一清理，避免切换账号看到上一位用户的数据。
+- **Zustand**：仅存放轻量 UI 状态（当前为移动端导航开关），不保存认证或业务数据。
+- **React Hook Form + Zod**：登录/注册/地址表单状态与前端校验。
 
 禁止把接口数据复制进 Zustand，也不在组件内直接 `fetch`。
 
@@ -167,6 +173,7 @@ npm run test:e2e    # Playwright，自动启动带 MSW 的 dev server
 - `src/mocks/handlers.ts` 按真实后端结构提供分类、商品、SKU、评价、轮播图、推荐位与认证 Mock；
   `keyword=__error__` 是仅用于错误态验证的 Mock 钩子，真实后端不存在。
 - 认证 Mock 覆盖注册、登录、`/me`、refresh 轮换、logout；默认测试账号为 `demo / demo12345`。
+- 地址与收藏 Mock 使用内存状态，覆盖默认地址、CRUD、收藏可用性（下架/删除）与取消幂等。
 - E2E 通过 `VITE_ENABLE_MOCK=true` 启用浏览器 MSW，不依赖本地后端；
   推荐位区块通过 `VITE_HOME_RECOMMEND_CODE=home` 启用。
 - E2E 串行执行（`workers: 1`），避免 MSW Service Worker 注册与 Vite 依赖优化并发导致空页面。
@@ -182,6 +189,7 @@ npm run typegen
 仓库当前**没有** `contracts/openapi.yaml`（已核查仓库根目录与 `docs/`）。
 W1/W2 的 DTO 以 `api/*/v1/*.go` 的 JSON tag 为事实来源，集中定义在 `src/api/types.ts`
 与 `src/api/auth.ts`；后端提供正式契约后再执行 `npm run typegen` 并逐步替换手写 DTO。
+个人资料当前只有 `GET /me`（id/username），后端没有资料修改接口，因此资料页为只读。
 
 ## 边界
 

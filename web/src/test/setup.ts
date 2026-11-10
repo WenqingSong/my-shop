@@ -4,7 +4,9 @@ import { afterAll, afterEach, beforeAll } from 'vitest'
 
 import { resetRefreshStateForTests } from '@/auth/refresh-session'
 import { clearAuthTokens } from '@/auth/token-store'
+import { resetMockAddresses } from '@/mocks/data/addresses'
 import { resetMockAuthState } from '@/mocks/data/auth'
+import { resetMockFavorites } from '@/mocks/data/favorites'
 import { server } from '@/mocks/server'
 
 beforeAll(() => {
@@ -27,6 +29,8 @@ afterEach(() => {
   clearAuthTokens()
   resetRefreshStateForTests()
   resetMockAuthState()
+  resetMockAddresses()
+  resetMockFavorites()
 })
 
 afterAll(() => {

@@ -46,4 +46,15 @@ export const queryKeys = {
     all: ['recommendations'] as const,
     byCode: (code: string) => ['recommendations', code] as const,
   },
+  addresses: {
+    all: ['addresses'] as const,
+    list: () => ['addresses', 'list'] as const,
+  },
+  favorites: {
+    all: ['favorites'] as const,
+    lists: () => ['favorites', 'list'] as const,
+    list: (page: number, size: number) => ['favorites', 'list', { page, size }] as const,
+    checks: () => ['favorites', 'check'] as const,
+    check: (productId: number) => ['favorites', 'check', String(productId)] as const,
+  },
 } as const

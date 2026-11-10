@@ -6,13 +6,17 @@ import { RequireAuth } from '@/auth/require-auth'
 import { RouteErrorPage } from '@/components/common/route-error-page'
 import { RouteLoading } from '@/components/common/route-loading'
 import { RootLayout } from '@/layouts/root-layout'
+import { AccountLayout } from '@/pages/account/account-layout'
 import { HomePage } from '@/pages/home-page'
 import { NotFoundPage } from '@/pages/not-found-page'
 import {
-  AccountPage,
+  AccountOverviewPage,
+  AddressesPage,
+  FavoritesPage,
   LoginPage,
   ProductDetailPage,
   ProductsPage,
+  ProfilePage,
   RegisterPage,
 } from '@/router/lazy-pages'
 
@@ -63,10 +67,28 @@ export const routes: RouteObject[] = [
         path: 'account',
         element: withRouteLoading(
           <RequireAuth>
-            <AccountPage />
+            <AccountLayout />
           </RequireAuth>,
         ),
         errorElement: <RouteErrorPage />,
+        children: [
+          { index: true, element: withRouteLoading(<AccountOverviewPage />) },
+          {
+            path: 'profile',
+            element: withRouteLoading(<ProfilePage />),
+            errorElement: <RouteErrorPage />,
+          },
+          {
+            path: 'addresses',
+            element: withRouteLoading(<AddressesPage />),
+            errorElement: <RouteErrorPage />,
+          },
+          {
+            path: 'favorites',
+            element: withRouteLoading(<FavoritesPage />),
+            errorElement: <RouteErrorPage />,
+          },
+        ],
       },
       { path: '*', element: <NotFoundPage /> },
     ],

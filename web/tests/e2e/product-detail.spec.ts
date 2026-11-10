@@ -16,7 +16,7 @@ test.describe('商品详情与 SKU 选择', () => {
     await expect(page.getByText('已选规格：标准款')).toBeVisible()
     await expect(page.getByText('库存状态')).toBeVisible()
     await expect(page.getByRole('button', { name: '加入购物车' })).toBeDisabled()
-    await expect(page.getByText('购物车功能尚未开放，当前可浏览商品与规格信息。')).toBeVisible()
+    await expect(page.getByText(/购物车功能尚未开放/)).toBeVisible()
   })
 
   test('切换 SKU 后价格与已选规格同步更新', async ({ page }) => {

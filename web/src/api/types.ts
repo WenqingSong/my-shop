@@ -12,6 +12,8 @@
  * - BannerItem                api/banner/v1/banner.go
  * - ReviewItem                api/review/v1/review.go
  * - RecommendationItem        api/recommendation/v1/recommendation.go
+ * - Address                   api/address/v1/address.go
+ * - FavoriteItem              api/favorite/v1/favorite.go
  */
 
 /** 与后端 api/product/v1/product.go 的字符串枚举一致。 */
@@ -128,4 +130,39 @@ export interface RecommendationResult {
   code: string
   name: string
   items: RecommendationItem[]
+}
+
+/**
+ * 收货地址（api/address/v1/address.go）。
+ * 省/市/区为自由文本（不是行政区划 code）；is_default 为布尔。
+ */
+export interface Address {
+  id: number
+  recipient_name: string
+  phone: string
+  province: string
+  city: string
+  district: string
+  detail: string
+  is_default: boolean
+  created_at: string | null
+  updated_at: string | null
+}
+
+/**
+ * 收藏条目（api/favorite/v1/favorite.go）。
+ * 商品信息为服务端实时联查快照；商品删除时 product_name/main_image 为空、
+ * product_price 为 null，available=false。
+ */
+export interface FavoriteItem {
+  id: number
+  product_id: number
+  product_name: string
+  product_main_image: string
+  /** 整数分；商品删除时为 null。 */
+  product_price: number | null
+  available: boolean
+  /** 空串表示可用；off_shelf / product_deleted。 */
+  unavailable_reason: string
+  created_at: string | null
 }

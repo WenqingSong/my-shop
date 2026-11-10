@@ -117,7 +117,10 @@ export function useLogout() {
         // 本地登出优先，忽略服务端错误（文档记录该失败语义）。
       } finally {
         clearAuthTokens()
+        // 立即清理所有用户私有缓存，避免下一个登录用户看到上一位用户的数据。
         queryClient.removeQueries({ queryKey: queryKeys.auth.all })
+        queryClient.removeQueries({ queryKey: queryKeys.addresses.all })
+        queryClient.removeQueries({ queryKey: queryKeys.favorites.all })
       }
     },
     onSuccess: () => {

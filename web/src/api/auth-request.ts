@@ -1,5 +1,5 @@
 import { ApiError, type RequestOptions } from '@/api/client'
-import { getData, postData } from '@/api/envelope'
+import { deleteData, getData, postData, putData } from '@/api/envelope'
 import { refreshSession } from '@/auth/refresh-session'
 import { clearAuthTokens } from '@/auth/token-store'
 
@@ -52,4 +52,21 @@ export function authPostData<T>(
   options?: Omit<RequestOptions, 'method' | 'body'>,
 ): Promise<T> {
   return with401Refresh(() => postData<T>(path, body, options))
+}
+
+/** 带 401 自动刷新的 PUT。 */
+export function authPutData<T>(
+  path: string,
+  body?: unknown,
+  options?: Omit<RequestOptions, 'method' | 'body'>,
+): Promise<T> {
+  return with401Refresh(() => putData<T>(path, body, options))
+}
+
+/** 带 401 自动刷新的 DELETE。 */
+export function authDeleteData<T>(
+  path: string,
+  options?: Omit<RequestOptions, 'method' | 'body'>,
+): Promise<T> {
+  return with401Refresh(() => deleteData<T>(path, options))
 }

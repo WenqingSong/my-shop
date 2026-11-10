@@ -1,8 +1,8 @@
 import { lazy } from 'react'
 
 /**
- * 路由级代码拆分：商品列表、详情、登录、注册、账户各自独立 chunk。
- * 首页保持同步加载，避免首屏多一次网络往返。
+ * 路由级代码拆分：商品列表、详情、登录、注册与个人中心子页面各自独立 chunk。
+ * 首页与个人中心布局保持同步加载，避免首屏/切换页面多一次网络往返。
  */
 export const ProductsPage = lazy(() =>
   import('@/pages/products-page').then((module) => ({ default: module.ProductsPage })),
@@ -20,6 +20,20 @@ export const RegisterPage = lazy(() =>
   import('@/pages/register-page').then((module) => ({ default: module.RegisterPage })),
 )
 
-export const AccountPage = lazy(() =>
-  import('@/pages/account-page').then((module) => ({ default: module.AccountPage })),
+export const AccountOverviewPage = lazy(() =>
+  import('@/pages/account/overview-page').then((module) => ({
+    default: module.AccountOverviewPage,
+  })),
+)
+
+export const ProfilePage = lazy(() =>
+  import('@/pages/account/profile-page').then((module) => ({ default: module.ProfilePage })),
+)
+
+export const AddressesPage = lazy(() =>
+  import('@/pages/account/addresses-page').then((module) => ({ default: module.AddressesPage })),
+)
+
+export const FavoritesPage = lazy(() =>
+  import('@/pages/account/favorites-page').then((module) => ({ default: module.FavoritesPage })),
 )

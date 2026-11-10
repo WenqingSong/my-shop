@@ -1,7 +1,10 @@
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 
+import { fetchFavoriteStatus } from '@/api/favorites'
+import { queryKeys } from '@/api/query-keys'
+import { signInAsDemo } from '@/test/auth'
 import { renderApp } from '@/test/render'
 
 describe('商品详情页', () => {
@@ -63,5 +66,47 @@ describe('商品详情页', () => {
     expect(
       await screen.findByRole('heading', { level: 1, name: '商品不存在或已下架' }),
     ).toBeInTheDocument()
+  })
+
+  it('未登录时收藏入口跳转登录，登录后回到商品详情', async () => {
+    const user = userEvent.setup()
+    const { router } = renderApp('/products/1')
+
+    await screen.findByRole('heading', { level: 1, name: '星海 X1 Pro 5G 手机 12GB+256GB' })
+    await user.click(screen.getByRole('button', { name: '登录后收藏' }))
+
+    expect(await screen.findByRole('heading', { level: 1, name: '登录' })).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe('/login')
+
+    await user.type(screen.getByLabelText('用户名'), 'demo')
+    await user.type(screen.getByLabelText('密码'), 'demo12345')
+    await user.click(screen.getByRole('button', { name: '登录' }))
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/products/1')
+    })
+    expect(await screen.findByRole('button', { name: '收藏' })).toBeInTheDocument()
+  })
+
+  it('收藏与取消收藏同步服务端状态与 Query 缓存', async () => {
+    const user = userEvent.setup()
+    await signInAsDemo()
+    const { client } = renderApp('/products/1')
+
+    await screen.findByRole('heading', { level: 1, name: '星海 X1 Pro 5G 手机 12GB+256GB' })
+
+    await user.click(await screen.findByRole('button', { name: '收藏' }))
+    expect(await screen.findByRole('button', { name: '已收藏' })).toBeInTheDocument()
+    expect(client.getQueryData(queryKeys.favorites.check(1))).toEqual({ favorited: true })
+    await waitFor(async () => {
+      await expect(fetchFavoriteStatus(1)).resolves.toEqual({ favorited: true })
+    })
+
+    await user.click(screen.getByRole('button', { name: '已收藏' }))
+    expect(await screen.findByRole('button', { name: '收藏' })).toBeInTheDocument()
+    expect(client.getQueryData(queryKeys.favorites.check(1))).toEqual({ favorited: false })
+    await waitFor(async () => {
+      await expect(fetchFavoriteStatus(1)).resolves.toEqual({ favorited: false })
+    })
   })
 })

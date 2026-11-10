@@ -10,6 +10,19 @@ import {
   startMockSession,
 } from '@/mocks/data/auth'
 import {
+  createMockAddress,
+  deleteMockAddress,
+  listMockAddresses,
+  updateMockAddress,
+  type MockAddressInput,
+} from '@/mocks/data/addresses'
+import {
+  addMockFavorite,
+  checkMockFavorite,
+  listMockFavorites,
+  removeMockFavorite,
+} from '@/mocks/data/favorites'
+import {
   mockBanners,
   mockCategories,
   mockProductDetail,
@@ -70,6 +83,20 @@ async function readJsonObject(request: Request): Promise<Record<string, unknown>
 
 function readString(value: unknown): string {
   return typeof value === 'string' ? value : ''
+}
+
+const MOCK_PHONE_PATTERN = /^1[3-9]\d{9}$/
+
+function normalizeText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function runeLength(value: string): number {
+  return Array.from(value).length
+}
+
+function isValidAddressText(value: string, maxLength: number): boolean {
+  return value !== '' && runeLength(value) <= maxLength
 }
 
 function positiveInt(value: string | null, fallback: number, max: number): number {
@@ -172,6 +199,205 @@ export const handlers = [
     }
 
     return HttpResponse.json(ok(null))
+  }),
+
+  http.get(`${API}/addresses`, ({ request }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    return HttpResponse.json(ok({ items: listMockAddresses(user.id) }))
+  }),
+
+  http.post(`${API}/addresses`, async ({ request }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    const body = await readJsonObject(request)
+    const recipientName = normalizeText(body.recipient_name)
+    const phone = normalizeText(body.phone)
+    const province = normalizeText(body.province)
+    const city = normalizeText(body.city)
+    const district = normalizeText(body.district)
+    const detail = normalizeText(body.detail)
+
+    if (
+      !isValidAddressText(recipientName, 32) ||
+      !MOCK_PHONE_PATTERN.test(phone) ||
+      !isValidAddressText(province, 32) ||
+      !isValidAddressText(city, 32) ||
+      !isValidAddressText(district, 32) ||
+      !isValidAddressText(detail, 255)
+    ) {
+      return fail(400, 1001, '参数错误')
+    }
+
+    const address = createMockAddress(user.id, {
+      recipient_name: recipientName,
+      phone,
+      province,
+      city,
+      district,
+      detail,
+      is_default: typeof body.is_default === 'boolean' ? body.is_default : undefined,
+    })
+
+    return HttpResponse.json(ok(address))
+  }),
+
+  http.get(`${API}/addresses/:id`, ({ request, params }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    const address = listMockAddresses(user.id).find((item) => item.id === Number(params.id))
+
+    return address ? HttpResponse.json(ok(address)) : fail(404, 7001, '地址不存在')
+  }),
+
+  http.put(`${API}/addresses/:id`, async ({ request, params }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    const body = await readJsonObject(request)
+    const patch: Partial<MockAddressInput> = {}
+
+    const textFields = [
+      ['recipient_name', 32],
+      ['province', 32],
+      ['city', 32],
+      ['district', 32],
+      ['detail', 255],
+    ] as const
+
+    for (const [field, maxLength] of textFields) {
+      if (field in body) {
+        const value = normalizeText(body[field])
+
+        if (!isValidAddressText(value, maxLength)) {
+          return fail(400, 1001, '参数错误')
+        }
+
+        patch[field] = value
+      }
+    }
+
+    if ('phone' in body) {
+      const phone = normalizeText(body.phone)
+
+      if (!MOCK_PHONE_PATTERN.test(phone)) {
+        return fail(400, 1001, '参数错误')
+      }
+
+      patch.phone = phone
+    }
+
+    if ('is_default' in body) {
+      if (typeof body.is_default !== 'boolean') {
+        return fail(400, 1001, '参数错误')
+      }
+
+      patch.is_default = body.is_default
+    }
+
+    const updated = updateMockAddress(user.id, Number(params.id), patch)
+
+    return updated ? HttpResponse.json(ok(updated)) : fail(404, 7001, '地址不存在')
+  }),
+
+  http.delete(`${API}/addresses/:id`, ({ request, params }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    if (!deleteMockAddress(user.id, Number(params.id))) {
+      return fail(404, 7001, '地址不存在')
+    }
+
+    return HttpResponse.json(ok({}))
+  }),
+
+  http.get(`${API}/favorites/check`, ({ request }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    const rawProductId = new URL(request.url).searchParams.get('product_id')
+    const productId = Number(rawProductId)
+
+    if (!Number.isSafeInteger(productId) || productId <= 0) {
+      return fail(400, 1001, '参数错误')
+    }
+
+    return HttpResponse.json(ok({ favorited: checkMockFavorite(user.id, productId) }))
+  }),
+
+  http.get(`${API}/favorites`, ({ request }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    const url = new URL(request.url)
+    const page = positiveInt(url.searchParams.get('page'), 1, 10_000)
+    const size = positiveInt(url.searchParams.get('size'), 20, 100)
+
+    return HttpResponse.json(ok(listMockFavorites(user.id, page, size)))
+  }),
+
+  http.post(`${API}/favorites`, async ({ request }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    const body = await readJsonObject(request)
+    const productId = Number(body.product_id)
+
+    if (!Number.isSafeInteger(productId) || productId <= 0) {
+      return fail(400, 1001, '参数错误')
+    }
+
+    const result = addMockFavorite(user.id, productId)
+
+    if (!result.ok) {
+      return fail(result.status, result.code, result.message)
+    }
+
+    return HttpResponse.json(ok(result.item))
+  }),
+
+  http.delete(`${API}/favorites/:product_id`, ({ request, params }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    const productId = Number(params.product_id)
+
+    if (!Number.isSafeInteger(productId) || productId <= 0) {
+      return fail(400, 1001, '参数错误')
+    }
+
+    removeMockFavorite(user.id, productId)
+    return HttpResponse.json(ok({}))
   }),
 
   http.get(`${API}/categories`, () => HttpResponse.json(ok({ items: mockCategories }))),

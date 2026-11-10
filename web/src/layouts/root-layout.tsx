@@ -1,9 +1,12 @@
 import { Outlet } from 'react-router'
 
+import { useAuthCacheReset } from '@/auth/use-auth-cache-reset'
 import { SiteFooter } from '@/components/layout/site-footer'
 import { SiteHeader } from '@/components/layout/site-header'
 
 export function RootLayout() {
+  useAuthCacheReset()
+
   return (
     <div className="flex min-h-dvh flex-col bg-background">
       <a

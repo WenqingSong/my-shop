@@ -62,3 +62,22 @@ export async function postData<T>(
   const payload = await apiClient.post<unknown>(path, body, options)
   return unwrapEnvelope<T>(payload)
 }
+
+/** PUT 业务接口并解包统一响应。 */
+export async function putData<T>(
+  path: string,
+  body?: unknown,
+  options?: Omit<RequestOptions, 'method' | 'body'>,
+): Promise<T> {
+  const payload = await apiClient.put<unknown>(path, body, options)
+  return unwrapEnvelope<T>(payload)
+}
+
+/** DELETE 业务接口并解包统一响应。 */
+export async function deleteData<T>(
+  path: string,
+  options?: Omit<RequestOptions, 'method' | 'body'>,
+): Promise<T> {
+  const payload = await apiClient.delete<unknown>(path, options)
+  return unwrapEnvelope<T>(payload)
+}

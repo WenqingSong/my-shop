@@ -12,6 +12,7 @@ import { ErrorState } from '@/components/common/error-state'
 import { PageContainer } from '@/components/common/page-container'
 import { PagePlaceholder } from '@/components/common/page-placeholder'
 import { PriceDisplay } from '@/components/common/price-display'
+import { FavoriteButton } from '@/components/product/favorite-button'
 import { ProductGallery } from '@/components/product/product-gallery'
 import { ReviewSection } from '@/components/product/review-section'
 import { SkuSelector } from '@/components/product/sku-selector'
@@ -139,16 +140,17 @@ function ProductDetailContent({
           </div>
 
           <div className="mt-6 flex flex-wrap items-center gap-3">
+            <FavoriteButton productId={product.id} />
             <span title="购物车将在 W3 阶段开放" className="inline-block">
               <Button size="lg" disabled aria-describedby="cart-availability">
                 <ShoppingCart aria-hidden="true" />
                 加入购物车
               </Button>
             </span>
-            <p id="cart-availability" className="text-xs leading-5 text-muted-foreground">
-              购物车功能尚未开放，当前可浏览商品与规格信息。
-            </p>
           </div>
+          <p id="cart-availability" className="mt-2 text-xs leading-5 text-muted-foreground">
+            购物车功能尚未开放，当前可浏览商品、收藏与规格信息。
+          </p>
 
           <ul className="mt-6 space-y-2 border-t border-border pt-4 text-xs leading-5 text-muted-foreground">
             <li className="flex items-center gap-2">

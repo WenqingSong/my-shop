@@ -3,7 +3,9 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 
+import { addFavorite } from '@/api/favorites'
 import { loginRequest } from '@/api/auth'
+import { queryKeys } from '@/api/query-keys'
 import { getAuthTokens, setAuthTokens } from '@/auth/token-store'
 import { server } from '@/mocks/server'
 import { renderApp } from '@/test/render'
@@ -30,7 +32,7 @@ async function loginAsDemo() {
   await user.click(screen.getByRole('button', { name: '登录' }))
 }
 
-describe('账户页与路由保护', () => {
+describe('个人中心与路由保护', () => {
   it('未登录访问账户页会跳转到登录页', async () => {
     const { router } = renderApp('/account')
 
@@ -52,7 +54,7 @@ describe('账户页与路由保护', () => {
     await user.click(screen.getByRole('link', { name: '账户：demo' }))
 
     expect(await screen.findByRole('heading', { level: 1, name: '账户' })).toBeInTheDocument()
-    const summary = screen.getByRole('region', { name: '当前登录用户' })
+    const summary = await screen.findByRole('region', { name: '当前登录用户' })
     expect(within(summary).getByText('demo')).toBeInTheDocument()
     expect(within(summary).getByText('1')).toBeInTheDocument()
 
@@ -63,6 +65,54 @@ describe('账户页与路由保护', () => {
     })
     expect(await screen.findByRole('link', { name: '登录 / 注册' })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '账户：demo' })).not.toBeInTheDocument()
+  })
+
+  it('个人资料页只展示后端真实字段，不提供伪造的修改表单', async () => {
+    await seedDemoSession()
+    renderApp('/account/profile')
+
+    expect(await screen.findByRole('heading', { name: '个人资料' })).toBeInTheDocument()
+    const profile = await screen.findByRole('region', { name: '账户信息' })
+    expect(within(profile).getByText('demo')).toBeInTheDocument()
+    expect(screen.getByText('资料修改暂未开放')).toBeInTheDocument()
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '保存' })).not.toBeInTheDocument()
+  })
+
+  it('个人中心导航可进入收货地址与收藏页面', async () => {
+    const user = userEvent.setup()
+    await seedDemoSession()
+    const { router } = renderApp('/account')
+
+    await screen.findByRole('region', { name: '当前登录用户' })
+    const nav = screen.getByRole('navigation', { name: '个人中心导航' })
+
+    await user.click(within(nav).getByRole('link', { name: '收货地址' }))
+    expect(await screen.findByRole('heading', { name: '收货地址' })).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe('/account/addresses')
+
+    await user.click(within(nav).getByRole('link', { name: '我的收藏' }))
+    expect(await screen.findByRole('heading', { name: '我的收藏' })).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe('/account/favorites')
+  })
+
+  it('退出登录后移除收藏等用户私有缓存', async () => {
+    const user = userEvent.setup()
+    await seedDemoSession()
+    await addFavorite(1)
+
+    const { client, router } = renderApp('/account/favorites')
+    expect(
+      await screen.findByRole('link', { name: '查看商品：星海 X1 Pro 5G 手机 12GB+256GB' }),
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '退出登录' }))
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/')
+    })
+    expect(client.getQueryData(queryKeys.favorites.list(1, 10))).toBeUndefined()
+    expect(client.getQueryData(queryKeys.auth.me())).toBeUndefined()
   })
 
   it('Header、路由守卫与账户页共享同一个 /me 请求', async () => {
