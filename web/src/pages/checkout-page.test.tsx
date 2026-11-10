@@ -97,8 +97,9 @@ describe('结算页', () => {
     expect(
       within(amountPanel).getByText(/不是后端订单试算结果/),
     ).toBeInTheDocument()
-    // 运费与优惠均未接入，不展示虚构金额。
-    expect(within(amountPanel).getAllByText('暂未接入')).toHaveLength(2)
+    // 运费仍未接入；优惠券区域已接入（W4-04），未选券时展示「未使用优惠券」而不是虚构金额。
+    expect(within(amountPanel).getAllByText('暂未接入')).toHaveLength(1)
+    expect(within(amountPanel).getByText('未使用优惠券')).toBeInTheDocument()
 
     // 默认地址自动选中
     expect(await screen.findByRole('radio', { name: '使用收货地址：张三' })).toBeChecked()
@@ -199,7 +200,8 @@ describe('结算页', () => {
     expect(within(info).getByText(/^\d{13}[0-9a-f]{12}$/)).toBeInTheDocument()
     expect(within(info).getByText('待支付')).toBeInTheDocument()
     // 金额来自后端返回：4,299 × 2 + 1,999 = 10,597
-    expect(within(info).getByText('10,597')).toBeInTheDocument()
+    // W4-04 起成功页同时展示「商品总额」与「应付金额」，未用券时两者相同。
+    expect(within(info).getAllByText('10,597').length).toBeGreaterThanOrEqual(1)
     expect(within(info).getByText('由服务端订单事务计算并返回')).toBeInTheDocument()
 
     // 收货快照
@@ -360,7 +362,8 @@ describe('下单成功页', () => {
     const info = orderInfoPanel()
     expect(within(info).getByText(result.order.order_no)).toBeInTheDocument()
     expect(within(info).getByText('待支付')).toBeInTheDocument()
-    expect(within(info).getByText('4,299')).toBeInTheDocument()
+    // 商品总额与应付金额均展示该数值（未使用优惠券）。
+    expect(within(info).getAllByText('4,299').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText(/支付与售后操作将在后续阶段开放/)).toBeInTheDocument()
     // W4-01：成功页提供进入订单详情的入口。
     expect(screen.getByRole('link', { name: '查看订单' })).toHaveAttribute(

@@ -23,17 +23,29 @@ export function createIdempotencyKey(): string {
 /**
  * 下单内容指纹（仅用于判断「幂等键能否复用」）。
  *
- * 与后端 requestHash 的口径保持一致：来源 + 地址 + 优惠券 + 按 sku 升序的 sku:qty。
- * 本阶段不使用优惠券（固定 0）。
+ * 与后端 `requestHash` 的口径严格一致
+ * （`internal/logic/order/order.go:916-933`）：
+ *
+ * ```
+ * source|address_id|coupon_id|sku_id:qty|...
+ * ```
+ *
+ * `couponId` 必须参与指纹（后端同样把它写进 hash）：
+ * - 换券 / 取消用券都算「内容变化」→ 必须生成新幂等键，
+ *   否则会命中旧键并因 request_hash 不同返回 9006；
+ * - 只有「同一地址 + 同一批商品 + 同一张券」的重试才复用原键。
+ *
+ * 0 表示不使用优惠券（与后端 `req.CouponId` 缺省值一致）。
  */
 export function buildOrderSignature(
   addressId: number,
   lines: readonly { sku_id: number; quantity: number }[],
+  couponId = 0,
 ): string {
   const normalized = [...lines]
     .sort((a, b) => a.sku_id - b.sku_id)
     .map((line) => `${String(line.sku_id)}:${String(line.quantity)}`)
     .join(',')
 
-  return `cart|${String(addressId)}|0|${normalized}`
+  return `cart|${String(addressId)}|${String(couponId)}|${normalized}`
 }

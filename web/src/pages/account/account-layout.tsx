@@ -1,4 +1,4 @@
-import { Heart, MapPin, Package, ReceiptText, UserRound, LayoutDashboard } from 'lucide-react'
+import { Heart, MapPin, Package, ReceiptText, Ticket, UserRound, LayoutDashboard } from 'lucide-react'
 import { NavLink, Outlet } from 'react-router'
 
 import { PageContainer } from '@/components/common/page-container'
@@ -10,6 +10,7 @@ const accountNavItems = [
   { to: '/account/orders', label: '我的订单', icon: Package, end: false },
   // 退款详情 /account/refunds/:id 同理，保证子路由高亮。
   { to: '/account/refunds', label: '我的退款', icon: ReceiptText, end: false },
+  { to: '/account/coupons', label: '我的优惠券', icon: Ticket, end: false },
   { to: '/account/profile', label: '个人资料', icon: UserRound, end: false },
   { to: '/account/addresses', label: '收货地址', icon: MapPin, end: false },
   { to: '/account/favorites', label: '我的收藏', icon: Heart, end: false },

@@ -71,3 +71,7 @@ export const RefundDetailPage = lazy(() =>
     default: module.RefundDetailPage,
   })),
 )
+
+export const CouponsPage = lazy(() =>
+  import('@/pages/account/coupons-page').then((module) => ({ default: module.CouponsPage })),
+)

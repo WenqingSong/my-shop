@@ -96,4 +96,14 @@ export const queryKeys = {
     details: () => ['refunds', 'detail'] as const,
     detail: (refundId: number) => ['refunds', 'detail', String(refundId)] as const,
   },
+  /**
+   * 优惠券：W4-04 新增。
+   *
+   * 后端只有「我的优惠券」一个用户端查询接口（GET /my/coupons），
+   * 没有分页、状态筛选、可用券查询与优惠试算，因此只有一个列表 key。
+   */
+  coupons: {
+    all: ['coupons'] as const,
+    list: () => ['coupons', 'list'] as const,
+  },
 } as const

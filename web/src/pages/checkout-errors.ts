@@ -40,6 +40,15 @@ export function describeOrderError(error: unknown): string {
     return '收货地址不存在或已被删除，请重新选择'
   }
 
+  // 优惠券域（W4-04）：internal/codes/codes.go:143-150。
+  if (error.code === '19003') {
+    return '优惠券不存在或不属于当前账号，请重新选择优惠券'
+  }
+
+  if (error.code === '19007') {
+    return '优惠券当前不可用（可能已被占用、已使用、超出有效期或未达到门槛），已为你刷新优惠券列表，请重新选择或改用其他优惠券'
+  }
+
   if (error.code === '1001') {
     return '请求参数有误，请检查收货地址与商品后重试'
   }
@@ -67,4 +76,14 @@ export function isUnknownResultError(error: unknown): boolean {
 /** 是否为幂等冲突，需要用户刷新内容后重新提交。 */
 export function isIdempotencyConflict(error: unknown): boolean {
   return error instanceof ApiError && error.code === '9006'
+}
+
+/**
+ * 是否为服务端拒绝优惠券（19003 不存在/非本人、19007 不可用）。
+ *
+ * 这两种错误说明本地券缓存已过期：调用方需要刷新券列表并回落到「不使用优惠券」，
+ * 否则用户会反复提交同一个必然失败的请求。
+ */
+export function isCouponRejected(error: unknown): boolean {
+  return error instanceof ApiError && (error.code === '19003' || error.code === '19007')
 }

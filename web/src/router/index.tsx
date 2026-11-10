@@ -15,6 +15,7 @@ import {
   CartPage,
   CheckoutPage,
   CheckoutSuccessPage,
+  CouponsPage,
   FavoritesPage,
   LoginPage,
   OrderDetailPage,
@@ -147,6 +148,13 @@ export const routes: RouteObject[] = [
           {
             path: 'refunds/:id',
             element: withRouteLoading(<RefundDetailPage />),
+            errorElement: <RouteErrorPage />,
+          },
+          {
+            // 优惠券中心：GET /my/coupons 在 Auth 分组下，
+            // 外层 /account 已由 RequireAuth 保护，这里只做懒加载。
+            path: 'coupons',
+            element: withRouteLoading(<CouponsPage />),
             errorElement: <RouteErrorPage />,
           },
         ],

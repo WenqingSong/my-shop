@@ -86,19 +86,34 @@ export function useOrderAction(orderId: number) {
   return useMutation<Order, Error, OrderActionKind>({
     mutationFn: (action) => ACTION_REQUEST[action](orderId),
     retry: 0,
-    onSuccess: (order) => {
+    onSuccess: (order, action) => {
       queryClient.setQueryData(queryKeys.orders.detail(order.id), order)
       void queryClient.invalidateQueries({ queryKey: queryKeys.orders.list() })
+
+      // 优惠券联动（W4-04）：
+      // - 支付成功：后端在同一事务内把 locked 券核销为 used；
+      // - 取消成功：后端在同一事务内把 locked 券释放为 available；
+      // - 确认收货不影响券状态，无需额外请求。
+      if (action === 'pay' || action === 'cancel') {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.coupons.all })
+      }
     },
-    onError: async (error) => {
+    onError: async (error, action) => {
       if (!(error instanceof ApiError) || error.kind !== 'http') {
         return
       }
 
-      await Promise.all([
+      const tasks = [
         queryClient.invalidateQueries({ queryKey: queryKeys.orders.detail(orderId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.orders.list() }),
-      ])
+      ]
+
+      // 业务错误说明本地缓存已过期：支付/取消失败时券状态也可能已变化（例如已被其它请求占用/释放）。
+      if (action === 'pay' || action === 'cancel') {
+        tasks.push(queryClient.invalidateQueries({ queryKey: queryKeys.coupons.all }))
+      }
+
+      await Promise.all(tasks)
     },
   })
 }

@@ -1,4 +1,4 @@
-import { Menu, Package, ReceiptText, ShoppingCart } from 'lucide-react'
+import { Menu, Package, ReceiptText, ShoppingCart, Ticket } from 'lucide-react'
 import { Link } from 'react-router'
 
 import { useAuthStatus, useLogout } from '@/auth/use-auth'
@@ -103,6 +103,12 @@ export function MobileNav() {
                   <Link to="/account/refunds" className={cn(linkClass, 'flex items-center gap-2')}>
                     <ReceiptText className="size-4" aria-hidden="true" />
                     我的退款
+                  </Link>
+                </DialogClose>
+                <DialogClose asChild>
+                  <Link to="/account/coupons" className={cn(linkClass, 'flex items-center gap-2')}>
+                    <Ticket className="size-4" aria-hidden="true" />
+                    我的优惠券
                   </Link>
                 </DialogClose>
                 <DialogClose asChild>

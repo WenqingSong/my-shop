@@ -3,6 +3,13 @@ import type { Order, OrderItem, OrderStatus } from '@/api/orders'
 import { listMockAddresses } from '@/mocks/data/addresses'
 import { listMockCart, removeMockCartItemsBySkuIds } from '@/mocks/data/cart'
 import { mockProducts, mockSkusFor } from '@/mocks/data/catalog'
+import {
+  evaluateMockCoupon,
+  getMockCoupon,
+  lockMockCoupon,
+  releaseMockCouponOfOrder,
+  markMockCouponUsedOfOrder,
+} from '@/mocks/data/coupons'
 
 /**
  * MSW 订单状态（仅测试 / 本地 Mock，不参与生产逻辑）。
@@ -78,13 +85,22 @@ function resolveSku(skuId: number): MockSkuInfo | undefined {
   return undefined
 }
 
-function requestHash(addressId: number, lines: readonly { skuId: number; quantity: number }[]): string {
+/**
+ * 请求指纹（对齐后端 `requestHash`）：source|address_id|coupon_id|sku:qty...
+ *
+ * coupon_id 参与指纹，保证「换券 / 取消用券」不会与旧请求共用同一个幂等键内容。
+ */
+function requestHash(
+  addressId: number,
+  couponId: number,
+  lines: readonly { skuId: number; quantity: number }[],
+): string {
   const normalized = [...lines]
     .sort((a, b) => a.skuId - b.skuId)
     .map((line) => `${String(line.skuId)}:${String(line.quantity)}`)
     .join(',')
 
-  return `cart|${String(addressId)}|0|${normalized}`
+  return `cart|${String(addressId)}|${String(couponId)}|${normalized}`
 }
 
 export function resetMockOrders(): void {
@@ -137,6 +153,8 @@ export interface MockCreateOrderInput {
   source?: unknown
   address_id?: unknown
   idempotency_key?: unknown
+  /** 0/缺省表示不使用优惠券（与后端一致）。 */
+  coupon_id?: unknown
 }
 
 type MockOrderResult =
@@ -161,6 +179,13 @@ export function createMockOrder(userId: number, input: MockCreateOrderInput): Mo
   const idempotencyKey = typeof input.idempotency_key === 'string' ? input.idempotency_key.trim() : ''
 
   if (!Number.isSafeInteger(addressId) || addressId <= 0 || idempotencyKey === '') {
+    return { ok: false, status: 400, code: 1001, message: '参数错误' }
+  }
+
+  // coupon_id：缺省/0 表示不使用；与后端一致，负数属于参数错误。
+  const couponId = input.coupon_id === undefined ? 0 : Number(input.coupon_id)
+
+  if (!Number.isSafeInteger(couponId) || couponId < 0) {
     return { ok: false, status: 400, code: 1001, message: '参数错误' }
   }
 
@@ -190,8 +215,27 @@ export function createMockOrder(userId: number, input: MockCreateOrderInput): Mo
     return { ok: false, status: 404, code: 7001, message: '地址不存在' }
   }
 
+  const originalAmount = resolved.reduce(
+    (total, line) => total + line.sku.price * line.quantity,
+    0,
+  )
+
+  // 用券校验与优惠计算（对齐后端 GetDiscount：归属/有效期/门槛；状态由预占闸门判定）。
+  let discountAmount = 0
+
+  if (couponId > 0) {
+    const evaluated = evaluateMockCoupon(userId, couponId, originalAmount)
+
+    if (!evaluated.ok) {
+      return evaluated
+    }
+
+    discountAmount = evaluated.discountAmount
+  }
+
   const hash = requestHash(
     addressId,
+    couponId,
     resolved.map((line) => ({ skuId: line.sku.skuId, quantity: line.quantity })),
   )
   const existing = orders.find(
@@ -203,15 +247,25 @@ export function createMockOrder(userId: number, input: MockCreateOrderInput): Mo
       return { ok: false, status: 409, code: 9006, message: '幂等键冲突' }
     }
 
+    // 幂等重试：券可能已被本次下单锁定，直接返回既有订单（后端同语义）。
     return { ok: true, order: existing }
+  }
+
+  // 幂等检查之后再判定券状态：重复请求命中既有订单时不应因「券已锁定」被拒。
+  if (couponId > 0) {
+    const coupon = getMockCoupon(userId, couponId)
+
+    if (!coupon) {
+      return { ok: false, status: 404, code: 19003, message: '优惠券不存在' }
+    }
+
+    if (coupon.status !== 'available') {
+      return { ok: false, status: 409, code: 19007, message: '优惠券不可用' }
+    }
   }
 
   sequence += 1
   const createdAt = nowText()
-  const originalAmount = resolved.reduce(
-    (total, line) => total + line.sku.price * line.quantity,
-    0,
-  )
 
   const items: OrderItem[] = resolved.map((line, index) => ({
     id: sequence * 100 + index + 1,
@@ -232,10 +286,10 @@ export function createMockOrder(userId: number, input: MockCreateOrderInput): Mo
     order_no: orderNo,
     user_id: userId,
     status: 'pending_payment',
-    total_amount: originalAmount,
+    total_amount: originalAmount - discountAmount,
     original_amount: originalAmount,
-    discount_amount: 0,
-    user_coupon_id: null,
+    discount_amount: discountAmount,
+    user_coupon_id: couponId > 0 ? couponId : null,
     idempotency_key: idempotencyKey,
     request_hash: hash,
     recipient_name: address.recipient_name,
@@ -260,6 +314,12 @@ export function createMockOrder(userId: number, input: MockCreateOrderInput): Mo
   }
 
   orders = [...orders, order]
+
+  // 与真实后端同一事务：下单即预占券（available → locked）。
+  if (couponId > 0) {
+    lockMockCoupon(userId, couponId, order.id)
+  }
+
   // 与真实后端一致：订单事务内删除已购（已勾选）条目。
   removeMockCartItemsBySkuIds(
     userId,
@@ -421,6 +481,9 @@ export function payMockOrder(userId: number, orderId: number): MockOrderActionRe
     return INVALID_TRANSITION
   }
 
+  // 与真实后端一致：支付事务内核销券（locked → used）。
+  markMockCouponUsedOfOrder(record.id)
+
   return {
     ok: true,
     order: replaceOrder({ ...record, status: 'paid', paid_at: nowText(), updated_at: nowText() }),
@@ -444,6 +507,9 @@ export function cancelMockOrder(userId: number, orderId: number): MockOrderActio
   if (record.status !== 'pending_payment') {
     return INVALID_TRANSITION
   }
+
+  // 与真实后端一致：取消事务内释放券（locked → available）。
+  releaseMockCouponOfOrder(record.id)
 
   return {
     ok: true,

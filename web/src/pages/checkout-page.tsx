@@ -1,11 +1,14 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ShoppingCart } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 
 import { fetchAddresses } from '@/api/addresses'
+import type { UserCoupon } from '@/api/coupons'
 import { queryKeys } from '@/api/query-keys'
+import type { CartItem } from '@/api/types'
 import { CheckoutAddressSection } from '@/components/checkout/checkout-address-section'
+import { CheckoutCouponSection } from '@/components/checkout/checkout-coupon-section'
 import { CheckoutItemList } from '@/components/checkout/checkout-item-list'
 import { CheckoutSummary } from '@/components/checkout/checkout-summary'
 import { EmptyState } from '@/components/common/empty-state'
@@ -15,13 +18,16 @@ import { PageContainer } from '@/components/common/page-container'
 import { Button } from '@/components/ui/button'
 import { useCreateOrder } from '@/hooks/use-checkout'
 import { useCartQuery } from '@/hooks/use-cart'
+import { useCouponList } from '@/hooks/use-coupons'
 import { useDocumentTitle } from '@/hooks/use-document-title'
 import {
   describeOrderError,
+  isCouponRejected,
   isIdempotencyConflict,
   isUnknownResultError,
 } from '@/pages/checkout-errors'
 import { summarizeCart } from '@/utils/cart'
+import { evaluateCouponForCheckout } from '@/utils/coupons'
 import { buildOrderSignature } from '@/utils/idempotency'
 
 /**
@@ -40,7 +46,9 @@ export function CheckoutPage() {
   const queryClient = useQueryClient()
   const cartQuery = useCartQuery()
   const createOrder = useCreateOrder()
+  const couponsQuery = useCouponList()
   const [chosenAddressId, setChosenAddressId] = useState<number | null>(null)
+  const [selectedCouponId, setSelectedCouponId] = useState<number | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const submittingRef = useRef(false)
 
@@ -50,10 +58,13 @@ export function CheckoutPage() {
     staleTime: 30_000,
   })
 
-  const items = cartQuery.data?.items ?? []
-  const selectedItems = items.filter((item) => item.selected)
+  // 稳定引用：结算页同时依赖购物车、地址、优惠券三份服务端数据，
+  // 这里把派生数组与金额汇总 memo 化，避免每次渲染都产生新对象
+  // （也避免 React Compiler 因「依赖可能被修改」跳过优化）。
+  const items = useMemo<CartItem[]>(() => cartQuery.data?.items ?? [], [cartQuery.data])
+  const selectedItems = useMemo(() => items.filter((item) => item.selected), [items])
   const unselectedCount = items.length - selectedItems.length
-  const summary = summarizeCart(selectedItems)
+  const summary = useMemo(() => summarizeCart(selectedItems), [selectedItems])
   const blockedItems = selectedItems.filter((item) => !item.available)
   const insufficientItems = selectedItems.filter((item) => item.available && item.insufficient)
   const blocked = blockedItems.length > 0
@@ -65,6 +76,35 @@ export function CheckoutPage() {
     addresses.find((address) => address.is_default) ??
     addresses[0] ??
     null
+
+  /**
+   * 当前选择的优惠券（派生，不额外存一份副本）。
+   *
+   * 只有「用户选中的券仍然存在且按前端估算可选」时才真正生效：
+   * 券列表刷新后如果该券被别人占用 / 已过期 / 不再满足门槛，
+   * 这里会自动回落到「不使用优惠券」，避免提交一个必然 19007 的请求。
+   */
+  const coupons = useMemo<readonly UserCoupon[]>(
+    () => couponsQuery.data?.items ?? [],
+    [couponsQuery.data],
+  )
+  const estimatedGoodsAmount = summary.estimatedTotal
+
+  const selectedCoupon = useMemo(() => {
+    if (selectedCouponId === null) {
+      return null
+    }
+
+    const coupon = coupons.find((item) => item.id === selectedCouponId)
+
+    if (!coupon) {
+      return null
+    }
+
+    const evaluation = evaluateCouponForCheckout(coupon, estimatedGoodsAmount)
+
+    return evaluation.selectable ? { coupon, evaluation } : null
+  }, [coupons, selectedCouponId, estimatedGoodsAmount])
 
   const canSubmit =
     selectedItems.length > 0 && !blocked && selectedAddress !== null && !createOrder.isPending
@@ -78,13 +118,17 @@ export function CheckoutPage() {
     submittingRef.current = true
     setSubmitError(null)
 
+    const couponId = selectedCoupon?.coupon.id ?? 0
+    // 优惠券 id 必须参与内容指纹：换券 / 取消用券都会生成新的幂等键，
+    // 与后端 requestHash（source|address|coupon|sku:qty）保持一致。
     const signature = buildOrderSignature(
       selectedAddress.id,
       selectedItems.map((item) => ({ sku_id: item.sku_id, quantity: item.quantity })),
+      couponId,
     )
 
     createOrder.mutate(
-      { addressId: selectedAddress.id, signature },
+      { addressId: selectedAddress.id, couponId, signature },
       {
         onSuccess: (order) => {
           // replace：避免用户回退到结算页再次提交。
@@ -98,6 +142,13 @@ export function CheckoutPage() {
             // 超时/网络异常：订单可能已创建（购物车条目已被服务端删除），
             // 刷新购物车能帮助用户判断，同时避免在旧缓存上重复提交。
             void queryClient.invalidateQueries({ queryKey: queryKeys.cart.all })
+          }
+
+          if (isCouponRejected(error)) {
+            // 19007/19003：券在服务端已不可用。刷新券列表，回落到不使用优惠券，
+            // 让用户可以立即取消选择后重新提交（新幂等键）。
+            void queryClient.invalidateQueries({ queryKey: queryKeys.coupons.all })
+            setSelectedCouponId(null)
           }
         },
         onSettled: () => {
@@ -195,6 +246,16 @@ export function CheckoutPage() {
                 购物车中还有 {unselectedCount} 种未勾选商品，不会参与本次下单。
               </p>
             ) : null}
+
+            <CheckoutCouponSection
+              coupons={coupons}
+              isLoading={couponsQuery.isPending}
+              isError={couponsQuery.isError}
+              onRetry={() => void couponsQuery.refetch()}
+              selectedCouponId={selectedCoupon?.coupon.id ?? null}
+              onSelect={setSelectedCouponId}
+              estimatedGoodsAmount={summary.estimatedTotal}
+            />
           </div>
 
           <CheckoutSummary
@@ -203,6 +264,8 @@ export function CheckoutPage() {
             disabled={selectedAddress === null}
             isSubmitting={createOrder.isPending}
             onSubmit={handleSubmit}
+            discountEstimate={selectedCoupon?.evaluation.estimatedDiscount ?? 0}
+            couponSelected={selectedCoupon !== null}
           />
         </div>
       ) : null}

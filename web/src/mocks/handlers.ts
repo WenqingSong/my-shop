@@ -27,6 +27,7 @@ import {
   payMockOrder,
   receiveMockOrder,
 } from '@/mocks/data/orders'
+import { listMockCoupons } from '@/mocks/data/coupons'
 import {
   applyMockRefund,
   getMockRefund,
@@ -425,6 +426,18 @@ export const handlers = [
     return result.ok
       ? HttpResponse.json(ok(result.order))
       : fail(result.status, result.code, result.message)
+  }),
+
+  // 优惠券：与 internal/cmd/routes_frontend.go:141-142 对应，仅 /my/coupons 在本期接入。
+  // 领取接口虽然存在，但没有公开模板列表来源，前端不调用也不 Mock。
+  http.get(`${API}/my/coupons`, ({ request }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    return HttpResponse.json(ok({ items: listMockCoupons(user.id) }))
   }),
 
   // 退款：与 internal/cmd/routes_frontend.go:98-103 对应，全部需要登录。

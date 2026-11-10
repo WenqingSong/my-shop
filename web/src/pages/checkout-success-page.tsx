@@ -150,12 +150,38 @@ export function CheckoutSuccessPage() {
               </div>
             </dl>
 
-            <div className="mt-4 flex items-baseline justify-between gap-3 border-t border-border pt-4">
+            {/* 金额全部来自服务端创建订单响应，前端不做任何换算（W4-04 增加优惠明细）。 */}
+            <dl className="mt-4 flex flex-col gap-2 border-t border-border pt-4 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-muted-foreground">商品总额</dt>
+                <dd>
+                  <PriceDisplay value={order.original_amount} size="sm" tone="neutral" />
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-muted-foreground">优惠金额</dt>
+                <dd>
+                  {order.discount_amount > 0 ? (
+                    <span className="inline-flex items-baseline gap-1">
+                      <span className="text-sm text-foreground">-</span>
+                      <PriceDisplay value={order.discount_amount} size="sm" tone="neutral" />
+                    </span>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">未使用优惠券</span>
+                  )}
+                </dd>
+              </div>
+            </dl>
+
+            <div className="mt-3 flex items-baseline justify-between gap-3 border-t border-border pt-3">
               <span className="text-sm font-medium text-foreground">应付金额</span>
               <PriceDisplay value={order.total_amount} size="lg" />
             </div>
             <p className="mt-1 text-right text-xs text-muted-foreground">
               由服务端订单事务计算并返回
+              {order.user_coupon_id !== null
+                ? ` · 本单使用优惠券（券 id：${String(order.user_coupon_id)}）`
+                : ''}
             </p>
           </section>
 
