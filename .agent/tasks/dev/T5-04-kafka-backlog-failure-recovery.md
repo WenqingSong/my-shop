@@ -493,3 +493,14 @@ HTTP 200 只代表"已受理"（本项目返回 `queued`），秒杀是**异步*
 
 公共约定（`lib.ps1`）：SQL 与 Kafka 消息体一律走"无 BOM 临时文件 + Start-Process 重定向"，
 凭据只在 Pod 内部展开，宿主机侧从不读取明文。
+
+## 16. 交付状态
+
+| 项 | 值 |
+|---|---|
+| 基线 SHA | `be7fbe429791577679e5e1dcb12e4fe44f6f17b7` |
+| 开发分支 | `feat/k8s-t5-04-kafka-backlog-failure-recovery` |
+| 实现提交 | `6cf0dc6d569aee05f7c6dbf319d8d7cabef04998` |
+| 门禁 | gofmt PASS；`go build ./...` Linux 容器 PASS（Windows 因 `test/deployk8s` 使用 `syscall.Flock` 而失败，属平台限制）；`go vet ./...` PASS；`scripts/test-unit.sh` PASS；`go test ./test/manifest/...` PASS；8 个脚本静态检查 PASS |
+| 未执行 | `test-integration` / `test-race` / `test-kafka-e2e` / `scripts/test-k8s-manifest.sh`（原因见正式报告 §13） |
+| 验证边界 | "MySQL 已提交、位移未提交"毫秒级窗口 NOT_VERIFIED；`retry_count` 由注入而非真实技术失败推进 |

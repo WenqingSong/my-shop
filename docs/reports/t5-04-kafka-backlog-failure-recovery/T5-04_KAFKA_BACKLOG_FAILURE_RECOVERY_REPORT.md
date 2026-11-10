@@ -621,8 +621,18 @@ Go 侧 `DbNow.Sub(CreatedAt)` 于是恒定多出 `28800s`。
 
 | 项 | 值 |
 |---|---|
-| 基线 SHA | `be7fbe429791577679e5e1dcb12e4fe44f6f17b7` |
+| 基线 SHA（T5-03 最终提交） | `be7fbe429791577679e5e1dcb12e4fe44f6f17b7` |
 | 开发分支 | `feat/k8s-t5-04-kafka-backlog-failure-recovery` |
-| 实现提交 SHA | 见下一次元数据提交回填 |
-| 最终 SHA | 见下一次元数据提交回填 |
-| 远端 SHA | 见下一次元数据提交回填 |
+| 实现提交 SHA | `6cf0dc6d569aee05f7c6dbf319d8d7cabef04998` |
+| 实现提交内容 | 106 files changed, 28037 insertions(+)（8 个脚本 + 报告 + 学习文档 + 原始证据），**未修改任何既有文件** |
+| 远端 SHA（实现提交） | `6cf0dc6d569aee05f7c6dbf319d8d7cabef04998`（首次推送成功） |
+| 最终 SHA | 本报告元数据回填提交（见下一条提交记录，SHA 以 `git log` 为准） |
+| 推送状态 | 成功（`* [new branch]`，未合并 main、未 force push、未删除任何历史分支） |
+| 工作区状态 | 干净（除本文件自身的元数据回填提交外无未跟踪/未提交改动） |
+
+### 15.1 提交序列
+
+| 顺序 | 提交 | 说明 |
+|---|---|---|
+| 1 | `6cf0dc6` | `test(kafka): inject backlog, broker outage, crash and DLQ to verify reliability` |
+| 2 | 见远端 HEAD | `docs(test): T5-04 报告回填提交 SHA 与推送状态（仅元数据）` |
