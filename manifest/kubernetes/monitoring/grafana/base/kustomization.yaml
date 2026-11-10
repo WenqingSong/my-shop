@@ -1,0 +1,33 @@
+# Grafana 基础层（base，T4-04）。
+#
+# 职责：只声明与运行环境无关的部分（持久卷、Provisioning 配置、Dashboard 定义、安全上下文）。
+# 入口：
+#   kubectl kustomize manifest/kubernetes/monitoring/grafana/overlays/local
+#
+# 与 Prometheus 的关系：Grafana 只通过 ClusterIP Service DNS 查询 Prometheus（只读消费者），
+# 不修改 Prometheus 的任何配置，也不与 Prometheus 共享卷。
+#
+# 不包含：
+#   - Namespace：monitoring 由 prometheus/base/namespace.yaml 创建（PSS 标签单一来源，
+#     避免两处维护同名 Namespace 造成标签漂移）；
+#   - NodePort/LoadBalancer/Ingress：Grafana 只做集群内访问，本机查看走 port-forward；
+#   - RBAC：Grafana 不访问 Kubernetes API（数据源是 Prometheus HTTP 接口），不需要任何权限。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - configmap-datasource.yaml
+  - configmap-dashboard-provider.yaml
+  - configmap-dashboard.yaml
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+
+# 命名空间级资源统一落到 monitoring（与 Prometheus 同命名空间）。
+namespace: monitoring
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: surgecart
+      app.kubernetes.io/managed-by: kustomize
+    includeSelectors: false

@@ -1,0 +1,28 @@
+# Grafana 数据卷（T4-04）。
+#
+# 为什么必须持久化：
+#   Grafana 默认把 sqlite 数据库放在 /var/lib/grafana/grafana.db，其中保存 org、用户、
+#   仪表盘元数据与（本任务中的）Provisioning 历史；插件也落在同目录下的 plugins/。
+#   没有 PVC 时 Pod 重建 = 数据库回退到空库，表现为「Dashboard 时有时无」这类难排查的静默问题。
+#
+# 说明：Dashboard 与 Data Source 本身由 ConfigMap Provisioning 提供（不依赖数据库），
+# PVC 保证的是 Grafana 自身状态（管理员、组织、偏好、插件）不丢失 —— 两层都要有，
+# 单靠 ConfigMap 无法恢复 UI 侧状态，单靠 PVC 则无法保证配置可复现。
+#
+# StorageClass 不写死：沿用集群默认（本地 kind 为 local-path 的 standard），环境差异由 overlay 负责。
+# accessModes 只能是 ReadWriteOnce：SQLite 单写者。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-data
+  labels:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: surgecart
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      # grafana.db + 少量插件：2Gi 对单实例足够；容量规划不属于本任务结论。
+      storage: 2Gi
