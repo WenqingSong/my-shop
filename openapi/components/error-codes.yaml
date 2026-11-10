@@ -47,6 +47,51 @@ codes:
     http_status: 404
     message: 轮播图不存在
     domain: banner
+  - code: 21002
+    constant: CodeBargainActivityInvalid
+    http_status: 400
+    message: 砍价活动参数非法
+    domain: bargain
+  - code: 21001
+    constant: CodeBargainActivityNotFound
+    http_status: 404
+    message: 砍价活动不存在
+    domain: bargain
+  - code: 21003
+    constant: CodeBargainActivityUnavailable
+    http_status: 409
+    message: 砍价活动暂不可参与
+    domain: bargain
+  - code: 21008
+    constant: CodeBargainHelpDuplicated
+    http_status: 409
+    message: 已助力过该砍价
+    domain: bargain
+  - code: 21007
+    constant: CodeBargainHelpUnavailable
+    http_status: 409
+    message: 该砍价不可助力
+    domain: bargain
+  - code: 21005
+    constant: CodeBargainInstanceExists
+    http_status: 409
+    message: 已有进行中的砍价
+    domain: bargain
+  - code: 21004
+    constant: CodeBargainInstanceNotFound
+    http_status: 404
+    message: 砍价记录不存在
+    domain: bargain
+  - code: 21009
+    constant: CodeBargainInvalidStatusTransition
+    http_status: 409
+    message: 砍价状态迁移非法
+    domain: bargain
+  - code: 21006
+    constant: CodeBargainSelfHelpForbidden
+    http_status: 409
+    message: 不能给自己砍价
+    domain: bargain
   - code: 8002
     constant: CodeCartInvalidQuantity
     http_status: 400
@@ -202,6 +247,7 @@ codes:
       - admin
       - article
       - banner
+      - bargain
       - cart
       - categories
       - coupon
@@ -215,7 +261,6 @@ codes:
       - product
       - recommendation
       - refund
-      - region
       - review
       - sku
   - code: 1001
@@ -227,6 +272,7 @@ codes:
       - address
       - admin
       - article
+      - bargain
       - cart
       - categories
       - coupon
@@ -238,7 +284,6 @@ codes:
       - order
       - product
       - refund
-      - region
       - review
       - sku
   - code: 2002
@@ -270,7 +315,6 @@ codes:
     domain: common
     reused_by_domains:
       - flashsale
-      - region
   - code: 0
     constant: CodeOK
     http_status: 200
@@ -322,13 +366,6 @@ codes:
     domain: iam
     reused_by_domains:
       - admin
-  - code: 2016
-    constant: CodePhoneExists
-    http_status: 409
-    message: 手机号已被使用
-    domain: unknown
-    reused_by_domains:
-      - iam
   - code: 4007
     constant: CodeProductCategoryDisabled
     http_status: 400
@@ -540,6 +577,7 @@ codes:
     domain: common
     reused_by_domains:
       - admin
+      - bargain
       - iam
   - code: 17002
     constant: CodeUploadConfigInvalid

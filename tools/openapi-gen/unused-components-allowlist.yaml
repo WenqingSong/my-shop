@@ -14,7 +14,7 @@
 version: 1
 
 groups:
-  # 142 条常驻 API 的完整请求 DTO。operation 的 requestBody/parameters 是「按字段位置拆分的
+  # 155 条常驻 API 的完整请求 DTO。operation 的 requestBody/parameters 是「按字段位置拆分的
   # 内联子集」（path/query/body 分开生成），因此不会 $ref 完整 Req Schema。
   # 保留用途：DTO 全量覆盖审计（B1-02_DTO_SCHEMA_INVENTORY.md 与 components/schemas.yaml 双向核对）。
   - type: schemas
@@ -58,6 +58,19 @@ groups:
       - ArticleUnfavoriteRequest
       - ArticleUnlikeRequest
       - ArticleUpdateRequest
+      - BargainAbandonRequest
+      - BargainAdminCreateRequest
+      - BargainAdminDetailRequest
+      - BargainAdminListRequest
+      - BargainAdminStatusRequest
+      - BargainAdminUpdateRequest
+      - BargainDetailRequest
+      - BargainHelpRequest
+      - BargainHelpsRequest
+      - BargainInstanceDetailRequest
+      - BargainListRequest
+      - BargainMyListRequest
+      - BargainStartRequest
       - BannerAdminDetailRequest
       - BannerAdminListRequest
       - BannerCreateRequest

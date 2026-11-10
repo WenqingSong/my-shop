@@ -18,8 +18,6 @@ tags:
     description: 用户注册、登录、刷新、会话管理与后台用户状态
   - name: 收货地址
     description: 用户收货地址 CRUD（仅本人）
-  - name: 地区
-    description: 省/市/区地区字典只读查询
   - name: 后台认证
     description: 管理员登录/登出/当前身份
   - name: 管理员
@@ -44,6 +42,8 @@ tags:
     description: 退款申请、撤销、审核、执行与审计
   - name: 优惠券
     description: 优惠券模板管理与用户领取
+  - name: 砍价
+    description: 砍价活动管理与用户发起/好友助力
   - name: 秒杀
     description: 秒杀活动管理与下单
   - name: 轮播图
@@ -862,27 +862,42 @@ paths:
           $ref: '#/components/responses/BadRequest'
         "500":
           $ref: '#/components/responses/InternalError'
-  /regions:
+  /bargain-activities:
     get:
       tags:
-        - 地区
-      summary: 查询地区列表
+        - 砍价
+      summary: 查询可参与的砍价活动
       description: 公开接口，无需认证。
-      operationId: regionList
+      operationId: bargainList
       security: []
       x-auth: public
-      x-handler: region.List
+      x-handler: bargain.List
       x-source: routes_frontend.go
       parameters:
-        - name: parent_id
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int
+          description: 页码，默认 1；<1 返回 400
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int
+          description: 每页数量，默认 20、上限 100；越界返回 400
+        - name: product_id
           in: query
           required: false
           schema:
             type: integer
             format: int64
             x-go-type: int64
-            default: 0
-          description: 父级地区 id；0 或缺省返回省级列表
+          description: 商品 id 精确筛选；<=0 返回 400
       x-pagination-mode: none
       x-idempotency:
         mode: none
@@ -897,7 +912,7 @@ paths:
                   - type: object
                     properties:
                       data:
-                        $ref: '#/components/schemas/RegionListResponse'
+                        $ref: '#/components/schemas/BargainListResponse'
         x-error-codes:
           codes:
             - 1000
@@ -908,16 +923,16 @@ paths:
           $ref: '#/components/responses/BadRequest'
         "500":
           $ref: '#/components/responses/InternalError'
-  /regions/{id}:
+  /bargain-activities/{id}:
     get:
       tags:
-        - 地区
-      summary: 查询地区详情与层级链
+        - 砍价
+      summary: 查询砍价活动详情
       description: 公开接口，无需认证。
-      operationId: regionDetail
+      operationId: bargainDetail
       security: []
       x-auth: public
-      x-handler: region.Detail
+      x-handler: bargain.Detail
       x-source: routes_frontend.go
       parameters:
         - name: id
@@ -927,7 +942,7 @@ paths:
             type: integer
             format: int64
             x-go-type: int64
-          description: 地区 id
+          description: 活动 id
       x-pagination-mode: none
       x-idempotency:
         mode: none
@@ -942,12 +957,12 @@ paths:
                   - type: object
                     properties:
                       data:
-                        $ref: '#/components/schemas/RegionDetailResponse'
+                        $ref: '#/components/schemas/BargainDetailResponse'
         x-error-codes:
           codes:
             - 1000
             - 1001
-            - 1004
+            - 21001
           scope: static-call-chain
           note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
         "400":
@@ -1326,67 +1341,6 @@ paths:
           $ref: '#/components/responses/Forbidden'
         "500":
           $ref: '#/components/responses/InternalError'
-    put:
-      tags:
-        - IAM
-      summary: 修改当前登录用户资料
-      description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
-      operationId: userUpdateMe
-      security:
-        - bearerAuth: []
-      x-auth: user
-      x-handler: iam.UpdateMe
-      x-source: routes_frontend.go
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                nickname:
-                  type: [string, "null"]
-                  description: 昵称；空串表示清空，省略表示不修改；trim 后 ≤32 字符
-                avatar_url:
-                  type: [string, "null"]
-                  description: 头像地址；空串表示清空，省略表示不修改；非空时须为 http/https URL 且 ≤512 字符
-                phone:
-                  type: [string, "null"]
-                  description: 手机号；空串表示清空为未设置，省略表示不修改；格式 ^1[3-9]\d{9}$
-      x-pagination-mode: none
-      x-idempotency:
-        mode: none
-      responses:
-        "200":
-          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/Success'
-                  - type: object
-                    properties:
-                      data:
-                        $ref: '#/components/schemas/UserUpdateMeResponse'
-        x-error-codes:
-          codes:
-            - 1000
-            - 1001
-            - 1002
-            - 1003
-            - 2016
-          scope: static-call-chain
-          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
-        "400":
-          $ref: '#/components/responses/BadRequest'
-        "401":
-          $ref: '#/components/responses/Unauthorized'
-        "403":
-          $ref: '#/components/responses/Forbidden'
-        "409":
-          $ref: '#/components/responses/Conflict'
-        "500":
-          $ref: '#/components/responses/InternalError'
   /addresses:
     post:
       tags:
@@ -1412,30 +1366,15 @@ paths:
                 phone:
                   type: string
                   description: 手机号，格式 ^1[3-9]\d{9}$
-                province_id:
-                  type: [integer, "null"]
-                  format: int64
-                  x-go-type: int64
-                  description: 省级地区 id（与 city_id/district_id 同时提供）
-                city_id:
-                  type: [integer, "null"]
-                  format: int64
-                  x-go-type: int64
-                  description: 市级地区 id（与 province_id/district_id 同时提供）
-                district_id:
-                  type: [integer, "null"]
-                  format: int64
-                  x-go-type: int64
-                  description: 区/县级地区 id（与 province_id/city_id 同时提供）
                 province:
                   type: string
-                  description: 省（自由文本；结构化模式下可省略，以字典为准）
+                  description: 省（自由文本，非空）
                 city:
                   type: string
-                  description: 市（自由文本；结构化模式下可省略，以字典为准）
+                  description: 市（自由文本，非空）
                 district:
                   type: string
-                  description: 区（自由文本；结构化模式下可省略，以字典为准）
+                  description: 区（自由文本，非空）
                 detail:
                   type: string
                   description: 详细地址，trim 后 1~255 字符
@@ -1612,30 +1551,15 @@ paths:
                 phone:
                   type: [string, "null"]
                   description: 手机号
-                province_id:
-                  type: [integer, "null"]
-                  format: int64
-                  x-go-type: int64
-                  description: 省级地区 id；与另外两个 id 同传，传 0 表示清空
-                city_id:
-                  type: [integer, "null"]
-                  format: int64
-                  x-go-type: int64
-                  description: 市级地区 id；与另外两个 id 同传，传 0 表示清空
-                district_id:
-                  type: [integer, "null"]
-                  format: int64
-                  x-go-type: int64
-                  description: 区/县级地区 id；与另外两个 id 同传，传 0 表示清空
                 province:
                   type: [string, "null"]
-                  description: 省（自由文本；未传 id 时修改文本会清空地区 id）
+                  description: 省（自由文本）
                 city:
                   type: [string, "null"]
-                  description: 市（自由文本；未传 id 时修改文本会清空地区 id）
+                  description: 市（自由文本）
                 district:
                   type: [string, "null"]
-                  description: 区（自由文本；未传 id 时修改文本会清空地区 id）
+                  description: 区（自由文本）
                 detail:
                   type: [string, "null"]
                   description: 详细地址
@@ -3990,6 +3914,353 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         "403":
           $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /bargain-activities/{id}/instances:
+    post:
+      tags:
+        - 砍价
+      summary: 发起砍价
+      description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+      operationId: bargainStart
+      security:
+        - bearerAuth: []
+      x-auth: user
+      x-handler: bargain.Start
+      x-source: routes_frontend.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 活动 id
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BargainStartResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 21001
+            - 21003
+            - 21005
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /my/bargain-instances:
+    get:
+      tags:
+        - 砍价
+      summary: 查询我的砍价记录
+      description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+      operationId: bargainMyList
+      security:
+        - bearerAuth: []
+      x-auth: user
+      x-handler: bargain.MyList
+      x-source: routes_frontend.go
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int
+          description: 页码，默认 1；<1 返回 400
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int
+          description: 每页数量，默认 20、上限 100；越界返回 400
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BargainMyListResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /bargain-instances/{id}:
+    get:
+      tags:
+        - 砍价
+      summary: 查询砍价实例详情
+      description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+      operationId: bargainInstanceDetail
+      security:
+        - bearerAuth: []
+      x-auth: user
+      x-handler: bargain.InstanceDetail
+      x-source: routes_frontend.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 实例 id
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BargainInstanceDetailResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 21004
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /bargain-instances/{id}/helps:
+    get:
+      tags:
+        - 砍价
+      summary: 查询砍价助力记录
+      description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+      operationId: bargainHelps
+      security:
+        - bearerAuth: []
+      x-auth: user
+      x-handler: bargain.Helps
+      x-source: routes_frontend.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 实例 id
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BargainHelpsResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 21004
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /bargain-instances/{id}/help:
+    post:
+      tags:
+        - 砍价
+      summary: 好友助力砍价
+      description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+      operationId: bargainHelp
+      security:
+        - bearerAuth: []
+      x-auth: user
+      x-handler: bargain.Help
+      x-source: routes_frontend.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 实例 id
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BargainHelpResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 21004
+            - 21006
+            - 21007
+            - 21008
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /bargain-instances/{id}/abandon:
+    post:
+      tags:
+        - 砍价
+      summary: 放弃砍价
+      description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+      operationId: bargainAbandon
+      security:
+        - bearerAuth: []
+      x-auth: user
+      x-handler: bargain.Abandon
+      x-source: routes_frontend.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 实例 id
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BargainAbandonResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 21004
+            - 21009
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
         "500":
           $ref: '#/components/responses/InternalError'
   /sessions:
@@ -8879,6 +9150,414 @@ paths:
           $ref: '#/components/responses/NotFound'
         "500":
           $ref: '#/components/responses/InternalError'
+  /admin/bargain-activities:
+    post:
+      tags:
+        - 砍价
+      summary: 创建砍价活动
+      description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`bargain:create`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+      operationId: bargainAdminCreate
+      security:
+        - bearerAuth: []
+      x-auth: admin
+      x-permission: bargain:create
+      x-handler: bargain.AdminCreate
+      x-source: routes_admin.go
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: 活动名称（trim 后 1~64 字符）
+                product_id:
+                  type: integer
+                  format: int64
+                  x-go-type: int64
+                  description: 商品 id（必须存在）
+                sku_id:
+                  type: integer
+                  format: int64
+                  x-go-type: int64
+                  description: SKU id（必须存在且属于该商品）
+                start_price:
+                  type: integer
+                  format: int64
+                  x-go-type: int64
+                  x-unit: cent
+                  description: 原始价（整数分，1~99999999）
+                floor_price:
+                  type: integer
+                  format: int64
+                  x-go-type: int64
+                  x-unit: cent
+                  description: 目标价/底价（整数分，≥1 且 < start_price）
+                help_amount:
+                  type: integer
+                  format: int64
+                  x-go-type: int64
+                  x-unit: cent
+                  description: 每次助力的名义砍减额（整数分，≥1）
+                max_help_count:
+                  type: integer
+                  format: int64
+                  x-go-type: int64
+                  description: 单个实例最多被助力次数（≥1，且需足以砍到 floor_price）
+                start_time:
+                  type: [string, "null"]
+                  x-go-type: gtime.Time
+                  x-format: gtime-lenient
+                  description: 活动开始时间（必须早于 end_time）；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+                end_time:
+                  type: [string, "null"]
+                  x-go-type: gtime.Time
+                  x-format: gtime-lenient
+                  description: 活动结束时间（必须晚于当前时间）；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BargainAdminCreateResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 21002
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags:
+        - 砍价
+      summary: 后台砍价活动分页列表
+      description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`bargain:list`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+      operationId: bargainAdminList
+      security:
+        - bearerAuth: []
+      x-auth: admin
+      x-permission: bargain:list
+      x-handler: bargain.AdminList
+      x-source: routes_admin.go
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int
+          description: 页码，默认 1；<1 返回 400
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int
+          description: 每页数量，默认 20、上限 100；越界返回 400
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int
+          description: 状态筛选：1=启用、0=停用；省略=全部
+        - name: product_id
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 商品 id 精确筛选；<=0 返回 400
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BargainAdminListResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /admin/bargain-activities/{id}:
+    get:
+      tags:
+        - 砍价
+      summary: 后台砍价活动详情
+      description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`bargain:view`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+      operationId: bargainAdminDetail
+      security:
+        - bearerAuth: []
+      x-auth: admin
+      x-permission: bargain:view
+      x-handler: bargain.AdminDetail
+      x-source: routes_admin.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 活动 id
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BargainAdminDetailResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 21001
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "500":
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags:
+        - 砍价
+      summary: 编辑砍价活动
+      description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`bargain:update`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+      operationId: bargainAdminUpdate
+      security:
+        - bearerAuth: []
+      x-auth: admin
+      x-permission: bargain:update
+      x-handler: bargain.AdminUpdate
+      x-source: routes_admin.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 活动 id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: 活动名称（trim 后 1~64 字符）
+                product_id:
+                  type: integer
+                  format: int64
+                  x-go-type: int64
+                  description: 商品 id（必须与创建时一致）
+                sku_id:
+                  type: integer
+                  format: int64
+                  x-go-type: int64
+                  description: SKU id（必须与创建时一致）
+                start_price:
+                  type: integer
+                  format: int64
+                  x-go-type: int64
+                  x-unit: cent
+                  description: 原始价（整数分）
+                floor_price:
+                  type: integer
+                  format: int64
+                  x-go-type: int64
+                  x-unit: cent
+                  description: 目标价/底价（整数分）
+                help_amount:
+                  type: integer
+                  format: int64
+                  x-go-type: int64
+                  x-unit: cent
+                  description: 每次助力的名义砍减额（整数分）
+                max_help_count:
+                  type: integer
+                  format: int64
+                  x-go-type: int64
+                  description: 单个实例最多被助力次数
+                start_time:
+                  type: [string, "null"]
+                  x-go-type: gtime.Time
+                  x-format: gtime-lenient
+                  description: 活动开始时间；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+                end_time:
+                  type: [string, "null"]
+                  x-go-type: gtime.Time
+                  x-format: gtime-lenient
+                  description: 活动结束时间（必须晚于当前时间）；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BargainAdminUpdateResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 21001
+            - 21002
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /admin/bargain-activities/{id}/status:
+    post:
+      tags:
+        - 砍价
+      summary: 启用或停用砍价活动
+      description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`bargain:update`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+      operationId: bargainAdminStatus
+      security:
+        - bearerAuth: []
+      x-auth: admin
+      x-permission: bargain:update
+      x-handler: bargain.AdminStatus
+      x-source: routes_admin.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 活动 id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: integer
+                  format: int64
+                  x-go-type: int
+                  description: 目标状态：1=启用、0=停用
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BargainAdminStatusResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 21001
+            - 21002
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "500":
+          $ref: '#/components/responses/InternalError'
   /health:
     get:
       tags:
@@ -9264,6 +9943,64 @@ components:
       $ref: ./components/schemas.yaml#/BannerDeleteRequest
     BannerDeleteResponse:
       $ref: ./components/schemas.yaml#/BannerDeleteResponse
+    BargainActivity:
+      $ref: ./components/schemas.yaml#/BargainActivity
+    BargainInstance:
+      $ref: ./components/schemas.yaml#/BargainInstance
+    BargainHelpRecord:
+      $ref: ./components/schemas.yaml#/BargainHelpRecord
+    BargainAdminCreateRequest:
+      $ref: ./components/schemas.yaml#/BargainAdminCreateRequest
+    BargainAdminCreateResponse:
+      $ref: ./components/schemas.yaml#/BargainAdminCreateResponse
+    BargainAdminUpdateRequest:
+      $ref: ./components/schemas.yaml#/BargainAdminUpdateRequest
+    BargainAdminUpdateResponse:
+      $ref: ./components/schemas.yaml#/BargainAdminUpdateResponse
+    BargainAdminStatusRequest:
+      $ref: ./components/schemas.yaml#/BargainAdminStatusRequest
+    BargainAdminStatusResponse:
+      $ref: ./components/schemas.yaml#/BargainAdminStatusResponse
+    BargainAdminListRequest:
+      $ref: ./components/schemas.yaml#/BargainAdminListRequest
+    BargainAdminListResponse:
+      $ref: ./components/schemas.yaml#/BargainAdminListResponse
+    BargainAdminDetailRequest:
+      $ref: ./components/schemas.yaml#/BargainAdminDetailRequest
+    BargainAdminDetailResponse:
+      $ref: ./components/schemas.yaml#/BargainAdminDetailResponse
+    BargainListRequest:
+      $ref: ./components/schemas.yaml#/BargainListRequest
+    BargainListResponse:
+      $ref: ./components/schemas.yaml#/BargainListResponse
+    BargainDetailRequest:
+      $ref: ./components/schemas.yaml#/BargainDetailRequest
+    BargainDetailResponse:
+      $ref: ./components/schemas.yaml#/BargainDetailResponse
+    BargainStartRequest:
+      $ref: ./components/schemas.yaml#/BargainStartRequest
+    BargainStartResponse:
+      $ref: ./components/schemas.yaml#/BargainStartResponse
+    BargainMyListRequest:
+      $ref: ./components/schemas.yaml#/BargainMyListRequest
+    BargainMyListResponse:
+      $ref: ./components/schemas.yaml#/BargainMyListResponse
+    BargainInstanceDetailRequest:
+      $ref: ./components/schemas.yaml#/BargainInstanceDetailRequest
+    BargainInstanceDetailResponse:
+      $ref: ./components/schemas.yaml#/BargainInstanceDetailResponse
+    BargainHelpRequest:
+      $ref: ./components/schemas.yaml#/BargainHelpRequest
+    BargainHelpResponse:
+      $ref: ./components/schemas.yaml#/BargainHelpResponse
+    BargainHelpsRequest:
+      $ref: ./components/schemas.yaml#/BargainHelpsRequest
+    BargainHelpsResponse:
+      $ref: ./components/schemas.yaml#/BargainHelpsResponse
+    BargainAbandonRequest:
+      $ref: ./components/schemas.yaml#/BargainAbandonRequest
+    BargainAbandonResponse:
+      $ref: ./components/schemas.yaml#/BargainAbandonResponse
     CartItem:
       $ref: ./components/schemas.yaml#/CartItem
     CartListRequest:
@@ -9438,10 +10175,6 @@ components:
       $ref: ./components/schemas.yaml#/UserMeRequest
     UserMeResponse:
       $ref: ./components/schemas.yaml#/UserMeResponse
-    UserUpdateMeRequest:
-      $ref: ./components/schemas.yaml#/UserUpdateMeRequest
-    UserUpdateMeResponse:
-      $ref: ./components/schemas.yaml#/UserUpdateMeResponse
     UserLogoutRequest:
       $ref: ./components/schemas.yaml#/UserLogoutRequest
     UserLogoutResponse:
@@ -9676,16 +10409,6 @@ components:
       $ref: ./components/schemas.yaml#/RefundCloseRequest
     RefundCloseResponse:
       $ref: ./components/schemas.yaml#/RefundCloseResponse
-    Region:
-      $ref: ./components/schemas.yaml#/Region
-    RegionListRequest:
-      $ref: ./components/schemas.yaml#/RegionListRequest
-    RegionListResponse:
-      $ref: ./components/schemas.yaml#/RegionListResponse
-    RegionDetailRequest:
-      $ref: ./components/schemas.yaml#/RegionDetailRequest
-    RegionDetailResponse:
-      $ref: ./components/schemas.yaml#/RegionDetailResponse
     ReviewItem:
       $ref: ./components/schemas.yaml#/ReviewItem
     Review:
@@ -9773,9 +10496,9 @@ components:
       $ref: ./components/security.yaml#/bearerAuth
 x-contract-baseline: 82243c0fbce614e03c4ff57dcc829b5f68fb08f2
 x-api-count:
-  total: 145
-  frontend: 70
-  admin: 73
+  total: 155
+  frontend: 75
+  admin: 78
   health: 2
   conditional: 1
   static: 1

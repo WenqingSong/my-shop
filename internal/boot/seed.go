@@ -75,6 +75,11 @@ var seedPermissionList = []permissionSeed{
 	{Code: "coupon:create", Name: "创建优惠券模板"},
 	{Code: "coupon:list", Name: "查看优惠券模板"},
 	{Code: "coupon:stop", Name: "停止优惠券领取"},
+
+	{Code: "bargain:create", Name: "创建砍价活动"},
+	{Code: "bargain:update", Name: "编辑砍价活动"},
+	{Code: "bargain:list", Name: "查看砍价活动列表"},
+	{Code: "bargain:view", Name: "查看砍价活动详情"},
 }
 
 // seedPermissions 幂等写入标准权限：已存在（code 唯一）则跳过。

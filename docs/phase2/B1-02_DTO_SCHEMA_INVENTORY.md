@@ -13,11 +13,11 @@
 
 | 指标 | 数值 |
 |---|---|
-| DTO 结构体总数 | 328 |
-| Request 结构体 | 145 |
-| Response 结构体 | 144 |
-| 业务实体结构体 | 39 |
-| 已登记 API | 145 |
+| DTO 结构体总数 | 350 |
+| Request 结构体 | 155 |
+| Response 结构体 | 154 |
+| 业务实体结构体 | 41 |
+| 已登记 API | 155 |
 | OperationId 唯一性 | 通过（生成期强制校验） |
 | 无法确认的字段 | 0（遇到未登记类型直接失败，不猜测） |
 
@@ -51,14 +51,14 @@
 
 | Schema | Go 类型 | 类型 | 字段数 | 金额字段 | 枚举字段 | 时间字段 | 可空字段 |
 |---|---|---|---|---|---|---|---|
-| `Address` | `address.Address` | Entity | 13 | - | - | `created_at`<br>`updated_at` | `province_id`<br>`city_id`<br>`district_id`<br>`created_at`<br>`updated_at` |
-| `AddressCreateRequest` | `address.CreateReq` | Request | 10 | - | - | - | `province_id`<br>`city_id`<br>`district_id`<br>`is_default` |
+| `Address` | `address.Address` | Entity | 10 | - | - | `created_at`<br>`updated_at` | `created_at`<br>`updated_at` |
+| `AddressCreateRequest` | `address.CreateReq` | Request | 7 | - | - | - | `is_default` |
 | `AddressCreateResponse` | `address.CreateRes` | Response | 1 | - | - | - | - |
 | `AddressListRequest` | `address.ListReq` | Request | 0 | - | - | - | - |
 | `AddressListResponse` | `address.ListRes` | Response | 1 | - | - | - | - |
 | `AddressDetailRequest` | `address.DetailReq` | Request | 1 | - | - | - | - |
 | `AddressDetailResponse` | `address.DetailRes` | Response | 1 | - | - | - | - |
-| `AddressUpdateRequest` | `address.UpdateReq` | Request | 11 | - | - | - | `recipient_name`<br>`phone`<br>`province_id`<br>`city_id`<br>`district_id`<br>`province`<br>`city`<br>`district`<br>`detail`<br>`is_default` |
+| `AddressUpdateRequest` | `address.UpdateReq` | Request | 8 | - | - | - | `recipient_name`<br>`phone`<br>`province`<br>`city`<br>`district`<br>`detail`<br>`is_default` |
 | `AddressUpdateResponse` | `address.UpdateRes` | Response | 1 | - | - | - | - |
 | `AddressDeleteRequest` | `address.DeleteReq` | Request | 1 | - | - | - | - |
 | `AddressDeleteResponse` | `address.DeleteRes` | Response | 0 | - | - | - | - |
@@ -144,6 +144,35 @@
 | `BannerUpdateResponse` | `banner.UpdateRes` | Response | 1 | - | - | - | - |
 | `BannerDeleteRequest` | `banner.DeleteReq` | Request | 1 | - | - | - | - |
 | `BannerDeleteResponse` | `banner.DeleteRes` | Response | 0 | - | - | - | - |
+| `BargainActivity` | `bargain.Activity` | Entity | 16 | `start_price`<br>`floor_price`<br>`help_amount` | - | `start_time`<br>`end_time`<br>`created_at`<br>`updated_at` | `start_time`<br>`end_time`<br>`created_at`<br>`updated_at` |
+| `BargainInstance` | `bargain.Instance` | Entity | 21 | `start_price`<br>`floor_price`<br>`current_price`<br>`remaining_amount` | - | `expire_at`<br>`completed_at`<br>`created_at`<br>`updated_at` | `expire_at`<br>`completed_at`<br>`order_id`<br>`created_at`<br>`updated_at` |
+| `BargainHelpRecord` | `bargain.HelpRecord` | Entity | 9 | `cut_amount` | - | `created_at` | `created_at` |
+| `BargainAdminCreateRequest` | `bargain.AdminCreateReq` | Request | 9 | `start_price`<br>`floor_price`<br>`help_amount` | - | `start_time`<br>`end_time` | `start_time`<br>`end_time` |
+| `BargainAdminCreateResponse` | `bargain.AdminCreateRes` | Response | 1 | - | - | - | - |
+| `BargainAdminUpdateRequest` | `bargain.AdminUpdateReq` | Request | 10 | `start_price`<br>`floor_price`<br>`help_amount` | - | `start_time`<br>`end_time` | `start_time`<br>`end_time` |
+| `BargainAdminUpdateResponse` | `bargain.AdminUpdateRes` | Response | 1 | - | - | - | - |
+| `BargainAdminStatusRequest` | `bargain.AdminStatusReq` | Request | 2 | - | - | - | - |
+| `BargainAdminStatusResponse` | `bargain.AdminStatusRes` | Response | 1 | - | - | - | - |
+| `BargainAdminListRequest` | `bargain.AdminListReq` | Request | 4 | - | - | - | `page`<br>`size`<br>`status`<br>`product_id` |
+| `BargainAdminListResponse` | `bargain.AdminListRes` | Response | 4 | - | - | - | - |
+| `BargainAdminDetailRequest` | `bargain.AdminDetailReq` | Request | 1 | - | - | - | - |
+| `BargainAdminDetailResponse` | `bargain.AdminDetailRes` | Response | 1 | - | - | - | - |
+| `BargainListRequest` | `bargain.ListReq` | Request | 3 | - | - | - | `page`<br>`size`<br>`product_id` |
+| `BargainListResponse` | `bargain.ListRes` | Response | 4 | - | - | - | - |
+| `BargainDetailRequest` | `bargain.DetailReq` | Request | 1 | - | - | - | - |
+| `BargainDetailResponse` | `bargain.DetailRes` | Response | 2 | - | - | - | - |
+| `BargainStartRequest` | `bargain.StartReq` | Request | 1 | - | - | - | - |
+| `BargainStartResponse` | `bargain.StartRes` | Response | 1 | - | - | - | - |
+| `BargainMyListRequest` | `bargain.MyListReq` | Request | 2 | - | - | - | `page`<br>`size` |
+| `BargainMyListResponse` | `bargain.MyListRes` | Response | 4 | - | - | - | - |
+| `BargainInstanceDetailRequest` | `bargain.InstanceDetailReq` | Request | 1 | - | - | - | - |
+| `BargainInstanceDetailResponse` | `bargain.InstanceDetailRes` | Response | 1 | - | - | - | - |
+| `BargainHelpRequest` | `bargain.HelpReq` | Request | 1 | - | - | - | - |
+| `BargainHelpResponse` | `bargain.HelpRes` | Response | 2 | - | - | - | `help` |
+| `BargainHelpsRequest` | `bargain.HelpsReq` | Request | 1 | - | - | - | - |
+| `BargainHelpsResponse` | `bargain.HelpsRes` | Response | 1 | - | - | - | - |
+| `BargainAbandonRequest` | `bargain.AbandonReq` | Request | 1 | - | - | - | - |
+| `BargainAbandonResponse` | `bargain.AbandonRes` | Response | 1 | - | - | - | - |
 | `CartItem` | `cart.CartItem` | Entity | 17 | `price_snapshot` | `unavailable_reason` | `created_at`<br>`updated_at` | `product_id`<br>`current_price`<br>`stock`<br>`created_at`<br>`updated_at` |
 | `CartListRequest` | `cart.ListReq` | Request | 0 | - | - | - | - |
 | `CartListResponse` | `cart.ListRes` | Response | 1 | - | - | - | - |
@@ -230,9 +259,7 @@
 | `UserRefreshRequest` | `iam.RefreshReq` | Request | 1 | - | - | - | - |
 | `UserRefreshResponse` | `iam.RefreshRes` | Response | 4 | - | - | - | - |
 | `UserMeRequest` | `iam.MeReq` | Request | 0 | - | - | - | - |
-| `UserMeResponse` | `iam.MeRes` | Response | 5 | - | - | - | `phone` |
-| `UserUpdateMeRequest` | `iam.UpdateMeReq` | Request | 3 | - | - | - | `nickname`<br>`avatar_url`<br>`phone` |
-| `UserUpdateMeResponse` | `iam.UpdateMeRes` | Response | 1 | - | - | - | - |
+| `UserMeResponse` | `iam.MeRes` | Response | 2 | - | - | - | - |
 | `UserLogoutRequest` | `iam.LogoutReq` | Request | 0 | - | - | - | - |
 | `UserLogoutResponse` | `iam.LogoutRes` | Response | 0 | - | - | - | - |
 | `UserSession` | `iam.Session` | Entity | 5 | - | - | - | - |
@@ -350,11 +377,6 @@
 | `RefundExecuteResponse` | `refund.ExecuteRes` | Response | 1 | - | - | - | - |
 | `RefundCloseRequest` | `refund.CloseReq` | Request | 2 | - | - | - | - |
 | `RefundCloseResponse` | `refund.CloseRes` | Response | 1 | - | - | - | - |
-| `Region` | `region.Region` | Entity | 4 | - | - | - | - |
-| `RegionListRequest` | `region.ListReq` | Request | 1 | - | - | - | - |
-| `RegionListResponse` | `region.ListRes` | Response | 1 | - | - | - | - |
-| `RegionDetailRequest` | `region.DetailReq` | Request | 1 | - | - | - | - |
-| `RegionDetailResponse` | `region.DetailRes` | Response | 4 | - | - | - | `province`<br>`city`<br>`district` |
 | `ReviewItem` | `review.ReviewItem` | Entity | 7 | - | - | `created_at` | `created_at` |
 | `Review` | `review.Review` | Entity | 9 | - | `status` | `created_at` | `created_at` |
 | `ReviewListRequest` | `review.ListReq` | Request | 3 | - | - | - | - |
@@ -384,6 +406,20 @@
 
 | Schema | 字段 | Go 类型 |
 |---|---|---|
+| `BargainActivity` | `start_price` | int64 |
+| `BargainActivity` | `floor_price` | int64 |
+| `BargainActivity` | `help_amount` | int64 |
+| `BargainInstance` | `start_price` | int64 |
+| `BargainInstance` | `floor_price` | int64 |
+| `BargainInstance` | `current_price` | int64 |
+| `BargainInstance` | `remaining_amount` | int64 |
+| `BargainHelpRecord` | `cut_amount` | int64 |
+| `BargainAdminCreateRequest` | `start_price` | int64 |
+| `BargainAdminCreateRequest` | `floor_price` | int64 |
+| `BargainAdminCreateRequest` | `help_amount` | int64 |
+| `BargainAdminUpdateRequest` | `start_price` | int64 |
+| `BargainAdminUpdateRequest` | `floor_price` | int64 |
+| `BargainAdminUpdateRequest` | `help_amount` | int64 |
 | `CartItem` | `price_snapshot` | int64 |
 | `CouponTemplate` | `threshold_amount` | int64 |
 | `CouponTemplate` | `discount_amount` | int64 |
@@ -465,6 +501,19 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 | `ArticleItem` | `updated_at` | *gtime | response |
 | `Banner` | `created_at` | *gtime | response |
 | `Banner` | `updated_at` | *gtime | response |
+| `BargainActivity` | `start_time` | *gtime | response |
+| `BargainActivity` | `end_time` | *gtime | response |
+| `BargainActivity` | `created_at` | *gtime | response |
+| `BargainActivity` | `updated_at` | *gtime | response |
+| `BargainInstance` | `expire_at` | *gtime | response |
+| `BargainInstance` | `completed_at` | *gtime | response |
+| `BargainInstance` | `created_at` | *gtime | response |
+| `BargainInstance` | `updated_at` | *gtime | response |
+| `BargainHelpRecord` | `created_at` | *gtime | response |
+| `BargainAdminCreateRequest` | `start_time` | *gtime | request |
+| `BargainAdminCreateRequest` | `end_time` | *gtime | request |
+| `BargainAdminUpdateRequest` | `start_time` | *gtime | request |
+| `BargainAdminUpdateRequest` | `end_time` | *gtime | request |
 | `CartItem` | `created_at` | *gtime | response |
 | `CartItem` | `updated_at` | *gtime | response |
 | `Category` | `created_at` | *gtime | response |
@@ -529,20 +578,11 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 
 | Schema | 字段 |
 |---|---|
-| `Address` | `province_id` |
-| `Address` | `city_id` |
-| `Address` | `district_id` |
 | `Address` | `created_at` |
 | `Address` | `updated_at` |
-| `AddressCreateRequest` | `province_id` |
-| `AddressCreateRequest` | `city_id` |
-| `AddressCreateRequest` | `district_id` |
 | `AddressCreateRequest` | `is_default` |
 | `AddressUpdateRequest` | `recipient_name` |
 | `AddressUpdateRequest` | `phone` |
-| `AddressUpdateRequest` | `province_id` |
-| `AddressUpdateRequest` | `city_id` |
-| `AddressUpdateRequest` | `district_id` |
 | `AddressUpdateRequest` | `province` |
 | `AddressUpdateRequest` | `city` |
 | `AddressUpdateRequest` | `district` |
@@ -565,6 +605,30 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 | `BannerUpdateRequest` | `link_url` |
 | `BannerUpdateRequest` | `sort` |
 | `BannerUpdateRequest` | `status` |
+| `BargainActivity` | `start_time` |
+| `BargainActivity` | `end_time` |
+| `BargainActivity` | `created_at` |
+| `BargainActivity` | `updated_at` |
+| `BargainInstance` | `expire_at` |
+| `BargainInstance` | `completed_at` |
+| `BargainInstance` | `order_id` |
+| `BargainInstance` | `created_at` |
+| `BargainInstance` | `updated_at` |
+| `BargainHelpRecord` | `created_at` |
+| `BargainAdminCreateRequest` | `start_time` |
+| `BargainAdminCreateRequest` | `end_time` |
+| `BargainAdminUpdateRequest` | `start_time` |
+| `BargainAdminUpdateRequest` | `end_time` |
+| `BargainAdminListRequest` | `page` |
+| `BargainAdminListRequest` | `size` |
+| `BargainAdminListRequest` | `status` |
+| `BargainAdminListRequest` | `product_id` |
+| `BargainListRequest` | `page` |
+| `BargainListRequest` | `size` |
+| `BargainListRequest` | `product_id` |
+| `BargainMyListRequest` | `page` |
+| `BargainMyListRequest` | `size` |
+| `BargainHelpResponse` | `help` |
 | `CartItem` | `product_id` |
 | `CartItem` | `current_price` |
 | `CartItem` | `stock` |
@@ -612,10 +676,6 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 | `FlashSaleUpdateRequest` | `end_time` |
 | `FlashSaleGetOrderResultResponse` | `order` |
 | `FlashSaleRequestAudit` | `created_at` |
-| `UserMeResponse` | `phone` |
-| `UserUpdateMeRequest` | `nickname` |
-| `UserUpdateMeRequest` | `avatar_url` |
-| `UserUpdateMeRequest` | `phone` |
 | `Inventory` | `created_at` |
 | `Inventory` | `updated_at` |
 | `InventoryLog` | `operator_admin_id` |
@@ -667,9 +727,6 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 | `RefundAdminListRequest` | `order_id` |
 | `RefundAdminListRequest` | `user_id` |
 | `RefundAudit` | `created_at` |
-| `RegionDetailResponse` | `province` |
-| `RegionDetailResponse` | `city` |
-| `RegionDetailResponse` | `district` |
 | `ReviewItem` | `created_at` |
 | `Review` | `created_at` |
 | `Sku` | `created_at` |

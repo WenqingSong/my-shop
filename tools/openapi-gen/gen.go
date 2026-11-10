@@ -11,11 +11,11 @@ import (
 // 契约基线（B1-01 冻结的 HEAD）。
 const contractBaseline = "82243c0fbce614e03c4ff57dcc829b5f68fb08f2"
 
-// 142 条常驻 API 的期望分布（B1-01 §3.1）。
+// 155 条常驻 API 的期望分布（B1-01 §3.1 冻结；B1-04-07 追加砍价 13 条）。
 const (
-	expectedTotal    = 142
-	expectedFrontend = 67
-	expectedAdmin    = 73
+	expectedTotal    = 155
+	expectedFrontend = 75
+	expectedAdmin    = 78
 	expectedHealth   = 2
 )
 
@@ -24,7 +24,7 @@ var codesByValue = map[int]*ErrorCode{}
 // pathFileOrder 固定分域视图文件的输出顺序。
 var pathFileOrder = []string{
 	"iam", "admin", "categories", "product", "sku", "inventory", "address",
-	"cart", "order", "refund", "coupon", "flashsale", "banner", "recommendation",
+	"cart", "order", "refund", "coupon", "bargain", "flashsale", "banner", "recommendation",
 	"article", "review", "favorite", "like", "upload", "dashboard", "health",
 }
 
@@ -47,6 +47,7 @@ var tagDescriptions = []struct {
 	{"订单", "订单创建、支付、取消、收货与后台管理"},
 	{"退款", "退款申请、撤销、审核、执行与审计"},
 	{"优惠券", "优惠券模板管理与用户领取"},
+	{"砍价", "砍价活动管理与用户发起/好友助力"},
 	{"秒杀", "秒杀活动管理与下单"},
 	{"轮播图", "轮播图查询与后台管理"},
 	{"推荐位", "推荐位查询与后台管理"},

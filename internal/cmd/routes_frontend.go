@@ -6,6 +6,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/address"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/article"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/banner"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/bargain"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/cart"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/coupon"
@@ -47,6 +48,7 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	uploadCtrlV1 := uploadCtrl.NewV1()
 	refundCtrlV1 := refundCtrl.NewV1()
 	couponCtrl := coupon.NewV1()
+	bargainCtrl := bargain.NewV1()
 
 	// 前台公开接口：注册、登录、刷新、分类查询、商品查询、轮播图列表（无需 token）。
 	root.POST("/register", iamCtrl.Register)
@@ -64,6 +66,9 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	root.GET("/banners", bannerCtrl.List)
 	// 公开推荐位查询（无需 token，仅返回启用位中的可售商品）。
 	root.GET("/recommendations/:code", recommendationCtrl.Frontend)
+	// 公开砍价活动列表/详情（无需 token；列表仅返回启用且在时间窗内的活动）。
+	root.GET("/bargain-activities", bargainCtrl.List)
+	root.GET("/bargain-activities/:id", bargainCtrl.Detail)
 	// 公开文章列表/详情/点赞数（无需 token）。
 	root.GET("/articles", articleCtrl.List)
 	root.GET("/articles/:id", articleCtrl.Detail)
@@ -140,6 +145,14 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 		// 优惠券（仅登录用户，作用于本人数据）。
 		user.POST("/coupons/:template_id/claim", couponCtrl.Claim)
 		user.GET("/my/coupons", couponCtrl.ListMine)
+
+		// 砍价（仅登录用户，作用于本人数据；实例详情与助力记录允许登录用户查看已分享的实例）。
+		user.POST("/bargain-activities/:id/instances", bargainCtrl.Start)
+		user.GET("/my/bargain-instances", bargainCtrl.MyList)
+		user.GET("/bargain-instances/:id", bargainCtrl.InstanceDetail)
+		user.GET("/bargain-instances/:id/helps", bargainCtrl.Helps)
+		user.POST("/bargain-instances/:id/help", bargainCtrl.Help)
+		user.POST("/bargain-instances/:id/abandon", bargainCtrl.Abandon)
 
 		user.GET("/sessions", iamCtrl.ListSessions)
 		user.DELETE("/sessions/:sid", iamCtrl.RevokeSession)

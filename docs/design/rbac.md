@@ -61,6 +61,7 @@ recommend:create/update/delete/item                  （4）
 dashboard:view                                       （1，运营数据大屏）
 user:read / user:status                              （2，用户状态管理：查询 / 禁用·启用）
 coupon:create/list/stop                              （3）
+bargain:create/update/list/view                      （4，create=创建活动、update=编辑+启停、list=列表、view=详情）
 ```
 
 ## 3. 业务不变量

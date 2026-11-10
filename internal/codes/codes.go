@@ -148,6 +148,18 @@ const (
 	CodeCouponClaimUnavailable Code = 19005 // 未开始/已结束/已停止，不可领取 → 409
 	CodeCouponClaimSoldOut     Code = 19006 // 发放总量已满 → 409
 	CodeCouponUnavailable      Code = 19007 // 下单用券：已使用/被占用/不在使用期/未达门槛 → 409
+
+	// 砍价域（Bargain）21000-21999。
+	// 注：20000-20999 已由 B1-04-03（运费与统一计价）占用，砍价按域序 21 另行分配。
+	CodeBargainActivityNotFound        Code = 21001 // 砍价活动不存在 → 404
+	CodeBargainActivityInvalid         Code = 21002 // 活动参数非法（价格/时间/商品/SKU/助力参数）→ 400
+	CodeBargainActivityUnavailable     Code = 21003 // 活动不可参与（停用/未开始/已结束）→ 409
+	CodeBargainInstanceNotFound        Code = 21004 // 砍价实例不存在或不属于当前用户（防枚举）→ 404
+	CodeBargainInstanceExists          Code = 21005 // 同一活动已存在进行中的实例 → 409
+	CodeBargainSelfHelpForbidden       Code = 21006 // 不能给自己的砍价助力 → 409
+	CodeBargainHelpUnavailable         Code = 21007 // 实例不可助力（已成功/已失败/已过期/次数用尽/已到底价）→ 409
+	CodeBargainHelpDuplicated          Code = 21008 // 已助力过该实例 → 409
+	CodeBargainInvalidStatusTransition Code = 21009 // 砍价实例状态迁移非法（终态不可重复推进）→ 409
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -264,6 +276,16 @@ var codeTable = map[Code]codeInfo{
 	CodeCouponClaimUnavailable: {http.StatusConflict, "优惠券暂不可领取"},
 	CodeCouponClaimSoldOut:     {http.StatusConflict, "优惠券已领完"},
 	CodeCouponUnavailable:      {http.StatusConflict, "优惠券不可用"},
+
+	CodeBargainActivityNotFound:        {http.StatusNotFound, "砍价活动不存在"},
+	CodeBargainActivityInvalid:         {http.StatusBadRequest, "砍价活动参数非法"},
+	CodeBargainActivityUnavailable:     {http.StatusConflict, "砍价活动暂不可参与"},
+	CodeBargainInstanceNotFound:        {http.StatusNotFound, "砍价记录不存在"},
+	CodeBargainInstanceExists:          {http.StatusConflict, "已有进行中的砍价"},
+	CodeBargainSelfHelpForbidden:       {http.StatusConflict, "不能给自己砍价"},
+	CodeBargainHelpUnavailable:         {http.StatusConflict, "该砍价不可助力"},
+	CodeBargainHelpDuplicated:          {http.StatusConflict, "已助力过该砍价"},
+	CodeBargainInvalidStatusTransition: {http.StatusConflict, "砍价状态迁移非法"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。

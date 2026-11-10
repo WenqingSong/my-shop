@@ -1,8 +1,9 @@
 # 拼团与砍价设计（Marketing）
 
 本文说明拼团与砍价的长期数据模型、状态、跨模块边界与关键不变量。**B1-03-03 只落数据库结构**：
-没有开团/参团/成团、发起砍价/助力/成功判定、超时扫描、订单计价或真实支付的业务代码；
-B1-04 才在这些表上实现 Mock 业务。任何实现必须先遵守本文的不变量，再更新 `pricing.md`/`order.md`。
+没有开团/参团/成团、发起砍价/助力/成功判定、超时扫描、订单计价或真实支付的业务代码。
+**B1-04-07 已在同一批表上落地砍价业务**（活动管理、发起、助力、成功/失败/过期与查询，见 §3.6–§3.10），
+拼团仍只有结构。任何实现必须先遵守本文的不变量，再更新 `pricing.md`/`order.md`。
 
 ## 1. 职责与边界
 
@@ -194,6 +195,123 @@ B1-04 才在这些表上实现 Mock 业务。任何实现必须先遵守本文�
 因此 `cut_amount` 允许小于 `help_amount`，但 `price_after` 不得低于 `floor_price`。
 `max_help_count` 用条件更新限制，`uk_instance_helper` 是并发重复请求的最终防线。
 
+### 3.6 砍价实现落地（B1-04-07）
+
+代码边界：
+
+| 层 | 位置 | 职责 |
+| --- | --- | --- |
+| API | `api/bargain/v1/bargain.go` | 活动/实例/助力记录 DTO，实例状态对外为字符串枚举 |
+| Controller | `internal/controller/bargain` | HTTP 适配；前台用户身份取自 `Principal.UserID`，后台身份取自 `AdminPrincipal` |
+| Service | `internal/service/bargain.go` | `IBargain` 对内接口 |
+| Logic | `internal/logic/bargain` | 活动校验、发起、助力事务、状态推进、懒过期、查询编排 |
+| 错误码 | `internal/codes/codes.go` | 砍价域 `21001-21009`（域序 21） |
+| 权限 | `internal/boot/seed.go` | `bargain:create`/`bargain:update`/`bargain:list`/`bargain:view` |
+
+活动管理规则（后台）：
+
+- 价格：`1 ≤ floor_price < start_price ≤ 99999999`，`help_amount ≥ 1`，`max_help_count ≥ 1`；
+  且 `ceil((start_price - floor_price) / help_amount) ≤ max_help_count`（可达成性），
+  否则活动永远无法砍到底价，一律 `21002`。
+- 时间：`start_time < end_time`，且 `end_time` 必须晚于当前时间；缺时间或时间倒置 `21002`。
+- 商品/SKU：商品必须存在，SKU 必须存在且 `skus.product_id = bargain_activities.product_id`，否则 `21002`。
+- 编辑：`name`/价格/助力参数/时间窗可改；`product_id`/`sku_id` **不可改绑**（在途实例以活动为展示来源，
+  改绑会让同一实例指向另一件商品），需要换商品时另建活动。
+- 状态：`1=启用`、`0=停用`，启停幂等；**停用只阻止新发起**，已创建实例按自身快照继续推进（INV-BG08）。
+
+发起规则（前台）：
+
+- 仅 `status=1` 且 `NOW() ∈ [start_time, end_time)` 可发起，否则 `21003`；活动不存在 `21001`。
+- 创建实例用单条 `INSERT ... SELECT` 从活动行取快照，把「活动可参与判定」与「写入实例」合并为一个原子语句，
+  不存在先查后写的窗口：`start_price`/`floor_price`/`current_price=start_price`/`max_help_count`/`expire_at=end_time`。
+- 同一用户同一活动至多一个进行中实例：`uk_active_instance` 撞键 → `21005`；失败/过期/成功释放 `active_key` 后可重新发起，
+  历史实例保留。
+
+### 3.7 助力事务与并发控制（实现细节）
+
+`Help` 在**单个事务**内完成，顺序与 §3.5 一致：
+
+1. `SELECT ... FOR UPDATE` 锁定实例行，并在同一语句内用 `(expire_at <= NOW())` 判定是否过期
+   （时间比较只在 SQL 侧做，避免 Go↔MySQL 时区漂移）；未命中 → `21004`。
+2. 资格校验：助力者是发起者本人 → `21006`；实例非进行中或已过期 → `21007`；`helped_count >= max_help_count` → `21007`。
+3. 读取活动 `help_amount`（实例不快照该列），按 §3.8 计算 `cut`；`cut <= 0` → `21007`。
+4. 条件更新实例（带 `status/次数/价格下限/未过期` 全量闸门），`RowsAffected=0` → `21007` 并回滚。
+5. 插入 `bargain_help_records`；撞 `uk_instance_helper`（1062）→ `21008` 并整体回滚（价格与次数一并回滚）。
+6. 若 `price_after <= floor_price`，同事务条件更新 `status=20, completed_at=NOW()`。
+
+行锁让同一实例上的并发助力串行化，条件更新是无法绕过的第二道闸门，唯一索引是重复请求的最终防线。
+`SELECT ... FOR UPDATE` 与唯一索引均为真实 MySQL 行为，由 `internal/logic/bargain/integration_test.go` 在隔离库上验证
+（并发 20 人助力只成功 5 次、价格恰好停在底价）。
+
+### 3.8 助力金额算法
+
+```text
+remaining  = current_price - floor_price        （实例快照，恒 ≥ 0）
+cut_amount = min(help_amount, remaining)        （> 0 才允许助力）
+price_after = current_price - cut_amount        （恒 ≥ floor_price）
+成功条件    = price_after == floor_price
+```
+
+- 算法来源：Migration `20261110000012_bargain` 顶部注释与本文 §3.5 的 APPROVED 设计（`GREATEST(floor_price, current_price - help_amount)` 的等价表述），
+  不是随机数、固定值或临时发明。Java 参考源码在本机不可得（见交付报告），因此以已批准设计为唯一依据。
+- `help_amount` 取自活动当前配置（实例未快照该列，DDL 事实）；`floor_price`/`start_price`/`max_help_count`/`expire_at`
+  是实例快照，因此**活动改价不会改变已创建实例的底价**，只会影响后续助力的单次砍减额。
+- 示例：`start=10000, floor=9500, help=100` → 5 次助力后 `current=9500` 且状态置成功；
+  若 `start=10000, floor=9900, help=500`，首次助力 `cut=100`（补足差额），`price_after=9900`。
+
+### 3.9 成功、失败与过期语义
+
+| 终态 | 触发 | 写入 |
+| --- | --- | --- |
+| 20 成功 | 助力后 `current_price == floor_price`（同事务条件更新） | `completed_at=NOW()` |
+| 30 失败 | 发起者本人放弃（`POST /bargain-instances/:id/abandon`，仅进行中） | 不改 `completed_at` |
+| 40 已过期 | 读取路径懒推进：`status=10 且 expire_at<=NOW()` | 不改 `completed_at` |
+
+- 过期不引入扫描器/MQ/Redis：`InstanceDetail`、`MyInstances`、`Abandon` 在读/写前执行
+  `UPDATE ... SET status=40 WHERE id=? AND status=10 AND expire_at<=NOW()`，条件更新保证**重复执行无副作用**。
+  这只影响状态呈现时机（未被读取的过期实例在库中仍是 10），不影响任何可助力判定：助力的条件更新自带 `expire_at > NOW()`。
+- 终态不可重复推进：成功/失败/过期后助力一律 `21007`；重复放弃 `21009`；越权或不存在 `21004`。
+- 过期后 `active_key` 变 NULL，允许对同一活动重新发起。
+
+### 3.10 API、权限与错误码
+
+| 方法 | 路径 | 认证/权限 | 说明 |
+| --- | --- | --- | --- |
+| GET | `/bargain-activities` | 公开 | 可参与活动分页列表（启用且在时间窗内） |
+| GET | `/bargain-activities/:id` | 公开 | 活动详情 + `is_joinable` |
+| POST | `/bargain-activities/:id/instances` | 用户 JWT | 发起砍价 |
+| GET | `/my/bargain-instances` | 用户 JWT | 我的砍价记录（分页） |
+| GET | `/bargain-instances/:id` | 用户 JWT | 实例详情（登录用户均可查看，便于好友打开分享） |
+| GET | `/bargain-instances/:id/helps` | 用户 JWT | 助力记录（含助力者昵称/头像） |
+| POST | `/bargain-instances/:id/help` | 用户 JWT | 好友助力 |
+| POST | `/bargain-instances/:id/abandon` | 用户 JWT | 放弃砍价（仅发起者、仅进行中） |
+| POST | `/admin/bargain-activities` | `bargain:create` | 创建活动 |
+| GET | `/admin/bargain-activities` | `bargain:list` | 后台分页列表（状态/商品筛选） |
+| GET | `/admin/bargain-activities/:id` | `bargain:view` | 后台详情 |
+| PUT | `/admin/bargain-activities/:id` | `bargain:update` | 编辑活动 |
+| POST | `/admin/bargain-activities/:id/status` | `bargain:update` | 启用/停用（幂等） |
+
+错误码（域序 21，`21000-21999`；`20000-20999` 已被 B1-04-03 运费/计价占用）：
+
+| code | 语义 | HTTP |
+| --- | --- | --- |
+| 21001 | 砍价活动不存在 | 404 |
+| 21002 | 活动参数非法（价格/时间/商品/SKU/助力参数/改绑商品） | 400 |
+| 21003 | 活动不可参与（停用/未开始/已结束） | 409 |
+| 21004 | 实例不存在或不属于当前用户 | 404 |
+| 21005 | 已存在进行中的实例 | 409 |
+| 21006 | 不能给自己的砍价助力 | 409 |
+| 21007 | 实例不可助力（终态/过期/次数用尽/已到底价） | 409 |
+| 21008 | 已助力过该实例 | 409 |
+| 21009 | 实例状态迁移非法（终态重复推进） | 409 |
+
+### 3.11 与订单模块的边界
+
+- 本期**不创建订单**：下单需要「按砍价成交价计价」的能力，属于订单金额公式/计价范围（B1-04-03 与后续计价集成任务），
+  本任务明确不修改 `internal/logic/pricing`、不改写 `orders` 金额语义。
+- `bargain_instances.order_id` 保持 NULL；`uk_order_id` 已就位，后续集成任务在下单成功后回填即可（一个订单只能对应一个实例）。
+- 砍价成功只表示「价格已砍到目标价」，不锁库存、不占库存、不产生支付或履约状态；库存扣减仍走普通下单链路。
+
 ## 4. 跨模块边界
 
 | 对象 | 关系 | 说明 |
@@ -232,6 +350,10 @@ B1-04 才在这些表上实现 Mock 业务。任何实现必须先遵守本文�
   可小于 `help_amount`，但 `price_after = price_before - cut_amount` 且不低于 `floor_price`。
 - INV-BG07（状态机）：实例仅 `10→20/30/40` 合法；`completed_at` 只在成功时写入。
 - INV-BG08（活动引用）：有实例的活动不可删除（FK RESTRICT）；活动停用不改变已创建实例的历史。
+- INV-BG09（禁止自助）：实例发起者不能给自己的实例助力（应用层校验 `user_id != helper_user_id`，返回 `21006`，
+  且不产生助力记录、不改价格）。
+- INV-BG10（活动可达成）：`ceil((start_price - floor_price) / help_amount) ≤ max_help_count`，否则活动创建/编辑被拒（`21002`），
+  避免上架一个永远无法成功的活动。
 
 ## 6. Migration
 
@@ -245,9 +367,13 @@ B1-04 才在这些表上实现 Mock 业务。任何实现必须先遵守本文�
 
 ## 7. Deferred / 已知留白
 
-- 拼团/砍价的下单计价、Mock 支付联动、取消/退款后的团状态与价格恢复。
+- 拼团：开团/参团/成团/失败/过期与相关 API 仍未实现（只有 §2 的表结构）。
+- 拼团/砍价的下单计价、Mock 支付联动、取消/退款后的团状态与价格恢复；砍价 `order_id` 回填与砍价成交价下单。
 - 活动库存/配额、拼团失败自动退款、砍价成功后的下单有效期。
-- 超时扫描任务的调度方式（scanner vs 懒判定）与多实例并发策略。
+- 砍价过期**只做读取路径懒推进**，没有独立扫描器：无人读取的过期实例会在库中保持 `status=10`（状态呈现时机差异，
+  不影响助力与成功判定）。若后续需要「到期即对外不可见/可统计」，再按现有 `internal/worker` ticker 模式补扫描器，
+  不需要 MQ/Redis。
 - 防刷规则（同一 IP/设备、助力者与发起人关系限制、黑名单）。
-- 管理端 API、权限码、错误码、前端页面与 OpenAPI。
+- 管理端/前台页面（本任务只交付后端 API 与 OpenAPI 契约）。
 - 拼团/砍价订单的退款规则（是否退券、是否恢复活动名额）需 Owner 决策后写入 `refund.md` 与本文。
+- `bargain_activities` 无「逻辑删除」：有实例的活动受 FK RESTRICT 保护，只能停用，不能删除。
