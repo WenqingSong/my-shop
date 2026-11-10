@@ -1,0 +1,23 @@
+# Prometheus TSDB 持久卷（T4-03）。
+#
+# 为什么必须持久化：TSDB 默认把最近 2 小时的数据放在内存中，只在后台每 2 小时切块落盘。
+# 没有 PVC 时 Pod 重建会丢掉整个时间线，PromQL 结果「看起来正常但突然没有历史」——
+# 这类静默丢失比没有监控更难排查，因此这里显式申请持久卷。
+#
+# StorageClass 不写死：沿用集群默认（本地 kind 为 local-path 的 standard）。
+# 生产环境应替换为具备真实冗余的 StorageClass，这属于环境差异，由 overlay 负责。
+# accessModes 只能是 ReadWriteOnce：TSDB 单写者，多副本会破坏数据一致性。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-data
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: surgecart
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi

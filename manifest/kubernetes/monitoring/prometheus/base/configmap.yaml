@@ -1,0 +1,58 @@
+# Prometheus 抓取配置（T4-03）。
+#
+# 边界（为什么是静态配置而不是服务发现）：
+#   - 本任务只监控一个应用、一个副本，静态目标足够；引入 kubernetes_sd_configs 需要
+#     读取 Pod/Endpoints/Service 的 RBAC 权限，属于本阶段未授权扩大的权限面
+#     （见 docs/development/kubernetes.md 的最小权限约定）；
+#   - 静态配置的代价写在这里：应用副本数变化或改名必须同步改本文件，否则会出现
+#     「目标消失但不报错」的静默盲区。副本数 >1 后再评估服务发现，不在本任务范围。
+#
+# 目标地址必须是**集群内 Service DNS**：
+#   surgecart.surgecart.svc.cluster.local:8000
+#     `<service>.<namespace>.svc.cluster.local:<port>`
+#   不能写 localhost / 127.0.0.1（Prometheus Pod 自己的回环）、宿主机 IP 或 NodePort：
+#   前两者抓不到应用，后者绕过了 Service/Endpoint 的摘流语义。
+#
+# 抓取间隔 15s 与 T4-02 的指标语义配套：
+#   - HTTP 指标是同步累加，任何间隔都能观测到增量；
+#   - Kafka Lag / Outbox 是后台采样（10s / 5s 周期），15s 抓取间隔不会系统性漏采样，
+#     也不会把同一次采样重复计入（Gauge 是覆盖语义，不是累加）。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: surgecart
+data:
+  prometheus.yml: |
+    global:
+      # 抓取间隔与 scrape_timeout：timeout 必须小于 interval，否则会累积未完成的抓取。
+      scrape_interval: 15s
+      scrape_timeout: 10s
+      # 本任务没有 recording/alerting 规则（Alertmanager 不在范围内），
+      # evaluation_interval 保留默认节奏，便于后续追加规则时行为可预期。
+      evaluation_interval: 15s
+      external_labels:
+        cluster: surgecart-local
+
+    scrape_configs:
+      # 业务应用：SurgeCart Go 服务（T4-02 实现的 /metrics）。
+      - job_name: surgecart
+        metrics_path: /metrics
+        scheme: http
+        scrape_interval: 15s
+        scrape_timeout: 10s
+        static_configs:
+          - targets:
+              - surgecart.surgecart.svc.cluster.local:8000
+
+      # Prometheus 自身：用于验证 TSDB/抓取链路自身的健康度，以及 up{job="prometheus"}。
+      # 这是 Pod 内回环（同一容器），与「应用必须经 Service DNS 抓取」不冲突。
+      - job_name: prometheus
+        metrics_path: /metrics
+        scheme: http
+        static_configs:
+          - targets:
+              - 127.0.0.1:9090

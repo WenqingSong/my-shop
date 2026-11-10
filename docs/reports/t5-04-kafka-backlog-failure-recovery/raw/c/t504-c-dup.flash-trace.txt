@@ -1,0 +1,11 @@
+﻿[k6-run] docker run --rm -v D:/Wenqingsong/CodeProjects/codebuddy/k8s/test/k6:/scripts -v D:/Wenqingsong/CodeProjects/codebuddy/k8s/test/k6/results:/results -v D:/Wenqingsong/CodeProjects/codebuddy/k8s/test/k6/data:/data -w /scripts -e SURGECART_BASE_URL=http://host.docker.internal:18000 -e RUN_ID=t504-c-dup -e SCENARIO=flashsale-order -e K6_SUMMARY_DIR=/results -e K6_TEST_PASSWORD=*** -e DATA_PREFIX=t504cf -e ACTIVITY_ID=21 -e SKU_ID=19 -e FLASH_USERS=10 -e FLASH_VERIFY=false -e FLASH_EXECUTOR=once -e FLASH_ITERATIONS=1 -e FLASH_VUS=10 -e FLASH_TRACE=true grafana/k6:0.54.0 run /scripts/scenarios/flashsale-order.js
+time="2026-11-10T10:09:59Z" level=info msg="FLASH_TRACE vu=2 user=t504cf6ewhcdu2 key=t504-c-dup-k6-2-9 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T10:09:59Z" level=info msg="FLASH_TRACE vu=5 user=t504cf6ewhcdu5 key=t504-c-dup-k6-5-3 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T10:09:59Z" level=info msg="FLASH_TRACE vu=10 user=t504cf6ewhcdu10 key=t504-c-dup-k6-10-0 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T10:09:59Z" level=info msg="FLASH_TRACE vu=9 user=t504cf6ewhcdu9 key=t504-c-dup-k6-9-8 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T10:09:59Z" level=info msg="FLASH_TRACE vu=7 user=t504cf6ewhcdu7 key=t504-c-dup-k6-7-7 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T10:09:59Z" level=info msg="FLASH_TRACE vu=4 user=t504cf6ewhcdu4 key=t504-c-dup-k6-4-4 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T10:09:59Z" level=info msg="FLASH_TRACE vu=3 user=t504cf6ewhcdu3 key=t504-c-dup-k6-3-6 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T10:09:59Z" level=info msg="FLASH_TRACE vu=8 user=t504cf6ewhcdu8 key=t504-c-dup-k6-8-5 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T10:09:59Z" level=info msg="FLASH_TRACE vu=6 user=t504cf6ewhcdu6 key=t504-c-dup-k6-6-1 http=200 code=0 outcome=accepted data_status=queued" source=console
+time="2026-11-10T10:09:59Z" level=info msg="FLASH_TRACE vu=1 user=t504cf6ewhcdu1 key=t504-c-dup-k6-1-2 http=200 code=0 outcome=accepted data_status=queued" source=console

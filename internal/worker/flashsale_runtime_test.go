@@ -55,10 +55,18 @@ type runtimeProbe struct {
 	backlogCalls atomic.Int32
 	// consumerClientErr 非 nil 时，重建 Consumer 客户端直接失败。
 	consumerClientErr error
+	// lagFetchBehavior 决定 Kafka Lag 采样的行为（call 从 1 开始）。
+	lagFetchBehavior func(ctx context.Context, call int) ([]kafkamq.PartitionLag, error)
+	// lagFetchCalls 统计 Lag 采样次数；lagCloseCalls 统计采样客户端关闭次数。
+	lagFetchCalls atomic.Int32
+	lagCloseCalls atomic.Int32
+	lagReaderErr  error
 	// outboxEntered 在每次进入 PublishBatch 时收到一次信号（非阻塞）。
 	outboxEntered chan struct{}
 	// backlogEntered 在每次进入 Backlog 时收到一次信号（非阻塞）。
 	backlogEntered chan struct{}
+	// lagEntered 在每次进入 Lag Fetch 时收到一次信号（非阻塞）。
+	lagEntered chan struct{}
 	// consumerStarted 在每次进入 Run 时收到一次信号（非阻塞）。
 	consumerStarted chan struct{}
 	// events 按发生顺序记录组件生命周期事件，用于断言关闭顺序未改变。
@@ -84,6 +92,7 @@ func newRuntimeProbe() *runtimeProbe {
 		scannerStarts:   map[string]int{},
 		outboxEntered:   make(chan struct{}, 32),
 		backlogEntered:  make(chan struct{}, 32),
+		lagEntered:      make(chan struct{}, 32),
 		consumerStarted: make(chan struct{}, 32),
 	}
 }
@@ -265,6 +274,15 @@ func newProbeDeps(cfg flashSaleRuntimeConfig, probe *runtimeProbe) flashSaleRunt
 			probe.mu.Unlock()
 			return &fakeOutbox{probe: probe}, nil
 		},
+		newLagReader: func(kafkamq.Config) (kafkaLagSampler, error) {
+			probe.mu.Lock()
+			readerErr := probe.lagReaderErr
+			probe.mu.Unlock()
+			if readerErr != nil {
+				return nil, readerErr
+			}
+			return &fakeLagSampler{probe: probe}, nil
+		},
 		newEventConsumer: func(
 			flashsale.RebalanceConsumer, mq.Publisher, flashsale.RequestConsumer, flashsale.ConsumerOptions,
 		) (consumerRunner, error) {
@@ -286,10 +304,12 @@ func newProbeDeps(cfg flashSaleRuntimeConfig, probe *runtimeProbe) flashSaleRunt
 			probe.countScanner("consume")
 			waitCtx("consume")(ctx, wg)
 		},
-		consumerRestartBase:   10 * time.Millisecond,
-		consumerRestartMax:    40 * time.Millisecond,
-		consumerCloseTimeout:  time.Second,
-		backlogSampleInterval: 10 * time.Millisecond,
+		consumerRestartBase:    10 * time.Millisecond,
+		consumerRestartMax:     40 * time.Millisecond,
+		consumerCloseTimeout:   time.Second,
+		backlogSampleInterval:  10 * time.Millisecond,
+		kafkaLagSampleInterval: 10 * time.Millisecond,
+		kafkaLagSampleTimeout:  5 * time.Millisecond,
 	}
 }
 
@@ -761,20 +781,29 @@ func consumerJoinedGauge(t *testing.T) (value float64, ok bool) {
 	return unlabelledGauge(t, consumerJoinedMetricName)
 }
 
-// TestFlashSaleRuntimeOutboxBacklogSampler 覆盖 T2-02-C 的采样语义：
-//   - kafka 模式由后台采样写入指标（不依赖 /metrics 抓取）；
-//   - 采样失败只记录日志，绝不把上一次有效积压覆盖为 0；
+// TestFlashSaleRuntimeOutboxBacklogSampler 覆盖 T2-02-C / T4-02 的采样语义：
+//   - kafka 模式由后台采样写入积压与最老年龄（不依赖 /metrics 抓取）；
+//   - 采样失败只记录日志，绝不把上一次有效积压/年龄覆盖为 0；
+//   - 采样恢复后写入新值（不是停摆）；
 //   - 采样失败不影响发布循环；
 //   - Shutdown 后采样循环真正退出，不再产生查询。
 func TestFlashSaleRuntimeOutboxBacklogSampler(t *testing.T) {
 	t.Setenv("FLASH_SALE_METRICS_ENABLED", "true")
 	probe := newRuntimeProbe()
 	var failing atomic.Bool
+	var pending atomic.Int64
+	pending.Store(7)
 	probe.outboxBacklogBehavior = func(context.Context, int) (flashsale.OutboxBacklog, error) {
 		if failing.Load() {
 			return flashsale.OutboxBacklog{}, errors.New("mysql: connection refused")
 		}
-		return flashsale.OutboxBacklog{Pending: 7}, nil
+		// OldestCreatedAt 非零表示「年龄已知」，采样器应写入 oldest age 指标。
+		return flashsale.OutboxBacklog{
+			Pending:         pending.Load(),
+			OldestID:        1,
+			OldestCreatedAt: time.Now().Add(-30 * time.Second),
+			OldestAge:       30 * time.Second,
+		}, nil
 	}
 
 	rt, err := startFlashSaleRuntime(context.Background(), newProbeDeps(testRuntimeConfig(flashSaleModeKafka, true), probe))
@@ -786,8 +815,12 @@ func TestFlashSaleRuntimeOutboxBacklogSampler(t *testing.T) {
 		v, ok := backlogGauge(t)
 		return ok && v == 7
 	})
+	waitFor(t, 2*time.Second, "后台采样写入最老事件年龄", func() bool {
+		v, ok := gatherSeries(t, "surgecart_outbox_oldest_age_seconds", nil)
+		return ok && v == 30
+	})
 
-	// 采样失败：指标必须保持 7，且采样仍在继续尝试（不是停摆）。
+	// 采样失败：指标必须保持 7/30，且采样仍在继续尝试（不是停摆）。
 	failing.Store(true)
 	before := probe.backlogCalls.Load()
 	waitFor(t, 2*time.Second, "采样失败后仍有新的采样尝试", func() bool {
@@ -796,6 +829,24 @@ func TestFlashSaleRuntimeOutboxBacklogSampler(t *testing.T) {
 	if v, ok := backlogGauge(t); !ok || v != 7 {
 		t.Fatalf("采样失败后积压指标=(%v,%v)，必须保留上一次有效值 7", v, ok)
 	}
+	if v, ok := gatherSeries(t, "surgecart_outbox_oldest_age_seconds", nil); !ok || v != 30 {
+		t.Fatalf("采样失败后最老年龄=(%v,%v)，必须保留上一次有效值 30", v, ok)
+	}
+	if v, ok := samplerUpGauge(t, metrics.SamplerOutbox); !ok || v != 0 {
+		t.Fatalf("采样失败后 sampler_up=(%v,%v) want (0,true)", v, ok)
+	}
+
+	// 采样恢复：写入新的积压值与年龄，状态回到 1。
+	failing.Store(false)
+	pending.Store(11)
+	waitFor(t, 2*time.Second, "采样恢复后写入新积压", func() bool {
+		v, ok := backlogGauge(t)
+		return ok && v == 11
+	})
+	waitFor(t, 2*time.Second, "采样恢复后 sampler_up=1", func() bool {
+		v, ok := samplerUpGauge(t, metrics.SamplerOutbox)
+		return ok && v == 1
+	})
 	// 采样失败不得影响发布循环。
 	published := probe.outboxEntered
 	waitFor(t, 2*time.Second, "发布循环不受采样失败影响", func() bool {

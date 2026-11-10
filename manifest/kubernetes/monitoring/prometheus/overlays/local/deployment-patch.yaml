@@ -1,0 +1,21 @@
+# 本地 kind 集群的 Prometheus 参数覆盖（T4-03）。
+#
+# 只改「随环境变化」的一项：TSDB 保留期。
+#   本地 PVC 只有 5Gi、单节点 local-path，15d 会在压测/长时间运行时把磁盘写满；
+#   7d 足够覆盖本地验证与回溯，也不影响 T4-03 的验收（验收只依赖最近几分钟的样本）。
+#
+# args 是无 merge key 的字符串列表，strategic merge 会整体替换，因此这里必须写全。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+spec:
+  template:
+    spec:
+      containers:
+        - name: prometheus
+          args:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.path=/prometheus"
+            - "--storage.tsdb.retention.time=7d"
+            - "--web.listen-address=:9090"

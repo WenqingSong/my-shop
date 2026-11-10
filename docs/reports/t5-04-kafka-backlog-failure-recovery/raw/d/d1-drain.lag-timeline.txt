@@ -1,0 +1,1 @@
+﻿2026-11-10T10:36:13Z	committed=134	logEnd=134	broker_lag=0	prom_lag=0	backlog=0

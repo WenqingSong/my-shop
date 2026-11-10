@@ -438,7 +438,7 @@ func TestOutboxBacklogMetricReflectsSampleAndFreezesOnFailure(t *testing.T) {
 	ctx := context.Background()
 	t.Setenv("FLASH_SALE_METRICS_ENABLED", "true")
 
-	SetOutboxBacklogPending(ctx, 3)
+	SetOutboxBacklogSample(ctx, 3, 30*time.Second, true)
 	if got := gaugeValue(t, metricOutboxBacklogPending, nil); got != 3 {
 		t.Fatalf("积压指标=%v want 3", got)
 	}
@@ -448,7 +448,7 @@ func TestOutboxBacklogMetricReflectsSampleAndFreezesOnFailure(t *testing.T) {
 	if !set || value != 3 {
 		t.Fatalf("采样失败后指标状态=(%v,%v) want (true,3)", set, value)
 	}
-	SetOutboxBacklogPending(ctx, 0)
+	SetOutboxBacklogSample(ctx, 0, 0, true)
 	if got := gaugeValue(t, metricOutboxBacklogPending, nil); got != 0 {
 		t.Fatalf("积压清零后指标=%v want 0", got)
 	}

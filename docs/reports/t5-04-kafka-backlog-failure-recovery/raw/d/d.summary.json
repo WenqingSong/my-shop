@@ -1,0 +1,34 @@
+﻿{
+    "experiment":  "D: retry budget \u0026 DLQ",
+    "activity_id":  23,
+    "sku_id":  21,
+    "d2_request_id":  124,
+    "d2_dlq_latest":  22,
+    "d2_reasons":  [
+                       "retry_exhausted"
+                   ],
+    "d2_final_row":  [
+                         "status=3 retry_count=4 last_error_code=500 flash_order_id=0 published_offset=135"
+                     ],
+    "d2_db_final":  {
+                        "requests_total":  "2",
+                        "requests_queued":  "0",
+                        "requests_success":  "0",
+                        "requests_failed":  "0",
+                        "requests_dead":  "2",
+                        "requests_unpublished":  "0",
+                        "requests_retry_exhausted":  "2",
+                        "orders_total":  "0",
+                        "orders_distinct_users":  "0",
+                        "orders_dup_per_user":  "0",
+                        "orders_dup_no":  "0",
+                        "sku_total_stock":  "5",
+                        "sku_sold":  "0",
+                        "sku_remaining":  "5",
+                        "request_status_distribution":  [
+                                                            "status=3 code=500 n=2"
+                                                        ]
+                    },
+    "d1_result_ref":  "d1-result.json",
+    "note_d2":  "retry_count 由本脚本注入（模拟已完成 4 次技术失败），验证的是「预算耗尽后的处置」而非「重试计数如何推进」。"
+}

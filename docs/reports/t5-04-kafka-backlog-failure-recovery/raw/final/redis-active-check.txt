@@ -1,0 +1,5 @@
+﻿=== Redis ↔ MySQL 活跃活动交叉核验（只读，活动 12 为 T5-03 遗留仍在时间窗内的活动）===
+activity=12 sku=10 redis_stock=3 ttl=2542
+mysql: total=3 sold=0 remaining=3 inflight_queued=0 expected_redis=3
+结论：Redis remaining 与 MySQL 权威值（total - sold - inflight_queued）一致
+说明：本任务创建的测试活动（16~23）在核验时均已越过 end_time，缓存被对账扫描器清理，因此 redis_stock=(nil) 属预期行为，不是数据不一致。

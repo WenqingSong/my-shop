@@ -1,0 +1,41 @@
+# Grafana Data Source Provisioning（T4-04）。
+#
+# 关键约束：
+#   1. 地址必须是集群内 Service DNS：Prometheus 的 ClusterIP 只在集群网络内可达；
+#      localhost / 宿主机 IP / NodePort 在 Pod 内都不成立（localhost 会指向 Grafana 自身）。
+#   2. uid 固定为 prometheus：Dashboard JSON 里直接引用该 uid，
+#      固定后重复 apply 不会因为 uid 变化导致面板集体「Data source not found」。
+#   3. isDefault: true：Dashboard 不写死数据源时也会命中它。
+#   4. editable: false：数据源以 Git 为准，防止 UI 误改后与清单不一致（无法复现）。
+#   5. 集群内 Prometheus 未开鉴权，因此不配置任何 secureJsonData / basicAuth，
+#      避免写入无人使用的凭据。
+#
+# 挂载点：/etc/grafana/provisioning/datasources（见 deployment.yaml）。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  labels:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: surgecart
+data:
+  datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        uid: prometheus
+        type: prometheus
+        access: proxy
+        # T4-03 部署的 Prometheus：Service prometheus.monitoring，端口 9090。
+        url: http://prometheus.monitoring.svc.cluster.local:9090
+        isDefault: true
+        editable: false
+        jsonData:
+          # 与 Prometheus 的 15s 抓取间隔一致：Grafana 据此选择默认步长，
+          # 避免在 15s 数据上用 10s 步长重复取样。
+          timeInterval: 15s
+          # 查询走 POST：长 PromQL 不会被 URL 长度限制截断。
+          httpMethod: POST
+          prometheusType: Prometheus
+          prometheusVersion: 2.53.0

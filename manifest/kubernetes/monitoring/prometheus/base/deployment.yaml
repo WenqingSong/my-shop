@@ -1,0 +1,143 @@
+# Prometheus Deployment（T4-03）。
+#
+# 单副本、单实例，不做 HA：本阶段只要求「能在集群内抓取并查询真实指标」，
+# 双副本需要处理同组 external_labels 下的数据去重与分片，属于未授权扩大的架构。
+# 副本数固定为 1 的另一个原因：TSDB 走 RWO PVC（与 Application 的 Recreate 策略同源）。
+#
+# 安全基线（与 Application 同款，不放宽 restricted PSS）：
+#   - 非 root（65534:65534，官方镜像 nobody 用户）、runAsNonRoot；
+#   - readOnlyRootFilesystem + capabilities drop ALL + allowPrivilegeEscalation false；
+#   - seccomp RuntimeDefault；
+#   - 不挂载 ServiceAccount Token（静态配置，不访问 Kubernetes API，因此不需要任何 RBAC）。
+#
+# 可写路径只有两个：/prometheus（TSDB，PVC）与 /tmp（内存型 emptyDir，仅兜底临时文件）。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: surgecart
+    app.kubernetes.io/version: "v2.53.0"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  # 单副本 + RWO PVC：滚动更新会在旧 Pod 释放卷之前尝试挂载新卷（多节点必卡 Multi-Attach），
+  # 与 Application 采用同一策略；代价是重建期间短暂无监控数据。
+  strategy:
+    type: Recreate
+  # 镜像本地已导入/可拉取时，启动 + 首次抓取在 60s 内可观测完成。
+  progressDeadlineSeconds: 300
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus
+      app.kubernetes.io/component: monitoring
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prometheus
+        app.kubernetes.io/component: monitoring
+        app.kubernetes.io/part-of: surgecart
+        app.kubernetes.io/version: "v2.53.0"
+      annotations:
+        # 配置内容变更不会自动触发重建（ConfigMap 挂载是文件级更新，Prometheus 不会重读）。
+        # 这里记录「配置来源」，便于事后核对 Pod 用的是哪一版 prometheus.yml；
+        # 变更流程：改 ConfigMap → kubectl rollout restart deployment/prometheus。
+        surgecart.io/config-source: "configmap/prometheus-config"
+    spec:
+      # 静态配置，不访问 Kubernetes API，也就不需要 ServiceAccount 权限。
+      automountServiceAccountToken: false
+      # 不注入 <service>_<port> 环境变量，保持配置面干净。
+      enableServiceLinks: false
+      # 30s 足够刷 WAL 并退出；Prometheus 单实例无长连接，不需要 Application 的 60s 预算。
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        # 官方 prom/prometheus 镜像以 nobody(65534) 运行；显式固定，避免镜像默认值漂移。
+        runAsUser: 65534
+        runAsGroup: 65534
+        # PVC 挂载后由 kubelet 授权给 65534（TSDB 必须可写）。
+        fsGroup: 65534
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: prometheus
+          # 版本固定（不使用 latest）：抓取/存储行为在不同大版本之间会变化。
+          image: prom/prometheus:v2.53.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.path=/prometheus"
+            # 保留期由 overlays 按环境覆盖（本地磁盘有限）；base 给出可部署的默认值。
+            - "--storage.tsdb.retention.time=15d"
+            - "--web.listen-address=:9090"
+          ports:
+            - name: http
+              containerPort: 9090
+              protocol: TCP
+          # 启动保护：首次启动要加载 WAL/创建 TSDB，2s × 30 = 60s 覆盖本地小数据量场景。
+          startupProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 30
+          # 存活：/-/healthy 只回答「进程与 HTTP 服务是否存活」，不检查存储与抓取。
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          # 就绪：/-/ready 表示 TSDB 已加载完成、可以接受查询；未就绪不应被查询命中。
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            # 只抓一个应用 + 自身，本地 15s 间隔下内存/CPU 需求很小；
+            # limits 留出压缩与查询突发余量，避免 OOMKilled 造成「监控瞎了」。
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+              readOnly: true
+            - name: data
+              mountPath: /prometheus
+            # 只读根文件系统下的兜底临时目录（Prometheus 正常路径不写这里）。
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-config
+            items:
+              - key: prometheus.yml
+                path: prometheus.yml
+        # TSDB 持久化：Pod 重建/升级后指标时间线不丢失（PVC 由 pvc.yaml 定义）。
+        - name: data
+          persistentVolumeClaim:
+            claimName: prometheus-data
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 32Mi

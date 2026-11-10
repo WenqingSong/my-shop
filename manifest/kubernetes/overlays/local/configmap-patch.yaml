@@ -29,3 +29,9 @@ data:
   FLASH_SALE_KAFKA_TOPIC: "surgecart.flashsale.order.requested.v1"
   FLASH_SALE_KAFKA_DLQ_TOPIC: "surgecart.flashsale.order.requested.v1.dlq"
   FLASH_SALE_KAFKA_CONSUMER_GROUP: "surgecart-flashsale-order-worker-v1"
+
+  # ---------- 监控端点（T4-03）----------
+  # 开启后应用才会挂载 GET /metrics（T4-02 实现），同时启用 HTTP / Kafka Lag /
+  # Outbox 三类指标的后台采样器；关闭时不挂路由、不启动采样器（零开销）。
+  # 只在本地集群打开：production overlay 是否开启属于后续发布决策，不在此任务扩大范围。
+  FLASH_SALE_METRICS_ENABLED: "true"

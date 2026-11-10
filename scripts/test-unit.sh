@@ -11,7 +11,7 @@
 #     类型解析与严格模式，不依赖任何外部服务。
 #   - 混合包纯内存：iam（用户名/密码校验）、flashsale（熔断器状态机 / 结果映射 / Kafka 消息契约）、
 #     legacymigrate（金额/状态映射 / DSN 构建拒绝）、migrations（DSN 构建 / charset）、
-#     middleware（RequestID 中间件）。
+#     middleware（RequestID / Metrics 中间件，T4-02 起含 HTTP 指标采集）。
 # 新增纯内存测试时应在此登记；集成测试一律由 test-integration.sh 覆盖。
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -39,10 +39,12 @@ go test -run 'TestValidateUsername|TestValidatePassword' ./internal/logic/iam/..
 go test -run 'TestCircuitBreakerStateMachine|TestOrderOutcomeMapping|TestRequestedEvent|TestOutboxPublishBackoff|TestOutboxClaimToken|TestOutboxOptionsValidation|TestOutboxMessageContract|TestConsumerParseRequestedEvent|TestConsumerInvalidMessageGoesToDLQAndCommits|TestConsumerDLQFailureKeepsOffset|TestConsumerCommitFailureStopsProgress|TestConsumerIdentityMismatchGoesToDLQ|TestConsumerRetryBudgetExhaustedGoesToDLQ|TestConsumerDeadLetterFailureKeepsOffset|TestConsumerRetryThenSuccess|TestConsumerPersistenceFailureNeverDropsMessage|TestConsumerBackoffBounded|TestConsumerOptionsValidation|TestConsumerContextCancelReleasesRebalance' ./internal/logic/flashsale/...
 go test -run 'TestYuanToCents|TestMapCategoryStatus|TestMapProductStatus|TestSkuStatusForProduct|TestSplitSliderImages|TestMapSkusInventoryDedup|TestOpenConnectionsRejectsEmptyPass|TestBuildDSNCharsetUTF8MB4' ./internal/logic/legacymigrate/...
 go test -run 'TestBuildDSNRejectsEmptyPass|TestBuildDSNCharsetUTF8MB4' ./internal/migrations/...
-go test -run 'TestRequestID' ./internal/middleware/...
+# T4-02：HTTP 指标中间件（最终状态码/路由模板/在途计数//metrics 排除），启动真实 Server。
+go test -run 'TestRequestID|TestHTTPMetrics|TestMetricsEndpoint' ./internal/middleware/...
 # T2-03 / T2-03.1：B4.1 WithoutCancel 语义、drain 预算与强制关闭路径（纯内存，不连接 DB/Redis）。
 # T2-05：migrate 子命令的前置配置校验顺序（严格模式/密码/本地模式，端口不可达即可判定顺序）。
-go test -run 'TestRuntimeContextDetachesSignalCancellation|TestForceCloseWindow|TestTrackedListener|TestStopHTTPServer|TestMigrate' ./internal/cmd/...
+# T4-02：/metrics 路由挂载位置与 Go Runtime 指标复用（真实 HTTP 抓取）。
+go test -run 'TestRuntimeContextDetachesSignalCancellation|TestForceCloseWindow|TestTrackedListener|TestStopHTTPServer|TestMigrate|TestMetricsRoute' ./internal/cmd/...
 # 注：扫描器 ctx 取消与 B4 秒杀装配/互斥/恢复用例已随 ./internal/worker/... 整包执行，
 # 不再指向 ./internal/cmd（该包没有同名用例，旧命令是空跑）。
 

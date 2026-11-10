@@ -1,0 +1,113 @@
+﻿{
+    "phase":  "c2-crash-paused",
+    "captured_at_utc":  "2026-11-10T10:28:46Z",
+    "captured_at_cst":  "2026-11-10 18:28:46",
+    "kafka":  {
+                  "topic":  "surgecart.flashsale.order.requested.v1",
+                  "dlq_topic":  "surgecart.flashsale.order.requested.v1.dlq",
+                  "topic_etas":  [
+                                     {
+                                         "partition":  "0",
+                                         "earliest":  "0",
+                                         "latest":  "130"
+                                     }
+                                 ],
+                  "dlq_etas":  [
+                                   {
+                                       "partition":  "0",
+                                       "earliest":  "0",
+                                       "latest":  "16"
+                                   }
+                               ],
+                  "consumer_group":  "surgecart-flashsale-order-worker-v1",
+                  "group_state":  [
+                                      {
+                                          "group":  "surgecart-flashsale-order-worker-v1",
+                                          "topic":  "surgecart.flashsale.order.requested.v1",
+                                          "partition":  0,
+                                          "current":  "120",
+                                          "logEnd":  "130",
+                                          "lag":  "10",
+                                          "consumerId":  "surgecart-flashsale-consumer-64b26c05-87d9-47c6-a828-fa7a0e99bde1",
+                                          "host":  "/10.244.0.34",
+                                          "clientId":  "surgecart-flashsale-consumer"
+                                      }
+                                  ],
+                  "lag_total":  10,
+                  "client_quota":  [
+                                       "Quota configs for client-id \u0027surgecart-flashsale-consumer\u0027 are consumer_byte_rate=1.0"
+                                   ],
+                  "kafka_errors":  [
+
+                                   ]
+              },
+    "mysql":  {
+                  "activities_total":  "22",
+                  "activity_skus_total":  "22",
+                  "orders_total":  "94",
+                  "requests_total":  "113",
+                  "requests_queued":  "10",
+                  "requests_success":  "94",
+                  "requests_failed":  "9",
+                  "requests_dead":  "0",
+                  "requests_unpublished":  "1",
+                  "requests_unpublished_queued":  "0",
+                  "requests_retry_pending":  "0",
+                  "requests_lease_active":  "0",
+                  "max_request_id":  "122",
+                  "max_order_id":  "103",
+                  "mysql_now":  "2026-11-10 10:28:43",
+                  "mysql_tz":  "SYSTEM"
+              },
+    "redis":  {
+                  "dbsize":  "333",
+                  "flashsale:stock:*":  "8",
+                  "flashsale:bought:*":  "80",
+                  "flashsale:activity:*":  "8",
+                  "flashsale:null:*":  "0",
+                  "flashsale:soldout:*":  "0"
+              },
+    "prometheus":  {
+                       "kafka_consumer_lag":  "10",
+                       "outbox_backlog_pending":  "0",
+                       "outbox_oldest_age_seconds":  "0",
+                       "sampler_up_outbox":  "1",
+                       "sampler_up_kafka_lag":  "1",
+                       "consumer_joined":  "1",
+                       "consumer_records_total":  "0",
+                       "consumer_processed_success":  null,
+                       "consumer_processed_failed":  null,
+                       "consumer_processed_duplicate":  null,
+                       "consumer_processed_invalid":  null,
+                       "consumer_processed_dead":  null,
+                       "consumer_processed_error":  null,
+                       "consumer_retries_total":  "0",
+                       "consumer_dlq_total":  null,
+                       "consumer_commit_failures":  "0",
+                       "consumer_restarts_total":  "0",
+                       "outbox_published_total":  "10",
+                       "outbox_publish_failed_total":  null,
+                       "outbox_retried_total":  "0",
+                       "outbox_claimed_total":  "10",
+                       "outbox_lease_reclaimed":  "0",
+                       "http_requests_total":  "129"
+                   },
+    "kubernetes":  {
+                       "kafka_replicas":  "1/1",
+                       "pods":  [
+                                    "NAME                        READY   STATUS      RESTARTS   AGE     IP            NODE                            NOMINATED NODE   READINESS GATES",
+                                    "kafka-6cc98894b9-7djfr      1/1     Running     0          36m     10.244.0.32   surgecart-local-control-plane   \u003cnone\u003e           \u003cnone\u003e",
+                                    "mysql-87f8b688f-t854q       1/1     Running     0          22h     10.244.0.9    surgecart-local-control-plane   \u003cnone\u003e           \u003cnone\u003e",
+                                    "redis-5c44b5d69d-f66q6      1/1     Running     0          22h     10.244.0.11   surgecart-local-control-plane   \u003cnone\u003e           \u003cnone\u003e",
+                                    "surgecart-7d4d84b88-lhsg8   1/1     Running     0          4m58s   10.244.0.34   surgecart-local-control-plane   \u003cnone\u003e           \u003cnone\u003e",
+                                    "surgecart-migrate-7j8dm     0/1     Completed   0          21h     10.244.0.19   surgecart-local-control-plane   \u003cnone\u003e           \u003cnone\u003e"
+                                ],
+                       "pvc":  [
+                                   "NAME                STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE",
+                                   "kafka-data          Bound    pvc-bfcf7704-058a-48bb-9cdf-ed31a53ba322   2Gi        RWO            standard       \u003cunset\u003e                 22h",
+                                   "mysql-data          Bound    pvc-201fd1b3-8f85-4e0e-bee4-bc02826d8c47   2Gi        RWO            standard       \u003cunset\u003e                 22h",
+                                   "redis-data          Bound    pvc-8e507535-d9dd-4175-888e-4e9d537e17f9   1Gi        RWO            standard       \u003cunset\u003e                 22h",
+                                   "surgecart-storage   Bound    pvc-da9498d8-903a-46f5-9f50-5f3663433856   5Gi        RWO            standard       \u003cunset\u003e                 21h"
+                               ]
+                   }
+}

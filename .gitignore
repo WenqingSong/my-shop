@@ -27,6 +27,16 @@ logs/
 # 秒杀压测基线（运行时生成，不入库）
 /scripts/flashsale-loadtest/baselines/*.json
 
+# T5-01 k6 测试运行产物：summary/meta/原始 JSON 均为一次性结果，体积大且与当次环境强绑定。
+# 需要长期保留的结论写入 docs/reports/，不依赖本目录。
+/test/k6/results/*
+!/test/k6/results/.gitkeep
+# 测试数据准备产出（run 级 activity_id/sku_id，仅本次实验有效）
+/test/k6/data/*
+!/test/k6/data/.gitkeep
+# 本地 k6 环境变量（含测试账号密码，绝不提交；模板见 config/env.example）
+/test/k6/config/env.local
+
 # Agent Workflow adoption 事务备份（本地审计用，不入库）
 /.agent/.transactions/
 

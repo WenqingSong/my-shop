@@ -1,0 +1,20 @@
+# 本地 kind 集群（T4-03）的 Prometheus 部署入口。
+#
+# 与 base 的差别只有一处环境差异：TSDB 保留期 15d → 7d（本地 5Gi local-path 卷）。
+# 镜像版本 prom/prometheus:v2.53.0 直接继承 base，不在 overlay 里重复声明
+# （仓库约定：同一事实只写一次，避免 tag 与镜像两处漂移）。
+#
+# 部署与验证：
+#   kubectl apply -k manifest/kubernetes/monitoring/prometheus/overlays/local
+#   kubectl -n monitoring rollout status deployment/prometheus
+#   kubectl -n monitoring port-forward svc/prometheus 9090:9090   # 仅人工查看
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+namespace: monitoring
+
+patches:
+  - path: deployment-patch.yaml

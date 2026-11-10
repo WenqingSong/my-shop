@@ -1,0 +1,30 @@
+﻿[
+    {
+        "at_utc":  "2026-11-10T11:11:51Z",
+        "at_cst":  "2026-11-10 19:11:51",
+        "committed_offset":  "135",
+        "log_end_offset":  "136",
+        "broker_lag":  "1",
+        "topic_earliest":  "0",
+        "topic_latest":  "136",
+        "prom_lag":  "1",
+        "prom_backlog_pending":  "0",
+        "prom_consumer_joined":  "1",
+        "consumer_id":  "-",
+        "kafka_error":  ""
+    },
+    {
+        "at_utc":  "2026-11-10T11:12:00Z",
+        "at_cst":  "2026-11-10 19:12:00",
+        "committed_offset":  "136",
+        "log_end_offset":  "136",
+        "broker_lag":  "0",
+        "topic_earliest":  "0",
+        "topic_latest":  "136",
+        "prom_lag":  "1",
+        "prom_backlog_pending":  "0",
+        "prom_consumer_joined":  "1",
+        "consumer_id":  "surgecart-flashsale-consumer-e2269bac-39b7-4a8d-8bda-8a6d2ebc62e3",
+        "kafka_error":  ""
+    }
+]

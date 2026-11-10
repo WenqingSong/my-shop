@@ -1,0 +1,2 @@
+﻿2026-11-10T09:52:44Z	backlog=4	lag=0	joined=1
+2026-11-10T09:52:56Z	backlog=0	lag=0	joined=1

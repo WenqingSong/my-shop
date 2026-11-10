@@ -75,6 +75,16 @@ manifest/kubernetes/
         └── rbac.yaml                         # 发布锁最小权限（Role/RoleBinding，人工授予）
 ```
 
+监控栈是**独立入口**（不属于上面三个发布入口，也不参与发布顺序）：
+
+```text
+manifest/kubernetes/monitoring/prometheus/
+├── base/                                     # Namespace monitoring + ConfigMap + PVC + Deployment + Service
+└── overlays/local/                           # 本地保留期覆盖
+```
+
+部署与抓取语义见 [prometheus.md](./prometheus.md)（T4-03）。
+
 两个入口必须互不重叠，且各自可独立构建：
 
 ```bash

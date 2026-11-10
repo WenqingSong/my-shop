@@ -114,6 +114,7 @@ type flashSaleRuntimeDeps struct {
 	newProducer        func(kafkamq.Config) (mq.Publisher, error)
 	newConsumerClient  func(kafkamq.Config) (flashsale.RebalanceConsumer, error)
 	newOutbox          func(mq.Publisher, string, flashsale.OutboxOptions) (outboxBackend, error)
+	newLagReader       func(kafkamq.Config) (kafkaLagSampler, error)
 	newEventConsumer   func(flashsale.RebalanceConsumer, mq.Publisher, flashsale.RequestConsumer, flashsale.ConsumerOptions) (consumerRunner, error)
 	newRequestConsumer func() flashsale.RequestConsumer
 
@@ -122,10 +123,12 @@ type flashSaleRuntimeDeps struct {
 	startConsumeScanner func(ctx context.Context, wg *sync.WaitGroup)
 
 	// 测试注入的可调时长；为零时使用生产默认值。
-	consumerRestartBase   time.Duration
-	consumerRestartMax    time.Duration
-	consumerCloseTimeout  time.Duration
-	backlogSampleInterval time.Duration
+	consumerRestartBase    time.Duration
+	consumerRestartMax     time.Duration
+	consumerCloseTimeout   time.Duration
+	backlogSampleInterval  time.Duration
+	kafkaLagSampleInterval time.Duration
+	kafkaLagSampleTimeout  time.Duration
 }
 
 // defaultFlashSaleRuntimeDeps 返回生产装配使用的依赖。
@@ -140,6 +143,15 @@ func defaultFlashSaleRuntimeDeps() flashSaleRuntimeDeps {
 		},
 		newOutbox: func(pub mq.Publisher, topic string, opts flashsale.OutboxOptions) (outboxBackend, error) {
 			return flashsale.NewOutboxPublisher(pub, topic, opts)
+		},
+		// 独立 Kafka 客户端（不订阅、不入组）；装配失败时仅跳过 Lag 指标，
+		// 不影响业务链路（监控故障不得导致服务不可用）。
+		newLagReader: func(cfg kafkamq.Config) (kafkaLagSampler, error) {
+			reader, err := kafkamq.NewLagReader(cfg)
+			if err != nil {
+				return nil, err
+			}
+			return reader, nil
 		},
 		newEventConsumer: func(
 			client flashsale.RebalanceConsumer, dlq mq.Publisher,
@@ -176,13 +188,22 @@ type FlashSaleRuntime struct {
 	consumerCancel  context.CancelFunc
 	// backlogCancel 停止积压采样循环；采样是只读操作，退出顺序独立于发布/消费。
 	backlogCancel context.CancelFunc
+	// lagCancel 停止 Kafka Consumer Lag 采样循环（独立 Kafka 客户端）。
+	lagCancel context.CancelFunc
 
 	publisherWG sync.WaitGroup
 	consumerWG  sync.WaitGroup
 	backlogWG   sync.WaitGroup
+	lagWG       sync.WaitGroup
 	scannerWG   sync.WaitGroup
 
 	producer mq.Publisher
+
+	// lagSampler 是 Lag 采样使用的独立 Kafka 客户端，Shutdown 时随采样循环一起关闭。
+	lagSampler kafkaLagSampler
+	// lagPartitions 记录上一轮采样到的分区集合，用于清理消失分区的序列。
+	// 只在采样 goroutine 中读写。
+	lagPartitions map[int32]struct{}
 
 	kafkaConfig  kafkamq.Config
 	consumerOpts flashsale.ConsumerOptions
@@ -191,10 +212,12 @@ type FlashSaleRuntime struct {
 	publisherPollInterval time.Duration
 	publisherErrorBackoff time.Duration
 
-	consumerRestartBase   time.Duration
-	consumerRestartMax    time.Duration
-	consumerCloseTimeout  time.Duration
-	backlogSampleInterval time.Duration
+	consumerRestartBase    time.Duration
+	consumerRestartMax     time.Duration
+	consumerCloseTimeout   time.Duration
+	backlogSampleInterval  time.Duration
+	kafkaLagSampleInterval time.Duration
+	kafkaLagSampleTimeout  time.Duration
 
 	shutdownOnce sync.Once
 	shutdownErr  error
@@ -222,19 +245,21 @@ func startFlashSaleRuntime(ctx context.Context, deps flashSaleRuntimeDeps) (*Fla
 
 	baseCtx, baseCancel := context.WithCancel(ctx)
 	rt := &FlashSaleRuntime{
-		mode:                  cfg.Mode,
-		shutdownTimeout:       cfg.ShutdownTimeout,
-		baseCtx:               baseCtx,
-		baseCancel:            baseCancel,
-		publisherBatchSize:    cfg.Publisher.BatchSize,
-		publisherPollInterval: cfg.Publisher.PollInterval,
-		publisherErrorBackoff: cfg.Publisher.ErrorBackoff,
-		kafkaConfig:           cfg.Kafka,
-		consumerOpts:          flashsale.ConsumerOptions{DLQTopic: cfg.Kafka.DLQTopic},
-		consumerRestartBase:   deps.consumerRestartBase,
-		consumerRestartMax:    deps.consumerRestartMax,
-		consumerCloseTimeout:  deps.consumerCloseTimeout,
-		backlogSampleInterval: deps.backlogSampleInterval,
+		mode:                   cfg.Mode,
+		shutdownTimeout:        cfg.ShutdownTimeout,
+		baseCtx:                baseCtx,
+		baseCancel:             baseCancel,
+		publisherBatchSize:     cfg.Publisher.BatchSize,
+		publisherPollInterval:  cfg.Publisher.PollInterval,
+		publisherErrorBackoff:  cfg.Publisher.ErrorBackoff,
+		kafkaConfig:            cfg.Kafka,
+		consumerOpts:           flashsale.ConsumerOptions{DLQTopic: cfg.Kafka.DLQTopic},
+		consumerRestartBase:    deps.consumerRestartBase,
+		consumerRestartMax:     deps.consumerRestartMax,
+		consumerCloseTimeout:   deps.consumerCloseTimeout,
+		backlogSampleInterval:  deps.backlogSampleInterval,
+		kafkaLagSampleInterval: deps.kafkaLagSampleInterval,
+		kafkaLagSampleTimeout:  deps.kafkaLagSampleTimeout,
 	}
 	rt.applyTimingDefaults()
 
@@ -320,29 +345,61 @@ func (r *FlashSaleRuntime) startKafka(ctx context.Context, deps flashSaleRuntime
 
 	// Outbox 积压采样：独立可取消 ctx + 独立 WaitGroup，纳入 Shutdown 管理。
 	// 采样只读、有界（单次 3s 预算 < 5s 周期），失败不影响发布与消费。
-	backlogCtx, backlogCancel := context.WithCancel(ctx)
-	r.backlogCancel = backlogCancel
-	r.backlogWG.Add(1)
-	go func() {
-		defer r.backlogWG.Done()
-		r.runOutboxBacklogSampler(backlogCtx, outbox)
-	}()
+	// 指标关闭时不启动采样器（不产生任何 DB 负载、不留下无意义的 goroutine）。
+	backlogStarted := false
+	if metrics.Enabled(ctx) {
+		backlogCtx, backlogCancel := context.WithCancel(ctx)
+		r.backlogCancel = backlogCancel
+		r.backlogWG.Add(1)
+		go func() {
+			defer r.backlogWG.Done()
+			r.runOutboxBacklogSampler(backlogCtx, outbox)
+		}()
+		backlogStarted = true
+	}
+
+	// Kafka Consumer Lag 采样：独立 Kafka 客户端 + 独立可取消 ctx。
+	// 装配失败（客户端无法创建）只跳过该指标：监控故障不得导致业务服务不可用。
+	lagStarted := false
+	if metrics.Enabled(ctx) {
+		lagSampler, lagErr := deps.newLagReader(r.kafkaConfig)
+		if lagErr != nil {
+			logx.Warning(ctx, "flashsale_kafka_lag_sampler_unavailable", "Kafka Consumer Lag 采样器初始化失败，跳过该指标（不影响秒杀链路）", logx.Fields{
+				"consumer_group": r.kafkaConfig.ConsumerGroup,
+				"topic":          r.kafkaConfig.Topic,
+				"error":          lagErr.Error(),
+			})
+		} else {
+			r.lagSampler = lagSampler
+			lagCtx, lagCancel := context.WithCancel(ctx)
+			r.lagCancel = lagCancel
+			r.lagWG.Add(1)
+			go func() {
+				defer r.lagWG.Done()
+				r.runKafkaLagSampler(lagCtx, lagSampler)
+			}()
+			lagStarted = true
+		}
+	}
 
 	// 订单超时取消与 Redis 对账与分发模式无关：两种模式都必须继续运行。
 	deps.startOrderCancel(ctx, &r.scannerWG)
 	deps.startReconcile(ctx, &r.scannerWG)
 
 	logx.Info(ctx, "flashsale_runtime_started", "秒杀链路以 Kafka 模式启动", logx.Fields{
-		"mode":                    r.mode,
-		"brokers":                 strings.Join(r.kafkaConfig.Brokers, ","),
-		"topic":                   r.kafkaConfig.Topic,
-		"dlq_topic":               r.kafkaConfig.DLQTopic,
-		"consumer_group":          r.kafkaConfig.ConsumerGroup,
-		"publisher_batch":         r.publisherBatchSize,
-		"poll_interval":           r.publisherPollInterval.String(),
-		"publisher_backoff":       r.publisherErrorBackoff.String(),
-		"backlog_sample_interval": r.backlogSampleInterval.String(),
-		"shutdown_budget":         r.shutdownTimeout.String(),
+		"mode":                      r.mode,
+		"brokers":                   strings.Join(r.kafkaConfig.Brokers, ","),
+		"topic":                     r.kafkaConfig.Topic,
+		"dlq_topic":                 r.kafkaConfig.DLQTopic,
+		"consumer_group":            r.kafkaConfig.ConsumerGroup,
+		"publisher_batch":           r.publisherBatchSize,
+		"poll_interval":             r.publisherPollInterval.String(),
+		"publisher_backoff":         r.publisherErrorBackoff.String(),
+		"backlog_sample_interval":   r.backlogSampleInterval.String(),
+		"backlog_sampler_started":   backlogStarted,
+		"kafka_lag_sample_interval": r.kafkaLagSampleInterval.String(),
+		"kafka_lag_sampler_started": lagStarted,
+		"shutdown_budget":           r.shutdownTimeout.String(),
 	})
 	return nil
 }
@@ -376,6 +433,16 @@ func (r *FlashSaleRuntime) applyTimingDefaults() {
 	}
 	if r.backlogSampleInterval <= 0 {
 		r.backlogSampleInterval = outboxBacklogSampleInterval
+	}
+	if r.kafkaLagSampleInterval <= 0 {
+		r.kafkaLagSampleInterval = kafkaLagSampleInterval
+	}
+	if r.kafkaLagSampleTimeout <= 0 {
+		r.kafkaLagSampleTimeout = kafkaLagSampleTimeout
+	}
+	if r.kafkaLagSampleTimeout > r.kafkaLagSampleInterval {
+		// 单次采样预算不得越过采样周期，否则慢请求会堆积。
+		r.kafkaLagSampleTimeout = r.kafkaLagSampleInterval
 	}
 }
 
@@ -454,12 +521,20 @@ func (r *FlashSaleRuntime) sampleOutboxBacklog(ctx context.Context, outbox outbo
 			// 关闭期间取消导致的失败不是故障，不刷错误日志。
 			return
 		}
+		metrics.SetSamplerUp(metrics.SamplerOutbox, false)
 		logx.Warning(ctx, "flashsale_outbox_backlog_sample_failed", "秒杀 Outbox 积压采样失败，保留上一次有效值", logx.Fields{
 			"error": err.Error(),
 		})
 		return
 	}
-	metrics.SetOutboxBacklogPending(ctx, backlog.Pending)
+	// 最老事件年龄的可信判定：
+	//   - Pending=0：空 Outbox，年龄确实是 0；
+	//   - Pending>0：Backlog 在同一快照里回表拿到 created_at 才算已知；
+	//     若统计与回表之间记录被并发处理掉（OldestCreatedAt 为零值），保留上一次有效年龄，
+	//     不能把「这一轮拿不到年龄」写成 0。
+	oldestAgeKnown := backlog.Pending == 0 || !backlog.OldestCreatedAt.IsZero()
+	metrics.SetOutboxBacklogSample(ctx, backlog.Pending, backlog.OldestAge, oldestAgeKnown)
+	metrics.SetSamplerUp(metrics.SamplerOutbox, true)
 }
 
 // superviseConsumer 监督 Consumer.Run，并在意外退出后按有界指数退避重建。
@@ -578,6 +653,28 @@ func (r *FlashSaleRuntime) shutdown() error {
 		logx.Info(context.Background(), "flashsale_outbox_backlog_sampler_stopped", "秒杀 Outbox 积压采样已停止", logx.Fields{
 			"elapsed_ms": time.Since(started).Milliseconds(),
 			"timed_out":  !stopped,
+		})
+	}
+
+	// Kafka Lag 采样同样只读且独立：先停循环（等待在途请求返回），再关闭它独占的客户端。
+	if r.lagCancel != nil {
+		r.lagCancel()
+		stopped := waitGroupUntil(&r.lagWG, deadline)
+		if !stopped {
+			errs = append(errs, r.shutdownTimeoutError("Kafka Consumer Lag 采样"))
+		}
+		logx.Info(context.Background(), "flashsale_kafka_lag_sampler_stopped", "Kafka Consumer Lag 采样已停止", logx.Fields{
+			"elapsed_ms": time.Since(started).Milliseconds(),
+			"timed_out":  !stopped,
+		})
+	}
+	if r.lagSampler != nil {
+		// 采样循环已退出（或在预算内放弃等待）：关闭独立客户端，释放连接与后台协程。
+		if closeErr := r.lagSampler.Close(); closeErr != nil {
+			errs = append(errs, fmt.Errorf("关闭 Kafka Consumer Lag 采样器: %w", closeErr))
+		}
+		logx.Info(context.Background(), "flashsale_kafka_lag_sampler_closed", "Kafka Consumer Lag 采样客户端已关闭", logx.Fields{
+			"elapsed_ms": time.Since(started).Milliseconds(),
 		})
 	}
 

@@ -1,0 +1,18 @@
+# 本地 kind 集群（T4-04）的 Grafana 部署入口。
+#
+# 与 base 的差别只有一处环境差异说明，没有参数覆盖需求：
+#   - 镜像 grafana/grafana:11.2.2 由 `ctr -n k8s.io images import` 导入 kind 节点
+#     （本机无 kind CLI，与 T4-03 加载 Prometheus/应用镜像的方式一致）；
+#   - 命名空间 monitoring 已由 prometheus/overlays/local 创建，本 overlay 不重复声明 Namespace。
+#
+# 部署与验证：
+#   kubectl apply -k manifest/kubernetes/monitoring/grafana/overlays/local
+#   kubectl -n monitoring rollout status deployment/grafana
+#   kubectl -n monitoring port-forward svc/grafana 3000:3000   # 仅人工查看
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+namespace: monitoring

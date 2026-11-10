@@ -1,0 +1,63 @@
+﻿=== T5-04 最终一致性核验 ===
+时间(CST) = 2026-11-10 19:41:58
+--- Kafka ---
+lag_total=0 unconsumed_records=0
+  topic partition=0 earliest=0 latest=136
+  dlq   partition=0 earliest=0 latest=22
+--- MySQL 测试活动终态 ---
+activity|sku|total|sold|remaining|req_total|queued|success|failed|dead|unpublished|orders|distinct_users|dup_user|dup_no|retry_exhausted
+16|14|20|20|0|20|0|20|0|0|0|20|20|0|0|0|1794335316
+17|15|10|10|0|10|0|10|0|0|0|10|10|0|0|0|1794335884
+18|16|10|10|0|10|0|10|0|0|0|10|10|0|0|0|1794336482
+19|17|10|10|0|10|0|10|0|0|0|10|10|0|0|0|1794337036
+20|18|10|10|0|10|0|10|0|0|0|10|10|0|0|0|1794337039
+21|19|20|10|10|10|0|10|0|0|0|10|10|0|0|0|1794337747
+22|20|10|10|0|10|0|10|0|0|0|10|10|0|0|0|1794338785
+23|21|5|0|5|2|0|0|0|2|0|0|0|0|0|2|1794339109
+global: requests_total=115 | queued=0 | unpublished=0 | orders_total=104 | dup_order_no=0 | dup_user_per_activity=0 | sold_gt_stock=0
+--- Redis ---
+  stock_keys = 1
+  bought_keys = 0
+  idem_keys = 0
+  activity_keys = 1
+  soldout_keys = 0
+  activity=16 sku=14 redis=(nil) ttl=-2 mysql_remaining=0 -> no-cache-key
+  activity=17 sku=15 redis=(nil) ttl=-2 mysql_remaining=0 -> no-cache-key
+  activity=18 sku=16 redis=(nil) ttl=-2 mysql_remaining=0 -> no-cache-key
+  activity=19 sku=17 redis=(nil) ttl=-2 mysql_remaining=0 -> no-cache-key
+  activity=20 sku=18 redis=(nil) ttl=-2 mysql_remaining=0 -> no-cache-key
+  activity=21 sku=19 redis=(nil) ttl=-2 mysql_remaining=10 -> no-cache-key
+  activity=22 sku=20 redis=(nil) ttl=-2 mysql_remaining=0 -> no-cache-key
+  activity=23 sku=21 redis=(nil) ttl=-2 mysql_remaining=5 -> no-cache-key
+--- Prometheus ---
+  === Prometheus 区间数据 2026-11-10T08:41:58Z ~ 2026-11-10T11:41:58Z step=30s ===
+  kafka_consumer_lag : min=0 max=20 last=0 n=361
+  outbox_backlog_pending : min=0 max=10 last=0 n=361
+  outbox_oldest_age_seconds : min=0 max=28903.504 last=0 n=361
+  sampler_up_outbox : min=1 max=1 last=1 n=361
+  sampler_up_kafka_lag : min=0 max=1 last=1 n=361
+  consumer_joined : min=0 max=1 last=1 n=361
+  consumer_processed_total : min=10 max=104 last=16 n=347
+  consumer_processed_invalid : min=1 max=13 last=4 n=219
+  consumer_processed_duplicate : min=1 max=3 last=3 n=3
+  consumer_processed_dead : min=1 max=2 last=2 n=125
+  consumer_dlq_total : min=1 max=13 last=6 n=219
+  outbox_published : min=0 max=101 last=2 n=361
+  outbox_publish_failed : min=10 max=32 last=32 n=59
+  http_requests : min=0.244 max=1.644 last=0.311 n=361
+--- Kubernetes ---
+  NAME                        READY   STATUS      RESTARTS   AGE    IP            NODE                            NOMINATED NODE   READINESS GATES
+  kafka-6cc98894b9-7djfr      1/1     Running     0          109m   10.244.0.32   surgecart-local-control-plane   <none>           <none>
+  mysql-87f8b688f-t854q       1/1     Running     0          24h    10.244.0.9    surgecart-local-control-plane   <none>           <none>
+  redis-5c44b5d69d-f66q6      1/1     Running     0          24h    10.244.0.11   surgecart-local-control-plane   <none>           <none>
+  surgecart-7d4d84b88-gwpxp   1/1     Running     0          73m    10.244.0.35   surgecart-local-control-plane   <none>           <none>
+  surgecart-migrate-7j8dm     0/1     Completed   0          22h    10.244.0.19   surgecart-local-control-plane   <none>           <none>
+  NAME                STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+  kafka-data          Bound    pvc-bfcf7704-058a-48bb-9cdf-ed31a53ba322   2Gi        RWO            standard       <unset>                 24h
+  mysql-data          Bound    pvc-201fd1b3-8f85-4e0e-bee4-bc02826d8c47   2Gi        RWO            standard       <unset>                 24h
+  redis-data          Bound    pvc-8e507535-d9dd-4175-888e-4e9d537e17f9   1Gi        RWO            standard       <unset>                 24h
+  surgecart-storage   Bound    pvc-da9498d8-903a-46f5-9f50-5f3663433856   5Gi        RWO            standard       <unset>                 22h
+  kafka       1     1     apache/kafka:3.9.1
+  mysql       1     1     mysql:8.0
+  redis       1     1     redis:7-alpine
+  surgecart   1     1     surgecart:64ebbbd-t4-03
