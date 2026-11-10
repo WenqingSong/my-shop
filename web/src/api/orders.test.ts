@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest'
 
 import { fetchCart } from '@/api/cart'
 import { ApiError } from '@/api/client'
-import { createOrder, fetchOrder, fetchOrders } from '@/api/orders'
+import {
+  cancelOrder,
+  createOrder,
+  fetchOrder,
+  fetchOrders,
+  payOrder,
+  receiveOrder,
+} from '@/api/orders'
 import { createMockAddress } from '@/mocks/data/addresses'
 import { mockCartSkuId, seedMockCartItem } from '@/mocks/data/cart'
 import { getMockOrderCreatePayloads, seedMockOrder } from '@/mocks/data/orders'
@@ -187,5 +194,93 @@ describe('订单列表 API（GET /orders，MSW Mock）', () => {
     const result = await fetchOrders()
 
     expect(result.items).toEqual([])
+  })
+})
+
+describe('订单操作 API（MSW Mock）', () => {
+  it('未登录时支付/取消/收货均返回 401', async () => {
+    for (const run of [
+      () => payOrder(1),
+      () => cancelOrder(1),
+      () => receiveOrder(1),
+    ]) {
+      const error = await catchError(run)
+      expect(error.status).toBe(401)
+      expect(error.code).toBe('1002')
+    }
+  })
+
+  it('待支付订单可模拟支付，重复支付幂等且不改变 paid_at', async () => {
+    await signInAsDemo()
+    const order = seedMockOrder(DEMO_USER_ID, { status: 'pending_payment' })
+
+    const paid = await payOrder(order.id)
+
+    expect(paid.status).toBe('paid')
+    expect(paid.paid_at).toBeTruthy()
+
+    const replay = await payOrder(order.id)
+
+    expect(replay.status).toBe('paid')
+    expect(replay.paid_at).toBe(paid.paid_at)
+  })
+
+  it('已取消订单不能支付（9002）', async () => {
+    await signInAsDemo()
+    const order = seedMockOrder(DEMO_USER_ID, { status: 'cancelled' })
+
+    const error = await catchError(() => payOrder(order.id))
+
+    expect(error.status).toBe(409)
+    expect(error.code).toBe('9002')
+  })
+
+  it('待支付订单可取消，写入用户取消原因', async () => {
+    await signInAsDemo()
+    const order = seedMockOrder(DEMO_USER_ID, { status: 'pending_payment' })
+
+    const cancelled = await cancelOrder(order.id)
+
+    expect(cancelled.status).toBe('cancelled')
+    expect(cancelled.cancel_reason).toBe(1)
+    expect(cancelled.cancelled_at).toBeTruthy()
+  })
+
+  it('已支付订单不能取消（9002）', async () => {
+    await signInAsDemo()
+    const order = seedMockOrder(DEMO_USER_ID, { status: 'paid' })
+
+    const error = await catchError(() => cancelOrder(order.id))
+
+    expect(error.code).toBe('9002')
+  })
+
+  it('已发货订单确认收货后直接完成', async () => {
+    await signInAsDemo()
+    const order = seedMockOrder(DEMO_USER_ID, { status: 'shipped' })
+
+    const completed = await receiveOrder(order.id)
+
+    expect(completed.status).toBe('completed')
+    expect(completed.completed_at).toBeTruthy()
+  })
+
+  it('未发货订单不能确认收货（9002）', async () => {
+    await signInAsDemo()
+    const order = seedMockOrder(DEMO_USER_ID, { status: 'paid' })
+
+    const error = await catchError(() => receiveOrder(order.id))
+
+    expect(error.code).toBe('9002')
+  })
+
+  it('操作他人的订单返回 9001', async () => {
+    await signInAsDemo()
+    const otherOrder = seedMockOrder(DEMO_USER_ID + 1, { status: 'pending_payment' })
+
+    const error = await catchError(() => payOrder(otherOrder.id))
+
+    expect(error.status).toBe(404)
+    expect(error.code).toBe('9001')
   })
 })

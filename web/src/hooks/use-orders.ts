@@ -1,8 +1,9 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { ApiError } from '@/api/client'
-import { fetchOrder, fetchOrders } from '@/api/orders'
+import { cancelOrder, fetchOrder, fetchOrders, payOrder, receiveOrder } from '@/api/orders'
 import { queryKeys } from '@/api/query-keys'
+import type { Order } from '@/api/orders'
 import { useAuthStatus } from '@/auth/use-auth'
 
 /**
@@ -54,5 +55,50 @@ export function useOrderDetail(orderId: number) {
     enabled: hasSession && validId,
     staleTime: ORDERS_STALE_TIME,
     retry: shouldRetry,
+  })
+}
+
+/** 订单可执行的操作（与后端状态闸门一一对应）。 */
+export type OrderActionKind = 'pay' | 'cancel' | 'receive'
+
+const ACTION_REQUEST: Record<OrderActionKind, (orderId: number) => Promise<Order>> = {
+  pay: payOrder,
+  cancel: cancelOrder,
+  receive: receiveOrder,
+}
+
+/**
+ * 订单操作（模拟支付 / 取消 / 确认收货）。
+ *
+ * 缓存策略（以服务端为准，不做乐观更新）：
+ * - 成功：后端返回的是**更新后的完整订单**，直接写入详情缓存（避免再发一次 GET），
+ *   并失效列表缓存，使列表状态、分组计数、个人中心入口在下次进入时与服务端一致；
+ * - 失败：如果是 HTTP 业务错误（例如 9002 状态已迁移/已超时取消），
+ *   说明本地缓存已经过期，必须同时失效详情与列表，让页面立刻回到真实状态；
+ * - 不做乐观更新：交易状态不能靠前端猜测，失败回滚反而会闪回错误状态。
+ *
+ * 并发保护：`mutation.isPending` 同时驱动所有按钮的 disabled/loading，
+ * 用户快速连点不会发出第二个请求（mutation 本身也不会并发执行同一实例）。
+ */
+export function useOrderAction(orderId: number) {
+  const queryClient = useQueryClient()
+
+  return useMutation<Order, Error, OrderActionKind>({
+    mutationFn: (action) => ACTION_REQUEST[action](orderId),
+    retry: 0,
+    onSuccess: (order) => {
+      queryClient.setQueryData(queryKeys.orders.detail(order.id), order)
+      void queryClient.invalidateQueries({ queryKey: queryKeys.orders.list() })
+    },
+    onError: async (error) => {
+      if (!(error instanceof ApiError) || error.kind !== 'http') {
+        return
+      }
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.orders.detail(orderId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.orders.list() }),
+      ])
+    },
   })
 }

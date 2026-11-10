@@ -101,7 +101,7 @@ describe('订单详情', () => {
     expect(addressSection).toHaveTextContent('深南大道 2 号')
   })
 
-  it('待支付订单展示服务端支付截止时间，且不提供前端倒计时/取消入口', async () => {
+  it('待支付订单展示服务端支付截止时间，且不提供前端倒计时', async () => {
     await signInAsDemo()
     const order = seedMockOrder(DEMO_USER_ID, {
       status: 'pending_payment',
@@ -114,10 +114,11 @@ describe('订单详情', () => {
     expect(document.querySelector('[data-status="pending_payment"]')).toHaveTextContent('待支付')
     expect(screen.getByText(/支付截止时间（服务端返回）/)).toBeInTheDocument()
     expect(screen.getByText('2026-11-10 15:30:00')).toBeInTheDocument()
-    // W4-01 明确不做任何状态变更操作
-    expect(screen.queryByRole('button', { name: /支付/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /取消订单/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /确认收货/ })).not.toBeInTheDocument()
+    // 不实现前端倒计时：页面明确说明倒计时缺失与后端自动取消的关系。
+    expect(screen.getByText(/页面不提供前端倒计时与取消操作/)).toBeInTheDocument()
+    // W4-02 起提供模拟支付与取消入口（具体行为由 order-actions.test.tsx 覆盖）。
+    expect(screen.getByRole('button', { name: '模拟支付' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '取消订单' })).toBeInTheDocument()
   })
 
   it('expire_at 缺失时不展示支付截止时间', async () => {

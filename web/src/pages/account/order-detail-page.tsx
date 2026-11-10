@@ -7,6 +7,7 @@ import { ErrorState } from '@/components/common/error-state'
 import { LoadingState } from '@/components/common/loading-state'
 import { PagePlaceholder } from '@/components/common/page-placeholder'
 import { PriceDisplay } from '@/components/common/price-display'
+import { OrderActions } from '@/components/order/order-actions'
 import { OrderProgress } from '@/components/order/order-progress'
 import { OrderStatusBadge } from '@/components/order/order-status-badge'
 import { ProductImage } from '@/components/product/product-image'
@@ -61,6 +62,8 @@ function OrderDetailContent({ order }: { order: Order }) {
           <OrderStatusBadge status={order.status} className="mt-1" />
         </div>
       </div>
+
+      <OrderActions order={order} />
 
       <section
         aria-labelledby="order-progress-heading"
@@ -202,8 +205,8 @@ function OrderDetailContent({ order }: { order: Order }) {
       </section>
 
       <p className="text-xs leading-5 text-muted-foreground">
-        本页仅提供订单查询与展示；支付、取消、确认收货与退款操作将在后续版本开放。当前订单共{' '}
-        {quantity} 件商品。
+        本页提供订单查询与订单操作（模拟支付 / 取消 / 确认收货）；退款与优惠券属于后续阶段。
+        当前订单共 {quantity} 件商品。
       </p>
     </div>
   )

@@ -122,3 +122,34 @@ export function fetchOrders(signal?: AbortSignal): Promise<OrderListResult> {
 export function fetchOrder(orderId: number, signal?: AbortSignal): Promise<Order> {
   return authGetData<Order>(`/orders/${String(orderId)}`, { signal })
 }
+
+/**
+ * 订单操作接口（全部是 POST + 仅 path 参数 + 空请求体）。
+ *
+ * 事实来源：
+ * - `api/order/v1/order.go:112-143`：PayReq / CancelReq / ReceiveReq 只有 `Id`（path, required），
+ *   没有任何 body 字段；
+ * - `internal/controller/order/order.go:48-72`：三个 handler 都只取 Principal.UserID；
+ * - `internal/logic/order/order.go:447-595`：状态闸门与幂等语义。
+ *
+ * 三个接口都返回「更新后的完整 Order」，前端必须用它覆盖缓存，
+ * 而不是按自己的假设去改本地状态。
+ *
+ * 统一发送 `{}` 作为请求体：后端不读取 body，但显式空对象可以避免
+ * 「无 Content-Type 的空 body」在某些网关/代理下被改写为非法请求。
+ */
+
+/** POST /orders/:id/pay（Mock 支付）：仅待支付(10)可入；已支付重复调用幂等成功；其余状态 9002。 */
+export function payOrder(orderId: number): Promise<Order> {
+  return authPostData<Order>(`/orders/${String(orderId)}/pay`, {})
+}
+
+/** POST /orders/:id/cancel：仅待支付(10)可取消；同事务恢复库存 + 释放优惠券；其余状态 9002。 */
+export function cancelOrder(orderId: number): Promise<Order> {
+  return authPostData<Order>(`/orders/${String(orderId)}/cancel`, {})
+}
+
+/** POST /orders/:id/receive：仅已发货(30)可确认；同一事务 30→40→50，响应恒为 completed。 */
+export function receiveOrder(orderId: number): Promise<Order> {
+  return authPostData<Order>(`/orders/${String(orderId)}/receive`, {})
+}

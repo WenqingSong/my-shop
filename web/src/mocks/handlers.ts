@@ -18,10 +18,14 @@ import {
   updateMockCartSelected,
 } from '@/mocks/data/cart'
 import {
+  cancelMockOrder,
   createMockOrder,
   getMockOrder,
+  getMockOrderActionDelay,
   getMockOrderRequestDelay,
   listMockOrders,
+  payMockOrder,
+  receiveMockOrder,
 } from '@/mocks/data/orders'
 import {
   createMockAddress,
@@ -352,6 +356,68 @@ export const handlers = [
     const order = getMockOrder(user.id, Number(params.id))
 
     return order ? HttpResponse.json(ok(order)) : fail(404, 9001, '订单不存在')
+  }),
+
+  // 订单操作：与 internal/cmd/routes_frontend.go 的 /orders/:id/{pay,cancel,receive} 对应。
+  // 状态闸门与 internal/logic/order/order.go 保持一致；Mock 不建模库存与优惠券。
+  http.post(`${API}/orders/:id/pay`, async ({ request, params }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    const wait = getMockOrderActionDelay()
+
+    if (wait > 0) {
+      await delay(wait)
+    }
+
+    const result = payMockOrder(user.id, Number(params.id))
+
+    return result.ok
+      ? HttpResponse.json(ok(result.order))
+      : fail(result.status, result.code, result.message)
+  }),
+
+  http.post(`${API}/orders/:id/cancel`, async ({ request, params }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    const wait = getMockOrderActionDelay()
+
+    if (wait > 0) {
+      await delay(wait)
+    }
+
+    const result = cancelMockOrder(user.id, Number(params.id))
+
+    return result.ok
+      ? HttpResponse.json(ok(result.order))
+      : fail(result.status, result.code, result.message)
+  }),
+
+  http.post(`${API}/orders/:id/receive`, async ({ request, params }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    const wait = getMockOrderActionDelay()
+
+    if (wait > 0) {
+      await delay(wait)
+    }
+
+    const result = receiveMockOrder(user.id, Number(params.id))
+
+    return result.ok
+      ? HttpResponse.json(ok(result.order))
+      : fail(result.status, result.code, result.message)
   }),
 
   http.get(`${API}/addresses`, ({ request }) => {

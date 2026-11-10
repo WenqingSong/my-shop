@@ -39,9 +39,13 @@ let orders: MockOrderRecord[] = []
 let sequence = 0
 
 let requestDelayMs = 0
+/** 订单操作（支付/取消/收货）的响应延迟，用于验证「请求中」与防重复点击。 */
+let actionDelayMs = 0
 let forcedError: { status: number; code: number; message: string } | null = null
 let createRequestCount = 0
 let createPayloads: Record<string, unknown>[] = []
+/** 订单操作（支付/取消/收货）请求计数，用于断言「重复点击只发一次请求」。 */
+let actionRequestCount = 0
 
 function nowText(): string {
   return new Date().toISOString().slice(0, 19).replace('T', ' ')
@@ -87,9 +91,11 @@ export function resetMockOrders(): void {
   orders = []
   sequence = 0
   requestDelayMs = 0
+  actionDelayMs = 0
   forcedError = null
   createRequestCount = 0
   createPayloads = []
+  actionRequestCount = 0
 }
 
 export function setMockOrderRequestDelay(ms: number): void {
@@ -98,6 +104,20 @@ export function setMockOrderRequestDelay(ms: number): void {
 
 export function getMockOrderRequestDelay(): number {
   return requestDelayMs
+}
+
+/** 测试专用：设置订单操作（支付/取消/收货）的响应延迟。 */
+export function setMockOrderActionDelay(ms: number): void {
+  actionDelayMs = ms
+}
+
+export function getMockOrderActionDelay(): number {
+  return actionDelayMs
+}
+
+/** 已发生的订单操作请求数（支付/取消/收货合计）。 */
+export function getMockOrderActionRequestCount(): number {
+  return actionRequestCount
 }
 
 /** 测试专用：下一次创建订单强制失败（返回指定业务错误，不落库）。 */
@@ -349,4 +369,122 @@ export function seedMockOrder(userId: number, input: MockSeedOrderInput = {}): O
   orders = [...orders, order]
 
   return { ...order, items: [...order.items] }
+}
+
+/** 订单操作（支付/取消/收货）的 Mock 返回。 */
+export type MockOrderActionResult =
+  | { ok: true; order: Order }
+  | { ok: false; status: number; code: number; message: string }
+
+function findOwnedRecord(userId: number, orderId: number): MockOrderRecord | undefined {
+  return orders.find((order) => order.user_id === userId && order.id === orderId)
+}
+
+function replaceOrder(next: MockOrderRecord): Order {
+  orders = orders.map((order) => (order.id === next.id ? next : order))
+  return { ...next, items: [...next.items] }
+}
+
+const NOT_FOUND: MockOrderActionResult = {
+  ok: false,
+  status: 404,
+  code: 9001,
+  message: '订单不存在',
+}
+
+const INVALID_TRANSITION: MockOrderActionResult = {
+  ok: false,
+  status: 409,
+  code: 9002,
+  message: '订单状态迁移非法',
+}
+
+/**
+ * 模拟支付（对齐 internal/logic/order/order.go:447-516）：
+ * - 仅 pending_payment → paid，写 paid_at；
+ * - paid 重复支付幂等成功（返回既有订单，不改状态）；
+ * - 其它状态 9002。
+ */
+export function payMockOrder(userId: number, orderId: number): MockOrderActionResult {
+  actionRequestCount += 1
+  const record = findOwnedRecord(userId, orderId)
+
+  if (!record) {
+    return NOT_FOUND
+  }
+
+  if (record.status === 'paid') {
+    return { ok: true, order: { ...record, items: [...record.items] } }
+  }
+
+  if (record.status !== 'pending_payment') {
+    return INVALID_TRANSITION
+  }
+
+  return {
+    ok: true,
+    order: replaceOrder({ ...record, status: 'paid', paid_at: nowText(), updated_at: nowText() }),
+  }
+}
+
+/**
+ * 取消订单（对齐 order.go:518-549, 729-761）：
+ * - 仅 pending_payment → cancelled，cancel_reason=1（用户取消），写 cancelled_at；
+ * - 同事务恢复库存、释放券 —— Mock 不建模库存与券，仅在文案层说明；
+ * - 其它状态 9002。
+ */
+export function cancelMockOrder(userId: number, orderId: number): MockOrderActionResult {
+  actionRequestCount += 1
+  const record = findOwnedRecord(userId, orderId)
+
+  if (!record) {
+    return NOT_FOUND
+  }
+
+  if (record.status !== 'pending_payment') {
+    return INVALID_TRANSITION
+  }
+
+  return {
+    ok: true,
+    order: replaceOrder({
+      ...record,
+      status: 'cancelled',
+      cancel_reason: 1,
+      cancelled_at: nowText(),
+      updated_at: nowText(),
+    }),
+  }
+}
+
+/**
+ * 确认收货（对齐 order.go:551-595）：
+ * - 仅 shipped 可入；
+ * - 后端在同一事务里 30→40→50，响应恒为 completed，这里同样直接落到 completed；
+ * - 其它状态 9002。
+ */
+export function receiveMockOrder(userId: number, orderId: number): MockOrderActionResult {
+  actionRequestCount += 1
+  const record = findOwnedRecord(userId, orderId)
+
+  if (!record) {
+    return NOT_FOUND
+  }
+
+  if (record.status !== 'shipped') {
+    return INVALID_TRANSITION
+  }
+
+  const at = nowText()
+
+  return {
+    ok: true,
+    order: replaceOrder({
+      ...record,
+      status: 'completed',
+      received_at: at,
+      completed_at: at,
+      updated_at: at,
+    }),
+  }
 }
