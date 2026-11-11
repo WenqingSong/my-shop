@@ -219,6 +219,18 @@ func TestConservedRejectsTamperedBreakdown(t *testing.T) {
 		t.Fatal("负数应付必须被守恒校验拒绝")
 	}
 
+	// 折扣合计超过商品金额时即便应付为 0 也必须拒绝：否则负数中间余额会被运费抹平而掩盖错误。
+	overDiscount := &Breakdown{OriginalAmount: 100, CouponDiscount: 60, MemberDiscount: 50, PayableAmount: 0}
+	if overDiscount.Conserved() {
+		t.Fatal("折扣合计超过商品金额必须被守恒校验拒绝")
+	}
+
+	// 运费与剩余金额相加溢出 int64 时必须拒绝，不能回绕成合法的应付金额。
+	overflow := &Breakdown{OriginalAmount: math.MaxInt64, ShippingFee: 1, PayableAmount: 0}
+	if overflow.Conserved() {
+		t.Fatal("运费导致 int64 溢出必须被守恒校验拒绝")
+	}
+
 	if (*Breakdown)(nil).Conserved() {
 		t.Fatal("nil 明细不应通过守恒校验")
 	}
