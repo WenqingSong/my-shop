@@ -34,11 +34,18 @@
                 type: string
                 x-go-validate: required
                 description: SKU 名称，非空且不超过 128 字符
+              image_url:
+                type: string
+                description: SKU 规格图 URL，可选，不超过 512 字符
               price:
                 oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
                 x-go-type: json.Number
                 x-go-validate: required
-                description: 价格（整数分，0~99999999）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+                description: 售价（整数分，0~99999999）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+              original_price:
+                oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+                x-go-type: json.Number
+                description: 原价/划线价（整数分，0~99999999）；缺省等于售价；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
               status:
                 type: [string, "null"]
                 enum: [enabled, disabled, null]
@@ -82,6 +89,7 @@
           - 5002
           - 5003
           - 5004
+          - 5017
         scope: static-call-chain
         note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
       "400":
@@ -128,10 +136,17 @@
               name:
                 type: [string, "null"]
                 description: SKU 名称，非空且不超过 128 字符
+              image_url:
+                type: [string, "null"]
+                description: SKU 规格图 URL，不超过 512 字符
               price:
                 oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
                 x-go-type: json.Number
-                description: 价格（整数分，0~99999999）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+                description: 售价（整数分，0~99999999）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+              original_price:
+                oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+                x-go-type: json.Number
+                description: 原价/划线价（整数分，0~99999999）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
               status:
                 type: [string, "null"]
                 enum: [enabled, disabled, null]
@@ -222,6 +237,90 @@
           - 1003
           - 5001
           - 5005
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/admin/products/{id}/skus/generate:
+  post:
+    tags:
+      - SKU
+    summary: 按规格组合生成 SKU
+    description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`sku:create`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+    operationId: skuGenerate
+    security:
+      - bearerAuth: []
+    x-auth: admin
+    x-permission: sku:create
+    x-handler: sku.Generate
+    x-source: routes_admin.go
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int64
+        description: 商品 id
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              price:
+                oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+                x-go-type: json.Number
+                description: 新建 SKU 的售价（整数分）；缺省取商品价格；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+              original_price:
+                oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+                x-go-type: json.Number
+                description: 新建 SKU 的原价（整数分）；缺省等于售价；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+              image_url:
+                type: string
+                description: 新建 SKU 的规格图 URL，可选
+              status:
+                type: [string, "null"]
+                description: 新建 SKU 的状态，默认 enabled
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/SkuGenerateResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 4001
+          - 5002
+          - 5003
+          - 5004
+          - 5015
+          - 5016
         scope: static-call-chain
         note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
       "400":

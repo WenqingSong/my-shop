@@ -1,6 +1,8 @@
 package v1
 
 import (
+	"encoding/json"
+
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 )
@@ -63,24 +65,31 @@ type Order struct {
 type OrderItem struct {
 	Id               int64  `json:"id" dc:"订单项 id"`
 	SkuId            int64  `json:"sku_id" dc:"SKU id（软引用）"`
+	SkuCode          string `json:"sku_code" dc:"SKU 编码快照（下单时 sku_code）"`
 	ProductId        int64  `json:"product_id" dc:"商品 id（软引用）"`
 	SkuName          string `json:"sku_name" dc:"SKU 名称快照"`
+	SpecText         string `json:"spec_text" dc:"规格文本快照（如「红色,S」；无规格为空串）"`
 	ProductName      string `json:"product_name" dc:"商品名快照"`
 	ProductMainImage string `json:"product_main_image" dc:"商品主图快照"`
 	Price            int64  `json:"price" dc:"成交价（整数分，下单时 skus.price 快照）"`
+	OriginalPrice    int64  `json:"original_price" dc:"原价快照（整数分，下单时 skus.original_price）"`
 	Quantity         int64  `json:"quantity" dc:"数量"`
 }
 
-// CreateReq 创建订单请求（source=cart 时从购物车勾选项下单，忽略 sku_id/quantity；
-// source=direct 时按单个 SKU + 数量直接购买）。
+// CreateReq 创建订单请求（source=cart 时从购物车勾选项下单，忽略 sku_id/sku_code/quantity；
+// source=direct 时按单个 SKU（sku_code 优先，兼容 sku_id）+ 数量直接购买）。
+// 单价一律由服务端按 skus.price 确定；price 字段仅用于检测客户端伪造/篡改价格，
+// 与服务端定价不一致时拒绝下单，不参与任何金额计算。
 type CreateReq struct {
 	g.Meta         `path:"/orders" method:"post" tags:"订单" summary:"创建订单"`
-	Source         string `json:"source" v:"required" dc:"来源：cart/direct"`
-	AddressId      int64  `json:"address_id" v:"required" dc:"收货地址 id（必须属于当前用户）"`
-	IdempotencyKey string `json:"idempotency_key" v:"required" dc:"幂等键（同键同内容幂等，同键不同内容 9006）"`
-	SkuId          int64  `json:"sku_id" dc:"直接购买 SKU id（source=direct 必填）"`
-	Quantity       int64  `json:"quantity" dc:"直接购买数量（source=direct 必填，正整数）"`
-	CouponId       int64  `json:"coupon_id" dc:"可选使用的用户券 id（一笔订单最多一张，0 或缺省表示不使用）"`
+	Source         string       `json:"source" v:"required" dc:"来源：cart/direct"`
+	AddressId      int64        `json:"address_id" v:"required" dc:"收货地址 id（必须属于当前用户）"`
+	IdempotencyKey string       `json:"idempotency_key" v:"required" dc:"幂等键（同键同内容幂等，同键不同内容 9006）"`
+	SkuCode        string       `json:"sku_code" dc:"直接购买 SKU 编码（source=direct 推荐；与 sku_id 至少填一个）"`
+	SkuId          int64        `json:"sku_id" dc:"直接购买 SKU id（source=direct 兼容字段；与 sku_code 二选一或同时一致）"`
+	Quantity       int64        `json:"quantity" dc:"直接购买数量（source=direct 必填，正整数）"`
+	CouponId       int64        `json:"coupon_id" dc:"可选使用的用户券 id（一笔订单最多一张，0 或缺省表示不使用）"`
+	Price          *json.Number `json:"price" dc:"客户端单价（仅用于防伪校验）：必须等于服务端 skus.price，否则 9007 拒绝"`
 }
 
 // CreateRes 创建订单响应。

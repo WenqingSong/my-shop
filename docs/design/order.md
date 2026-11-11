@@ -48,12 +48,14 @@
 | `id` | BIGINT UNSIGNED | 主键，自增 |
 | `order_id` | BIGINT UNSIGNED | 非空，FK → `orders.id` `ON DELETE CASCADE` |
 | `sku_id` | BIGINT UNSIGNED | 非空，软引用（无 FK），指向 `skus.id` |
+| `sku_code` | VARCHAR(64) | 非空默认 ''，下单时 `skus.sku_code` 快照（B1-04-02）；历史订单为空串 |
 | `product_id` | BIGINT UNSIGNED | 非空，软引用（无 FK），指向 `products.id` |
 | `sku_name` | VARCHAR(128) | 非空，快照 |
-| `spec_text` | VARCHAR(128) | 非空默认 ''，下单时 SKU 规格文本快照；历史订单为空串，不回填 |
+| `spec_text` | VARCHAR(128) | 非空默认 ''，下单时 SKU 规格文本快照（如 `红色,S`）；历史订单为空串，不回填 |
 | `product_name` | VARCHAR(128) | 非空，快照 |
 | `product_main_image` | VARCHAR(512) | 非空默认 `''`，快照 |
 | `price` | INT UNSIGNED | 非空，成交价整数分 = 下单时 `skus.price` |
+| `original_price` | INT UNSIGNED | 非空默认 0，原价快照（下单时 `skus.original_price`，B1-04-02） |
 | `quantity` | INT UNSIGNED | 非空，正整数 |
 | `created_at` | DATETIME | 默认 `CURRENT_TIMESTAMP` |
 
@@ -157,7 +159,10 @@
 - `order_items.sku_id`/`product_id` → `skus.id`/`products.id`（软引用，无 FK），快照自足；SKU/商品删除后订单仍可读。
 - 库存：下单经 `IInventory.DeductInTx` 扣减、取消经 `IInventory.IncreaseInTx` 恢复，复用其「条件更新 + RowsAffected + 流水」规则；`operator_admin_id` 落 NULL（用户/系统驱动）。
 - 退款：退款成功推进订单 `paid→refunded` 由 refund 模块经 `IOrder.CompleteRefundInTx` 复用（订单 `20→70` + `refunded_at` + 恢复库存，`WHERE status=20` 闸门），见 `refund.md`。
-- 定价：`original_amount` 重读 `ISku.GetByID` 的 `skus.price` 求和，校验 SKU enabled 且商品 on_shelf（否则 9003）；用券经 `ICoupon` 校验归属/有效期/状态/门槛并计算 `discount_amount`。
+- 定价：`original_amount` 重读 `skus.price` 求和，校验 SKU enabled 且商品 on_shelf（否则 9003）；用券经 `ICoupon` 校验归属/有效期/状态/门槛并计算 `discount_amount`。
+- SKU 定位（B1-04-02）：`source=direct` 优先按 `sku_code` 查库（`ISku.GetByCode`），兼容 `sku_id`；两者同时提交必须一致（否则 9003）。
+  编码不存在 → 5001；客户端 `price` 仅用于防伪比对，与服务端售价不一致 → 9007（`source=cart` 提交 `price` 一律 9007），
+  该字段永不参与金额计算。订单项快照 `sku_code`/`spec_text`/`original_price`。
 - 优惠券：`orders.user_coupon_id` → `user_coupons.id`（软引用，快照）；预占/核销/释放经 `ICoupon` 与订单状态变更同事务，见 `coupon.md`。
 - 地址：快照自 `addresses`，下单后地址变更不影响订单。
 - 状态流水：`order_status_logs.order_id` → `orders.id`（软引用，无 FK，只追加）；写入时机与事务边界在 B1-04 与状态推进一起实现。

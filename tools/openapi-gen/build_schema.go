@@ -226,6 +226,15 @@ func typeToSchema(t *TypeRef, refPrefix string) *OMap {
 		}
 		s.Set("items", elem)
 		return s
+	case KindMap:
+		// 动态键对象：JSON 对象键天然为字符串，值类型由 additionalProperties 描述。
+		if t.Pointer {
+			s.Set("type", FlowList{"object", "null"})
+		} else {
+			s.Set("type", "object")
+		}
+		s.Set("additionalProperties", typeToSchema(t.Elem, refPrefix))
+		return s
 	case KindScalar:
 		switch t.Scalar {
 		case "string":

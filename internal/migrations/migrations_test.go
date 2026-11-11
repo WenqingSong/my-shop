@@ -14,8 +14,8 @@ import (
 // baselineVersion 是内嵌 baseline 迁移的版本号（14 位时间戳）。
 const baselineVersion = uint(20261001000001)
 
-// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + … + profile_region_address）。
-const latestMigrationVersion = uint(20261110000015)
+// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + … + sku_code_pricing）。
+const latestMigrationVersion = uint(20261111000001)
 
 // businessTables 是 migration 应建立的 60 张业务表。
 // 注意顺序：wallet_transactions 通过外键引用 wallet_accounts（ON DELETE RESTRICT），故排在 wallet_accounts 之前；
@@ -983,12 +983,14 @@ var expectedSchema = []tableSpec{
 			{Name: "id", Type: "bigint unsigned", Extra: "auto_increment"},
 			{Name: "order_id", Type: "bigint unsigned"},
 			{Name: "sku_id", Type: "bigint unsigned"},
+			{Name: "sku_code", Type: "varchar(64)", Default: strPtr("")},
 			{Name: "product_id", Type: "bigint unsigned"},
 			{Name: "sku_name", Type: "varchar(128)"},
 			{Name: "spec_text", Type: "varchar(128)", Default: strPtr("")},
 			{Name: "product_name", Type: "varchar(128)"},
 			{Name: "product_main_image", Type: "varchar(512)", Default: strPtr("")},
 			{Name: "price", Type: "int unsigned"},
+			{Name: "original_price", Type: "int unsigned", Default: strPtr("0")},
 			{Name: "quantity", Type: "int unsigned"},
 			{Name: "created_at", Type: "datetime", Default: strPtr("CURRENT_TIMESTAMP"), Extra: "DEFAULT_GENERATED"},
 		},

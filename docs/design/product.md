@@ -135,7 +135,8 @@ draft ──> on_shelf ──> off_shelf
 ## 8. 跨模块关系
 
 - `products.category_id` → `categories.id`（FK `ON DELETE RESTRICT`）：分类删除保护，见 `category.md`。
-- 商品详情组合 SPU + SKU：`DetailRes`/`AdminDetailRes` 内嵌 `skus`，见 `sku.md`。
+- 商品详情组合 SPU + SKU：`DetailRes`/`AdminDetailRes` 内嵌 `skus`；前台额外返回 `attr[]`（`attrName`/`attrValueArr`）
+  与 `productValue{}`（`unique`/`sku`/价格/原价/库存），后台额外返回 `specs[]`，详见 `sku.md` §2.6。
 - `product_specs.product_id` → `products.id`（FK `ON DELETE CASCADE`）：规格组是商品的下属数据，随商品删除清理；
   商品本身仍受 `fk_skus_product`（`ON DELETE RESTRICT`）保护，存在 SKU 时不可删除。
 - 商品建表经 golang-migrate 迁移（`20261001000002_products.up.sql`、`20261110000001_product_spec.up.sql`），见 `migration.md`。
@@ -146,5 +147,4 @@ draft ──> on_shelf ──> off_shelf
 - 已绑定商品后分类被禁用：已有商品（含已上架）不受影响，前台仍按商品自身 `status` 过滤；再次上架会因分类禁用被拒。该「禁用后处理已有商品」语义不在 V1 扩展。
 - 叶子分类被后续添加子分类后变为非叶子：已绑定商品不受影响，但再次上架会被拒（非叶子）。
 - 无商品删除接口（当前不处理）。
-- 商品详情暂不返回规格结构：`product_specs`/`product_spec_values` 与 `sku_spec_values` 目前只有数据库结构，
-  规格维护与详情组合属于后续任务，见 `docs/dev/product-sku.md`。
+- 商品详情已返回 van-sku 规格结构（B1-04-02，见 `sku.md` §2.6）；商品列表不返回规格，避免列表 N+1 与响应膨胀。

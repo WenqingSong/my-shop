@@ -312,7 +312,19 @@ func resolveType(rs *rawStruct, expr ast.Expr, names map[string]string) (*TypeRe
 		}
 		return &TypeRef{Kind: KindRef, Ref: name}, nil
 	case *ast.MapType:
-		return nil, fmt.Errorf("不支持 map 类型作为契约字段")
+		// 仅支持 JSON 兼容的 string 键（动态键对象），值类型继续按同一规则解析。
+		key, err := resolveType(rs, t.Key, names)
+		if err != nil {
+			return nil, fmt.Errorf("map 键解析失败: %w", err)
+		}
+		if key.Kind != KindScalar || key.Scalar != "string" {
+			return nil, fmt.Errorf("map 键必须是 string（JSON 对象只允许字符串键）")
+		}
+		value, err := resolveType(rs, t.Value, names)
+		if err != nil {
+			return nil, fmt.Errorf("map 值解析失败: %w", err)
+		}
+		return &TypeRef{Kind: KindMap, Elem: value}, nil
 	case *ast.InterfaceType:
 		return &TypeRef{Kind: KindAny, Scalar: "any"}, nil
 	default:

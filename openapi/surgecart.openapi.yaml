@@ -34,8 +34,10 @@ tags:
     description: 商品分类树查询与后台写操作
   - name: 商品
     description: 商品 SPU 查询与后台写操作
+  - name: 商品规格
+    description: 商品规格组与规格值的后台维护
   - name: SKU
-    description: SKU 写操作
+    description: SKU 写操作与规格组合生成
   - name: 库存
     description: 库存查询、增减与流水
   - name: 购物车
@@ -2135,11 +2137,14 @@ paths:
                   type: string
                   x-go-validate: required
                   description: 幂等键（同键同内容幂等，同键不同内容 9006）
+                sku_code:
+                  type: string
+                  description: 直接购买 SKU 编码（source=direct 推荐；与 sku_id 至少填一个）
                 sku_id:
                   type: integer
                   format: int64
                   x-go-type: int64
-                  description: 直接购买 SKU id（source=direct 必填）
+                  description: 直接购买 SKU id（source=direct 兼容字段；与 sku_code 二选一或同时一致）
                 quantity:
                   type: integer
                   format: int64
@@ -2150,6 +2155,10 @@ paths:
                   format: int64
                   x-go-type: int64
                   description: 可选使用的用户券 id（一笔订单最多一张，0 或缺省表示不使用）
+                price:
+                  oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+                  x-go-type: json.Number
+                  description: 客户端单价（仅用于防伪校验）：必须等于服务端 skus.price，否则 9007 拒绝；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
               required:
                 - source
                 - address_id
@@ -2192,6 +2201,7 @@ paths:
             - 9004
             - 9005
             - 9006
+            - 9007
             - 19003
             - 19007
           scope: static-call-chain
@@ -6376,6 +6386,435 @@ paths:
           $ref: '#/components/responses/Conflict'
         "500":
           $ref: '#/components/responses/InternalError'
+  /admin/product-specs:
+    post:
+      tags:
+        - 商品规格
+      summary: 创建商品规格组
+      description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`spec:create`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+      operationId: specCreateGroup
+      security:
+        - bearerAuth: []
+      x-auth: admin
+      x-permission: spec:create
+      x-handler: spec.CreateGroup
+      x-source: routes_admin.go
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                product_id:
+                  type: integer
+                  format: int64
+                  x-go-type: int64
+                  x-go-validate: required
+                  description: 所属商品 id（必须存在）
+                name:
+                  type: string
+                  x-go-validate: required
+                  description: 规格组名（trim 后非空，≤32 字符，同商品内唯一）
+                sort:
+                  type: integer
+                  format: int64
+                  x-go-type: int
+                  description: 排序值，升序展示，默认 0
+              required:
+                - product_id
+                - name
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      x-known-issue:
+        - id: B1-02-D1
+          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
+          actual_http_status: 500
+          actual_business_code: 51
+          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SpecCreateGroupResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 4001
+            - 5010
+            - 5011
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /admin/product-specs/{id}:
+    put:
+      tags:
+        - 商品规格
+      summary: 更新商品规格组
+      description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`spec:update`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+      operationId: specUpdateGroup
+      security:
+        - bearerAuth: []
+      x-auth: admin
+      x-permission: spec:update
+      x-handler: spec.UpdateGroup
+      x-source: routes_admin.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 规格组 id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: [string, "null"]
+                  description: 规格组名（trim 后非空，≤32 字符，同商品内唯一）
+                sort:
+                  type: [integer, "null"]
+                  format: int64
+                  x-go-type: int
+                  description: 排序值
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SpecUpdateGroupResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 5010
+            - 5011
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+        "500":
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags:
+        - 商品规格
+      summary: 删除商品规格组
+      description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`spec:delete`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+      operationId: specDeleteGroup
+      security:
+        - bearerAuth: []
+      x-auth: admin
+      x-permission: spec:delete
+      x-handler: spec.DeleteGroup
+      x-source: routes_admin.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 规格组 id
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SpecDeleteGroupResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 5010
+            - 5013
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /admin/product-specs/{id}/values:
+    post:
+      tags:
+        - 商品规格
+      summary: 创建规格值
+      description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`spec:create`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+      operationId: specCreateValue
+      security:
+        - bearerAuth: []
+      x-auth: admin
+      x-permission: spec:create
+      x-handler: spec.CreateValue
+      x-source: routes_admin.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 规格组 id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                value:
+                  type: string
+                  x-go-validate: required
+                  description: 规格值文本（trim 后非空，≤32 字符，同规格组内唯一）
+                sort:
+                  type: integer
+                  format: int64
+                  x-go-type: int
+                  description: 排序值，升序展示，默认 0
+              required:
+                - value
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      x-known-issue:
+        - id: B1-02-D1
+          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
+          actual_http_status: 500
+          actual_business_code: 51
+          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SpecCreateValueResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 5010
+            - 5012
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /admin/product-spec-values/{id}:
+    put:
+      tags:
+        - 商品规格
+      summary: 更新规格值
+      description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`spec:update`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+      operationId: specUpdateValue
+      security:
+        - bearerAuth: []
+      x-auth: admin
+      x-permission: spec:update
+      x-handler: spec.UpdateValue
+      x-source: routes_admin.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 规格值 id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                value:
+                  type: [string, "null"]
+                  description: 规格值文本（trim 后非空，≤32 字符，同规格组内唯一）
+                sort:
+                  type: [integer, "null"]
+                  format: int64
+                  x-go-type: int
+                  description: 排序值
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SpecUpdateValueResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 5010
+            - 5012
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+        "500":
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags:
+        - 商品规格
+      summary: 删除规格值
+      description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`spec:delete`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+      operationId: specDeleteValue
+      security:
+        - bearerAuth: []
+      x-auth: admin
+      x-permission: spec:delete
+      x-handler: spec.DeleteValue
+      x-source: routes_admin.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 规格值 id
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SpecDeleteValueResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 5010
+            - 5013
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+        "500":
+          $ref: '#/components/responses/InternalError'
   /admin/skus:
     post:
       tags:
@@ -6406,11 +6845,18 @@ paths:
                   type: string
                   x-go-validate: required
                   description: SKU 名称，非空且不超过 128 字符
+                image_url:
+                  type: string
+                  description: SKU 规格图 URL，可选，不超过 512 字符
                 price:
                   oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
                   x-go-type: json.Number
                   x-go-validate: required
-                  description: 价格（整数分，0~99999999）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+                  description: 售价（整数分，0~99999999）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+                original_price:
+                  oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+                  x-go-type: json.Number
+                  description: 原价/划线价（整数分，0~99999999）；缺省等于售价；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
                 status:
                   type: [string, "null"]
                   enum: [enabled, disabled, null]
@@ -6454,6 +6900,7 @@ paths:
             - 5002
             - 5003
             - 5004
+            - 5017
           scope: static-call-chain
           note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
         "400":
@@ -6500,10 +6947,17 @@ paths:
                 name:
                   type: [string, "null"]
                   description: SKU 名称，非空且不超过 128 字符
+                image_url:
+                  type: [string, "null"]
+                  description: SKU 规格图 URL，不超过 512 字符
                 price:
                   oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
                   x-go-type: json.Number
-                  description: 价格（整数分，0~99999999）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+                  description: 售价（整数分，0~99999999）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+                original_price:
+                  oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+                  x-go-type: json.Number
+                  description: 原价/划线价（整数分，0~99999999）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
                 status:
                   type: [string, "null"]
                   enum: [enabled, disabled, null]
@@ -6594,6 +7048,90 @@ paths:
             - 1003
             - 5001
             - 5005
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /admin/products/{id}/skus/generate:
+    post:
+      tags:
+        - SKU
+      summary: 按规格组合生成 SKU
+      description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`sku:create`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+      operationId: skuGenerate
+      security:
+        - bearerAuth: []
+      x-auth: admin
+      x-permission: sku:create
+      x-handler: sku.Generate
+      x-source: routes_admin.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 商品 id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                price:
+                  oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+                  x-go-type: json.Number
+                  description: 新建 SKU 的售价（整数分）；缺省取商品价格；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+                original_price:
+                  oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+                  x-go-type: json.Number
+                  description: 新建 SKU 的原价（整数分）；缺省等于售价；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+                image_url:
+                  type: string
+                  description: 新建 SKU 的规格图 URL，可选
+                status:
+                  type: [string, "null"]
+                  description: 新建 SKU 的状态，默认 enabled
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SkuGenerateResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 4001
+            - 5002
+            - 5003
+            - 5004
+            - 5015
+            - 5016
           scope: static-call-chain
           note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
         "400":
@@ -10201,6 +10739,10 @@ components:
       $ref: ./components/schemas.yaml#/ProductListResponse
     ProductDetailRequest:
       $ref: ./components/schemas.yaml#/ProductDetailRequest
+    SkuAttr:
+      $ref: ./components/schemas.yaml#/SkuAttr
+    SkuProductValue:
+      $ref: ./components/schemas.yaml#/SkuProductValue
     ProductDetailResponse:
       $ref: ./components/schemas.yaml#/ProductDetailResponse
     ProductAdminListRequest:
@@ -10367,6 +10909,8 @@ components:
       $ref: ./components/schemas.yaml#/ReviewTakeDownRequest
     ReviewTakeDownResponse:
       $ref: ./components/schemas.yaml#/ReviewTakeDownResponse
+    SkuSpecValue:
+      $ref: ./components/schemas.yaml#/SkuSpecValue
     Sku:
       $ref: ./components/schemas.yaml#/Sku
     SkuCreateRequest:
@@ -10381,6 +10925,38 @@ components:
       $ref: ./components/schemas.yaml#/SkuDeleteRequest
     SkuDeleteResponse:
       $ref: ./components/schemas.yaml#/SkuDeleteResponse
+    SkuGenerateRequest:
+      $ref: ./components/schemas.yaml#/SkuGenerateRequest
+    SkuGenerateResponse:
+      $ref: ./components/schemas.yaml#/SkuGenerateResponse
+    SpecValue:
+      $ref: ./components/schemas.yaml#/SpecValue
+    SpecGroup:
+      $ref: ./components/schemas.yaml#/SpecGroup
+    SpecCreateGroupRequest:
+      $ref: ./components/schemas.yaml#/SpecCreateGroupRequest
+    SpecCreateGroupResponse:
+      $ref: ./components/schemas.yaml#/SpecCreateGroupResponse
+    SpecUpdateGroupRequest:
+      $ref: ./components/schemas.yaml#/SpecUpdateGroupRequest
+    SpecUpdateGroupResponse:
+      $ref: ./components/schemas.yaml#/SpecUpdateGroupResponse
+    SpecDeleteGroupRequest:
+      $ref: ./components/schemas.yaml#/SpecDeleteGroupRequest
+    SpecDeleteGroupResponse:
+      $ref: ./components/schemas.yaml#/SpecDeleteGroupResponse
+    SpecCreateValueRequest:
+      $ref: ./components/schemas.yaml#/SpecCreateValueRequest
+    SpecCreateValueResponse:
+      $ref: ./components/schemas.yaml#/SpecCreateValueResponse
+    SpecUpdateValueRequest:
+      $ref: ./components/schemas.yaml#/SpecUpdateValueRequest
+    SpecUpdateValueResponse:
+      $ref: ./components/schemas.yaml#/SpecUpdateValueResponse
+    SpecDeleteValueRequest:
+      $ref: ./components/schemas.yaml#/SpecDeleteValueRequest
+    SpecDeleteValueResponse:
+      $ref: ./components/schemas.yaml#/SpecDeleteValueResponse
     UploadFrontendTokenRequest:
       $ref: ./components/schemas.yaml#/UploadFrontendTokenRequest
     UploadAdminTokenRequest:
@@ -10426,9 +11002,9 @@ components:
       $ref: ./components/security.yaml#/bearerAuth
 x-contract-baseline: 82243c0fbce614e03c4ff57dcc829b5f68fb08f2
 x-api-count:
-  total: 155
+  total: 162
   frontend: 76
-  admin: 77
+  admin: 84
   health: 2
   conditional: 1
   static: 1
@@ -10476,7 +11052,7 @@ x-planned-apis:
 x-known-issues:
   - id: B1-02-D1
     summary: DTO gvalid 校验失败返回 HTTP 500 + code 51，与目标规范 400 + 1001 不一致
-    affected: 15 条带 v:"required" 的写接口，见各 operation 的 x-known-issue
+    affected: 17 条带 v:"required" 的写接口，见各 operation 的 x-known-issue
     remediation: 需单独立项修复错误码映射；B1-02 仅在契约层标注
   - id: B1-01-H15.4
     summary: 分页三种形态并存：clamp（静默归一）/ strict（越界 400）/ none（无分页）

@@ -235,6 +235,7 @@ codes:
       - region
       - review
       - sku
+      - spec
   - code: 1001
     constant: CodeInvalidArgument
     http_status: 400
@@ -260,6 +261,7 @@ codes:
       - region
       - review
       - sku
+      - spec
   - code: 2002
     constant: CodeInvalidCredentials
     http_status: 401
@@ -320,6 +322,11 @@ codes:
     constant: CodeOrderNotFound
     http_status: 404
     message: 订单不存在
+    domain: order
+  - code: 9007
+    constant: CodeOrderPriceMismatch
+    http_status: 409
+    message: 商品价格与当前售价不一致
     domain: order
   - code: 9003
     constant: CodeOrderSkuUnavailable
@@ -388,6 +395,7 @@ codes:
       - like
       - recommendation
       - sku
+      - spec
   - code: 15003
     constant: CodeRecommendInvalidInput
     http_status: 400
@@ -514,6 +522,11 @@ codes:
     http_status: 404
     message: 会话不存在
     domain: iam
+  - code: 5017
+    constant: CodeSkuCodeExists
+    http_status: 409
+    message: SKU 编码已存在
+    domain: sku
   - code: 5005
     constant: CodeSkuHasInventory
     http_status: 409
@@ -544,6 +557,44 @@ codes:
       - flashsale
       - inventory
       - order
+  - code: 5016
+    constant: CodeSkuSpecDuplicate
+    http_status: 409
+    message: 规格组合已存在
+    domain: sku
+  - code: 5015
+    constant: CodeSkuSpecMissing
+    http_status: 400
+    message: 商品未配置规格
+    domain: sku
+  - code: 5011
+    constant: CodeSpecNameExists
+    http_status: 409
+    message: 规格组名已存在
+    domain: sku
+    reused_by_domains:
+      - spec
+  - code: 5010
+    constant: CodeSpecNotFound
+    http_status: 404
+    message: 规格不存在
+    domain: sku
+    reused_by_domains:
+      - spec
+  - code: 5012
+    constant: CodeSpecValueExists
+    http_status: 409
+    message: 规格值已存在
+    domain: sku
+    reused_by_domains:
+      - spec
+  - code: 5013
+    constant: CodeSpecValueInUse
+    http_status: 409
+    message: 规格值已被 SKU 使用，不能删除
+    domain: sku
+    reused_by_domains:
+      - spec
   - code: 2005
     constant: CodeSuperAdminProtected
     http_status: 403
