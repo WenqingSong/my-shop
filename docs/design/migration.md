@@ -86,8 +86,9 @@ B1-03-02 的六项交易与资金迁移、B1-04-01 的 profile_region_address）
 | `20261111000001` | `sku_code_pricing` | `skus` 增 `sku_code`（唯一）/`original_price` + `uk_sku_code`，历史行回填 `SKU<id>` 与售价；`order_items` 增 `sku_code`/`original_price`（含 down；不回算历史订单金额） |
 | `20261111000002` | `freight` | `freight_templates` + `freight_template_rules`（运费模板与区域计费规则）；`products` 增可空 `freight_template_id`（无回填；含 down） |
 | `20261111000003` | `order_member_discount` | `orders` 增 `member_discount_amount`（会员折扣金额快照，默认 0、不回填；含 down） |
+| `20261111000004` | `referral_graph_guard` | `referral_graph_guard`（推荐关系图全局变更锁，单行 `id=1`；不承载业务数据；含 down） |
 
-**版本分配（B1-04 八分支集成核实，2026-11-11）**：集成时逐一核对实际 SQL 文件、Registry 与已知数据库的 `schema_migrations`——`20261110000015` 仅由 B1-04-01（`profile_region_address`）使用，B1-04-08 分支内的同名版本 `order_member_discount` 从未进入任何持久化环境，已按 Registry 规则上移为 `20261111000003`，不存在同一版本号对应两套 Schema 的数据库。`my_shop` 已应用到 `20261111000001`，因此 B1-04-03 的运费迁移从原拟 `20261110000016` 上移为 `20261111000002`：否则 golang-migrate 会因版本号小于当前版本而**静默跳过**该迁移。当前最高版本为 `20261111000003`，下一个可用版本为 `20261111000004`；新增迁移必须按 Registry 规则单独领取，不得复用已被实现占用的版本号。
+**版本分配（B1-04 八分支集成核实，2026-11-11）**：集成时逐一核对实际 SQL 文件、Registry 与已知数据库的 `schema_migrations`——`20261110000015` 仅由 B1-04-01（`profile_region_address`）使用，B1-04-08 分支内的同名版本 `order_member_discount` 从未进入任何持久化环境，已按 Registry 规则上移为 `20261111000003`，不存在同一版本号对应两套 Schema 的数据库。`my_shop` 已应用到 `20261111000001`，因此 B1-04-03 的运费迁移从原拟 `20261110000016` 上移为 `20261111000002`：否则 golang-migrate 会因版本号小于当前版本而**静默跳过**该迁移。B1-04-FIX-01（分销并发成环修复）已在 Registry 领取 `20261111000004`（`referral_graph_guard`）。当前最高版本为 `20261111000004`，下一个可用版本为 `20261111000005`；新增迁移必须按 Registry 规则单独领取，不得复用已被实现占用的版本号。
 
 ### 2.2 baseline 模型
 
@@ -98,6 +99,18 @@ baseline 内容 = 迁移前 `boot.go` 中 7 张既有表的等价 DDL（`users`�
 ### 2.3 追踪表与 dirty
 
 `schema_migrations` 结构为 `version bigint`（主键）+ `dirty bool`，由 golang-migrate 首次 `Up()` 时自动创建。dirty 表示「存在执行失败的中间态」。
+
+### 2.4 并发控制表：`referral_graph_guard`
+
+| 项 | 说明 |
+| --- | --- |
+| 引入版本 | `20261111000004_referral_graph_guard`（B1-04-FIX-01） |
+| 结构 | `id TINYINT UNSIGNED PRIMARY KEY`（固定 1）、`created_at DATETIME`；迁移内初始化唯一记录 |
+| 用途 | 一级分销推荐关系图变更的全局串行化：绑定事务 `SELECT ... FOR UPDATE` 该行，跨连接/实例共用一把 InnoDB 行锁 |
+| 生命周期 | 随 migration 创建；锁随事务提交/回滚自动释放，无租约、无过期、无后台清理；down 直接 `DROP TABLE` |
+| 数据属性 | 不承载业务数据、不建外键、无外键引用；不属于用户/交易域 |
+| 缺失语义 | 记录缺失时应用 fail-closed（拒绝绑定并返回内部错误），不回退为无锁写入 |
+| 运维注意 | 不得在运行期手工 `DELETE` / `INSERT` 该表；如被误删，重新执行迁移或补插 `id=1` 即可恢复（无数据损失） |
 
 ## 3. 业务不变量
 

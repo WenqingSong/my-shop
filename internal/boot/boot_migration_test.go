@@ -40,6 +40,9 @@ var migrationRelatedTables = []string{
 	"order_items", "orders",
 	"refresh_tokens", "cart_items", "article_favorites", "article_likes", "articles", "favorites", "product_likes", "banners", "reviews", "role_permissions", "admin_roles", "permissions", "roles",
 	"admins", "inventory_logs", "inventories", "skus", "product_images", "products", "categories", "addresses", "users",
+	// referral_graph_guard：B1-04-FIX-01 的推荐关系图全局锁表（无外键，DROP 顺序无关）。
+	// 必须包含在本清单中，否则「模拟空库」后重新 migrate up 会因表已存在而失败。
+	"referral_graph_guard",
 	"schema_migrations", "migration_probe",
 }
 

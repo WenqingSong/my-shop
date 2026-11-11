@@ -65,3 +65,4 @@
 | 20261111000001 | sku_code_pricing | B1-04-02 | RESERVED | skus 增 sku_code（唯一）/original_price + uk_sku_code，历史行回填 SKU<id> 与售价；order_items 增 sku_code/original_price（含 down；不回算历史订单金额） |
 | 20261111000002 | freight | B1-04-03 | RESERVED | freight_templates + freight_template_rules；products 增可空 freight_template_id（含 down）。B1-04 八分支集成：原拟 `20261110000016` 在已应用 `20261111000001` 的数据库上会被 golang-migrate 跳过（版本号更小），故整体上移至当前最高版本之后；该号未被任何环境应用过，语义不变 |
 | 20261111000003 | order_member_discount | B1-04-08 | RESERVED | orders 增 member_discount_amount（会员折扣金额快照，默认 0、无回填；含 down）。B1-04 八分支集成：原编号 `20261110000015` 与 B1-04-01 的 profile_region_address 冲突（后者已应用到持久化库），故上移为当前最高版本之后 |
+| 20261111000004 | referral_graph_guard | B1-04-FIX-01 | RESERVED | referral_graph_guard 推荐关系图全局变更锁（单行 id=1，绑定事务 SELECT ... FOR UPDATE 串行化跨实例并发绑定；不承载业务数据、无外键；含 down） |

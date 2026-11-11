@@ -334,6 +334,74 @@ func TestDistributionBindReferralConcurrent(t *testing.T) {
 	}
 }
 
+// TestDistributionBindReferralConcurrentMutualCycle 覆盖 HTTP 层双向并发互绑（B1-04-FIX-01）：
+// A 绑定 B 与 B 绑定 A 同时发出，最多一个成功，另一个必须 409/20004；数据库最终只有一条关系且无环。
+func TestDistributionBindReferralConcurrentMutualCycle(t *testing.T) {
+	base := setupDistributionServer(t)
+
+	tokenA, idA := distributionLogin(t, base, "distcycmuta")
+	tokenB, idB := distributionLogin(t, base, "distcycmutb")
+
+	type bindResult struct {
+		status int
+		code   int
+	}
+	results := make([]bindResult, 2)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		res := distributionBind(t, base, tokenA, idB)
+		results[0] = bindResult{status: res.Status, code: res.Code}
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		res := distributionBind(t, base, tokenB, idA)
+		results[1] = bindResult{status: res.Status, code: res.Code}
+	}()
+	close(start)
+	wg.Wait()
+
+	success, cycles := 0, 0
+	for _, res := range results {
+		switch {
+		case res.status == 200 && res.code == 0:
+			success++
+		case res.status == 409 && res.code == 20004:
+			cycles++
+		default:
+			t.Fatalf("双向互绑出现非预期响应: status=%d code=%d", res.status, res.code)
+		}
+	}
+	if success != 1 || cycles != 1 {
+		t.Fatalf("双向互绑期望 1 成功 + 1 成环拒绝，实际 success=%d cycle=%d", success, cycles)
+	}
+
+	if n := distributionReferralCount(t); n != 1 {
+		t.Fatalf("双向互绑后 user_referrals=%d，期望 1", n)
+	}
+	// 数据库最终关系图：不能出现 A→B 与 B→A 同时存在。
+	var rows []struct {
+		UserId         int64 `json:"user_id"`
+		ReferrerUserId int64 `json:"referrer_user_id"`
+	}
+	if err := g.DB().Model("user_referrals").Ctx(context.Background()).Scan(&rows); err != nil {
+		t.Fatalf("读取推荐关系: %v", err)
+	}
+	graph := make(map[int64]int64, len(rows))
+	for _, row := range rows {
+		graph[row.UserId] = row.ReferrerUserId
+	}
+	for child, referrer := range graph {
+		if graph[referrer] == child {
+			t.Fatalf("最终关系图存在双节点环：%d → %d → %d", child, referrer, child)
+		}
+	}
+}
+
 // TestDistributionCommissionAccrual 覆盖计佣主路径：
 // 有推荐人的买家支付成功 → 生成一条一级佣金，金额 = floor(实付 × rate_bp / 10000)，快照齐全。
 func TestDistributionCommissionAccrual(t *testing.T) {

@@ -14,10 +14,10 @@ import (
 // baselineVersion 是内嵌 baseline 迁移的版本号（14 位时间戳）。
 const baselineVersion = uint(20261001000001)
 
-// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + … + order_member_discount）。
-const latestMigrationVersion = uint(20261111000003)
+// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + … + referral_graph_guard）。
+const latestMigrationVersion = uint(20261111000004)
 
-// businessTables 是 migration 应建立的 60 张业务表。
+// businessTables 是 migration 应建立的 61 张业务表（含并发控制用的 referral_graph_guard）。
 // 注意顺序：wallet_transactions 通过外键引用 wallet_accounts（ON DELETE RESTRICT），故排在 wallet_accounts 之前；
 // sku_spec_values 通过外键引用 skus（ON DELETE CASCADE）与 product_spec_values（ON DELETE RESTRICT），
 // product_spec_values 引用 product_specs，product_specs 引用 products，故三者必须排在 skus/products 之前；
@@ -50,6 +50,8 @@ var businessTables = []string{
 	"favorites", "product_likes", "banners", "flash_sale_request_audits", "flash_sale_order_requests", "flash_sale_orders", "flash_sale_activity_skus", "flash_sale_activities",
 	"refund_audits", "refund_requests",
 	"order_items", "orders", "refresh_tokens", "cart_items", "reviews", "addresses", "users", "user_status_audits", "inventory_logs", "inventories", "skus", "products", "product_images", "categories", "admins", "roles", "permissions", "admin_roles", "role_permissions",
+	// referral_graph_guard：B1-04-FIX-01 新增的推荐关系图全局变更锁（单行，无外键，DROP 顺序无关）。
+	"referral_graph_guard",
 }
 
 // allTables 含业务表与追踪表。

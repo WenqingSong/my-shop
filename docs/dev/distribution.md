@@ -30,7 +30,7 @@
 | 前台路由（Auth 分组） | `internal/cmd/routes_frontend.go`（`/distribution/*`） |
 | 后台路由（AdminAuth + RequirePermission） | `internal/cmd/routes_admin.go`（`/admin/distributions/*`） |
 | 权限 seed | `internal/boot/seed.go`（`distribution:referral_list`、`distribution:commission_list`） |
-| 错误码 | `internal/codes/codes.go`（20001-20003，域 20000-20999） |
+| 错误码 | `internal/codes/codes.go`（20001-20004，域 20000-20999） |
 | 计佣比例配置 | `internal/config/contract.go`、`manifest/config/config.yaml`（`distribution.commission_rate_bp`） |
 | 计佣接入点 | `internal/logic/order/order.go` → `Pay` 事务内 |
 | 冲回接入点 | `internal/logic/refund/refund.go` → `Execute`（success 分支）事务内 |
@@ -47,11 +47,21 @@ POST /distribution/referral
   → controller/distribution.ControllerV1.BindReferral   // 取 Principal.UserID
   → service.Distribution().BindReferral(ctx, userID, referrerUserID)
   → logic/distribution.sDistribution.BindReferral
-       1) 自荐校验（userID == referrerUserID → 20001）
-       2) 推荐人可用性：SELECT COUNT(*) FROM users WHERE id=? AND status=1（0 → 20002）
-       3) 读已有关系：存在 → 同人幂等 / 异人 20003
-       4) INSERT user_referrals（1062 → 重读关系再判定）
+       a) 自荐校验（userID == referrerUserID → 20001）
+       b) 推荐人可用性：SELECT COUNT(*) FROM users WHERE id=? AND status=1（0 → 20002）
+       c) 事务开始（g.DB().Transaction）
+          1) lockReferralGraphInTx：SELECT id FROM referral_graph_guard WHERE id=1 FOR UPDATE
+             （第一条语句；记录缺失 → 内部错误，fail-closed）
+          2) findReferralForUpdateInTx：当前读本人关系
+             存在 → 同人幂等返回 / 异人 20003（事务结束，锁释放）
+          3) requireAcyclicForUpdateInTx：从 referrer 沿 referrer_user_id 当前读向上追溯，
+             到达本人（或再次遇到已访问节点/超过深度上限）→ 20004
+          4) INSERT user_referrals（1062 → 回滚后新快照重判幂等/冲突）
+          5) 当前读回填 id/created_at，返回
+       d) 事务提交/回滚 → referral_graph_guard 行锁释放
 ```
+
+关键点：锁必须在事务内、且是**第一条语句**，保证后续所有关系读取都是当前读，不会复用事务早期快照。
 
 ### 3.2 订单支付计佣
 
@@ -129,6 +139,13 @@ POST /admin/refunds/:id/execute (result=success)
   `*InTx` 方法只使用传入的 `tx`，**绝不在内部再开事务**。
 - **锁顺序**：退款链路沿用 `orders → refund_requests → distribution_commissions` 的既有顺序
   （`orders` 行由 `UPDATE ... WHERE status=20` 隐式加锁），本模块不对 `orders` 加显式锁。
+- **绑定锁协议（B1-04-FIX-01）**：`BindReferral` 的自建事务固定顺序为
+  `referral_graph_guard(id=1, FOR UPDATE) → user_referrals(本人, FOR UPDATE) → 推荐链逐跳(FOR UPDATE) → INSERT`
+  - 全局锁是单行排他锁，跨 goroutine/连接/实例串行化，不存在锁释放先于事务提交的窗口；
+  - 锁内只用当前读（`LockUpdate()`），不读一致性快照；
+  - 锁记录缺失 → 返回内部错误并拒绝写入（fail-closed），不降级为无锁绑定；
+  - 其他写入口：`user_referrals` 只有 `BindReferral` 一处 INSERT，无 UPDATE/DELETE 业务路径；
+    新增写入口必须复用同一锁协议。
 - **幂等三件套**：
   1. 订单支付快路径 `if status == 20 { return }`（不进事务）；
   2. 计佣 `uk_order_id` 1062 视为已计提；
@@ -155,6 +172,7 @@ POST /admin/refunds/:id/execute (result=success)
 | --- | --- |
 | `TestDistributionBindReferral` | 正常绑定落库、同人幂等、换人 20003、自荐 20001、推荐人不存在/禁用 20002、未登录 401 |
 | `TestDistributionBindReferralConcurrent` | 8 个并发绑定不同推荐人 → 只有 1 个成功、落库 1 行且与成功响应一致 |
+| `TestDistributionBindReferralConcurrentMutualCycle` | HTTP 层双向互绑并发 → 1 成功 + 1 成环拒绝（409/20004），落库 1 行且无环 |
 | `TestDistributionCommissionAccrual` | base/rate/amount 快照正确（5000×2 → 10000 基数、500 佣金）、status=10；重复支付不重复计提 |
 | `TestDistributionCommissionPaidConcurrent` | 8 个并发支付 → 订单只到 20、佣金只 1 条 |
 | `TestDistributionCommissionNoReferral` | 无上级订单不产生佣金 |
@@ -165,11 +183,34 @@ POST /admin/refunds/:id/execute (result=success)
 | `TestDistributionUserIsolation` | 身份取自 Principal、伪造 `user_id` 不越权、未登录 401 |
 | `TestDistributionAdminAccess` | 无权限 403、按权限码分级放行、统计与记录一致、普通用户 token 403 |
 
+`internal/logic/distribution/distribution_concurrency_test.go`（真实 MySQL，多连接 + 同步屏障）：
+
+| 测试 | 覆盖不变量 |
+| --- | --- |
+| `TestBindConcurrentMutualCycleRejected` | 双向并发互绑 → 1 成功 + 1 成环拒绝，1 行关系、无环 |
+| `TestBindConcurrentThreeNodeCycleRejected` | A→B / B→C / C→A 并发 → 2 成功 + 1 成环拒绝，无环 |
+| `TestBindRejectsCycleOnLongChain` | 既有 A→B→C→D，D→A（及 D→C）被拒，既有关系不变 |
+| `TestBindConcurrentSameUserDifferentReferrers` | A→B 与 A→C 并发 → 1 成功 + 1 冲突(20003)，仅 1 行 |
+| `TestBindConcurrentSameRelationIdempotent` | A→B ×3 并发 → 全部幂等成功，仅 1 行 |
+| `TestBindReferralWaitsForGraphLock` | 手工持有 `referral_graph_guard` 行锁时绑定被阻塞，释放后成功（证明锁真实生效） |
+| `TestBindReferralTxRollbackReleasesLockAndLeavesNoRow` | 锁 + 写入后事务失败 → 无残留、锁已释放、后续绑定立即成功 |
+| `TestBindReferralFailsClosedWhenGuardRowMissing` | 锁记录缺失 → 拒绝写入（fail-closed），无关系落库 |
+| `TestBindConcurrentMutualCycleStress` | 双向互绑 100 轮，每轮核对数据库关系图（100 成功 / 100 成环拒绝 / 无环） |
+| `TestBindConcurrentThreeNodeCycleStress` | 三节点 100 轮（200 成功 / 100 成环拒绝 / 无环） |
+
 运行方式：
 
 ```bash
-DATABASE_DEFAULT_PASS=root go test -count=1 -run 'TestDistribution' ./test/e2e/
-DATABASE_DEFAULT_PASS=root go test -race -count=1 -run 'TestDistribution' ./test/e2e/
+# 集成 / 并发用例（必须指向隔离测试库；这些用例会清理用户与关系表）
+DATABASE_DEFAULT_NAME=my_shop_b104_test DATABASE_DEFAULT_PASS=root \
+  go test -count=1 ./internal/logic/distribution/ -v
+DATABASE_DEFAULT_NAME=my_shop_b104_test DATABASE_DEFAULT_PASS=root \
+  go test -race -count=1 ./internal/logic/distribution/
+
+DATABASE_DEFAULT_NAME=my_shop_b104_test DATABASE_DEFAULT_PASS=root \
+  go test -count=1 -run 'TestDistribution' ./test/e2e/
+DATABASE_DEFAULT_NAME=my_shop_b104_test DATABASE_DEFAULT_PASS=root \
+  go test -race -count=1 -run 'TestDistribution' ./test/e2e/
 ```
 
 前置条件：MySQL/Redis 就绪（`docker compose up -d mysql redis`）。测试直接读库断言唯一约束与金额，
@@ -184,6 +225,8 @@ DATABASE_DEFAULT_PASS=root go test -race -count=1 -run 'TestDistribution' ./test
 | 退款成功但佣金没冲回 | 订单本来就没有佣金（正常 no-op）；或佣金已被更早的退款单冲回（`status=30`，同订单不可再冲） |
 | 绑定返回 20003 | 该用户已有上级；分销关系不可改绑，属于预期行为 |
 | 绑定返回 20002 | 推荐人 id 不存在或被禁用（`users.status=0`） |
+| 绑定偶发等待/超时 | 有长事务持有 `referral_graph_guard` 行锁；用 `SELECT * FROM performance_schema.data_locks WHERE OBJECT_NAME='referral_graph_guard'` 与 `information_schema.innodb_trx` 定位持锁事务，等待其提交/回滚，不要手工删除锁记录 |
+| 绑定返回 500 且日志含「全局锁记录缺失」 | `20261111000004_referral_graph_guard` 未执行或记录被误删；执行 `migrate up`，并确认 `SELECT COUNT(*) FROM referral_graph_guard` = 1。缺失时应用 fail-closed，属预期 |
 | 后台 403 | 管理员缺少 `distribution:referral_list` / `distribution:commission_list`；检查 `role_permissions` |
 | 清理 `orders` 时报 1451 | 先 `DELETE FROM distribution_commissions`，佣金对订单是 FK RESTRICT |
 | 契约检查失败 | 忘了跑 `go run ./tools/openapi-gen -repo .`，或权限码三向不一致 |
@@ -213,13 +256,15 @@ DATABASE_DEFAULT_PASS=root go test -race -count=1 -run 'TestDistribution' ./test
 
 1. **唯一实现**：保留本模块（B1-04-05）的 `api/controller/logic/service` 与路由；
    B1-04-08 的重复分销实现已按集成决策废弃，仅吸收其两项能力：
-   - 推荐关系**成环校验**（`CodeDistributionCycle=20004`）：写后在本事务内从本人向上遍历，回到本人即回滚；
+   - 推荐关系**成环校验**（`CodeDistributionCycle=20004`）：B1-04-FIX-01 起改为「取全局锁 → 写入前从 referrer 向上当前读追溯 → 命中即拒绝」；
    - **人工结算** `POST /admin/distributions/commissions/:id/settle`（`distribution:settle`）：
      `pending(10) → settled(20)` + `settled_at`，幂等；已冲回(30) 返回 20006，不存在返回 20005。
      该操作**只做状态流转，不做真实资金转账**（无钱包流水、无打款）。
-2. **并发绑定**：不使用 `SELECT ... FOR UPDATE`（不存在的行会加间隙锁并互相死锁）；
-   并发仲裁交给 `uk_user_id`，命中 1062 时事务整体回滚，再由调用方在新快照中读取已提交关系，
-   判定「同推荐人幂等」或「已绑定不可改绑（20003）」。
+2. **并发绑定**（B1-04-FIX-01 修正）：原先「不显式加锁、靠 `uk_user_id` 仲裁」只能保证「一人一个上级」，
+   无法阻止双向并发互绑形成的 A→B→A 环（两个事务的一致性读互相看不到对方未提交插入）。
+   现改为 MySQL 级串行化：绑定事务第一条语句对 `referral_graph_guard.id=1` 取排他行锁，
+   锁内当前读完成后成环检查与写入；`uk_user_id` 退化为绕过锁协议时的最终兜底（1062 → 回滚重判）。
+   详细协议与测试见 `docs/design/distribution.md` §2.2/§2.3 与 B1-04-FIX-01 报告。
 3. **佣金比例**：仍由 `distribution.commission_rate_bp` 控制，默认 0（关闭计佣）；
    测试中通过环境变量注入 500 仅用于验证公式，生产默认值不变。
 4. **计佣基数**：`orders.total_amount`（已含会员折扣与运费），比例万分比、向下取整；一单一条佣金（`uk_order_id`）。

@@ -50,6 +50,13 @@ const (
 // 一级分销下每个用户至多一个上级，正常数据深度很小；上限只用于防御脏数据导致遍历不终止。
 const maxReferralChainDepth = 200
 
+// referralGraphGuardID 是推荐关系图全局变更锁的唯一记录主键（referral_graph_guard.id）。
+//
+// 关系图（边方向 child → referrer）的写入必须串行化：绑定事务的第一条语句对
+// referral_graph_guard.id = 1 执行 SELECT ... FOR UPDATE。该行锁跨 goroutine、跨数据库连接、
+// 跨 Go 实例共用同一把 InnoDB 锁，且与关系写入在同一事务内，事务提交/回滚才释放。
+const referralGraphGuardID int64 = 1
+
 // errReferralDuplicate 表示绑定推荐关系命中 uk_user_id（并发下另一请求已先绑定）。
 // 事务内不做「回读 + 判定」，而是整体回滚后在新快照中判定，避免 RR 快照读不到已提交行。
 var errReferralDuplicate = errors.New("distribution: referral already bound")
@@ -108,13 +115,18 @@ type commissionRow struct {
 //   - 不能自荐（20001）；
 //   - 推荐人必须存在且 status=1（20002）；
 //   - 一人一个上级：同人重复提交幂等返回既有关系，换人返回 20003（不可改绑）；
-//   - 不成环（20004）：从推荐人向上遍历，回到本人即成环（吸收 B1-04-08 的环校验）；
-//   - 并发安全：绑定在单事务内完成，不显式使用 SELECT ... FOR UPDATE（不存在的行在
-//     REPEATABLE READ 下会加间隙锁，并发绑定同一用户到不同推荐人时容易死锁）；
-//     并发仲裁交给 uk_user_id，写入后做写后环检测，1062 时以已落库关系为准判定幂等/冲突。
-//     已知残留：两个用户并发互绑时，双方的写后环检测可能各自看不到对方未提交的插入，
-//     理论上可产生 A→B→A 的双节点环（一级分销不遍历链路，暂无资金影响），修复方案见
-//     B1-04 最终验收报告「遗留事项」。
+//   - 不成环（20004）：从推荐人沿 referrer_user_id 向上追溯，能到达本人即成环；
+//   - 并发安全（B1-04-FIX-01）：关系图变更在 MySQL 级串行化——事务第一条语句对
+//     referral_graph_guard.id = 1 执行 SELECT ... FOR UPDATE，成环检查与写入都在该锁内、
+//     都使用当前读（FOR UPDATE），因此跨 goroutine / 跨连接 / 跨实例都不会出现
+//     「两个事务各自通过环检查后双双提交」的窗口。
+//
+// 锁协议（顺序不可调整）：
+//  1. 获取全局关系图锁（第一条语句，且 fail-closed：锁记录缺失即拒绝写入）；
+//  2. 当前读本人关系 → 幂等返回 / 改绑冲突 / 继续；
+//  3. 当前读推荐链完成成环检查；
+//  4. 写入关系并当前读回填响应；
+//  5. 事务提交或回滚同时释放锁。
 func (s *sDistribution) BindReferral(ctx context.Context, userID, referrerUserID int64) (*v1.BindReferralRes, error) {
 	if userID <= 0 || referrerUserID <= 0 {
 		return nil, codes.New(codes.CodeInvalidArgument)
@@ -136,10 +148,14 @@ func (s *sDistribution) BindReferral(ctx context.Context, userID, referrerUserID
 
 	var bound *v1.Referral
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		// 不使用 SELECT ... FOR UPDATE：不存在的行在 REPEATABLE READ 下会加间隙锁，
-		// 并发绑定同一用户到不同推荐人时容易死锁。并发仲裁交给 uk_user_id：
-		// 只有一个事务能插入成功，其余事务命中 1062 后结束本事务，由调用方在新快照中判定幂等/冲突。
-		existing, e := s.findReferralInTx(ctx, tx, userID)
+		// 1. 全局关系图锁必须是本事务的第一条语句：既保证跨实例串行化，也避免事务在此前
+		//    建立一致性读快照后继续使用过期关系图（后续读取一律使用当前读）。
+		if e := s.lockReferralGraphInTx(ctx, tx); e != nil {
+			return e
+		}
+
+		// 2. 锁内当前读本人关系：同一推荐人幂等返回，不同推荐人拒绝改绑。
+		existing, e := s.findReferralForUpdateInTx(ctx, tx, userID)
 		if e != nil {
 			return e
 		}
@@ -152,6 +168,13 @@ func (s *sDistribution) BindReferral(ctx context.Context, userID, referrerUserID
 			return nil
 		}
 
+		// 3. 锁内当前读整条推荐链，写入前完成成环检查（不依赖「先写后回滚」兜底）。
+		if e := s.requireAcyclicForUpdateInTx(ctx, tx, userID, referrerUserID); e != nil {
+			return e
+		}
+
+		// 4. 写入关系。uk_user_id 仍是最终仲裁：若存在绕过本锁协议的写入方，
+		//    1062 → 事务回滚，再由调用方在新快照中判定幂等/冲突。
 		if _, e := tx.Model("user_referrals").Ctx(ctx).Data(g.Map{
 			"user_id":          userID,
 			"referrer_user_id": referrerUserID,
@@ -162,12 +185,7 @@ func (s *sDistribution) BindReferral(ctx context.Context, userID, referrerUserID
 			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("绑定推荐关系: %w", e))
 		}
 
-		// 写后环检测：本事务内已可见新关系，从本人向上遍历，回到本人即成环并整体回滚。
-		if e := s.requireAcyclicInTx(ctx, tx, userID); e != nil {
-			return e
-		}
-
-		row, e := s.findReferralInTx(ctx, tx, userID)
+		row, e := s.findReferralForUpdateInTx(ctx, tx, userID)
 		if e != nil {
 			return e
 		}
@@ -197,23 +215,65 @@ func (s *sDistribution) BindReferral(ctx context.Context, userID, referrerUserID
 	return &v1.BindReferralRes{Referral: *bound}, nil
 }
 
-// requireAcyclicInTx 在事务内校验推荐关系不成环：从 userID 沿 referrer 向上遍历，
-// 回到 userID 即成环。一级分销下每层只有一条关系，深度上限只用于防御脏数据导致死循环。
-func (s *sDistribution) requireAcyclicInTx(ctx context.Context, tx gdb.TX, userID int64) error {
-	seen := map[int64]bool{userID: true}
-	current := userID
+// lockReferralGraphInTx 在事务内获取推荐关系图全局变更锁（referral_graph_guard.id = 1）。
+//
+// 该语句必须是绑定事务的第一条语句：后续读取都用当前读，锁保证同一时刻只有一个绑定事务
+// 在检查并修改关系图，跨 goroutine / 跨连接 / 跨实例共享同一把 InnoDB 行锁。
+//
+// 锁记录缺失（迁移未执行、被误删）时 fail-closed：拒绝绑定而不是在无串行化保障下写入。
+func (s *sDistribution) lockReferralGraphInTx(ctx context.Context, tx gdb.TX) error {
+	value, err := tx.Model("referral_graph_guard").Ctx(ctx).
+		Where("id", referralGraphGuardID).LockUpdate().Value("id")
+	if err != nil {
+		return codes.Wrap(codes.CodeInternalError, fmt.Errorf("获取推荐关系图全局锁: %w", err))
+	}
+	if value.IsNil() || value.Int64() != referralGraphGuardID {
+		return codes.Wrap(codes.CodeInternalError,
+			errors.New("推荐关系图全局锁记录缺失（referral_graph_guard.id=1），拒绝写入推荐关系"))
+	}
+	return nil
+}
+
+// findReferralForUpdateInTx 在事务内以当前读（SELECT ... FOR UPDATE）查询用户的一级推荐关系。
+//
+// 与一致性读不同，当前读始终返回最新已提交版本，不会因为事务早于并发提交而读到旧关系图。
+func (s *sDistribution) findReferralForUpdateInTx(ctx context.Context, tx gdb.TX, userID int64) (*v1.Referral, error) {
+	var rows []*referralRow
+	if err := tx.Model("user_referrals").Ctx(ctx).
+		Where("user_id", userID).Limit(1).LockUpdate().Scan(&rows); err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("锁定查询推荐关系: %w", err))
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return toReferral(rows[0]), nil
+}
+
+// requireAcyclicForUpdateInTx 在持有全局锁的事务内校验新增边「child → referrer」不成环。
+//
+// 算法：从 referrer 沿 referrer_user_id 向上追溯，若到达 child（或再次遇到已访问节点），
+// 说明新增边会闭合成环，返回 20004 并让事务回滚。所有读取均为当前读，链上任何节点都不使用
+// 事务快照；深度超过 maxReferralChainDepth 同样拒绝（fail-closed，不猜测剩余链路安全）。
+func (s *sDistribution) requireAcyclicForUpdateInTx(ctx context.Context, tx gdb.TX, childID, referrerID int64) error {
+	seen := map[int64]bool{childID: true}
+	current := referrerID
 	for depth := 0; depth <= maxReferralChainDepth; depth++ {
-		row, err := s.findReferralInTx(ctx, tx, current)
+		if current == childID {
+			return codes.New(codes.CodeDistributionCycle)
+		}
+		if seen[current] {
+			// 既有关系图本身已存在环（历史脏数据）：拒绝在其上继续扩展，避免放大异常数据。
+			return codes.New(codes.CodeDistributionCycle)
+		}
+		seen[current] = true
+
+		row, err := s.findReferralForUpdateInTx(ctx, tx, current)
 		if err != nil {
 			return err
 		}
 		if row == nil || row.ReferrerUserId <= 0 {
 			return nil
 		}
-		if seen[row.ReferrerUserId] {
-			return codes.New(codes.CodeDistributionCycle)
-		}
-		seen[row.ReferrerUserId] = true
 		current = row.ReferrerUserId
 	}
 	return codes.New(codes.CodeDistributionCycle)
