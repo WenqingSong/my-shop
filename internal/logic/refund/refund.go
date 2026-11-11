@@ -527,6 +527,10 @@ func (s *sRefund) Execute(ctx context.Context, adminID int64, req *v1.ExecuteReq
 			if e := service.Distribution().ReverseOrderCommissionInTx(ctx, tx, req.Id, r.OrderId); e != nil {
 				return e
 			}
+			// 会员成长值扣减：按该订单当初发放额原额扣减（幂等键 growth:refund_deduct:<refund_id>）。
+			if e := service.Member().DeductForRefundInTx(ctx, tx, r.OrderId, req.Id); e != nil {
+				return e
+			}
 			return s.insertAudit(ctx, tx, req.Id, auditActionExecuteSuccess, operatorTypeAdmin, adminID, username, before, refundStatusRefundSucceeded, reason)
 		})
 		if err != nil {

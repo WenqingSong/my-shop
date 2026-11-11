@@ -15,11 +15,12 @@ const contractBaseline = "82243c0fbce614e03c4ff57dcc829b5f68fb08f2"
 // + B1-04-01 用户资料与地区字典新增 5 条（前台 5：/profile 2 条、/regions 3 条）
 // + B1-04-02 商品规格 6 条与 SKU 组合生成 1 条（后台 7 条）
 // + B1-04-04 钱包 3 条（前台 3）
-// + B1-04-07 砍价 13 条（公开 2、前台 6、后台 5）。
+// + B1-04-07 砍价 13 条（公开 2、前台 6、后台 5）
+// + B1-04-08 会员 8 条（前台 3、后台 5）与佣金人工结算 1 条（后台）。
 const (
-	expectedTotal    = 175
-	expectedFrontend = 84
-	expectedAdmin    = 89
+	expectedTotal    = 184
+	expectedFrontend = 87
+	expectedAdmin    = 95
 	expectedHealth   = 2
 )
 
@@ -28,7 +29,7 @@ var codesByValue = map[int]*ErrorCode{}
 // pathFileOrder 固定分域视图文件的输出顺序。
 var pathFileOrder = []string{
 	"iam", "profile", "admin", "categories", "product", "spec", "sku", "inventory", "address", "region",
-	"cart", "order", "refund", "coupon", "distribution", "bargain", "flashsale", "banner",
+	"cart", "order", "refund", "coupon", "distribution", "bargain", "member", "flashsale", "banner",
 	"recommendation", "article", "review", "favorite", "like", "upload", "wallet", "dashboard", "health",
 }
 
@@ -54,7 +55,8 @@ var tagDescriptions = []struct {
 	{"订单", "订单创建、支付、取消、收货与后台管理"},
 	{"退款", "退款申请、撤销、审核、执行与审计"},
 	{"优惠券", "优惠券模板管理与用户领取"},
-	{"分销", "一级推荐关系与订单佣金（只做一级，不含提现与结算）"},
+	{"会员", "会员等级配置、会员权益与成长值"},
+	{"分销", "一级推荐关系与订单佣金（只做一级，不含提现与真实资金结算）"},
 	{"砍价", "砍价活动管理与用户发起/好友助力"},
 	{"秒杀", "秒杀活动管理与下单"},
 	{"轮播图", "轮播图查询与后台管理"},

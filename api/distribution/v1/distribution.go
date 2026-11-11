@@ -192,3 +192,17 @@ type AdminCommissionStatsRes struct {
 	TotalCount  int                    `json:"total_count" dc:"佣金总笔数"`
 	TotalAmount int64                  `json:"total_amount" dc:"佣金总金额（整数分）"`
 }
+
+// AdminSettleCommissionReq 后台人工结算佣金请求（持 distribution:settle）。
+//
+// 语义边界：只把佣金状态从「待结算(10)」推进到「已结算(20)」并写 settled_at，
+// **不代表已完成真实资金转账**；V1 不做提现、打款与对账。
+type AdminSettleCommissionReq struct {
+	g.Meta `path:"/admin/distributions/commissions/:id/settle" method:"post" tags:"分销" summary:"人工结算佣金（仅状态流转）"`
+	Id     int64 `json:"id" in:"path" v:"required" dc:"佣金记录 id"`
+}
+
+// AdminSettleCommissionRes 后台人工结算响应（返回结算后的佣金记录）。
+type AdminSettleCommissionRes struct {
+	Commission
+}

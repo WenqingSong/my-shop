@@ -94,6 +94,16 @@ func (c *AdminControllerV1) AdminCommissionStats(ctx context.Context, req *v1.Ad
 	return service.Distribution().AdminCommissionStats(ctx)
 }
 
+// AdminSettleCommission 人工结算佣金（经 RequirePermission("distribution:settle")）。
+// 只做 pending→settled 的状态流转，不做真实资金转账。
+func (c *AdminControllerV1) AdminSettleCommission(ctx context.Context, req *v1.AdminSettleCommissionReq) (res *v1.AdminSettleCommissionRes, err error) {
+	principal, ok := middleware.AdminPrincipalFromContext(ctx)
+	if !ok {
+		return nil, codes.New(codes.CodeUnauthorized)
+	}
+	return service.Distribution().AdminSettleCommission(ctx, principal.AdminID, req.Id)
+}
+
 // currentUserID 从认证中间件注入的 Principal 取当前用户 id；缺失返回 401。
 func currentUserID(ctx context.Context) (int64, error) {
 	p, ok := middleware.PrincipalFromContext(ctx)

@@ -18,9 +18,10 @@
 | `order_no` | VARCHAR(32) | 非空，唯一 `uk_order_no`（全局唯一订单号） |
 | `user_id` | BIGINT UNSIGNED | 非空，软引用（无 FK），取自 `Principal.UserID` |
 | `status` | TINYINT | 非空默认 10（见状态机） |
-| `total_amount` | INT UNSIGNED | 非空，应付金额整数分快照（= `original_amount` - `discount_amount`） |
+| `total_amount` | INT UNSIGNED | 非空，应付金额整数分快照（= `original_amount` - `discount_amount` - `member_discount_amount`） |
 | `original_amount` | INT UNSIGNED | 非空，优惠前金额快照（= Σ 订单项 `price×quantity`） |
-| `discount_amount` | INT UNSIGNED | 非空，优惠金额快照（默认 0） |
+| `discount_amount` | INT UNSIGNED | 非空，**优惠券**优惠金额快照（默认 0）；会员折扣不写此列 |
+| `member_discount_amount` | INT UNSIGNED | 非空默认 0，**会员等级折扣**金额快照（B1-04-08 新增，`20261110000015`；无折扣为 0） |
 | `shipping_fee` | INT UNSIGNED | 非空默认 0，运费快照（整数分）；历史订单保持 0，迁移不重算 `total_amount` |
 | `user_coupon_id` | BIGINT UNSIGNED | 可空，下单时使用的用户券 id（软引用，快照，见 `coupon.md`） |
 | `pay_type` | VARCHAR(16) | 非空默认 ''，支付方式（Mock；空串=未支付/未选择，见 §2.5） |
@@ -63,7 +64,9 @@
 
 ### 2.3 金额快照语义
 
-订单金额分三列快照：`original_amount`（优惠前金额）= Σ `order_items.price×quantity`（下单时重读 `skus.price`，不信任客户端提交价、也不信任购物车 `price_snapshot`）；`discount_amount`（优惠金额，由服务端按已选券计算，无券为 0）；`total_amount`（应付金额）= `original_amount - discount_amount + shipping_fee`。订单快照为「锁定金额」，下单后改价/改模板不影响订单；`products.price` 与订单无关（订单为 SKU 粒度）。无券时 `original_amount = total_amount`、`discount_amount = 0`，与历史订单语义一致（历史订单迁移回填 `original_amount = total_amount`）。
+订单金额分四列快照：`original_amount`（优惠前金额）= Σ `order_items.price×quantity`（下单时重读 `skus.price`，不信任客户端提交价、也不信任购物车 `price_snapshot`）；`discount_amount`（**券**优惠，由服务端按已选券计算，无券为 0）；`member_discount_amount`（**会员折扣**，按当前等级折扣率计算并按券后剩余金额夹紧，B1-04-08）；`total_amount`（应付金额）= `original_amount - discount_amount - member_discount_amount + shipping_fee`。订单快照为「锁定金额」，下单后改价/改模板不影响订单；`products.price` 与订单无关（订单为 SKU 粒度）。无券且无会员折扣时 `original_amount = total_amount`、`discount_amount = 0`、`member_discount_amount = 0`，
+与历史订单语义一致（历史订单迁移回填 `original_amount = total_amount`，`member_discount_amount` 默认 0）。
+另见 `pricing.md` 中的叠加顺序与夹紧规则：两项优惠合计不超过 `original_amount`。
 
 `shipping_fee` 为运费快照（整数分），由 migration `20261110000004_order_shipping_payment` 新增，默认 0。B1-04-03 已实现运费计算模块（`service.IFreight.Quote`，见 `freight.md`）与统一计价入口（`pricing.Quote`，见 `pricing.md`），但**订单链路尚未接入**：下单仍写 `shipping_fee = 0`，`total_amount = original_amount - discount_amount` 仍等价成立。
 
@@ -102,10 +105,10 @@
 
 | from | to | 触发者 | 备注 |
 | --- | --- | --- | --- |
-| 待支付(10) | 已支付(20) | 用户 mock 支付（本人） | 幂等 |
+| 待支付(10) | 已支付(20) | 用户 mock 支付（本人） | 幂等；同事务内发放会员成长值、计提一级分销佣金 |
 | 待支付(10) | 已取消(60) | 用户取消 / 超时自动取消 | 恢复库存 |
 | 已支付(20) | 已发货(30) | 管理员发货（`order:ship`） | |
-| 已支付(20) | 已退款(70) | 退款成功（refund 模块执行） | 恢复库存，仅「已支付、未发货」可退（见 `refund.md`） |
+| 已支付(20) | 已退款(70) | 退款成功（refund 模块执行） | 恢复库存 + 冲回佣金 + 扣减成长值，仅「已支付、未发货」可退（见 `refund.md`） |
 | 已发货(30) | 已收货(40) | 用户确认收货（本人） | |
 | 已收货(40) | 已完成(50) | 系统（确认收货同请求内原子推进） | 终态 |
 
@@ -118,7 +121,12 @@
 - INV-001（归属与隔离）：`orders.user_id` 取自 `Principal.UserID`；用户只能查看/取消/支付/收货自己的订单；跨用户操作返回 9001（404）且无写入。
 - INV-002（幂等去重）：同一 `(user_id, idempotency_key)` 至多产生一个成功订单（`uk_user_idempotency` 兜底）；同 key 同 `request_hash` 返回既有订单、不重复扣库存；同 key 不同 `request_hash` 返回 9006。
 - INV-003（事务原子性）：创建订单 = 单事务「写 orders + 写 order_items + 扣库存 +（若用券）预占券 +（购物车模式）删已购条目」，任一步失败整体回滚，无半成品、库存、券与购物车均不变。
-- INV-004（服务端定价与快照）：`original_amount` = Σ 下单时 `skus.price×quantity`；`total_amount = original_amount - discount_amount + shipping_fee`（`discount` 由服务端计算、≤ `original`；`shipping_fee` 为运费快照，当前阶段恒 0，故现行实现等价于 `original - discount`）；快照自足，改价/改模板/改地址不影响订单。
+- INV-003b（支付事务边界）：支付成功 = 单事务「订单 `10→20` + 券核销 + 会员成长值发放 + 一级佣金计提」，任一步失败整体回滚；
+  两步联动均幂等（成长值 `growth:order_reward:<id>`、佣金 `uk_order_id`），重复支付不重复发放/计提。
+- INV-004（服务端定价与快照）：`original_amount` = Σ 下单时 `skus.price×quantity`；
+  `total_amount = original_amount - discount_amount - member_discount_amount + shipping_fee`
+  （`discount` 与 `member_discount` 均由服务端计算且两者之和 ≤ `original`，故 `total ≥ 0`；`shipping_fee` 当前恒 0）；
+  快照自足，改价/改模板/改等级/改地址不影响订单。
 - INV-005（状态机）：仅合法迁移可推进；非法迁移 9002 且状态不变；`refunded` 仅从 `paid` 可达。
 - INV-006（防超卖）：并发同一 SKU 下单成功扣减总量 ≤ 可售库存且库存 ≥ 0（条件扣减 + `RowsAffected`）。
 - INV-007（取消/退款只补偿一次）：同一订单取消/退款仅恢复一次库存（条件状态更新 + `RowsAffected` 原子闸门）。
@@ -179,20 +187,24 @@
 - 一级分销：`POST /orders/:id/pay` 的事务内、订单置 `paid(20)` 后调用 `IDistribution.AccrueOrderCommissionInTx`，
   以 `orders.total_amount` 为基数、配置 `distribution.commission_rate_bp` 为比例写入佣金；计佣失败整体回滚
   （订单保持 10，可重试）。订单状态机与错误码不因分销改变，详见 `distribution.md`。
-- 会员成长值：同一支付事务内调用 `IMember.AccrueForOrderInTx`，按实付金额发放成长值并推进等级；
-  幂等键 `growth:order_reward:<order_id>`，详见 `member.md`。
+- 会员：下单经 `IMember.DiscountRateBp` 读取当前等级折扣率，会员折扣金额作为 `pricing.Quote` 的
+  `MemberDiscount` 槽位参与统一计价并写 `member_discount_amount` 快照；支付成功经
+  `IMember.AccrueForOrderInTx` 发放成长值（同事务、幂等键 `growth:order_reward:<order_id>`）；
+  退款成功经 `IMember.DeductForRefundInTx` 扣减成长值，见 `member.md`。
 - 钱包/积分：`wallet_transactions`/`user_points_logs` 通过 `biz_type` + `biz_id` 软关联订单（无 FK）。
-  余额支付渠道在 `10→20` 同一事务内调用 `IWallet.DebitForOrderInTx`（幂等键 `order_pay:<order_id>`）；
-  积分抵扣由 `pricing.Quote` 的 `points_discount` 槽位承载，当前无积分账本实现，恒为 0。
-- 建表经 golang-migrate 迁移（`20261001000007_orders.up.sql`）；金额三列（`original_amount`/`discount_amount`/`user_coupon_id`）由 `20261001000022_order_coupon_amounts.up.sql` 增列并回填；运费/支付/履约字段与 `order_items.spec_text` 由 `20261110000004_order_shipping_payment.up.sql` 增列（无回填）；状态流水由 `20261110000005_order_status_logs.up.sql` 建表，见 `migration.md`。
+  余额支付渠道在 `10→20` 同一事务内调用 `IWallet.DebitForOrderInTx`（幂等键 `order_pay:<order_id>`，
+  `pay_type='balance'`）；积分抵扣由 `pricing.Quote` 的 `points_discount` 槽位承载，
+  当前无积分账本实现（无对应任务分支），恒为 0。
+- 建表经 golang-migrate 迁移（`20261001000007_orders.up.sql`）；金额三列（`original_amount`/`discount_amount`/`user_coupon_id`）由 `20261001000022_order_coupon_amounts.up.sql` 增列并回填；会员折扣金额列 `member_discount_amount` 由 `20261111000003_order_member_discount` 增列（默认 0、无回填）；运费/支付/履约字段与 `order_items.spec_text` 由 `20261110000004_order_shipping_payment.up.sql` 增列（无回填）；状态流水由 `20261110000005_order_status_logs.up.sql` 建表，见 `migration.md`。
 - 配置：`order.pay_timeout`（支付超时秒，默认 900）、`order.cancel_scan_interval`（扫描周期秒，默认 60）。
 
 ## 9. Deferred / 已知留白
 
 - 真实支付/退款到账/对账/资金回调（支付仅 Mock）。
 - 履约字段（`delivery_type`/`delivery_name`/`delivery_sn`）只有结构与默认值：发货接口仍只推进状态，承运商/运单号写入、物流轨迹查询与发货单回传未实现。
-- 积分抵扣/返还未实现：`user_points_accounts`/`user_points_logs` 只有 Schema，无账本实现，`pricing.Quote` 的
-  `points_discount` 槽位当前恒为 0（见 `pricing.md`）。
+- 积分抵扣/返还未实现：`user_points_accounts`/`user_points_logs` 只有 Schema，无账本实现（B1-04 无对应分支），
+  `pricing.Quote` 的 `points_discount` 槽位当前恒为 0（见 `pricing.md`）。
+- 会员价、等级专享商品未建模：当前只有「等级折扣率 → 订单金额折扣」。
 - 历史订单金额不重算：`member_discount_amount`/`shipping_fee` 对迁移前订单保持 0，`total_amount` 不被回填改写。
 - `shipped/received/completed` 后的退款/退货/售后（留 After-sales/Refund 模块）。
 - 订单导出、收货人姓名/手机号模糊搜索等高级筛选（后台列表已支持 `order_no`/`user_id`/`status`/`start_time`/`end_time` 组合筛选与 7 态状态统计）。

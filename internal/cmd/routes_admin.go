@@ -14,6 +14,7 @@ import (
 	freightController "cnb.cool/go-cloud-devops/my-shop/internal/controller/freight"
 	iamController "cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/inventory"
+	memberAdminCtrl "cnb.cool/go-cloud-devops/my-shop/internal/controller/member"
 	orderController "cnb.cool/go-cloud-devops/my-shop/internal/controller/order"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/product"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/recommendation"
@@ -55,6 +56,7 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 	distributionAdminCtrl := distributionController.NewAdminV1()
 	freightAdminCtrl := freightController.NewAdminV1()
 	bargainAdminCtrl := bargain.NewAdminV1()
+	memberAdminCtrlV1 := memberAdminCtrl.NewAdminV1()
 
 	// 后台公开接口：管理员登录（无需 token）。
 	root.POST("/admin/login", adminCtrl.Login)
@@ -204,15 +206,23 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 		require("coupon:list").GET("/admin/coupons", couponAdminCtrl.AdminList)
 		require("coupon:stop").POST("/admin/coupons/:id/stop", couponAdminCtrl.AdminStop)
 
-		// 一级分销后台只读查询（AdminAuth + RequirePermission）：
+		// 一级分销后台只读查询与人工结算（AdminAuth + RequirePermission）：
 		//   - 关系与分销用户汇总持 distribution:referral_list；
-		//   - 佣金记录与佣金统计持 distribution:commission_list。
+		//   - 佣金记录与佣金统计持 distribution:commission_list；
+		//   - 人工结算（10→20，仅状态流转，不含真实资金转账）持 distribution:settle。
 		//   - stats 静态段登记在 /commissions 子路径下，不与任何 :id 路由冲突。
-		// 本任务不提供人工改佣金状态、改用户推荐关系等写接口（无业务依据）。
 		require("distribution:referral_list").GET("/admin/distributions/referrals", distributionAdminCtrl.AdminListReferrals)
 		require("distribution:referral_list").GET("/admin/distributions/distributors", distributionAdminCtrl.AdminListDistributors)
 		require("distribution:commission_list").GET("/admin/distributions/commissions", distributionAdminCtrl.AdminListCommissions)
 		require("distribution:commission_list").GET("/admin/distributions/commissions/stats", distributionAdminCtrl.AdminCommissionStats)
+		require("distribution:settle").POST("/admin/distributions/commissions/:id/settle", distributionAdminCtrl.AdminSettleCommission)
+
+		// 会员等级后台维护（AdminAuth + RequirePermission）。
+		require("member:list").GET("/admin/member-levels", memberAdminCtrlV1.AdminListLevels)
+		require("member:create").POST("/admin/member-levels", memberAdminCtrlV1.AdminCreateLevel)
+		require("member:update").PUT("/admin/member-levels/:id", memberAdminCtrlV1.AdminUpdateLevel)
+		require("member:delete").DELETE("/admin/member-levels/:id", memberAdminCtrlV1.AdminDeleteLevel)
+		require("member:view").GET("/admin/members/:user_id", memberAdminCtrlV1.AdminMember)
 
 		// 运费模板后台管理（AdminAuth + RequirePermission）。
 		//   - 模板与区域规则的写操作持 freight:update；查询持 freight:list/freight:view。

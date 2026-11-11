@@ -15,6 +15,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/flashsale"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/like"
+	memberCtrl "cnb.cool/go-cloud-devops/my-shop/internal/controller/member"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/order"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/product"
 	// B1-04-01 BEGIN：用户资料与地区字典
@@ -61,6 +62,7 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	distributionCtrlV1 := distributionCtrl.NewV1()
 	walletCtrl := wallet.NewV1()
 	bargainCtrl := bargain.NewV1()
+	memberCtrlV1 := memberCtrl.NewV1()
 
 	// 前台公开接口：注册、登录、刷新、分类查询、商品查询、轮播图列表（无需 token）。
 	root.POST("/register", iamCtrl.Register)
@@ -168,6 +170,11 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 		// 优惠券（仅登录用户，作用于本人数据）。
 		user.POST("/coupons/:template_id/claim", couponCtrl.Claim)
 		user.GET("/my/coupons", couponCtrl.ListMine)
+
+		// 会员等级与权益（仅登录用户；等级配置为只读，会员信息作用于本人）。
+		user.GET("/members/levels", memberCtrlV1.Levels)
+		user.GET("/my/membership", memberCtrlV1.My)
+		user.GET("/my/membership/growth-logs", memberCtrlV1.GrowthLogs)
 
 		// 一级分销（仅登录用户，作用于本人数据；被推荐人恒取自已认证身份）。
 		user.POST("/distribution/referral", distributionCtrlV1.BindReferral)

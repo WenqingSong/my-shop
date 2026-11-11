@@ -29,6 +29,10 @@ type IDistribution interface {
 	AdminListCommissions(ctx context.Context, req *v1.AdminListCommissionsReq) (*v1.AdminListCommissionsRes, error)
 	// AdminCommissionStats 后台按状态统计佣金。
 	AdminCommissionStats(ctx context.Context) (*v1.AdminCommissionStatsRes, error)
+	// AdminSettleCommission 人工结算佣金：pending(10) → settled(20) 并写 settled_at。
+	// 幂等：已结算直接返回；已冲回(30) 返回 20006；不存在返回 20005。
+	// 只做状态流转，不产生任何资金流水或真实转账。
+	AdminSettleCommission(ctx context.Context, adminID, commissionID int64) (*v1.AdminSettleCommissionRes, error)
 
 	// AccrueOrderCommissionInTx 在订单支付成功事务内为订单计提一级佣金。
 	// 幂等：同一订单至多一条佣金（uk_order_id），重复调用命中唯一键视为已计提。

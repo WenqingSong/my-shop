@@ -50,14 +50,26 @@ discount_amount = min(coupon_templates.discount_amount, original_amount)
 - 券的资格与金额由服务端在预占事务内判定；`orders.discount_amount` 与 `orders.user_coupon_id` 为下单快照。
 - 退款不返券（券保持已使用），见 `refund.md`。
 
-## 5. 会员优惠（Deferred）
+## 5. 会员优惠（B1-04-08 已实现）
 
-**等级与折扣配置已建模**（`member_levels.discount_rate_bp`，见 `docs/design/member.md`），但**计价尚未实现**。
-目标语义（B1-04 及以后）：
+**等级与折扣配置**见 `docs/design/member.md`（`member_levels.discount_rate_bp`，万分比）。
 
-- 会员折扣按「商品金额」计算，不折扣运费；
-- 折扣结果写入订单独立快照列（不得直接改写 `discount_amount` 的券语义）；
-- 折扣与券的叠加顺序、是否互斥由 Owner 决策后写入本文，当前不做假设。
+已实现语义：
+
+```text
+raw_member_discount = floor(original_amount × (10000 - discount_rate_bp) / 10000)
+member_discount     = min(raw_member_discount, original_amount - coupon_discount)
+```
+
+- 会员折扣按「商品金额」`original_amount` 计算，不折扣运费；不折扣订单项级别，不分摊到订单项。
+- 结果**向下取整到分**，全部为整数分运算，无浮点。
+- 折扣结果写入订单独立快照列 `orders.member_discount_amount`（migration `20261110000015`），
+  不改写 `orders.discount_amount` 的券语义。
+- **叠加顺序（B1-04-08 冻结）**：先算券（券资格与金额基于 `original_amount`，保持既有已交付语义不变），
+  再算会员折扣并按「券后剩余金额」夹紧。夹紧保证 `discount_amount + member_discount_amount ≤ original_amount`
+  且 `total_amount ≥ 0`——**会员折扣不突破订单金额边界**；券已抵满时会员折扣为 0。
+- 会员折扣在**下单时计算一次**并快照；等级变更、配置变更、事后查询都不重算（INV-P03）。
+- 无适用等级（平台未配置启用等级）或等级为原价（`discount_rate_bp=10000`）时折扣为 0。
 
 ## 6. 积分抵扣（Deferred）
 
@@ -80,7 +92,7 @@ PayableAmount = OriginalAmount - CouponDiscount - MemberDiscount - PointsDiscoun
 ```
 
 - 运费与折扣互不折抵：优惠只作用于商品金额，运费始终按模板规则加在应付上。
-- 订单链路尚未调用运费计算（`shipping_fee` 仍写 0），接入时机见本文 §8 与 `order.md` §9。
+- 会员折扣由会员模块按等级折扣率产出金额，作为 `pricing.Quote` 的 `MemberDiscount` 槽位参与统一计算（见 `member.md`）。
 
 ## 8. 最终应付金额与统一计价入口
 
@@ -129,18 +141,22 @@ PayableAmount = OriginalAmount
 | `pricing.Quote` 公式、守恒与溢出保护 | **已实现** |
 | 运费计算（`IFreight.Quote`） | **已实现** |
 | 优惠券折扣（`ICoupon.GetDiscount`） | **已实现**（既有） |
-| 订单使用 `pricing.Quote` 落库 | **未接入**，待 B1-04-02 进入共同基线 |
-| `/orders/quote` 算价接口 | **未实现**，同上 |
-| 会员折扣 / 积分抵扣产生实际值 | **Deferred**（B1-04-08 / B1-04-05） |
+| 订单使用 `pricing.Quote` 落库 | **已接入**（`POST /orders`，事务内复核） |
+| `/orders/quote` 算价接口 | **已实现**（`POST /orders/quote`，预览金额非最终可信金额） |
+| 会员折扣产生实际值 | **已实现**（`IMember.DiscountRateBp` → `MemberDiscount` 槽位） |
+| 积分抵扣产生实际值 | **未实现**（B1-04 无积分账本分支，槽位恒 0） |
 
-订单侧当前仍为：
+订单落库公式：
 
 ```text
-total_amount = original_amount - discount_amount
-shipping_fee = 0
+original_amount        = Σ(下单时重读的 skus.price × quantity)
+discount_amount        = coupon_discount
+member_discount_amount = floor(original × (10000 - rate_bp) / 10000)，且 ≤ original - coupon
+shipping_fee           = IFreight.Quote(收货地址 region_id, 商品/SKU/数量/金额)
+total_amount           = original - discount - member_discount + shipping
 ```
 
-**不得**在订单链路尚未接入时，把「订单已按六槽位计价」写成既定事实。接入时必须同步更新本文、`order.md` INV 与金额守恒测试。
+约束：各项优惠累计 ≤ 商品金额；运费不参与折扣；结果 ≥ 0 且为整数分；历史订单永不重算。
 
 ## 9. 支付与退款金额
 
@@ -155,6 +171,7 @@ shipping_fee = 0
 | 迁移前订单 | `original_amount` 已在 `20261001000022` 回填为 `total_amount`；`discount_amount=0`；`total_amount` 不重算 |
 | 新增 `shipping_fee` | 默认 0，不回填、不参与历史 `total_amount` 重算 |
 | 新增券快照 | 历史 `user_coupons` 四列为 NULL，读取回退模板；不回填 |
+| 新增 `member_discount_amount`（`20261110000015`） | 默认 0、不回填；历史订单 `total_amount = original_amount - discount_amount` 仍成立，不重算 |
 | 新增支付/履约字段 | 默认空串，历史订单保持空；不推断历史渠道或运单号 |
 | 新增 `spec_text` | 默认空串，历史订单不回填；历史 `sku_name` 已含规格文本 |
 
@@ -163,14 +180,13 @@ shipping_fee = 0
 - INV-P01（单位唯一）：所有金额一律整数分；任何新列/接口不得引入元或小数金额。
 - INV-P02（服务端定价）：订单商品金额只来自服务端重读的 `skus.price`；客户端金额不参与计算。
 - INV-P03（快照自足）：订单金额/优惠/运费一旦写入即为快照，改价、改模板、改地址不回溯修改。
-- INV-P04（金额守恒）：计价入口必须满足 `PayableAmount = OriginalAmount - CouponDiscount - MemberDiscount - PointsDiscount + ShippingFee`；订单落库满足 `total_amount = original_amount - discount_amount + shipping_fee`。历史订单永不重算。
+- INV-P04（金额守恒）：计价入口必须满足 `PayableAmount = OriginalAmount - CouponDiscount - MemberDiscount - PointsDiscount + ShippingFee`；订单落库满足 `total_amount = original_amount - discount_amount - member_discount_amount + shipping_fee`，且 `discount_amount + member_discount_amount ≤ original_amount`、`total_amount ≥ 0`。历史订单永不重算。
 - INV-P05（历史不伪造）：迁移只加列/加表，不回填无法从现有数据无歧义推导的金额与优惠。
 - INV-P06（入口唯一）：任何模块不得自行实现第二套金额公式；新增优惠类型必须扩展现有槽位，不得复制计价逻辑。
 - INV-P07（无浮点、无溢出）：金额计算禁止 float64/decimal；加、乘与累加前必须做上界检查，溢出返回明确错误码而非回绕。
 
 ## 12. Deferred / 已知留白
 
-- 订单链路接入统一计价（`/orders/quote`、事务内复核、`shipping_fee` 落库），待 B1-04-02 进入共同基线。
-- 会员等级折扣（B1-04-08）、积分抵扣比例与上限（B1-04-05）、优惠叠加顺序。
-- 比例折扣/积分换算的舍入规则（当前无比例计算）。
+- 积分抵扣比例、上限与账本实现（B1-04 无对应分支，`PointsDiscount` 恒 0）。
+- 会员折扣与运费/积分抵扣的叠加顺序中「运费是否计入会员折扣基数」的业务口径（当前运费不参与折扣）。
 - 优惠分摊到订单项、部分退款金额拆分、发票与税费。

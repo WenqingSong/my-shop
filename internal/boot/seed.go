@@ -80,6 +80,8 @@ var seedPermissionList = []permissionSeed{
 	{Code: "coupon:stop", Name: "停止优惠券领取"},
 	{Code: "distribution:referral_list", Name: "查看分销关系与分销用户"},
 	{Code: "distribution:commission_list", Name: "查看佣金记录与佣金统计"},
+	{Code: "distribution:settle", Name: "人工结算佣金（仅状态流转，不含资金转账）"},
+
 	{Code: "freight:create", Name: "创建运费模板"},
 	{Code: "freight:list", Name: "查看运费模板列表"},
 	{Code: "freight:view", Name: "查看运费模板详情与区域规则"},
@@ -89,6 +91,12 @@ var seedPermissionList = []permissionSeed{
 	{Code: "bargain:update", Name: "编辑砍价活动"},
 	{Code: "bargain:list", Name: "查看砍价活动列表"},
 	{Code: "bargain:view", Name: "查看砍价活动详情"},
+
+	{Code: "member:list", Name: "查看会员等级配置"},
+	{Code: "member:view", Name: "查看用户会员信息"},
+	{Code: "member:create", Name: "创建会员等级"},
+	{Code: "member:update", Name: "更新会员等级"},
+	{Code: "member:delete", Name: "删除会员等级"},
 }
 
 // seedPermissions 幂等写入标准权限：已存在（code 唯一）则跳过。

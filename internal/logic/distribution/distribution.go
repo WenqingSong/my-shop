@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/go-sql-driver/mysql"
@@ -45,6 +46,10 @@ const (
 	commissionScale = 10000
 	maxRateBp       = 10000
 )
+
+// maxReferralChainDepth 是推荐关系向上遍历的深度上限。
+// 一级分销下每个用户至多一个上级，正常数据深度很小；上限只用于防御脏数据导致遍历不终止。
+const maxReferralChainDepth = 200
 
 // reversalReasonRefund 是退款触发的冲回原因（distribution_commissions.reversal_reason）。
 const reversalReasonRefund = "refund"
@@ -100,7 +105,10 @@ type commissionRow struct {
 //   - 不能自荐（20001）；
 //   - 推荐人必须存在且 status=1（20002）；
 //   - 一人一个上级：同人重复提交幂等返回既有关系，换人返回 20003（不可改绑）；
-//   - 并发安全：uk_user_id 唯一约束兜底，1062 后以已落库关系为准判定幂等/冲突。
+//   - 不成环（20004）：从推荐人向上遍历，回到本人即成环（吸收 B1-04-08 的环校验）；
+//   - 并发安全：绑定在单事务内完成，先按 user_id 升序锁定双方推荐关系行（不存在的行由
+//     唯一索引间隙锁兜底），写入后做写后环检测；uk_user_id 仍是最终仲裁，
+//     1062 时以已落库关系为准判定幂等/冲突。
 func (s *sDistribution) BindReferral(ctx context.Context, userID, referrerUserID int64) (*v1.BindReferralRes, error) {
 	if userID <= 0 || referrerUserID <= 0 {
 		return nil, codes.New(codes.CodeInvalidArgument)
@@ -120,41 +128,97 @@ func (s *sDistribution) BindReferral(ctx context.Context, userID, referrerUserID
 		return nil, codes.New(codes.CodeDistributionReferrerUnavailable)
 	}
 
-	existing, err := s.findReferral(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	if existing != nil {
-		return s.existingReferralResult(existing, referrerUserID)
-	}
-
-	_, err = g.DB().Model("user_referrals").Ctx(ctx).Data(g.Map{
-		"user_id":          userID,
-		"referrer_user_id": referrerUserID,
-	}).Insert()
-	if err != nil {
-		if duplicateKeyName(err) != "" {
-			// 并发下另一请求已先绑定：唯一约束是最终仲裁，按其结果判定幂等或冲突。
-			bound, e := s.findReferral(ctx, userID)
-			if e != nil {
-				return nil, e
-			}
-			if bound == nil {
-				return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("推荐关系唯一冲突后未找到记录: %w", err))
-			}
-			return s.existingReferralResult(bound, referrerUserID)
+	var bound *v1.Referral
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		lockIDs := []int64{userID, referrerUserID}
+		sort.Slice(lockIDs, func(i, j int) bool { return lockIDs[i] < lockIDs[j] })
+		var locked []*referralRow
+		if e := tx.Model("user_referrals").Ctx(ctx).
+			WhereIn("user_id", lockIDs).
+			Order("user_id ASC").
+			LockUpdate().
+			Scan(&locked); e != nil {
+			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("锁定推荐关系: %w", e))
 		}
-		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("绑定推荐关系: %w", err))
-	}
+		for _, row := range locked {
+			if row.UserId != userID {
+				continue
+			}
+			res, e := s.existingReferralResult(toReferral(row), referrerUserID)
+			if e != nil {
+				return e
+			}
+			bound = &res.Referral
+			return nil
+		}
 
-	row, err := s.findReferral(ctx, userID)
+		if _, e := tx.Model("user_referrals").Ctx(ctx).Data(g.Map{
+			"user_id":          userID,
+			"referrer_user_id": referrerUserID,
+		}).Insert(); e != nil {
+			if duplicateKeyName(e) == "" {
+				return codes.Wrap(codes.CodeInternalError, fmt.Errorf("绑定推荐关系: %w", e))
+			}
+			// 并发下另一请求已先绑定：唯一约束是最终仲裁，按其结果判定幂等或冲突。
+			concurrent, ce := s.findReferralInTx(ctx, tx, userID)
+			if ce != nil {
+				return ce
+			}
+			if concurrent == nil {
+				return codes.Wrap(codes.CodeInternalError, fmt.Errorf("推荐关系唯一冲突后未找到记录: %w", e))
+			}
+			res, ce := s.existingReferralResult(concurrent, referrerUserID)
+			if ce != nil {
+				return ce
+			}
+			bound = &res.Referral
+			return nil
+		}
+
+		// 写后环检测：本事务内已可见新关系，从本人向上遍历，回到本人即成环并整体回滚。
+		if e := s.requireAcyclicInTx(ctx, tx, userID); e != nil {
+			return e
+		}
+
+		row, e := s.findReferralInTx(ctx, tx, userID)
+		if e != nil {
+			return e
+		}
+		if row == nil {
+			return codes.Wrap(codes.CodeInternalError, errors.New("绑定推荐关系后未找到记录"))
+		}
+		bound = row
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	if row == nil {
-		return nil, codes.Wrap(codes.CodeInternalError, errors.New("绑定推荐关系后未找到记录"))
+	if bound == nil {
+		return nil, codes.Wrap(codes.CodeInternalError, errors.New("绑定推荐关系后未找到结果"))
 	}
-	return &v1.BindReferralRes{Referral: *row}, nil
+	return &v1.BindReferralRes{Referral: *bound}, nil
+}
+
+// requireAcyclicInTx 在事务内校验推荐关系不成环：从 userID 沿 referrer 向上遍历，
+// 回到 userID 即成环。一级分销下每层只有一条关系，深度上限只用于防御脏数据导致死循环。
+func (s *sDistribution) requireAcyclicInTx(ctx context.Context, tx gdb.TX, userID int64) error {
+	seen := map[int64]bool{userID: true}
+	current := userID
+	for depth := 0; depth <= maxReferralChainDepth; depth++ {
+		row, err := s.findReferralInTx(ctx, tx, current)
+		if err != nil {
+			return err
+		}
+		if row == nil || row.ReferrerUserId <= 0 {
+			return nil
+		}
+		if seen[row.ReferrerUserId] {
+			return codes.New(codes.CodeDistributionCycle)
+		}
+		seen[row.ReferrerUserId] = true
+		current = row.ReferrerUserId
+	}
+	return codes.New(codes.CodeDistributionCycle)
 }
 
 // existingReferralResult 处理「已存在推荐关系」：同一推荐人幂等返回，不同推荐人拒绝改绑。
@@ -389,6 +453,69 @@ func (s *sDistribution) AdminListCommissions(ctx context.Context, req *v1.AdminL
 		items = append(items, toCommission(r))
 	}
 	return &v1.AdminListCommissionsRes{Items: items, Total: total, Page: page, Size: size}, nil
+}
+
+// AdminSettleCommission 人工结算佣金：pending(10) → settled(20) 并写 settled_at。
+//
+// 边界（见 docs/design/distribution.md §3.4）：
+//   - 只做状态流转，**不代表真实资金转账**，V1 不产生任何钱包流水或打款记录；
+//   - 幂等：已结算直接返回当前记录，不重复写 settled_at；
+//   - 已冲回(30) 是终态，返回 20006；记录不存在返回 20005（防枚举）；
+//   - 并发安全：先锁佣金行，再用 status=10 条件更新，0 行视为状态已变。
+func (s *sDistribution) AdminSettleCommission(ctx context.Context, adminID, commissionID int64) (*v1.AdminSettleCommissionRes, error) {
+	if adminID <= 0 {
+		return nil, codes.New(codes.CodeUnauthorized)
+	}
+	if commissionID <= 0 {
+		return nil, codes.New(codes.CodeDistributionCommissionNotFound)
+	}
+
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		var rows []*commissionRow
+		if e := tx.Model("distribution_commissions").Ctx(ctx).
+			Where("id", commissionID).
+			LockUpdate().
+			Scan(&rows); e != nil {
+			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("锁定佣金记录: %w", e))
+		}
+		if len(rows) == 0 {
+			return codes.New(codes.CodeDistributionCommissionNotFound)
+		}
+		switch rows[0].Status {
+		case commissionStatusSettled:
+			return nil // 幂等：已结算直接返回当前记录
+		case commissionStatusPending:
+		default:
+			return codes.New(codes.CodeDistributionCommissionStatus)
+		}
+		result, e := tx.Model("distribution_commissions").Ctx(ctx).
+			Where("id", commissionID).
+			Where("status", commissionStatusPending).
+			Data(g.Map{"status": commissionStatusSettled, "settled_at": gdb.Raw("NOW()")}).
+			Update()
+		if e != nil {
+			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("结算佣金: %w", e))
+		}
+		if affected, e := result.RowsAffected(); e != nil {
+			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("读取结算结果: %w", e))
+		} else if affected == 0 {
+			return codes.New(codes.CodeDistributionCommissionStatus)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var rows []*commissionRow
+	if err := g.DB().Model("distribution_commissions").Ctx(ctx).
+		Where("id", commissionID).Limit(1).Scan(&rows); err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("回读佣金记录: %w", err))
+	}
+	if len(rows) == 0 {
+		return nil, codes.New(codes.CodeDistributionCommissionNotFound)
+	}
+	return &v1.AdminSettleCommissionRes{Commission: *toCommission(rows[0])}, nil
 }
 
 // AdminCommissionStats 按状态统计佣金；固定返回 pending/settled/reversed 三项（无数据为 0），保证契约稳定。

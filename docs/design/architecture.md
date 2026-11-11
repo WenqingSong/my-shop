@@ -68,8 +68,12 @@ SurgeCart 基于 GoFrame v2 提供 HTTP API，MySQL 保存交易与身份数据�
 | 订单 | 普通订单下单（服务端定价、快照、幂等、状态机）、支付（模拟）、取消、发货、收货；购物车与收货地址作为下单前置 | `controller/order`、`controller/cart`、`controller/address`、`logic/order`、`logic/cart`、`logic/address` |
 | 库存 | SKU 库存查询、增减与流水；条件扣减防超卖；与订单/秒杀共享库存事实 | `controller/inventory`、`controller/sku`、`logic/inventory`、`logic/sku` |
 | 优惠券 | 优惠券模板管理与用户领券/查询（核销与订单的耦合边界见领域设计） | `controller/coupon`、`logic/coupon` |
-| 退款 | 退款申请、审核、执行、撤销、关闭与审计 | `controller/refund`、`logic/refund` |
-| 一级分销 | 一级推荐关系绑定、订单支付计佣、退款佣金冲回、用户端与后台只读查询（不含提现/结算） | `controller/distribution`、`logic/distribution` |
+| 退款 | 退款申请、审核、执行、撤销、关闭与审计；退款成功同事务退回钱包、冲回分销佣金、扣减会员成长值 | `controller/refund`、`logic/refund` |
+| 会员 | 会员等级配置（后台维护）、用户当前等级与成长值、成长值流水、会员折扣算价快照 | `controller/member`、`logic/member`、`api/member/v1` |
+| 一级分销 | 一级推荐关系绑定（含环校验）、订单支付计佣、佣金人工结算（仅状态流转）、退款佣金冲回、用户端与后台查询 | `controller/distribution`、`logic/distribution`、`api/distribution/v1` |
+| 运费与计价 | 运费模板/区域规则维护、服务端运费计算、订单统一计价入口 | `controller/freight`、`logic/freight`、`logic/pricing` |
+| 钱包 | 余额查询、资金流水、Mock 充值、订单扣款与退款入账事务原语 | `controller/wallet`、`logic/wallet` |
+| 砍价 | 砍价活动管理、用户发起砍价、好友助力、实例状态推进 | `controller/bargain`、`logic/bargain` |
 | 秒杀 | Redis + Lua 准入、MySQL 出队表异步落单、崩溃重投、幂等库存收敛、死信修复、限流/排队上限/熔断/对账与指标 | `controller/flashsale`、`logic/flashsale`、`internal/metrics` |
 | CMS（内容与运营） | 轮播图、文章、推荐位、评价、数据大屏等运营/内容能力 | `controller/banner`、`controller/article`、`controller/recommendation`、`controller/review`、`controller/dashboard`、`logic/*` |
 | 对象存储 | 静态资源存储边界：本地文件（轮播图占位图）与七牛云直传凭证签发 | `internal/storage`、`controller/upload`、`logic/upload` |
@@ -100,13 +104,18 @@ SurgeCart 基于 GoFrame v2 提供 HTTP API，MySQL 保存交易与身份数据�
    │                             5. 提交事务，返回订单
    │◄───────────────────────────
    │   POST /orders/:id/pay      → 状态机：模拟支付（Mock，不接真实支付机构）
+   │                              同事务：券核销 + 会员成长值发放 + 一级佣金计提
    │   POST /orders/:id/cancel   → 取消并恢复库存（只恢复一次）
    │   POST /orders/:id/receive  → 确认收货
    │   POST /orders/:id/refund   → 发起退款（转退款模块）
+   │                              退款成功同事务：恢复库存 + 佣金冲回 + 成长值扣减
 ```
 
 - **超时取消**：后台扫描器（`startOrderCancelScanner`，默认每 60s）扫描 `status=待支付` 且已过期的订单，用「条件状态更新 + RowsAffected」原子闸门逐单取消并恢复库存，多实例并发下同一订单只被处理一次。
-- **一致性**：服务端定价 + 快照防篡改；条件扣减 + `RowsAffected` 防超卖；取消/退款只恢复一次库存。
+- **计价**：`total_amount = original_amount - discount_amount(券) - member_discount_amount(会员折扣) + shipping_fee`；
+  会员折扣按等级折扣率计算并按券后剩余金额夹紧，`total_amount ≥ 0`（见 `pricing.md`）。
+- **一致性**：服务端定价 + 快照防篡改；条件扣减 + `RowsAffected` 防超卖；取消/退款只恢复一次库存；
+  支付/退款链路的会员成长值与佣金写入与订单状态推进同事务，且各自幂等。
 - 详见 `docs/design/order.md`、`docs/design/inventory.md`。
 
 ### 3.2 秒杀流程
@@ -236,6 +245,8 @@ CNB CI（`.cnb.yml`）：
 | 收藏 | `docs/design/favorite.md` |
 | 点赞 | `docs/design/like.md` |
 | 对象存储 | `docs/design/storage.md` |
+| 会员等级与成长值 | `docs/design/member.md` |
+| 一级分销与佣金 | `docs/design/distribution.md` |
 | 错误码 | `docs/design/error-codes.md` |
 | 数据库迁移（机制） | `docs/design/migration.md` |
 | 数据库迁移（运维 / K8s Job） | `docs/development/migrations.md` |

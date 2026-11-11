@@ -164,6 +164,9 @@ const (
 	CodeDistributionSelfReferral        Code = 20001 // 绑定自己为推荐人 → 400
 	CodeDistributionReferrerUnavailable Code = 20002 // 推荐人不存在或已禁用 → 404
 	CodeDistributionAlreadyBound        Code = 20003 // 已绑定其他推荐人，不可改绑 → 409
+	CodeDistributionCycle               Code = 20004 // 绑定会形成推荐关系环 → 409
+	CodeDistributionCommissionNotFound  Code = 20005 // 佣金记录不存在 → 404
+	CodeDistributionCommissionStatus    Code = 20006 // 佣金状态迁移非法（已冲回不可结算）→ 409
 
 	// 运费与统一计价域（Freight / Pricing）21000-21999（域序 21）。
 	// B1-04 集成：B1-04-03 原编号 20001-20012 与已合入的一级分销域（域序 20）冲突，
@@ -206,6 +209,14 @@ const (
 	CodeBargainHelpUnavailable         Code = 23007 // 实例不可助力（已成功/已失败/已过期/次数用尽/已到底价）→ 409
 	CodeBargainHelpDuplicated          Code = 23008 // 已助力过该实例 → 409
 	CodeBargainInvalidStatusTransition Code = 23009 // 砍价实例状态迁移非法（终态不可重复推进）→ 409
+
+	// 会员等级与成长值域（Member）24000-24999（域序 24，B1-04-08）。
+	// B1-04 八分支集成：原编号 20001-20005 与一级分销域（域序 20）冲突，整体迁移到域序 24。
+	CodeMemberLevelNotFound      Code = 24001 // 会员等级配置不存在 → 404
+	CodeMemberLevelInvalid       Code = 24002 // 等级配置非法（名称/门槛/折扣率/状态/单调性）→ 400
+	CodeMemberLevelInUse         Code = 24003 // 等级被用户会员记录引用，不可删除 → 409
+	CodeMemberLevelDuplicate     Code = 24004 // 等级序号或成长值门槛已被占用 → 409
+	CodeMemberGrowthInsufficient Code = 24005 // 成长值扣减超过当前余额（防御性拒绝）→ 409
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -336,6 +347,9 @@ var codeTable = map[Code]codeInfo{
 	CodeDistributionSelfReferral:        {http.StatusBadRequest, "不能绑定自己为推荐人"},
 	CodeDistributionReferrerUnavailable: {http.StatusNotFound, "推荐人不存在或不可用"},
 	CodeDistributionAlreadyBound:        {http.StatusConflict, "已绑定推荐人，不可变更"},
+	CodeDistributionCycle:               {http.StatusConflict, "推荐关系成环"},
+	CodeDistributionCommissionNotFound:  {http.StatusNotFound, "佣金记录不存在"},
+	CodeDistributionCommissionStatus:    {http.StatusConflict, "佣金状态迁移非法"},
 
 	CodeFreightTemplateNotFound:   {http.StatusNotFound, "运费模板不存在"},
 	CodeFreightTemplateNameExists: {http.StatusConflict, "运费模板名称已存在"},
@@ -369,6 +383,12 @@ var codeTable = map[Code]codeInfo{
 	CodeBargainHelpUnavailable:         {http.StatusConflict, "该砍价不可助力"},
 	CodeBargainHelpDuplicated:          {http.StatusConflict, "已助力过该砍价"},
 	CodeBargainInvalidStatusTransition: {http.StatusConflict, "砍价状态迁移非法"},
+
+	CodeMemberLevelNotFound:      {http.StatusNotFound, "会员等级不存在"},
+	CodeMemberLevelInvalid:       {http.StatusBadRequest, "会员等级配置非法"},
+	CodeMemberLevelInUse:         {http.StatusConflict, "会员等级已被用户使用，不能删除"},
+	CodeMemberLevelDuplicate:     {http.StatusConflict, "会员等级序号或成长值门槛已存在"},
+	CodeMemberGrowthInsufficient: {http.StatusConflict, "成长值不足"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。

@@ -14,8 +14,8 @@ import (
 // baselineVersion 是内嵌 baseline 迁移的版本号（14 位时间戳）。
 const baselineVersion = uint(20261001000001)
 
-// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + … + sku_code_pricing）。
-const latestMigrationVersion = uint(20261111000001)
+// latestMigrationVersion 是当前内嵌迁移的最高版本（baseline + … + order_member_discount）。
+const latestMigrationVersion = uint(20261111000003)
 
 // businessTables 是 migration 应建立的 60 张业务表。
 // 注意顺序：wallet_transactions 通过外键引用 wallet_accounts（ON DELETE RESTRICT），故排在 wallet_accounts 之前；
@@ -940,6 +940,7 @@ var expectedSchema = []tableSpec{
 			{Name: "total_amount", Type: "int unsigned"},
 			{Name: "original_amount", Type: "int unsigned", Default: strPtr("0")},
 			{Name: "discount_amount", Type: "int unsigned", Default: strPtr("0")},
+			{Name: "member_discount_amount", Type: "int unsigned", Default: strPtr("0")},
 			{Name: "shipping_fee", Type: "int unsigned", Default: strPtr("0")},
 			{Name: "user_coupon_id", Type: "bigint unsigned", Nullable: true},
 			{Name: "pay_type", Type: "varchar(16)", Default: strPtr("")},
