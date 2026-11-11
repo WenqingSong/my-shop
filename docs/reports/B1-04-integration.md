@@ -5,7 +5,7 @@
 | 任务 | B1-04-INTEGRATION：八个独立开发分支统一集成 |
 | 目标分支 | `feat/p2-backend` |
 | 集成开始时 HEAD | `637ae2d35d98892094b82184bc8045e6fda3b42c`（上一轮只合入 01/05 的集成结果，0 ahead / 0 behind `origin/feat/p2-backend`） |
-| 最终 HEAD | `e35ae4a`（文档与报告）+ 仅回填本 SHA 的元数据提交（`git log -1`） |
+| 最终 HEAD | `git log -1`（最后一次仅回填 SHA 的元数据提交；实质提交见 §13） |
 | 执行日期 | 2026-11-11 |
 | 执行环境 | Go `1.26.0 linux/amd64`、MySQL `8.0`（容器 `b10402-mysql`，`127.0.0.1:3306`）、Redis `7-alpine` |
 | 隔离测试库 | `my_shop_b104_integration`、`my_shop_bargain_test`、`my_shop_boot_test`、`my_shop_mig_check` |
@@ -313,8 +313,8 @@
 | 目标分支 | `feat/p2-backend` |
 | 集成开始时 SHA | `637ae2d35d98892094b82184bc8045e6fda3b42c` |
 | Merge 提交 | `60c0751`（02）、`d1400cc`（03）、`2446b5d`（04）、`0a67d5d`（07）、`7e7cede`（08）；01/05 为上一轮 `10f05fa`/`51d88ef` |
-| 集成提交 | `7458f85`（核心实现与测试）、`e35ae4a`（设计/开发文档与本报告） |
-| 最终 HEAD | `e35ae4a`，以及随后仅回填该 SHA 的元数据提交（`git log -1`） |
+| 集成提交 | `7458f85`（核心实现与测试）、`e35ae4a`（设计/开发文档与本报告）、`30bc42e`（状态流水操作者 id 修正） |
+| 最终 HEAD | `30bc42e`，以及随后仅回填该 SHA 的元数据提交（`git log -1`） |
 | 源分支 | 全部保留，HEAD 未改动：01 `5f233ee`、02 `ac09d69`、03 `9737072`、04 `37750fb`、05 `cae9638`、07 `0865a9c`、08 `deebff2`；06 不存在 |
 | 工作区 | 干净 |
 | Push | 未执行 |
