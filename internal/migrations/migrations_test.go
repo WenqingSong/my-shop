@@ -87,6 +87,7 @@ func dropAllTables(db *sql.DB) error {
 func setupCleanDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db := openTestDB(t)
+	requireIsolatedDestructiveDB(t, db)
 	if err := dropAllTables(db); err != nil {
 		t.Fatalf("drop all tables: %v", err)
 	}
@@ -171,6 +172,7 @@ var syntheticTables = []string{"migration_synthetic_base", "migration_probe"}
 func setupSyntheticMigrationDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db := openTestDB(t)
+	requireIsolatedDestructiveDB(t, db)
 	drop := append(append([]string{}, allTables...), syntheticTables...)
 	dropAll := func() error {
 		for _, table := range drop {

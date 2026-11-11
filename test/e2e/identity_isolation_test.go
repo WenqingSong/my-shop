@@ -97,6 +97,8 @@ func setupIsolationServer(t *testing.T) string {
 	t.Setenv("ADMIN_SUPER_PASSWORD", isoAdminPassword)
 
 	ctx := context.Background()
+	// B1-05-02：清空身份表之前确认实际连接的是独立测试库（历史库直接失败）。
+	requireIsolatedDestructiveDBE2E(t)
 	if err := migrations.Up(ctx); err != nil {
 		t.Fatalf("migrate up: %v", err)
 	}
