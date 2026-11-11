@@ -73,7 +73,8 @@ SurgeCart 基于 GoFrame v2 提供 HTTP API，MySQL 保存交易与身份数据�
 | 一级分销 | 一级推荐关系绑定（含环校验）、订单支付计佣、佣金人工结算（仅状态流转）、退款佣金冲回、用户端与后台查询 | `controller/distribution`、`logic/distribution`、`api/distribution/v1` |
 | 运费与计价 | 运费模板/区域规则维护、服务端运费计算、订单统一计价入口 | `controller/freight`、`logic/freight`、`logic/pricing` |
 | 钱包 | 余额查询、资金流水、Mock 充值、订单扣款与退款入账事务原语 | `controller/wallet`、`logic/wallet` |
-| 砍价 | 砍价活动管理、用户发起砍价、好友助力、实例状态推进 | `controller/bargain`、`logic/bargain` |
+| 拼团 | 拼团活动管理、开团/参团（条件更新控量）、成团/过期/运营关闭、失败补偿（取消待支付订单并恢复库存） | `controller/groupbuy`、`logic/groupbuy`、`api/groupbuy/v1` |
+| 砍价 | 砍价活动管理、用户发起砍价、好友助力、实例状态推进（砍价后下单未实现） | `controller/bargain`、`logic/bargain` |
 | 秒杀 | Redis + Lua 准入、MySQL 出队表异步落单、崩溃重投、幂等库存收敛、死信修复、限流/排队上限/熔断/对账与指标 | `controller/flashsale`、`logic/flashsale`、`internal/metrics` |
 | CMS（内容与运营） | 轮播图、文章、推荐位、评价、数据大屏等运营/内容能力 | `controller/banner`、`controller/article`、`controller/recommendation`、`controller/review`、`controller/dashboard`、`logic/*` |
 | 对象存储 | 静态资源存储边界：本地文件（轮播图占位图）与七牛云直传凭证签发 | `internal/storage`、`controller/upload`、`logic/upload` |
