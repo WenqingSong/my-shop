@@ -140,6 +140,7 @@ COMMIT / ROLLBACK                                                   -- 行锁在
 | 11 | `go run . migrate up` + `migrate version`（隔离库） | 0 | **PASS** | `20261111000004 (dirty=false)`，锁表 1 行 `id=1` |
 | 12 | `go test -run TestB104IntegrationMigrationsUpDownUp ./internal/migrations/` | 0 | **PASS** | 04 up → down（锁表消失）→ up（锁表恢复 + 单例记录） |
 | 13 | `DATABASE_DEFAULT_NAME=my_shop_b104_test go test -p 1 -count=1 ./...` | 1 | **PARTIAL（既有问题）** | 45 个包 `ok`；日志中仅 `internal/controller/address`（2 例）与 `internal/controller/region`（3 例）失败，单独复跑这两个包退出码同为 1；根因为 `regions` 为空，与本次修复无关（B1-04 验收遗留外部数据源阻塞） |
+| 13b | `bash scripts/test-integration.sh`（同环境，复用 go test 缓存） | 1 | **PARTIAL（同上）** | 与 13 项同源：仅 5 个地区用例失败，其余包全部通过 |
 | 14 | **修复前对照**：旧 `distribution.go` + 新用例（`TestBindConcurrentMutualCycleRejected` / `...ThreeNode...`） | 1 | **FAIL（预期）** | 双向 `success=2 cycle=0`；三节点 `success=3 cycle=0` —— 证明新用例能复现原缺陷 |
 
 > 说明：第 13 项中 `internal/boot`、`internal/migrations`、`internal/logic/distribution`、`test/e2e` 均为 `ok`。
