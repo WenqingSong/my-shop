@@ -36,6 +36,7 @@ const latestMigrationVersion = uint(20261111000003)
 // 否则 DROP TABLE 会因外键依赖失败。
 var businessTables = []string{
 	"distribution_commissions", "user_referrals",
+	"freight_template_rules", "freight_templates",
 	"member_growth_logs", "user_memberships", "member_levels",
 	"bargain_help_records", "bargain_instances", "bargain_activities",
 	"group_buy_participants", "group_buy_teams", "group_buy_activities",

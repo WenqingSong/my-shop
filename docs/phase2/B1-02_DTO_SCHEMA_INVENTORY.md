@@ -13,11 +13,11 @@
 
 | 指标 | 数值 |
 |---|---|
-| DTO 结构体总数 | 375 |
-| Request 结构体 | 162 |
-| Response 结构体 | 161 |
-| 业务实体结构体 | 52 |
-| 已登记 API | 162 |
+| DTO 结构体总数 | 453 |
+| Request 结构体 | 195 |
+| Response 结构体 | 194 |
+| 业务实体结构体 | 64 |
+| 已登记 API | 195 |
 | OperationId 唯一性 | 通过（生成期强制校验） |
 | 无法确认的字段 | 0（遇到未登记类型直接失败，不猜测） |
 
@@ -144,6 +144,35 @@
 | `BannerUpdateResponse` | `banner.UpdateRes` | Response | 1 | - | - | - | - |
 | `BannerDeleteRequest` | `banner.DeleteReq` | Request | 1 | - | - | - | - |
 | `BannerDeleteResponse` | `banner.DeleteRes` | Response | 0 | - | - | - | - |
+| `BargainActivity` | `bargain.Activity` | Entity | 16 | `start_price`<br>`floor_price`<br>`help_amount` | - | `start_time`<br>`end_time`<br>`created_at`<br>`updated_at` | `start_time`<br>`end_time`<br>`created_at`<br>`updated_at` |
+| `BargainInstance` | `bargain.Instance` | Entity | 21 | `start_price`<br>`floor_price`<br>`current_price`<br>`remaining_amount` | - | `expire_at`<br>`completed_at`<br>`created_at`<br>`updated_at` | `expire_at`<br>`completed_at`<br>`order_id`<br>`created_at`<br>`updated_at` |
+| `BargainHelpRecord` | `bargain.HelpRecord` | Entity | 9 | `cut_amount` | - | `created_at` | `created_at` |
+| `BargainAdminCreateRequest` | `bargain.AdminCreateReq` | Request | 9 | `start_price`<br>`floor_price`<br>`help_amount` | - | `start_time`<br>`end_time` | `start_time`<br>`end_time` |
+| `BargainAdminCreateResponse` | `bargain.AdminCreateRes` | Response | 1 | - | - | - | - |
+| `BargainAdminUpdateRequest` | `bargain.AdminUpdateReq` | Request | 10 | `start_price`<br>`floor_price`<br>`help_amount` | - | `start_time`<br>`end_time` | `start_time`<br>`end_time` |
+| `BargainAdminUpdateResponse` | `bargain.AdminUpdateRes` | Response | 1 | - | - | - | - |
+| `BargainAdminStatusRequest` | `bargain.AdminStatusReq` | Request | 2 | - | - | - | - |
+| `BargainAdminStatusResponse` | `bargain.AdminStatusRes` | Response | 1 | - | - | - | - |
+| `BargainAdminListRequest` | `bargain.AdminListReq` | Request | 4 | - | - | - | `page`<br>`size`<br>`status`<br>`product_id` |
+| `BargainAdminListResponse` | `bargain.AdminListRes` | Response | 4 | - | - | - | - |
+| `BargainAdminDetailRequest` | `bargain.AdminDetailReq` | Request | 1 | - | - | - | - |
+| `BargainAdminDetailResponse` | `bargain.AdminDetailRes` | Response | 1 | - | - | - | - |
+| `BargainListRequest` | `bargain.ListReq` | Request | 3 | - | - | - | `page`<br>`size`<br>`product_id` |
+| `BargainListResponse` | `bargain.ListRes` | Response | 4 | - | - | - | - |
+| `BargainDetailRequest` | `bargain.DetailReq` | Request | 1 | - | - | - | - |
+| `BargainDetailResponse` | `bargain.DetailRes` | Response | 2 | - | - | - | - |
+| `BargainStartRequest` | `bargain.StartReq` | Request | 1 | - | - | - | - |
+| `BargainStartResponse` | `bargain.StartRes` | Response | 1 | - | - | - | - |
+| `BargainMyListRequest` | `bargain.MyListReq` | Request | 2 | - | - | - | `page`<br>`size` |
+| `BargainMyListResponse` | `bargain.MyListRes` | Response | 4 | - | - | - | - |
+| `BargainInstanceDetailRequest` | `bargain.InstanceDetailReq` | Request | 1 | - | - | - | - |
+| `BargainInstanceDetailResponse` | `bargain.InstanceDetailRes` | Response | 1 | - | - | - | - |
+| `BargainHelpRequest` | `bargain.HelpReq` | Request | 1 | - | - | - | - |
+| `BargainHelpResponse` | `bargain.HelpRes` | Response | 2 | - | - | - | `help` |
+| `BargainHelpsRequest` | `bargain.HelpsReq` | Request | 1 | - | - | - | - |
+| `BargainHelpsResponse` | `bargain.HelpsRes` | Response | 1 | - | - | - | - |
+| `BargainAbandonRequest` | `bargain.AbandonReq` | Request | 1 | - | - | - | - |
+| `BargainAbandonResponse` | `bargain.AbandonRes` | Response | 1 | - | - | - | - |
 | `CartItem` | `cart.CartItem` | Entity | 17 | `price_snapshot` | `unavailable_reason` | `created_at`<br>`updated_at` | `product_id`<br>`current_price`<br>`stock`<br>`created_at`<br>`updated_at` |
 | `CartListRequest` | `cart.ListReq` | Request | 0 | - | - | - | - |
 | `CartListResponse` | `cart.ListRes` | Response | 1 | - | - | - | - |
@@ -215,6 +244,8 @@
 | `DistributionAdminListCommissionsResponse` | `distribution.AdminListCommissionsRes` | Response | 4 | - | - | - | - |
 | `DistributionAdminCommissionStatsRequest` | `distribution.AdminCommissionStatsReq` | Request | 0 | - | - | - | - |
 | `DistributionAdminCommissionStatsResponse` | `distribution.AdminCommissionStatsRes` | Response | 3 | `total_amount` | - | - | - |
+| `DistributionAdminSettleCommissionRequest` | `distribution.AdminSettleCommissionReq` | Request | 1 | - | - | - | - |
+| `DistributionAdminSettleCommissionResponse` | `distribution.AdminSettleCommissionRes` | Response | 1 | - | - | - | - |
 | `FavoriteItem` | `favorite.FavoriteItem` | Entity | 8 | - | `unavailable_reason` | `created_at` | `product_price`<br>`created_at` |
 | `FavoriteAddRequest` | `favorite.AddReq` | Request | 1 | - | - | - | - |
 | `FavoriteAddResponse` | `favorite.AddRes` | Response | 1 | - | - | - | - |
@@ -241,6 +272,23 @@
 | `FlashSaleListRequestAuditsRequest` | `flashsale.ListRequestAuditsReq` | Request | 1 | - | - | - | - |
 | `FlashSaleRequestAudit` | `flashsale.RequestAudit` | Entity | 9 | - | `before_status`<br>`after_status` | `created_at` | `created_at` |
 | `FlashSaleListRequestAuditsResponse` | `flashsale.ListRequestAuditsRes` | Response | 1 | - | - | - | - |
+| `FreightTemplate` | `freight.Template` | Entity | 8 | - | - | `created_at`<br>`updated_at` | `created_at`<br>`updated_at` |
+| `FreightRule` | `freight.Rule` | Entity | 10 | - | - | `created_at`<br>`updated_at` | `created_at`<br>`updated_at` |
+| `FreightRuleInput` | `freight.RuleInput` | Entity | 6 | - | - | - | - |
+| `FreightAdminCreateRequest` | `freight.AdminCreateReq` | Request | 4 | - | - | - | `is_free` |
+| `FreightAdminCreateResponse` | `freight.AdminCreateRes` | Response | 1 | - | - | - | - |
+| `FreightAdminListRequest` | `freight.AdminListReq` | Request | 0 | - | - | - | - |
+| `FreightAdminListResponse` | `freight.AdminListRes` | Response | 1 | - | - | - | - |
+| `FreightAdminDetailRequest` | `freight.AdminDetailReq` | Request | 1 | - | - | - | - |
+| `FreightAdminDetailResponse` | `freight.AdminDetailRes` | Response | 2 | - | - | - | - |
+| `FreightAdminUpdateRequest` | `freight.AdminUpdateReq` | Request | 5 | - | - | - | `is_free` |
+| `FreightAdminUpdateResponse` | `freight.AdminUpdateRes` | Response | 1 | - | - | - | - |
+| `FreightAdminUpdateStatusRequest` | `freight.AdminUpdateStatusReq` | Request | 2 | - | - | - | `status` |
+| `FreightAdminUpdateStatusResponse` | `freight.AdminUpdateStatusRes` | Response | 1 | - | - | - | - |
+| `FreightAdminListRulesRequest` | `freight.AdminListRulesReq` | Request | 1 | - | - | - | - |
+| `FreightAdminListRulesResponse` | `freight.AdminListRulesRes` | Response | 1 | - | - | - | - |
+| `FreightAdminReplaceRulesRequest` | `freight.AdminReplaceRulesReq` | Request | 2 | - | - | - | - |
+| `FreightAdminReplaceRulesResponse` | `freight.AdminReplaceRulesRes` | Response | 1 | - | - | - | - |
 | `HealthLivenessRequest` | `health.LivenessReq` | Request | 0 | - | - | - | - |
 | `HealthLivenessResponse` | `health.LivenessRes` | Response | 2 | - | - | - | - |
 | `HealthReadinessRequest` | `health.ReadinessReq` | Request | 0 | - | - | - | - |
@@ -286,7 +334,26 @@
 | `LikeCheckResponse` | `like.CheckRes` | Response | 1 | - | - | - | - |
 | `LikeCountRequest` | `like.CountReq` | Request | 1 | - | - | - | - |
 | `LikeCountResponse` | `like.CountRes` | Response | 1 | - | - | - | - |
-| `Order` | `order.Order` | Entity | 27 | `total_amount`<br>`original_amount`<br>`discount_amount` | `status`<br>`cancel_reason` | `expire_at`<br>`paid_at`<br>`shipped_at`<br>`received_at`<br>`completed_at`<br>`cancelled_at`<br>`refunded_at`<br>`created_at`<br>`updated_at` | `user_coupon_id`<br>`address_id`<br>`expire_at`<br>`cancel_reason`<br>`paid_at`<br>`shipped_at`<br>`received_at`<br>`completed_at`<br>`cancelled_at`<br>`refunded_at`<br>`created_at`<br>`updated_at` |
+| `MemberLevel` | `member.MemberLevel` | Entity | 8 | - | - | `created_at`<br>`updated_at` | `created_at`<br>`updated_at` |
+| `Membership` | `member.Membership` | Entity | 10 | - | - | `upgraded_at` | `level_id`<br>`level_no`<br>`upgraded_at`<br>`next_level_id`<br>`next_level_growth_threshold` |
+| `MemberGrowthLog` | `member.GrowthLog` | Entity | 9 | `change_amount` | - | `created_at` | `biz_id`<br>`created_at` |
+| `MemberLevelsRequest` | `member.LevelsReq` | Request | 0 | - | - | - | - |
+| `MemberLevelsResponse` | `member.LevelsRes` | Response | 1 | - | - | - | - |
+| `MemberMyRequest` | `member.MyReq` | Request | 0 | - | - | - | - |
+| `MemberMyResponse` | `member.MyRes` | Response | 1 | - | - | - | - |
+| `MemberGrowthLogsRequest` | `member.GrowthLogsReq` | Request | 2 | - | - | - | - |
+| `MemberGrowthLogsResponse` | `member.GrowthLogsRes` | Response | 4 | - | - | - | - |
+| `MemberAdminListLevelsRequest` | `member.AdminListLevelsReq` | Request | 0 | - | - | - | - |
+| `MemberAdminListLevelsResponse` | `member.AdminListLevelsRes` | Response | 1 | - | - | - | - |
+| `MemberAdminCreateLevelRequest` | `member.AdminCreateLevelReq` | Request | 5 | - | - | - | - |
+| `MemberAdminCreateLevelResponse` | `member.AdminCreateLevelRes` | Response | 1 | - | - | - | - |
+| `MemberAdminUpdateLevelRequest` | `member.AdminUpdateLevelReq` | Request | 6 | - | - | - | - |
+| `MemberAdminUpdateLevelResponse` | `member.AdminUpdateLevelRes` | Response | 1 | - | - | - | - |
+| `MemberAdminDeleteLevelRequest` | `member.AdminDeleteLevelReq` | Request | 1 | - | - | - | - |
+| `MemberAdminDeleteLevelResponse` | `member.AdminDeleteLevelRes` | Response | 0 | - | - | - | - |
+| `MemberAdminMemberRequest` | `member.AdminMemberReq` | Request | 1 | - | - | - | - |
+| `MemberAdminMemberResponse` | `member.AdminMemberRes` | Response | 2 | - | - | - | - |
+| `Order` | `order.Order` | Entity | 30 | `total_amount`<br>`original_amount`<br>`discount_amount`<br>`member_discount_amount` | `status`<br>`cancel_reason` | `expire_at`<br>`paid_at`<br>`shipped_at`<br>`received_at`<br>`completed_at`<br>`cancelled_at`<br>`refunded_at`<br>`created_at`<br>`updated_at` | `user_coupon_id`<br>`address_id`<br>`expire_at`<br>`cancel_reason`<br>`paid_at`<br>`shipped_at`<br>`received_at`<br>`completed_at`<br>`cancelled_at`<br>`refunded_at`<br>`created_at`<br>`updated_at` |
 | `OrderItem` | `order.OrderItem` | Entity | 11 | `price`<br>`original_price` | - | - | - |
 | `OrderCreateRequest` | `order.CreateReq` | Request | 8 | - | `source` | - | `price` |
 | `OrderCreateResponse` | `order.CreateRes` | Response | 1 | - | - | - | - |
@@ -294,7 +361,10 @@
 | `OrderListResponse` | `order.ListRes` | Response | 1 | - | - | - | - |
 | `OrderDetailRequest` | `order.DetailReq` | Request | 1 | - | - | - | - |
 | `OrderDetailResponse` | `order.DetailRes` | Response | 1 | - | - | - | - |
-| `OrderPayRequest` | `order.PayReq` | Request | 1 | - | - | - | - |
+| `OrderPayRequest` | `order.PayReq` | Request | 2 | - | - | - | - |
+| `OrderQuoteRequest` | `order.QuoteReq` | Request | 6 | - | - | - | - |
+| `OrderQuoteItem` | `order.QuoteItem` | Entity | 8 | `price`<br>`amount` | - | - | - |
+| `OrderQuoteResponse` | `order.QuoteRes` | Response | 7 | `original_amount`<br>`payable_amount` | - | - | - |
 | `OrderPayResponse` | `order.PayRes` | Response | 1 | - | - | - | - |
 | `OrderCancelRequest` | `order.CancelReq` | Request | 1 | - | - | - | - |
 | `OrderCancelResponse` | `order.CancelRes` | Response | 1 | - | - | - | - |
@@ -310,7 +380,7 @@
 | `OrderStatsItem` | `order.AdminOrderStatsItem` | Entity | 2 | - | `status` | - | - |
 | `OrderAdminOrderDetailRequest` | `order.AdminOrderDetailReq` | Request | 1 | - | - | - | - |
 | `OrderAdminDetailResponse` | `order.AdminOrderDetailRes` | Response | 1 | - | - | - | - |
-| `Product` | `product.Product` | Entity | 12 | `price` | `status` | `created_at`<br>`updated_at` | `created_at`<br>`updated_at` |
+| `Product` | `product.Product` | Entity | 13 | `price` | `status` | `created_at`<br>`updated_at` | `freight_template_id`<br>`created_at`<br>`updated_at` |
 | `ProductListRequest` | `product.ListReq` | Request | 6 | - | - | - | `category_id` |
 | `ProductListResponse` | `product.ListRes` | Response | 4 | - | - | - | - |
 | `ProductDetailRequest` | `product.DetailReq` | Request | 1 | - | - | - | - |
@@ -321,9 +391,9 @@
 | `ProductAdminListResponse` | `product.AdminListRes` | Response | 4 | - | - | - | - |
 | `ProductAdminDetailRequest` | `product.AdminDetailReq` | Request | 1 | - | - | - | - |
 | `ProductAdminDetailResponse` | `product.AdminDetailRes` | Response | 3 | - | - | - | - |
-| `ProductCreateRequest` | `product.CreateReq` | Request | 7 | - | - | - | - |
+| `ProductCreateRequest` | `product.CreateReq` | Request | 8 | - | - | - | `freight_template_id` |
 | `ProductCreateResponse` | `product.CreateRes` | Response | 1 | - | - | - | - |
-| `ProductUpdateRequest` | `product.UpdateReq` | Request | 9 | - | - | - | `name`<br>`brand`<br>`category_id`<br>`price`<br>`main_image`<br>`detail`<br>`status`<br>`images` |
+| `ProductUpdateRequest` | `product.UpdateReq` | Request | 10 | - | - | - | `name`<br>`brand`<br>`category_id`<br>`price`<br>`main_image`<br>`detail`<br>`status`<br>`images`<br>`freight_template_id` |
 | `ProductUpdateResponse` | `product.UpdateRes` | Response | 1 | - | - | - | - |
 | `ProductOnShelfRequest` | `product.OnShelfReq` | Request | 1 | - | - | - | - |
 | `ProductOnShelfResponse` | `product.OnShelfRes` | Response | 1 | - | - | - | - |
@@ -426,11 +496,33 @@
 | `UploadFrontendTokenRequest` | `upload.FrontendTokenReq` | Request | 2 | - | - | - | - |
 | `UploadAdminTokenRequest` | `upload.AdminTokenReq` | Request | 2 | - | - | - | - |
 | `UploadTokenResponse` | `upload.TokenRes` | Response | 6 | - | - | - | - |
+| `WalletAccountRequest` | `wallet.AccountReq` | Request | 0 | - | - | - | - |
+| `WalletAccountResponse` | `wallet.AccountRes` | Response | 2 | - | - | `updated_at` | `updated_at` |
+| `WalletTransaction` | `wallet.Transaction` | Entity | 10 | `amount` | - | `created_at` | `biz_id`<br>`created_at` |
+| `WalletTransactionListRequest` | `wallet.TransactionListReq` | Request | 3 | - | - | - | `page`<br>`size` |
+| `WalletTransactionListResponse` | `wallet.TransactionListRes` | Response | 4 | - | - | - | - |
+| `WalletRechargeRequest` | `wallet.RechargeReq` | Request | 2 | `amount` | - | - | - |
+| `WalletRechargeOrder` | `wallet.RechargeOrder` | Entity | 7 | `amount` | - | `paid_at`<br>`created_at` | `paid_at`<br>`created_at` |
+| `WalletRechargeResponse` | `wallet.RechargeRes` | Response | 1 | - | - | - | - |
 
 ## 5. 金额字段（整数分，`x-unit: cent`）
 
 | Schema | 字段 | Go 类型 |
 |---|---|---|
+| `BargainActivity` | `start_price` | int64 |
+| `BargainActivity` | `floor_price` | int64 |
+| `BargainActivity` | `help_amount` | int64 |
+| `BargainInstance` | `start_price` | int64 |
+| `BargainInstance` | `floor_price` | int64 |
+| `BargainInstance` | `current_price` | int64 |
+| `BargainInstance` | `remaining_amount` | int64 |
+| `BargainHelpRecord` | `cut_amount` | int64 |
+| `BargainAdminCreateRequest` | `start_price` | int64 |
+| `BargainAdminCreateRequest` | `floor_price` | int64 |
+| `BargainAdminCreateRequest` | `help_amount` | int64 |
+| `BargainAdminUpdateRequest` | `start_price` | int64 |
+| `BargainAdminUpdateRequest` | `floor_price` | int64 |
+| `BargainAdminUpdateRequest` | `help_amount` | int64 |
 | `CartItem` | `price_snapshot` | int64 |
 | `CouponTemplate` | `threshold_amount` | int64 |
 | `CouponTemplate` | `discount_amount` | int64 |
@@ -452,11 +544,17 @@
 | `DistributionAdminCommissionStatsResponse` | `total_amount` | int64 |
 | `FlashSaleActivitySku` | `flash_price` | int64 |
 | `FlashSaleOrder` | `flash_price` | int64 |
+| `MemberGrowthLog` | `change_amount` | int64 |
 | `Order` | `total_amount` | int64 |
 | `Order` | `original_amount` | int64 |
 | `Order` | `discount_amount` | int64 |
+| `Order` | `member_discount_amount` | int64 |
 | `OrderItem` | `price` | int64 |
 | `OrderItem` | `original_price` | int64 |
+| `OrderQuoteItem` | `price` | int64 |
+| `OrderQuoteItem` | `amount` | int64 |
+| `OrderQuoteResponse` | `original_amount` | int64 |
+| `OrderQuoteResponse` | `payable_amount` | int64 |
 | `AdminOrderListItem` | `total_amount` | int64 |
 | `Product` | `price` | int64 |
 | `SkuProductValue` | `price` | int64 |
@@ -465,6 +563,9 @@
 | `Refund` | `amount` | int64 |
 | `Sku` | `price` | int64 |
 | `Sku` | `original_price` | int64 |
+| `WalletTransaction` | `amount` | int64 |
+| `WalletRechargeRequest` | `amount` | int64 |
+| `WalletRechargeOrder` | `amount` | int64 |
 
 ## 6. 枚举字段
 
@@ -529,6 +630,19 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 | `ArticleItem` | `updated_at` | *gtime | response |
 | `Banner` | `created_at` | *gtime | response |
 | `Banner` | `updated_at` | *gtime | response |
+| `BargainActivity` | `start_time` | *gtime | response |
+| `BargainActivity` | `end_time` | *gtime | response |
+| `BargainActivity` | `created_at` | *gtime | response |
+| `BargainActivity` | `updated_at` | *gtime | response |
+| `BargainInstance` | `expire_at` | *gtime | response |
+| `BargainInstance` | `completed_at` | *gtime | response |
+| `BargainInstance` | `created_at` | *gtime | response |
+| `BargainInstance` | `updated_at` | *gtime | response |
+| `BargainHelpRecord` | `created_at` | *gtime | response |
+| `BargainAdminCreateRequest` | `start_time` | *gtime | request |
+| `BargainAdminCreateRequest` | `end_time` | *gtime | request |
+| `BargainAdminUpdateRequest` | `start_time` | *gtime | request |
+| `BargainAdminUpdateRequest` | `end_time` | *gtime | request |
 | `CartItem` | `created_at` | *gtime | response |
 | `CartItem` | `updated_at` | *gtime | response |
 | `Category` | `created_at` | *gtime | response |
@@ -567,9 +681,17 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 | `FlashSaleUpdateRequest` | `start_time` | *gtime | request |
 | `FlashSaleUpdateRequest` | `end_time` | *gtime | request |
 | `FlashSaleRequestAudit` | `created_at` | *gtime | response |
+| `FreightTemplate` | `created_at` | *gtime | response |
+| `FreightTemplate` | `updated_at` | *gtime | response |
+| `FreightRule` | `created_at` | *gtime | response |
+| `FreightRule` | `updated_at` | *gtime | response |
 | `Inventory` | `created_at` | *gtime | response |
 | `Inventory` | `updated_at` | *gtime | response |
 | `InventoryLog` | `created_at` | *gtime | response |
+| `MemberLevel` | `created_at` | *gtime | response |
+| `MemberLevel` | `updated_at` | *gtime | response |
+| `Membership` | `upgraded_at` | *gtime | response |
+| `MemberGrowthLog` | `created_at` | *gtime | response |
 | `Order` | `expire_at` | *gtime | response |
 | `Order` | `paid_at` | *gtime | response |
 | `Order` | `shipped_at` | *gtime | response |
@@ -595,6 +717,10 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 | `Review` | `created_at` | *gtime | response |
 | `Sku` | `created_at` | *gtime | response |
 | `Sku` | `updated_at` | *gtime | response |
+| `WalletAccountResponse` | `updated_at` | *gtime | response |
+| `WalletTransaction` | `created_at` | *gtime | response |
+| `WalletRechargeOrder` | `paid_at` | *gtime | response |
+| `WalletRechargeOrder` | `created_at` | *gtime | response |
 
 ## 8. 可空字段
 
@@ -630,6 +756,30 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 | `BannerUpdateRequest` | `link_url` |
 | `BannerUpdateRequest` | `sort` |
 | `BannerUpdateRequest` | `status` |
+| `BargainActivity` | `start_time` |
+| `BargainActivity` | `end_time` |
+| `BargainActivity` | `created_at` |
+| `BargainActivity` | `updated_at` |
+| `BargainInstance` | `expire_at` |
+| `BargainInstance` | `completed_at` |
+| `BargainInstance` | `order_id` |
+| `BargainInstance` | `created_at` |
+| `BargainInstance` | `updated_at` |
+| `BargainHelpRecord` | `created_at` |
+| `BargainAdminCreateRequest` | `start_time` |
+| `BargainAdminCreateRequest` | `end_time` |
+| `BargainAdminUpdateRequest` | `start_time` |
+| `BargainAdminUpdateRequest` | `end_time` |
+| `BargainAdminListRequest` | `page` |
+| `BargainAdminListRequest` | `size` |
+| `BargainAdminListRequest` | `status` |
+| `BargainAdminListRequest` | `product_id` |
+| `BargainListRequest` | `page` |
+| `BargainListRequest` | `size` |
+| `BargainListRequest` | `product_id` |
+| `BargainMyListRequest` | `page` |
+| `BargainMyListRequest` | `size` |
+| `BargainHelpResponse` | `help` |
 | `CartItem` | `product_id` |
 | `CartItem` | `current_price` |
 | `CartItem` | `stock` |
@@ -701,10 +851,26 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 | `FlashSaleUpdateRequest` | `end_time` |
 | `FlashSaleGetOrderResultResponse` | `order` |
 | `FlashSaleRequestAudit` | `created_at` |
+| `FreightTemplate` | `created_at` |
+| `FreightTemplate` | `updated_at` |
+| `FreightRule` | `created_at` |
+| `FreightRule` | `updated_at` |
+| `FreightAdminCreateRequest` | `is_free` |
+| `FreightAdminUpdateRequest` | `is_free` |
+| `FreightAdminUpdateStatusRequest` | `status` |
 | `Inventory` | `created_at` |
 | `Inventory` | `updated_at` |
 | `InventoryLog` | `operator_admin_id` |
 | `InventoryLog` | `created_at` |
+| `MemberLevel` | `created_at` |
+| `MemberLevel` | `updated_at` |
+| `Membership` | `level_id` |
+| `Membership` | `level_no` |
+| `Membership` | `upgraded_at` |
+| `Membership` | `next_level_id` |
+| `Membership` | `next_level_growth_threshold` |
+| `MemberGrowthLog` | `biz_id` |
+| `MemberGrowthLog` | `created_at` |
 | `Order` | `user_coupon_id` |
 | `Order` | `address_id` |
 | `Order` | `expire_at` |
@@ -722,10 +888,12 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 | `OrderAdminListRequest` | `size` |
 | `OrderAdminListRequest` | `user_id` |
 | `AdminOrderListItem` | `created_at` |
+| `Product` | `freight_template_id` |
 | `Product` | `created_at` |
 | `Product` | `updated_at` |
 | `ProductListRequest` | `category_id` |
 | `ProductAdminListRequest` | `category_id` |
+| `ProductCreateRequest` | `freight_template_id` |
 | `ProductUpdateRequest` | `name` |
 | `ProductUpdateRequest` | `brand` |
 | `ProductUpdateRequest` | `category_id` |
@@ -734,6 +902,7 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 | `ProductUpdateRequest` | `detail` |
 | `ProductUpdateRequest` | `status` |
 | `ProductUpdateRequest` | `images` |
+| `ProductUpdateRequest` | `freight_template_id` |
 | `UserProfile` | `phone` |
 | `UserProfile` | `birthday` |
 | `ProfileUpdateRequest` | `nickname` |
@@ -780,6 +949,13 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 | `SpecUpdateGroupRequest` | `sort` |
 | `SpecUpdateValueRequest` | `value` |
 | `SpecUpdateValueRequest` | `sort` |
+| `WalletAccountResponse` | `updated_at` |
+| `WalletTransaction` | `biz_id` |
+| `WalletTransaction` | `created_at` |
+| `WalletTransactionListRequest` | `page` |
+| `WalletTransactionListRequest` | `size` |
+| `WalletRechargeOrder` | `paid_at` |
+| `WalletRechargeOrder` | `created_at` |
 
 ## 9. 已知限制与不猜测声明
 

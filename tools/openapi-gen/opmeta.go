@@ -51,6 +51,13 @@ var opMetaByKey = map[string]*opMeta{
 	"POST /admin/refunds/:id/close":        {KnownIssues: []*OMap{d1Issue()}},
 	"POST /admin/roles/:id/permissions":    {KnownIssues: []*OMap{d1Issue()}, NullData: true},
 	"POST /distribution/referral":          {KnownIssues: []*OMap{d1Issue()}},
+	// B1-04 八分支集成：以下 5 条写接口同样带「非 path 的 required 字段」，
+	// 绑定阶段 gvalid 失败仍返回 500/51（未在本次集成中改变错误码映射）。
+	"POST /orders/quote":                      {KnownIssues: []*OMap{d1Issue()}},
+	"POST /wallet/recharges":                  {KnownIssues: []*OMap{d1Issue()}},
+	"POST /admin/freight-templates":           {KnownIssues: []*OMap{d1Issue()}},
+	"PUT /admin/freight-templates/:id":        {KnownIssues: []*OMap{d1Issue()}},
+	"PUT /admin/freight-templates/:id/status": {KnownIssues: []*OMap{d1Issue()}},
 
 	// ---- data 为 null 的成功响应（controller 显式 return nil, nil）----
 	"POST /logout":                                       {NullData: true},

@@ -30,11 +30,13 @@ import (
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/cart"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/coupon"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/distribution"
+	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/freight"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/inventory"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/member"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/product"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/refund"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/sku"
+	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/wallet"
 )
 
 // chainSeq 生成进程内唯一幂等键片段。
@@ -71,9 +73,10 @@ func cleanChainTables(t *testing.T, ctx context.Context) {
 		"distribution_commissions", "user_referrals",
 		"member_growth_logs", "user_memberships", "member_levels",
 		"refund_audits", "refund_requests",
-		"order_items", "orders",
+		"wallet_transactions", "wallet_accounts", "recharge_orders",
+		"order_status_logs", "order_items", "orders",
 		"addresses", "inventory_logs", "inventories", "cart_items",
-		"skus", "product_images", "products", "categories", "users",
+		"skus", "product_images", "products", "categories", "users", "freight_template_rules", "freight_templates", "regions",
 	} {
 		if _, err := g.DB().Exec(ctx, "DELETE FROM "+table); err != nil {
 			t.Fatalf("clean %s: %v", table, err)
@@ -195,7 +198,7 @@ func TestOrderChainMemberDiscountGrowthAndCommission(t *testing.T) {
 	}
 
 	// 支付：成长值 +19600（跨过白银门槛），佣金基数 = 19600 → 佣金 floor(19600×500/10000) = 980。
-	if _, err := service.Order().Pay(ctx, userID, created.Id); err != nil {
+	if _, err := service.Order().Pay(ctx, userID, created.Id, ""); err != nil {
 		t.Fatalf("支付订单: %v", err)
 	}
 
@@ -233,7 +236,7 @@ func TestOrderChainMemberDiscountGrowthAndCommission(t *testing.T) {
 	}
 
 	// 重复支付：幂等，不重复发成长值/计佣。
-	if _, err := service.Order().Pay(ctx, userID, created.Id); err != nil {
+	if _, err := service.Order().Pay(ctx, userID, created.Id, ""); err != nil {
 		t.Fatalf("重复支付应幂等: %v", err)
 	}
 	membership, err = service.Member().My(ctx, userID)

@@ -1284,6 +1284,731 @@ BannerDeleteResponse:
   description: DeleteRes 删除轮播图响应。
   properties: {}
   additionalProperties: false
+BargainActivity:
+  type: object
+  description: Activity 砍价活动（后台管理与前台浏览复用）。
+  required:
+    - id
+    - product_id
+    - sku_id
+    - name
+    - start_price
+    - floor_price
+    - help_amount
+    - max_help_count
+    - start_time
+    - end_time
+    - status
+    - product_name
+    - product_main_image
+    - sku_name
+    - created_at
+    - updated_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 活动 id
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 商品 id（物理 FK）
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: SKU id（活动价格作用于该 SKU，物理 FK）
+    name:
+      type: string
+      description: 活动名称
+    start_price:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 原始价（整数分）
+    floor_price:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 目标价/底价（整数分，< start_price）
+    help_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 每次助力的名义砍减额（整数分，最后一次可只砍剩余差额）
+    max_help_count:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 单个实例最多被助力次数
+    start_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 活动开始时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    end_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 活动结束时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    status:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 1=启用、0=停用
+    product_name:
+      type: string
+      description: 商品名（联查展示，非快照）
+    product_main_image:
+      type: string
+      description: 商品主图（联查展示，非快照）
+    sku_name:
+      type: string
+      description: SKU 名（联查展示，非快照）
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    updated_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 更新时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+BargainInstance:
+  type: object
+  description: Instance 用户砍价实例。
+  required:
+    - id
+    - activity_id
+    - user_id
+    - status
+    - start_price
+    - floor_price
+    - current_price
+    - remaining_amount
+    - helped_count
+    - max_help_count
+    - expire_at
+    - completed_at
+    - order_id
+    - activity_name
+    - product_id
+    - sku_id
+    - product_name
+    - product_main_image
+    - sku_name
+    - created_at
+    - updated_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 实例 id
+    activity_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 活动 id
+    user_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 发起砍价的用户 id
+    status:
+      type: string
+      description: 状态：in_progress/success/failed/expired
+    start_price:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 原始价快照（整数分）
+    floor_price:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 目标价快照（整数分）
+    current_price:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 当前价（整数分，≥ floor_price）
+    remaining_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 距目标价还需砍掉的金额（整数分，= current_price - floor_price）
+    helped_count:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 已成功助力次数
+    max_help_count:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 助力次数上限快照
+    expire_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 截止时间快照（= 活动 end_time）；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    completed_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 砍价成功时间（失败/过期为空）；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    order_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 关联订单 id（软引用；下单联动未在本期实现，通常为空）
+    activity_name:
+      type: string
+      description: 活动名称（联查展示）
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 商品 id
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: SKU id
+    product_name:
+      type: string
+      description: 商品名（联查展示）
+    product_main_image:
+      type: string
+      description: 商品主图（联查展示）
+    sku_name:
+      type: string
+      description: SKU 名（联查展示）
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 发起时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    updated_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 更新时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+BargainHelpRecord:
+  type: object
+  description: HelpRecord 助力记录（append-only 的价格变化凭据）。
+  required:
+    - id
+    - instance_id
+    - helper_user_id
+    - helper_nickname
+    - helper_avatar_url
+    - cut_amount
+    - price_before
+    - price_after
+    - created_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 助力记录 id
+    instance_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 砍价实例 id
+    helper_user_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 助力者用户 id
+    helper_nickname:
+      type: string
+      description: 助力者昵称（联查展示，可能为空串）
+    helper_avatar_url:
+      type: string
+      description: 助力者头像（联查展示，可能为空串）
+    cut_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 本次实际砍减额（整数分，≤ help_amount）
+    price_before:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 本次助力前价格（整数分）
+    price_after:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 本次助力后价格（整数分，≥ floor_price）
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 助力时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+BargainAdminCreateRequest:
+  type: object
+  description: AdminCreateReq 创建砍价活动请求（后台，需 bargain:create）。
+  properties:
+    name:
+      type: string
+      description: 活动名称（trim 后 1~64 字符）
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 商品 id（必须存在）
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: SKU id（必须存在且属于该商品）
+    start_price:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 原始价（整数分，1~99999999）
+    floor_price:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 目标价/底价（整数分，≥1 且 < start_price）
+    help_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 每次助力的名义砍减额（整数分，≥1）
+    max_help_count:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 单个实例最多被助力次数（≥1，且需足以砍到 floor_price）
+    start_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      x-format: gtime-lenient
+      description: 活动开始时间（必须早于 end_time）；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+    end_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      x-format: gtime-lenient
+      description: 活动结束时间（必须晚于当前时间）；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+BargainAdminCreateResponse:
+  type: object
+  description: AdminCreateRes 创建砍价活动响应。
+  allOf:
+    - $ref: '#/BargainActivity'
+BargainAdminUpdateRequest:
+  type: object
+  description: AdminUpdateReq 编辑砍价活动请求（后台，需 bargain:update）。 product_id/sku_id 不可变更：活动已有实例时改绑商品会让在途砍价指向另一件商品，需另建活动。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 活动 id
+    name:
+      type: string
+      description: 活动名称（trim 后 1~64 字符）
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 商品 id（必须与创建时一致）
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: SKU id（必须与创建时一致）
+    start_price:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 原始价（整数分）
+    floor_price:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 目标价/底价（整数分）
+    help_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 每次助力的名义砍减额（整数分）
+    max_help_count:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 单个实例最多被助力次数
+    start_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      x-format: gtime-lenient
+      description: 活动开始时间；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+    end_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      x-format: gtime-lenient
+      description: 活动结束时间（必须晚于当前时间）；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+BargainAdminUpdateResponse:
+  type: object
+  description: AdminUpdateRes 编辑砍价活动响应。
+  allOf:
+    - $ref: '#/BargainActivity'
+BargainAdminStatusRequest:
+  type: object
+  description: AdminStatusReq 启用/停用砍价活动请求（后台，需 bargain:update；幂等）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 活动 id
+    status:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 目标状态：1=启用、0=停用
+BargainAdminStatusResponse:
+  type: object
+  description: AdminStatusRes 启用/停用砍价活动响应。
+  allOf:
+    - $ref: '#/BargainActivity'
+BargainAdminListRequest:
+  type: object
+  description: AdminListReq 后台砍价活动分页列表请求（只读，需 bargain:list）。
+  properties:
+    page:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 页码，默认 1；<1 返回 400
+    size:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 每页数量，默认 20、上限 100；越界返回 400
+    status:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 状态筛选：1=启用、0=停用；省略=全部
+    product_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 商品 id 精确筛选；<=0 返回 400
+BargainAdminListResponse:
+  type: object
+  description: AdminListRes 后台砍价活动分页列表响应。
+  required:
+    - items
+    - total
+    - page
+    - size
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/BargainActivity'}, {type: "null"}]
+      description: 活动列表（按 id 倒序）
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 总记录数
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量
+BargainAdminDetailRequest:
+  type: object
+  description: AdminDetailReq 后台砍价活动详情请求（只读，需 bargain:view）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 活动 id
+BargainAdminDetailResponse:
+  type: object
+  description: AdminDetailRes 后台砍价活动详情响应。
+  allOf:
+    - $ref: '#/BargainActivity'
+BargainListRequest:
+  type: object
+  description: ListReq 前台可参与砍价活动列表请求（公开，无需 token）。
+  properties:
+    page:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 页码，默认 1；<1 返回 400
+    size:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 每页数量，默认 20、上限 100；越界返回 400
+    product_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 商品 id 精确筛选；<=0 返回 400
+BargainListResponse:
+  type: object
+  description: ListRes 前台可参与砍价活动列表响应。
+  required:
+    - items
+    - total
+    - page
+    - size
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/BargainActivity'}, {type: "null"}]
+      description: 可参与活动列表（启用且在时间窗内，按 id 倒序）
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 总记录数
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量
+BargainDetailRequest:
+  type: object
+  description: DetailReq 前台砍价活动详情请求（公开，无需 token）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 活动 id
+BargainDetailResponse:
+  type: object
+  description: DetailRes 前台砍价活动详情响应。
+  allOf:
+    - $ref: '#/BargainActivity'
+  required:
+    - is_joinable
+  properties:
+    is_joinable:
+      type: boolean
+      description: 当前是否可发起砍价（启用且在 [start_time, end_time) 内）
+BargainStartRequest:
+  type: object
+  description: StartReq 发起砍价请求（前台登录用户，作用于 Principal.UserID）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 活动 id
+BargainStartResponse:
+  type: object
+  description: StartRes 发起砍价响应。
+  allOf:
+    - $ref: '#/BargainInstance'
+BargainMyListRequest:
+  type: object
+  description: MyListReq 查询我的砍价记录请求（前台登录用户）。
+  properties:
+    page:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 页码，默认 1；<1 返回 400
+    size:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 每页数量，默认 20、上限 100；越界返回 400
+BargainMyListResponse:
+  type: object
+  description: MyListRes 查询我的砍价记录响应。
+  required:
+    - items
+    - total
+    - page
+    - size
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/BargainInstance'}, {type: "null"}]
+      description: 我的砍价实例（按 id 倒序）
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 总记录数
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量
+BargainInstanceDetailRequest:
+  type: object
+  description: InstanceDetailReq 查询砍价实例详情请求（前台登录用户；助力者也需要查看分享的实例）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 实例 id
+BargainInstanceDetailResponse:
+  type: object
+  description: InstanceDetailRes 查询砍价实例详情响应。
+  allOf:
+    - $ref: '#/BargainInstance'
+BargainHelpRequest:
+  type: object
+  description: HelpReq 好友助力请求（前台登录用户，作用于 Principal.UserID）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 实例 id
+BargainHelpResponse:
+  type: object
+  description: HelpRes 好友助力响应：返回推进后的实例与本次助力记录。
+  allOf:
+    - $ref: '#/BargainInstance'
+  required:
+    - help
+  properties:
+    help:
+      oneOf: [{$ref: '#/BargainHelpRecord'}, {type: "null"}]
+      description: 本次助力记录
+BargainHelpsRequest:
+  type: object
+  description: HelpsReq 查询砍价实例助力记录请求（前台登录用户）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 实例 id
+BargainHelpsResponse:
+  type: object
+  description: HelpsRes 查询砍价助力记录响应。
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/BargainHelpRecord'}, {type: "null"}]
+      description: 助力记录（按 id 倒序）
+BargainAbandonRequest:
+  type: object
+  description: AbandonReq 放弃砍价请求（前台登录用户，仅实例发起者、仅进行中）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 实例 id
+BargainAbandonResponse:
+  type: object
+  description: AbandonRes 放弃砍价响应。
+  allOf:
+    - $ref: '#/BargainInstance'
 CartItem:
   type: object
   description: CartItem 购物车条目（查询与写接口复用）。异常状态由查询时动态计算： available / unavailable_reason 标识「SKU 不存在 / SKU 禁用 / 商品下架」， insufficient 标识库存不足，price_changed 标识价格相对加购快照发生变化。
@@ -2840,6 +3565,24 @@ DistributionAdminCommissionStatsResponse:
       x-go-type: int64
       x-unit: cent
       description: 佣金总金额（整数分）
+DistributionAdminSettleCommissionRequest:
+  type: object
+  description: AdminSettleCommissionReq 后台人工结算佣金请求（持 distribution:settle）。 语义边界：只把佣金状态从「待结算(10)」推进到「已结算(20)」并写 settled_at， **不代表已完成真实资金转账**；V1 不做提现、打款与对账。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 佣金记录 id
+DistributionAdminSettleCommissionResponse:
+  type: object
+  description: AdminSettleCommissionRes 后台人工结算响应（返回结算后的佣金记录）。
+  allOf:
+    - $ref: '#/DistributionCommission'
 FavoriteItem:
   type: object
   description: FavoriteItem 收藏条目（列表与添加响应复用）。 商品信息（名称/主图/价格）不落库，查询时实时联查 products； 商品被下架/删除后收藏保留为软引用，available/unavailable_reason 动态标识其可用性。
@@ -3478,6 +4221,356 @@ FlashSaleListRequestAuditsResponse:
       items:
         oneOf: [{$ref: '#/FlashSaleRequestAudit'}, {type: "null"}]
       description: 审计记录列表（按时间升序）
+FreightTemplate:
+  type: object
+  description: Template 运费模板（后台列表/详情/写接口响应）。
+  required:
+    - id
+    - name
+    - is_free
+    - free_threshold
+    - status
+    - remark
+    - created_at
+    - updated_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 模板 id
+    name:
+      type: string
+      description: 模板名称（全局唯一）
+    is_free:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 1=模板级无条件包邮（跳过区域规则）；0=按区域规则计费
+    free_threshold:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 满额免邮阈值（整数分，0=不启用）
+    status:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 1 启用 / 0 停用；停用模板不可用于计价
+    remark:
+      type: string
+      description: 备注
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    updated_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 更新时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+FreightRule:
+  type: object
+  description: Rule 区域运费规则（按件计费）。
+  required:
+    - id
+    - template_id
+    - region_id
+    - first_quantity
+    - first_fee
+    - additional_quantity
+    - additional_fee
+    - free_threshold
+    - created_at
+    - updated_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 规则 id
+    template_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 所属模板 id
+    region_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 地区 id（regions.id，省/市/区任一层级）
+    first_quantity:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 首件数量（>=1）
+    first_fee:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 首件费用（整数分）
+    additional_quantity:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 续件数量（>=1）
+    additional_fee:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 续件费用（整数分）
+    free_threshold:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 该区域满额免邮阈值（整数分，0=继承模板）
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    updated_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 更新时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+FreightRuleInput:
+  type: object
+  description: RuleInput 区域规则写入入参（整体替换时使用）。
+  required:
+    - region_id
+    - first_quantity
+    - first_fee
+    - additional_quantity
+    - additional_fee
+    - free_threshold
+  properties:
+    region_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-go-validate: required
+      description: 地区 id（必须存在于 regions）
+    first_quantity:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-go-validate: required
+      description: 首件数量，>=1
+    first_fee:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 首件费用（整数分，>=0）
+    additional_quantity:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-go-validate: required
+      description: 续件数量，>=1
+    additional_fee:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 续件费用（整数分，>=0）
+    free_threshold:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 该区域满额免邮阈值（整数分，0=继承模板）
+FreightAdminCreateRequest:
+  type: object
+  description: AdminCreateReq 创建运费模板（后台，持 freight:create）。
+  required:
+    - name
+  properties:
+    name:
+      type: string
+      x-go-validate: required
+      description: 模板名称，1-64 字符，全局唯一
+    is_free:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 1=无条件包邮；0 或缺省=按区域规则计费
+    free_threshold:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 满额免邮阈值（整数分，0=不启用）
+    remark:
+      type: string
+      description: 备注，<=255 字符
+FreightAdminCreateResponse:
+  type: object
+  description: AdminCreateRes 创建运费模板响应。
+  allOf:
+    - $ref: '#/FreightTemplate'
+FreightAdminListRequest:
+  type: object
+  description: AdminListReq 查询运费模板列表（后台，持 freight:list）。
+  properties: {}
+  additionalProperties: false
+FreightAdminListResponse:
+  type: object
+  description: AdminListRes 运费模板列表响应（按 id 倒序）。
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/FreightTemplate'}, {type: "null"}]
+      description: 模板列表
+FreightAdminDetailRequest:
+  type: object
+  description: AdminDetailReq 查询运费模板详情（后台，持 freight:view）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 模板 id
+FreightAdminDetailResponse:
+  type: object
+  description: AdminDetailRes 运费模板详情响应。
+  allOf:
+    - $ref: '#/FreightTemplate'
+  required:
+    - rules
+  properties:
+    rules:
+      type: array
+      items:
+        oneOf: [{$ref: '#/FreightRule'}, {type: "null"}]
+      description: 区域规则列表（按 region_id 升序）
+FreightAdminUpdateRequest:
+  type: object
+  description: AdminUpdateReq 更新运费模板基础信息（后台，持 freight:update）。 区域规则不在此接口更新，见 AdminReplaceRulesReq。
+  required:
+    - id
+    - name
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 模板 id
+    name:
+      type: string
+      x-go-validate: required
+      description: 模板名称，1-64 字符，全局唯一
+    is_free:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 1=无条件包邮；0=按区域规则计费；缺省保持原值
+    free_threshold:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 满额免邮阈值（整数分，0=不启用）
+    remark:
+      type: string
+      description: 备注，<=255 字符
+FreightAdminUpdateResponse:
+  type: object
+  description: AdminUpdateRes 更新运费模板响应。
+  allOf:
+    - $ref: '#/FreightTemplate'
+FreightAdminUpdateStatusRequest:
+  type: object
+  description: AdminUpdateStatusReq 启用/停用运费模板（后台，持 freight:update）。
+  required:
+    - id
+    - status
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 模板 id
+    status:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      x-go-validate: required
+      description: 1=启用、0=停用
+FreightAdminUpdateStatusResponse:
+  type: object
+  description: AdminUpdateStatusRes 启用/停用响应。
+  allOf:
+    - $ref: '#/FreightTemplate'
+FreightAdminListRulesRequest:
+  type: object
+  description: AdminListRulesReq 查询模板的区域规则（后台，持 freight:view）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 模板 id
+FreightAdminListRulesResponse:
+  type: object
+  description: AdminListRulesRes 区域规则列表响应。
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/FreightRule'}, {type: "null"}]
+      description: 区域规则列表
+FreightAdminReplaceRulesRequest:
+  type: object
+  description: AdminReplaceRulesReq 整体替换模板的区域规则（后台，持 freight:update）。 采用整体替换而非逐条增删，保证「同一模板同一区域至多一条规则」的语义在单事务内成立。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 模板 id
+    rules:
+      type: array
+      items:
+        oneOf: [{$ref: '#/FreightRuleInput'}, {type: "null"}]
+      description: 区域规则全量列表；空数组表示清空全部规则
+FreightAdminReplaceRulesResponse:
+  type: object
+  description: AdminReplaceRulesRes 整体替换响应。
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/FreightRule'}, {type: "null"}]
+      description: 替换后的区域规则列表
 HealthLivenessRequest:
   type: object
   description: LivenessReq is the request of the liveness probe.
@@ -4060,6 +5153,380 @@ LikeCountResponse:
       format: int64
       x-go-type: int
       description: 该商品点赞数（实时 COUNT 聚合）
+MemberLevel:
+  type: object
+  description: MemberLevel 是会员等级配置（前台只读列表与后台维护复用）。
+  required:
+    - id
+    - level_no
+    - name
+    - growth_threshold
+    - discount_rate_bp
+    - status
+    - created_at
+    - updated_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 等级 id
+    level_no:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 等级序号（1、2、3…，全局唯一，须与门槛同向递增）
+    name:
+      type: string
+      description: 等级名称
+    growth_threshold:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 达到该累计成长值可升入本级（全局唯一，整数成长值）
+    discount_rate_bp:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 等级折扣率万分比：10000=原价、9000=9 折、8800=8.8 折
+    status:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 状态：1=启用、0=停用
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    updated_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 更新时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+Membership:
+  type: object
+  description: Membership 是用户当前会员信息（含等级权益与下一等级进度）。
+  required:
+    - user_id
+    - level_id
+    - level_no
+    - level_name
+    - growth_value
+    - discount_rate_bp
+    - upgraded_at
+    - next_level_id
+    - next_level_name
+    - next_level_growth_threshold
+  properties:
+    user_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 用户 id
+    level_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 当前等级 id；用户无会员档案时为 null（视为成长值 0 解析出的等级）
+    level_no:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 当前等级序号；无适用等级时为 null
+    level_name:
+      type: string
+      description: 当前等级名称；无适用等级时为空串
+    growth_value:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 当前累计成长值（整数，非负）
+    discount_rate_bp:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前生效折扣率万分比；无适用等级时为 10000（不打折）
+    upgraded_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 最近一次等级变更时间；null 表示尚未升级过；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    next_level_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 下一等级 id；已是最高等级或未配置更高等级时为 null
+    next_level_name:
+      type: string
+      description: 下一等级名称；无更高等级时为空串
+    next_level_growth_threshold:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 下一等级成长值门槛；无更高等级时为 null
+MemberGrowthLog:
+  type: object
+  description: GrowthLog 是成长值流水（append-only，按时间倒序返回）。
+  required:
+    - id
+    - change_amount
+    - growth_before
+    - growth_after
+    - change_type
+    - biz_type
+    - biz_id
+    - remark
+    - created_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 流水 id
+    change_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 带符号变动值：正=增加、负=扣减；单位：分（整数）
+    growth_before:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 变动前成长值
+    growth_after:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 变动后成长值（恒 ≥ 0）
+    change_type:
+      type: string
+      description: 语义类型：order_reward/refund_deduct/admin_adjust
+    biz_type:
+      type: string
+      description: 关联业务类型：order/refund/manual
+    biz_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 关联业务 id（订单 id 或退款单 id）；手动调整时为 null
+    remark:
+      type: string
+      description: 备注
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 发生时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+MemberLevelsRequest:
+  type: object
+  description: LevelsReq 查询会员等级配置（登录用户可读，仅返回启用等级）。
+  properties: {}
+  additionalProperties: false
+MemberLevelsResponse:
+  type: object
+  description: LevelsRes 会员等级配置列表响应（按 level_no 升序）。
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/MemberLevel'}, {type: "null"}]
+      description: 启用的等级配置，按 level_no 升序
+MemberMyRequest:
+  type: object
+  description: MyReq 查询当前用户会员信息与权益（作用于 Principal.UserID）。
+  properties: {}
+  additionalProperties: false
+MemberMyResponse:
+  type: object
+  description: MyRes 当前用户会员信息响应。
+  allOf:
+    - $ref: '#/Membership'
+MemberGrowthLogsRequest:
+  type: object
+  description: GrowthLogsReq 查询本人成长值流水（分页，按时间倒序）。
+  properties:
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 页码，默认 1；<1 按 1 处理
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量，默认 20，最大 100；越界按上限截断
+MemberGrowthLogsResponse:
+  type: object
+  description: GrowthLogsRes 成长值流水分页响应。
+  required:
+    - items
+    - total
+    - page
+    - size
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/MemberGrowthLog'}, {type: "null"}]
+      description: 成长值流水（按 id 倒序）
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 总记录数
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量
+MemberAdminListLevelsRequest:
+  type: object
+  description: AdminListLevelsReq 后台查询全部会员等级配置（含停用，持 member:list）。
+  properties: {}
+  additionalProperties: false
+MemberAdminListLevelsResponse:
+  type: object
+  description: AdminListLevelsRes 后台会员等级配置列表响应（按 level_no 升序，含停用）。
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/MemberLevel'}, {type: "null"}]
+      description: 全部等级配置，按 level_no 升序
+MemberAdminCreateLevelRequest:
+  type: object
+  description: AdminCreateLevelReq 后台创建会员等级（持 member:create）。 字段校验在 Logic 层完成：任一项非法返回 20002，序号/门槛重复返回 20004， 新增后若破坏「level_no 与 growth_threshold 同向递增」也返回 20002。
+  properties:
+    level_no:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 等级序号，必须为正整数且全局唯一
+    name:
+      type: string
+      description: 等级名称，trim 后 1~64 字符
+    growth_threshold:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 成长值门槛，必须 ≥0 且全局唯一
+    discount_rate_bp:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 折扣率万分比，取值 1~10000（10000=原价）
+    status:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 状态：1=启用、0=停用；缺省按 1 处理
+MemberAdminCreateLevelResponse:
+  type: object
+  description: AdminCreateLevelRes 创建会员等级响应。
+  allOf:
+    - $ref: '#/MemberLevel'
+MemberAdminUpdateLevelRequest:
+  type: object
+  description: AdminUpdateLevelReq 后台更新会员等级（持 member:update，全量覆盖式更新）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 等级 id
+    level_no:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 等级序号，必须为正整数且全局唯一
+    name:
+      type: string
+      description: 等级名称，trim 后 1~64 字符
+    growth_threshold:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 成长值门槛，必须 ≥0 且全局唯一
+    discount_rate_bp:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 折扣率万分比，取值 1~10000
+    status:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 状态：1=启用、0=停用
+MemberAdminUpdateLevelResponse:
+  type: object
+  description: AdminUpdateLevelRes 更新会员等级响应。
+  allOf:
+    - $ref: '#/MemberLevel'
+MemberAdminDeleteLevelRequest:
+  type: object
+  description: AdminDeleteLevelReq 后台删除会员等级（持 member:delete；被用户会员记录引用时返回 20003）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 等级 id
+MemberAdminDeleteLevelResponse:
+  type: object
+  description: AdminDeleteLevelRes 删除会员等级响应（无业务字段）。
+  properties: {}
+  additionalProperties: false
+MemberAdminMemberRequest:
+  type: object
+  description: AdminMemberReq 后台查询指定用户的会员信息（持 member:view）。
+  required:
+    - user_id
+  properties:
+    user_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 用户 id
+MemberAdminMemberResponse:
+  type: object
+  description: AdminMemberRes 用户会员信息响应（无会员档案时 level 字段为 null、成长值为 0）。
+  allOf:
+    - $ref: '#/Membership'
+  required:
+    - has_record
+  properties:
+    has_record:
+      type: boolean
+      description: 该用户是否已有 user_memberships 档案；false 时按成长值 0 解析等级
 Order:
   type: object
   description: Order 订单结构（查询与写接口复用）。
@@ -4071,6 +5538,9 @@ Order:
     - total_amount
     - original_amount
     - discount_amount
+    - member_discount_amount
+    - shipping_fee
+    - pay_type
     - user_coupon_id
     - idempotency_key
     - recipient_name
@@ -4125,7 +5595,7 @@ Order:
       format: int64
       x-go-type: int64
       x-unit: cent
-      description: 应付金额（整数分，快照 = original_amount - discount_amount）
+      description: 应付金额（整数分，快照 = original_amount - discount_amount - member_discount_amount）
     original_amount:
       type: integer
       format: int64
@@ -4137,7 +5607,21 @@ Order:
       format: int64
       x-go-type: int64
       x-unit: cent
-      description: 优惠金额（整数分，快照，无券为 0）
+      description: 优惠券优惠金额（整数分，快照，无券为 0）
+    member_discount_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 会员等级折扣金额（整数分，快照，无会员权益/无折扣为 0；不占用 discount_amount 的券语义）
+    shipping_fee:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 运费（整数分，快照；未绑定运费模板的商品为 0）
+    pay_type:
+      type: string
+      description: 支付方式：mock（默认）/balance（钱包余额）；未支付为空串
     user_coupon_id:
       type: [integer, "null"]
       format: int64
@@ -4398,7 +5882,7 @@ OrderDetailResponse:
     - $ref: '#/Order'
 OrderPayRequest:
   type: object
-  description: PayReq 支付请求（Mock 支付，仅本人）。
+  description: PayReq 支付请求（仅本人）。 pay_type 为空视为 mock；balance 走钱包余额渠道，余额不足返回 22002 且订单状态不变。
   required:
     - id
   properties:
@@ -4409,6 +5893,142 @@ OrderPayRequest:
       x-in: path
       x-go-validate: required
       description: 订单 id
+    pay_type:
+      type: string
+      description: 支付方式：mock（默认）/balance；其它值返回 1001
+OrderQuoteRequest:
+  type: object
+  description: QuoteReq 订单算价预览请求（不接受客户端金额）。 预览金额不是最终可信金额：创建订单时会在事务内重新读取 SKU 权威价格、会员折扣与运费并复核。
+  required:
+    - source
+    - address_id
+  properties:
+    source:
+      type: string
+      x-go-validate: required
+      description: 来源：cart/direct
+    address_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-go-validate: required
+      description: 收货地址 id（必须属于当前用户，决定运费）
+    sku_code:
+      type: string
+      description: 直接购买 SKU 编码（source=direct 推荐）
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 直接购买 SKU id（source=direct 兼容字段）
+    quantity:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 直接购买数量（source=direct 必填）
+    coupon_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 可选使用的用户券 id（只读预览，不占用/不核销）
+OrderQuoteItem:
+  type: object
+  description: QuoteItem 算价明细行（服务端权威价格快照，仅用于展示）。
+  required:
+    - sku_id
+    - sku_code
+    - product_id
+    - name
+    - spec_text
+    - price
+    - quantity
+    - amount
+  properties:
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: SKU id
+    sku_code:
+      type: string
+      description: SKU 编码
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 商品 id
+    name:
+      type: string
+      description: SKU 名称
+    spec_text:
+      type: string
+      description: 规格文本
+    price:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 服务端成交价（整数分）
+    quantity:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 数量
+    amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 行金额 = price × quantity（整数分）
+OrderQuoteResponse:
+  type: object
+  description: QuoteRes 订单算价预览响应（六槽位与守恒关系）。
+  required:
+    - original_amount
+    - coupon_discount
+    - member_discount
+    - points_discount
+    - shipping_fee
+    - payable_amount
+    - items
+  properties:
+    original_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 商品原始金额（整数分）
+    coupon_discount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 优惠券折扣（整数分）
+    member_discount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 会员折扣（整数分）
+    points_discount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 积分抵扣（整数分，当前恒 0）
+    shipping_fee:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 运费（整数分）
+    payable_amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 应付金额（整数分）
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/OrderQuoteItem'}, {type: "null"}]
+      description: 算价明细（服务端权威价格）
 OrderPayResponse:
   type: object
   description: PayRes 支付响应。
@@ -4668,6 +6288,7 @@ Product:
     - main_image
     - detail
     - status
+    - freight_template_id
     - view_count
     - images
     - created_at
@@ -4709,6 +6330,11 @@ Product:
         on_shelf: 已上架
         off_shelf: 已下架
       description: 状态：draft/on_shelf/off_shelf
+    freight_template_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 运费模板 id（null=未绑定，零运费兼容）
     view_count:
       type: integer
       format: int64
@@ -5009,6 +6635,11 @@ ProductCreateRequest:
       items:
         type: string
       description: 图片 URL 列表，可选
+    freight_template_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 运费模板 id（可选，必须存在且启用；缺省=不绑定）
 ProductCreateResponse:
   type: object
   description: CreateRes 创建商品响应（status 恒为 draft）。
@@ -5056,6 +6687,11 @@ ProductUpdateRequest:
       items:
         type: string
       description: 图片 URL 列表；提供则全量替换，未提供则保留
+    freight_template_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 运费模板 id：省略不改、0=解绑、>0 必须存在且启用
 ProductUpdateResponse:
   type: object
   description: UpdateRes 更新商品响应。
@@ -6872,6 +8508,205 @@ UploadTokenResponse:
       format: int64
       x-go-type: int64
       description: 凭证过期时间（unix 秒）
+WalletAccountRequest:
+  type: object
+  description: AccountReq 查询本人钱包余额。
+  properties: {}
+  additionalProperties: false
+WalletAccountResponse:
+  type: object
+  description: AccountRes 钱包余额响应（不含内部账户 id 与归属用户 id）。
+  required:
+    - balance
+    - updated_at
+  properties:
+    balance:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 可用余额（整数分）
+    updated_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 账户记录最后更新时间（初始化或余额变更触发）；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+WalletTransaction:
+  type: object
+  description: Transaction 资金流水（append-only，只读）。
+  required:
+    - id
+    - tx_type
+    - direction
+    - amount
+    - balance_before
+    - balance_after
+    - biz_type
+    - biz_id
+    - remark
+    - created_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 流水 id
+    tx_type:
+      type: string
+      description: 交易类型：recharge/order_pay/order_refund
+    direction:
+      type: string
+      description: 交易方向：credit=入账、debit=出账
+    amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 交易金额（整数分，恒为正数）
+    balance_before:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 交易前余额（整数分）
+    balance_after:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 交易后余额（整数分）
+    biz_type:
+      type: string
+      description: 业务类型：recharge/order/refund
+    biz_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 业务关联 id（充值单/订单/退款申请 id，可空）
+    remark:
+      type: string
+      description: 备注
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+WalletTransactionListRequest:
+  type: object
+  description: TransactionListReq 查询本人资金流水请求（按创建时间倒序）。
+  properties:
+    page:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 页码，默认 1；<1 返回 400
+    size:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 每页数量，默认 20、上限 100；越界返回 400
+    tx_type:
+      type: string
+      description: 按交易类型筛选：recharge/order_pay/order_refund；缺省为不过滤
+WalletTransactionListResponse:
+  type: object
+  description: TransactionListRes 资金流水分页响应。
+  required:
+    - items
+    - total
+    - page
+    - size
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/WalletTransaction'}, {type: "null"}]
+      description: 资金流水列表（按 id 倒序，仅本人）
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 总记录数
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量
+WalletRechargeRequest:
+  type: object
+  description: RechargeReq Mock 充值请求（仅登录用户，作用于 Principal.UserID）。 IdempotencyKey 是充值幂等键：同一用户重复提交同一键只会产生一笔充值单、只入账一次； 同键不同金额返回 21008（幂等冲突），不会被当作成功。
+  required:
+    - amount
+    - idempotency_key
+  properties:
+    amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      x-go-validate: required
+      description: 充值金额（整数分，1 ~ 1000000）
+    idempotency_key:
+      type: string
+      x-go-validate: required
+      description: 充值幂等键（同键同金额幂等，同键不同金额 21008）
+WalletRechargeOrder:
+  type: object
+  description: RechargeOrder Mock 充值订单（出参）。
+  required:
+    - id
+    - order_no
+    - amount
+    - status
+    - pay_type
+    - paid_at
+    - created_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 充值单 id
+    order_no:
+      type: string
+      description: 充值单号（全局唯一）
+    amount:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 充值金额（整数分）
+    status:
+      type: string
+      description: 状态：pending/succeeded/cancelled/failed
+    pay_type:
+      type: string
+      description: 支付方式（Mock 固定 mock；未支付为空串）
+    paid_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 支付完成时间（仅 succeeded 有值）；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+WalletRechargeResponse:
+  type: object
+  description: RechargeRes Mock 充值响应。
+  allOf:
+    - $ref: '#/WalletRechargeOrder'
 Success:
   type: object
   description: 统一成功响应包装：{code:0, message:"OK", data:<业务数据>}。data 的具体 Schema 由各 operation 的 allOf 覆盖；data 为 null 时表示该操作无返回体。

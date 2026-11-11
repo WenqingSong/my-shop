@@ -1,0 +1,198 @@
+# 本文件是 openapi/surgecart.openapi.yaml 的分域视图，由 tools/openapi-gen 生成，禁止手工编辑。
+# OpenAPI 3.1 的 Path Item 允许 $ref，但本生成器刻意把 Path Item 内联进主文件：
+#   1) 单一入口自洽：主文件不依赖分域文件即可被 Spectral / Redocly 等工具完整解析，避免跨文件 Path Item 解析差异；
+#   2) 门禁可靠：check 的路径/参数/operation 结构与分域名结构化比对，比跨文件 $ref 解析更容易定位差异；
+#   3) 分域文件只承担评审视图职责，不参与运行时或工具链解析。
+# 因此本文件用于分域评审与主/分域一致性校验，不是主文件的引用目标。
+/wallet:
+  get:
+    tags:
+      - 钱包
+    summary: 查询钱包余额
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: walletAccount
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: wallet.Account
+    x-source: routes_frontend.go
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/WalletAccountResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 22001
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/wallet/transactions:
+  get:
+    tags:
+      - 钱包
+    summary: 查询钱包资金流水
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: walletTransactions
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: wallet.Transactions
+    x-source: routes_frontend.go
+    parameters:
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int
+        description: 页码，默认 1；<1 返回 400
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          x-go-type: int
+        description: 每页数量，默认 20、上限 100；越界返回 400
+      - name: tx_type
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 按交易类型筛选：recharge/order_pay/order_refund；缺省为不过滤
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/WalletTransactionListResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/wallet/recharges:
+  post:
+    tags:
+      - 钱包
+    summary: Mock 充值
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: walletRecharge
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: wallet.Recharge
+    x-source: routes_frontend.go
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              amount:
+                type: integer
+                format: int64
+                x-go-type: int64
+                x-unit: cent
+                x-go-validate: required
+                description: 充值金额（整数分，1 ~ 1000000）
+              idempotency_key:
+                type: string
+                x-go-validate: required
+                description: 充值幂等键（同键同金额幂等，同键不同金额 21008）
+            required:
+              - amount
+              - idempotency_key
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    x-known-issue:
+      - id: B1-02-D1
+        summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
+        actual_http_status: 500
+        actual_business_code: 51
+        remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/WalletRechargeResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 22001
+          - 22002
+          - 22003
+          - 22004
+          - 22005
+          - 22008
+          - 22009
+          - 22010
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'

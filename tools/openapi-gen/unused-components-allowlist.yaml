@@ -106,15 +106,21 @@ groups:
       - DistributionListCommissionsRequest
       - DistributionListSubordinatesRequest
       - DistributionMyInfoRequest
-      # B1-04-08 会员：8 条 API 的完整请求 DTO（同上，按位置内联生成）。
-      - MemberAdminMemberRequest
-      - MemberAdminCreateLevelRequest
-      - MemberAdminDeleteLevelRequest
-      - MemberAdminListLevelsRequest
-      - MemberAdminUpdateLevelRequest
-      - MemberGrowthLogsRequest
-      - MemberLevelsRequest
-      - MemberMyRequest
+      # B1-04-03 运费模板：7 条 API 的完整请求 DTO（同上）。
+      - FreightAdminCreateRequest
+      - FreightAdminDetailRequest
+      - FreightAdminListRequest
+      - FreightAdminListRulesRequest
+      - FreightAdminReplaceRulesRequest
+      - FreightAdminUpdateRequest
+      - FreightAdminUpdateStatusRequest
+      # B1-04-04 钱包：3 条 API 的完整请求 DTO（同上）。
+      - WalletAccountRequest
+      - WalletRechargeRequest
+      - WalletTransactionListRequest
+      # B1-04 集成：订单算价预览与佣金人工结算的完整请求 DTO（同上）。
+      - OrderQuoteRequest
+      - DistributionAdminSettleCommissionRequest
       - FavoriteAddRequest
       - FavoriteCheckRequest
       - FavoriteListRequest

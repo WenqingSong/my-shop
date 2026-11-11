@@ -83,8 +83,9 @@ func TestParseDTOsCoversAllAPIPackages(t *testing.T) {
 	if product.SchemaName != "Product" {
 		t.Errorf("product.Product 的 Schema 名 = %q", product.SchemaName)
 	}
-	if len(product.Fields) != 12 {
-		t.Errorf("Product 字段数 = %d, want 12", len(product.Fields))
+	// 12 个既有字段 + B1-04-03 新增的 freight_template_id（商品侧运费模板绑定入口）。
+	if len(product.Fields) != 13 {
+		t.Errorf("Product 字段数 = %d, want 13", len(product.Fields))
 	}
 
 	var createdAt, price, status *Field
@@ -231,8 +232,8 @@ func TestParseRouteFilesAndControllers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseRouteFiles: %v", err)
 	}
-	if len(routes) != 182 {
-		t.Errorf("routes_*.go 注册路由数 = %d, want 182（184 减去自动绑定的 2 条 health）", len(routes))
+	if len(routes) != 193 {
+		t.Errorf("routes_*.go 注册路由数 = %d, want 193（195 减去自动绑定的 2 条 health）", len(routes))
 	}
 	cms, err := parseControllers(root)
 	if err != nil {

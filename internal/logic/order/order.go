@@ -27,8 +27,28 @@ import (
 	skuv1 "cnb.cool/go-cloud-devops/my-shop/api/sku/v1"
 	"cnb.cool/go-cloud-devops/my-shop/internal/codes"
 	"cnb.cool/go-cloud-devops/my-shop/internal/config"
+	"cnb.cool/go-cloud-devops/my-shop/internal/logic/pricing"
 	"cnb.cool/go-cloud-devops/my-shop/internal/logx"
 	"cnb.cool/go-cloud-devops/my-shop/internal/service"
+)
+
+// 订单状态流水枚举（order_status_logs，见 docs/design/order.md §2.4）。
+const (
+	changeTypeCreate        = "create"
+	changeTypePay           = "pay"
+	changeTypeCancel        = "cancel"
+	changeTypeTimeoutCancel = "timeout_cancel"
+	changeTypeShip          = "ship"
+	changeTypeReceive       = "receive"
+	changeTypeComplete      = "complete"
+	changeTypeRefund        = "refund"
+)
+
+// 状态流水操作者类型（1=user、2=admin、3=system）。
+const (
+	operatorTypeUser   = 1
+	operatorTypeAdmin  = 2
+	operatorTypeSystem = 3
 )
 
 // defaultPayTimeoutSeconds 是 order.pay_timeout 的代码默认值（秒）。
@@ -84,6 +104,8 @@ type orderRow struct {
 	OriginalAmount       int64       `json:"original_amount"`
 	DiscountAmount       int64       `json:"discount_amount"`
 	MemberDiscountAmount int64       `json:"member_discount_amount"`
+	ShippingFee          int64       `json:"shipping_fee"`
+	PayType              string      `json:"pay_type"`
 	UserCouponId         *int64      `json:"user_coupon_id"`
 	IdempotencyKey       string      `json:"idempotency_key"`
 	RequestHash          string      `json:"request_hash"`
@@ -134,6 +156,18 @@ type lineItem struct {
 	ProductMainImage string
 	Price            int64
 	OriginalPrice    int64
+	// FreightTemplateID 是商品绑定的运费模板 id（nil=未绑定，零运费兼容）。
+	FreightTemplateID *int64
+}
+
+// orderAmounts 是订单六槽位金额（整数分），一律由 pricing.Quote 产出。
+type orderAmounts struct {
+	OriginalAmount int64
+	CouponDiscount int64
+	MemberDiscount int64
+	PointsDiscount int64
+	ShippingFee    int64
+	PayableAmount  int64
 }
 
 // duplicateKeyErr 表示订单写入命中唯一约束（携带键名），由 Create 分流幂等/撞号重试。
@@ -141,7 +175,10 @@ type duplicateKeyErr struct{ key string }
 
 func (e *duplicateKeyErr) Error() string { return "订单唯一约束冲突: " + e.key }
 
-// Create 创建订单：服务端定价 → 组装快照 → 单事务「写订单 + 写订单项 + 扣库存（+ 清已购购物车条目）」。
+// Create 创建订单：服务端定价 → 六槽位计价预览 → 单事务「重读权威数据复核金额 + 写订单 + 订单项
+// + 扣库存 + 预占券 + 清已购购物车条目 + 状态流水」。
+//
+// 预览金额不是最终可信金额：事务内会重新锁定读取 skus 权威价格、重算券/会员/运费，并以复核结果落库。
 // 幂等键命中（uk_user_idempotency）时回滚并读回既有订单：同请求指纹返回既有订单、否则 9006。
 func (s *sOrder) Create(ctx context.Context, userID int64, req *v1.CreateReq) (*v1.CreateRes, error) {
 	source := strings.TrimSpace(req.Source)
@@ -169,40 +206,19 @@ func (s *sOrder) Create(ctx context.Context, userID int64, req *v1.CreateReq) (*
 		return nil, err
 	}
 
-	// 优惠前金额 = Σ 下单时 skus.price×quantity（服务端定价，不信任客户端金额）。
-	originalAmount := int64(0)
-	for _, l := range lines {
-		originalAmount += l.Price * l.Quantity
-	}
-
-	// 用券：服务端校验归属/有效期/状态/门槛并计算优惠金额；无券时优惠为 0。
-	discountAmount := int64(0)
-	var couponID *int64
-	if req.CouponId > 0 {
-		d, err := service.Coupon().GetDiscount(ctx, userID, req.CouponId, originalAmount)
-		if err != nil {
-			return nil, err
-		}
-		discountAmount = d
-		cid := req.CouponId
-		couponID = &cid
-	}
-
-	// 会员折扣：按用户当前等级折扣率作用于商品金额，结果写入独立快照列 member_discount_amount，
-	// 不改写 discount_amount 的券语义（见 docs/design/pricing.md §5、docs/design/order.md §2.3）。
-	memberDiscountAmount, err := resolveMemberDiscount(ctx, userID, originalAmount, discountAmount)
-	if err != nil {
+	// 预检：提前暴露券不可用/运费无法计算等问题；最终金额由事务内复核结果决定。
+	if _, err := s.computeAmounts(ctx, userID, lines, req.CouponId, address.RegionId); err != nil {
 		return nil, err
 	}
-	totalAmount := originalAmount - discountAmount - memberDiscountAmount
 
-	hash := requestHash(source, req.AddressId, req.CouponId, lines)
+	// 幂等指纹覆盖来源、地址快照（地址内容可能被修改）、券与行项目，避免「同键不同请求」被误判幂等。
+	hash := requestHash(source, address.Address, req.CouponId, lines)
 
 	var createdID int64
 	for attempt := 0; attempt < maxOrderNoRetry; attempt++ {
 		orderNo := generateOrderNo()
 		createdID, err = s.insertOrder(ctx, userID, source, req.AddressId, idempotencyKey, hash,
-			originalAmount, discountAmount, memberDiscountAmount, totalAmount, couponID, orderNo, &address.Address, lines)
+			req.CouponId, orderNo, &address.Address, lines)
 		if err == nil {
 			break
 		}
@@ -235,6 +251,144 @@ func (s *sOrder) Create(ctx context.Context, userID int64, req *v1.CreateReq) (*
 		"total_amount": o.TotalAmount,
 	})
 	return &v1.CreateRes{Order: *o}, nil
+}
+
+// Quote 订单算价预览（只读）：按服务端权威价格、当前会员折扣、券与运费计算六槽位金额。
+//
+// 边界：不占用/不核销券、不写订单、不扣库存；返回金额仅用于前端展示，
+// 创建订单时会在事务内重新读取权威数据并复核（预览金额不等于最终可信金额）。
+func (s *sOrder) Quote(ctx context.Context, userID int64, req *v1.QuoteReq) (*v1.QuoteRes, error) {
+	if req == nil {
+		return nil, codes.New(codes.CodeInvalidArgument)
+	}
+	source := strings.TrimSpace(req.Source)
+	if source != v1.SourceCart && source != v1.SourceDirect {
+		return nil, codes.New(codes.CodeInvalidArgument)
+	}
+	if req.AddressId <= 0 || req.CouponId < 0 {
+		return nil, codes.New(codes.CodeInvalidArgument)
+	}
+	address, err := service.Address().Detail(ctx, userID, req.AddressId)
+	if err != nil {
+		return nil, err
+	}
+	lines, err := s.buildLines(ctx, source, userID, &v1.CreateReq{
+		Source:   source,
+		SkuCode:  req.SkuCode,
+		SkuId:    req.SkuId,
+		Quantity: req.Quantity,
+	})
+	if err != nil {
+		return nil, err
+	}
+	amounts, err := s.computeAmounts(ctx, userID, lines, req.CouponId, address.RegionId)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]*v1.QuoteItem, 0, len(lines))
+	for _, l := range lines {
+		items = append(items, &v1.QuoteItem{
+			SkuId:     l.SkuID,
+			SkuCode:   l.SkuCode,
+			ProductId: l.ProductID,
+			Name:      l.SkuName,
+			SpecText:  l.SpecText,
+			Price:     l.Price,
+			Quantity:  l.Quantity,
+			Amount:    l.Price * l.Quantity,
+		})
+	}
+	return &v1.QuoteRes{
+		OriginalAmount: amounts.OriginalAmount,
+		CouponDiscount: amounts.CouponDiscount,
+		MemberDiscount: amounts.MemberDiscount,
+		PointsDiscount: amounts.PointsDiscount,
+		ShippingFee:    amounts.ShippingFee,
+		PayableAmount:  amounts.PayableAmount,
+		Items:          items,
+	}, nil
+}
+
+// computeAmounts 计算六槽位金额：商品金额 → 券 → 会员折扣 → 积分（恒 0）→ 运费。
+//
+// 金额公式只在 pricing.Quote 中实现，本方法只负责收集各项输入；
+// 任一输入非法（如券不可用、地区缺失导致运费无法计算）都会整体失败，不做静默降级。
+func (s *sOrder) computeAmounts(ctx context.Context, userID int64, lines []lineItem, couponID int64, regionID *int64) (*orderAmounts, error) {
+	original := int64(0)
+	for _, l := range lines {
+		original += l.Price * l.Quantity
+	}
+
+	couponDiscount := int64(0)
+	if couponID > 0 {
+		d, err := service.Coupon().GetDiscount(ctx, userID, couponID, original)
+		if err != nil {
+			return nil, err
+		}
+		couponDiscount = d
+	}
+
+	memberDiscount, err := resolveMemberDiscount(ctx, userID, original, couponDiscount)
+	if err != nil {
+		return nil, err
+	}
+
+	shipping, err := s.freightFee(ctx, lines, regionID)
+	if err != nil {
+		return nil, err
+	}
+
+	breakdown, err := pricing.Quote(ctx, &pricing.QuoteRequest{
+		OriginalAmount: original,
+		CouponDiscount: couponDiscount,
+		MemberDiscount: memberDiscount,
+		PointsDiscount: 0,
+		ShippingFee:    shipping,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &orderAmounts{
+		OriginalAmount: breakdown.OriginalAmount,
+		CouponDiscount: breakdown.CouponDiscount,
+		MemberDiscount: breakdown.MemberDiscount,
+		PointsDiscount: breakdown.PointsDiscount,
+		ShippingFee:    breakdown.ShippingFee,
+		PayableAmount:  breakdown.PayableAmount,
+	}, nil
+}
+
+// freightFee 调用运费模块计算整单运费。
+//
+// 未绑定运费模板的商品按零运费兼容；一旦有商品绑定模板，收货地址必须是结构化地区
+// （region_id 非空且存在），否则运费模块返回 21008，而不是静默按 0 处理。
+func (s *sOrder) freightFee(ctx context.Context, lines []lineItem, regionID *int64) (int64, error) {
+	items := make([]service.FreightItem, 0, len(lines))
+	needRegion := false
+	for _, l := range lines {
+		items = append(items, service.FreightItem{
+			FreightTemplateID: l.FreightTemplateID,
+			Quantity:          l.Quantity,
+			Amount:            l.Price * l.Quantity,
+		})
+		if l.FreightTemplateID != nil {
+			needRegion = true
+		}
+	}
+	var region int64
+	if regionID != nil {
+		region = *regionID
+	} else if needRegion {
+		return 0, codes.New(codes.CodeFreightRegionNotFound)
+	}
+	res, err := service.Freight().Quote(ctx, &service.FreightQuoteReq{RegionID: region, Items: items})
+	if err != nil {
+		return 0, err
+	}
+	if res == nil {
+		return 0, codes.Wrap(codes.CodeInternalError, fmt.Errorf("运费计算返回空结果"))
+	}
+	return res.ShippingFee, nil
 }
 
 // resolveMemberDiscount 计算会员等级折扣金额（整数分，向下取整）。
@@ -361,16 +515,17 @@ func (s *sOrder) resolveLine(ctx context.Context, skuID, qty int64) (lineItem, e
 		return lineItem{}, codes.New(codes.CodeOrderSkuUnavailable)
 	}
 	return lineItem{
-		SkuID:            skuID,
-		SkuCode:          sku.SkuCode,
-		Quantity:         qty,
-		SkuName:          sku.Name,
-		SpecText:         skuSpecText(sku.SpecValues),
-		ProductID:        sku.ProductId,
-		ProductName:      product.Name,
-		ProductMainImage: product.MainImage,
-		Price:            sku.Price,
-		OriginalPrice:    sku.OriginalPrice,
+		SkuID:             skuID,
+		SkuCode:           sku.SkuCode,
+		Quantity:          qty,
+		SkuName:           sku.Name,
+		SpecText:          skuSpecText(sku.SpecValues),
+		ProductID:         sku.ProductId,
+		ProductName:       product.Name,
+		ProductMainImage:  product.MainImage,
+		Price:             sku.Price,
+		OriginalPrice:     sku.OriginalPrice,
+		FreightTemplateID: product.FreightTemplateId,
 	}, nil
 }
 
@@ -401,7 +556,11 @@ func skuSpecText(values []*skuv1.SkuSpecValue) string {
 	return strings.Join(parts, ",")
 }
 
-// insertOrder 在单事务内写订单 + 订单项 + 扣库存（+ 预占券 + 购物车模式删已购条目），返回订单 id。
+// insertOrder 在单事务内完成「重读权威数据 → 复核六槽位金额 → 写订单 + 订单项 → 扣库存
+// → 预占券 → 清理购物车 → 写创建状态流水」，返回订单 id。
+//
+// A7/A9：事务内重新读取 skus（FOR UPDATE）与 products，券/会员/运费全部重算，落库金额以复核结果为准；
+// 订单状态推进与 order_status_logs 在同一事务内，任一步失败整体回滚。
 // 订单 INSERT 命中唯一约束时返回 duplicateKeyErr 供上层分流；预占失败（券不可用）返回 19007 并整体回滚。
 func (s *sOrder) insertOrder(
 	ctx context.Context,
@@ -409,22 +568,31 @@ func (s *sOrder) insertOrder(
 	source string,
 	addressID int64,
 	idempotencyKey, hash string,
-	originalAmount, discountAmount, memberDiscountAmount, totalAmount int64,
-	couponID *int64,
+	couponID int64,
 	orderNo string,
 	address *addressv1.Address,
 	lines []lineItem,
 ) (int64, error) {
 	var orderID int64
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		authoritative, e := s.reloadLinesInTx(ctx, tx, lines)
+		if e != nil {
+			return e
+		}
+		amounts, e := s.computeAmounts(ctx, userID, authoritative, couponID, address.RegionId)
+		if e != nil {
+			return e
+		}
+
 		data := g.Map{
 			"order_no":               orderNo,
 			"user_id":                userID,
 			"status":                 statusPendingPayment,
-			"total_amount":           totalAmount,
-			"original_amount":        originalAmount,
-			"discount_amount":        discountAmount,
-			"member_discount_amount": memberDiscountAmount,
+			"total_amount":           amounts.PayableAmount,
+			"original_amount":        amounts.OriginalAmount,
+			"discount_amount":        amounts.CouponDiscount,
+			"member_discount_amount": amounts.MemberDiscount,
+			"shipping_fee":           amounts.ShippingFee,
 			"idempotency_key":        idempotencyKey,
 			"request_hash":           hash,
 			"recipient_name":         address.RecipientName,
@@ -437,8 +605,8 @@ func (s *sOrder) insertOrder(
 			// 支付截止时间用 MySQL NOW() 计算，避免 Go 进程与 MySQL 的时区不一致导致过期判定偏移。
 			"expire_at": gdb.Raw("DATE_ADD(NOW(), INTERVAL " + strconv.FormatInt(payTimeout(ctx), 10) + " SECOND)"),
 		}
-		if couponID != nil {
-			data["user_coupon_id"] = *couponID
+		if couponID > 0 {
+			data["user_coupon_id"] = couponID
 		}
 		id, e := tx.Model("orders").Ctx(ctx).Data(data).InsertAndGetId()
 		if e != nil {
@@ -448,7 +616,7 @@ func (s *sOrder) insertOrder(
 			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("写入订单: %w", e))
 		}
 
-		for _, l := range lines {
+		for _, l := range authoritative {
 			if _, e := tx.Model("order_items").Ctx(ctx).Data(g.Map{
 				"order_id":           id,
 				"sku_id":             l.SkuID,
@@ -466,22 +634,22 @@ func (s *sOrder) insertOrder(
 			}
 		}
 
-		for _, l := range lines {
+		for _, l := range authoritative {
 			if _, e := service.Inventory().DeductInTx(ctx, tx, l.SkuID, l.Quantity, nil); e != nil {
 				return e
 			}
 		}
 
 		// 预占券：与订单创建同事务原子完成（available→locked），失败整体回滚（不残留「已预占」）。
-		if couponID != nil {
-			if e := service.Coupon().LockInTx(ctx, tx, userID, *couponID, id); e != nil {
+		if couponID > 0 {
+			if e := service.Coupon().LockInTx(ctx, tx, userID, couponID, id); e != nil {
 				return e
 			}
 		}
 
 		if source == v1.SourceCart {
-			skuIDs := make([]int64, 0, len(lines))
-			for _, l := range lines {
+			skuIDs := make([]int64, 0, len(authoritative))
+			for _, l := range authoritative {
 				skuIDs = append(skuIDs, l.SkuID)
 			}
 			if _, e := tx.Model("cart_items").Ctx(ctx).
@@ -492,6 +660,11 @@ func (s *sOrder) insertOrder(
 			}
 		}
 
+		// 状态流水：创建事件（0 → 10）与订单写入同事务。
+		if e := insertStatusLogInTx(ctx, tx, id, 0, statusPendingPayment, changeTypeCreate, operatorTypeUser, userID, ""); e != nil {
+			return e
+		}
+
 		orderID = id
 		return nil
 	})
@@ -499,6 +672,113 @@ func (s *sOrder) insertOrder(
 		return 0, err
 	}
 	return orderID, nil
+}
+
+// 数据库状态取值（服务层实体用字符串枚举，事务内复核直接读 DB 整数列）。
+const (
+	dbSkuEnabled     = 1
+	dbProductOnShelf = 1
+)
+
+// skuSnapshotRow 是事务内复核用的 SKU 权威行。
+type skuSnapshotRow struct {
+	Id            int64  `json:"id"`
+	SkuCode       string `json:"sku_code"`
+	ProductId     int64  `json:"product_id"`
+	Name          string `json:"name"`
+	Price         int64  `json:"price"`
+	OriginalPrice int64  `json:"original_price"`
+	Status        int    `json:"status"`
+}
+
+// productSnapshotRow 是事务内复核用的商品权威行。
+type productSnapshotRow struct {
+	Id                int64  `json:"id"`
+	Name              string `json:"name"`
+	MainImage         string `json:"main_image"`
+	Status            int    `json:"status"`
+	FreightTemplateId *int64 `json:"freight_template_id"`
+}
+
+// reloadLinesInTx 在事务内重新读取权威数据并覆盖行项目快照。
+//
+// skus 行加 FOR UPDATE 锁，防止「复核价格 → 写入订单」之间被改价；
+// products 只读（价格不在商品表参与订单金额），但状态、名称、主图与运费模板必须取当前值。
+func (s *sOrder) reloadLinesInTx(ctx context.Context, tx gdb.TX, lines []lineItem) ([]lineItem, error) {
+	if len(lines) == 0 {
+		return nil, codes.New(codes.CodeOrderCartEmpty)
+	}
+	skuIDs := make([]int64, 0, len(lines))
+	for _, l := range lines {
+		skuIDs = append(skuIDs, l.SkuID)
+	}
+	var skuRows []*skuSnapshotRow
+	if err := tx.Model("skus").Ctx(ctx).
+		Fields("id", "sku_code", "product_id", "name", "price", "original_price", "status").
+		WhereIn("id", skuIDs).Order("id ASC").LockUpdate().Scan(&skuRows); err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("复核 SKU 权威价格: %w", err))
+	}
+	skuByID := make(map[int64]*skuSnapshotRow, len(skuRows))
+	productIDs := make([]int64, 0, len(skuRows))
+	for _, row := range skuRows {
+		skuByID[row.Id] = row
+		productIDs = append(productIDs, row.ProductId)
+	}
+	var productRows []*productSnapshotRow
+	if err := tx.Model("products").Ctx(ctx).
+		Fields("id", "name", "main_image", "status", "freight_template_id").
+		WhereIn("id", productIDs).Scan(&productRows); err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("复核商品状态: %w", err))
+	}
+	productByID := make(map[int64]*productSnapshotRow, len(productRows))
+	for _, row := range productRows {
+		productByID[row.Id] = row
+	}
+
+	out := make([]lineItem, 0, len(lines))
+	for _, l := range lines {
+		sku, ok := skuByID[l.SkuID]
+		if !ok {
+			return nil, codes.New(codes.CodeSkuNotFound)
+		}
+		if sku.Status != dbSkuEnabled {
+			return nil, codes.New(codes.CodeOrderSkuUnavailable)
+		}
+		product, ok := productByID[sku.ProductId]
+		if !ok || product.Status != dbProductOnShelf {
+			return nil, codes.New(codes.CodeOrderSkuUnavailable)
+		}
+		updated := l
+		updated.SkuCode = sku.SkuCode
+		updated.SkuName = sku.Name
+		updated.Price = sku.Price
+		updated.OriginalPrice = sku.OriginalPrice
+		updated.ProductID = sku.ProductId
+		updated.ProductName = product.Name
+		updated.ProductMainImage = product.MainImage
+		updated.FreightTemplateID = product.FreightTemplateId
+		out = append(out, updated)
+	}
+	return out, nil
+}
+
+// insertStatusLogInTx 在调用方事务内追加一条订单状态流水（append-only）。
+func insertStatusLogInTx(ctx context.Context, tx gdb.TX, orderID int64, from, to int, changeType string, operatorType int, operatorID int64, remark string) error {
+	if orderID <= 0 {
+		return codes.Wrap(codes.CodeInternalError, fmt.Errorf("订单状态流水 order_id 非法: %d", orderID))
+	}
+	if _, err := tx.Model("order_status_logs").Ctx(ctx).Data(g.Map{
+		"order_id":      orderID,
+		"from_status":   from,
+		"to_status":     to,
+		"change_type":   changeType,
+		"operator_type": operatorType,
+		"operator_id":   operatorID,
+		"remark":        remark,
+	}).Insert(); err != nil {
+		return codes.Wrap(codes.CodeInternalError, fmt.Errorf("写入订单状态流水: %w", err))
+	}
+	return nil
 }
 
 // handleIdempotency 读回既有订单：同请求指纹返回既有订单（幂等成功），否则 9006。
@@ -561,8 +841,18 @@ func (s *sOrder) Detail(ctx context.Context, userID, id int64) (*v1.DetailRes, e
 	return &v1.DetailRes{Order: *o}, nil
 }
 
-// Pay Mock 支付：仅待支付→已支付合法，幂等；已过期订单先懒取消。
-func (s *sOrder) Pay(ctx context.Context, userID, id int64) (*v1.PayRes, error) {
+// Pay 支付：仅待支付→已支付合法，幂等；已过期订单先懒取消。
+//
+// payType=mock（默认）只推进状态；payType=balance 在「订单 10→20」同一事务内调用钱包扣款原语，
+// 余额不足返回 22002 且订单仍为待支付；重复支付走幂等快路径，不重复扣款。
+func (s *sOrder) Pay(ctx context.Context, userID, id int64, payType string) (*v1.PayRes, error) {
+	payType = strings.TrimSpace(payType)
+	if payType == "" {
+		payType = v1.PayTypeMock
+	}
+	if payType != v1.PayTypeMock && payType != v1.PayTypeBalance {
+		return nil, codes.New(codes.CodeInvalidArgument)
+	}
 	row, err := s.findOwned(ctx, userID, id)
 	if err != nil {
 		return nil, err
@@ -591,20 +881,44 @@ func (s *sOrder) Pay(ctx context.Context, userID, id int64) (*v1.PayRes, error) 
 		}
 		return &v1.PayRes{Order: *o}, nil
 	case statusPendingPayment:
-		// 事务：订单 10→20（条件更新）+ 若用券则核销（locked→used）+ 会员成长值 + 一级分销佣金，
-		// 全部原子完成；重复支付不重复核销、不重复加成长值、不重复计佣。
+		// 事务：订单 10→20（条件更新）+ 钱包扣款（余额渠道）+ 券核销 + 会员成长值 + 一级分销佣金
+		// + 状态流水，全部原子完成；任一步失败整体回滚（订单保持待支付，可重试）。
 		err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+			data := g.Map{
+				"status":   statusPaid,
+				"paid_at":  gdb.Raw("NOW()"),
+				"pay_type": payType,
+			}
 			result, e := tx.Model("orders").Ctx(ctx).
 				Where("id", id).
 				Where("user_id", userID).
 				Where("status", statusPendingPayment).
-				Data(g.Map{"status": statusPaid, "paid_at": gdb.Raw("NOW()")}).
+				Data(data).
 				Update()
 			if e != nil {
 				return codes.Wrap(codes.CodeInternalError, fmt.Errorf("支付订单: %w", e))
 			}
 			if affected, _ := result.RowsAffected(); affected == 0 {
 				return codes.New(codes.CodeOrderInvalidStatusTransition)
+			}
+			// 钱包余额支付：与订单状态推进同事务，余额不足（22002）时整体回滚。
+			if payType == v1.PayTypeBalance && row.TotalAmount > 0 {
+				fund, e := service.Wallet().DebitForOrderInTx(ctx, tx, service.WalletDebitInput{
+					UserID:  userID,
+					OrderID: id,
+					Amount:  row.TotalAmount,
+				})
+				if e != nil {
+					return e
+				}
+				if fund != nil && fund.TransactionID > 0 {
+					if _, e := tx.Model("orders").Ctx(ctx).
+						Where("id", id).
+						Data(g.Map{"transaction_no": fmt.Sprintf("wallet:%d", fund.TransactionID)}).
+						Update(); e != nil {
+						return codes.Wrap(codes.CodeInternalError, fmt.Errorf("写入支付流水号: %w", e))
+					}
+				}
 			}
 			if row.UserCouponId != nil {
 				if e := service.Coupon().MarkUsedInTx(ctx, tx, *row.UserCouponId); e != nil {
@@ -619,6 +933,9 @@ func (s *sOrder) Pay(ctx context.Context, userID, id int64) (*v1.PayRes, error) 
 			// 重复支付走上方幂等快路径不进本事务，uk_order_id 再兜底一次；计佣失败整体回滚，
 			// 不产生「订单已支付但佣金缺失/错账」的中间态（见 docs/design/distribution.md §3.2）。
 			if e := service.Distribution().AccrueOrderCommissionInTx(ctx, tx, id); e != nil {
+				return e
+			}
+			if e := insertStatusLogInTx(ctx, tx, id, statusPendingPayment, statusPaid, changeTypePay, operatorTypeUser, userID, payType); e != nil {
 				return e
 			}
 			return nil
@@ -707,6 +1024,12 @@ func (s *sOrder) Receive(ctx context.Context, userID, id int64) (*v1.ReceiveRes,
 			Update(); e != nil {
 			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("完成订单: %w", e))
 		}
+		if e := insertStatusLogInTx(ctx, tx, id, statusShipped, statusReceived, changeTypeReceive, operatorTypeUser, userID, ""); e != nil {
+			return e
+		}
+		if e := insertStatusLogInTx(ctx, tx, id, statusReceived, statusCompleted, changeTypeComplete, operatorTypeUser, userID, ""); e != nil {
+			return e
+		}
 		return nil
 	})
 	if err != nil {
@@ -764,6 +1087,9 @@ func (s *sOrder) Ship(ctx context.Context, orderID int64) (*v1.ShipRes, error) {
 		if affected, _ := result.RowsAffected(); affected == 0 {
 			return codes.New(codes.CodeOrderInvalidStatusTransition)
 		}
+		if e := insertStatusLogInTx(ctx, tx, orderID, statusPaid, statusShipped, changeTypeShip, operatorTypeAdmin, 0, ""); e != nil {
+			return e
+		}
 		return nil
 	})
 	if err != nil {
@@ -803,6 +1129,10 @@ func (s *sOrder) CompleteRefundInTx(ctx context.Context, tx gdb.TX, orderID int6
 		if _, err := service.Inventory().IncreaseInTx(ctx, tx, it.SkuId, it.Quantity, nil); err != nil {
 			return err
 		}
+	}
+	// 状态流水：退款成功推进订单 20→70，与库存恢复同事务。
+	if err := insertStatusLogInTx(ctx, tx, orderID, statusPaid, statusRefunded, changeTypeRefund, operatorTypeAdmin, 0, ""); err != nil {
+		return err
 	}
 	return nil
 }
@@ -884,6 +1214,16 @@ func (s *sOrder) cancelInTx(ctx context.Context, tx gdb.TX, orderID int64, reaso
 	}
 	// 释放占用的券（locked→available，清空 order_id/locked_at）；订单未占券时为 no-op。
 	if err := service.Coupon().ReleaseInTx(ctx, tx, orderID); err != nil {
+		return false, err
+	}
+	// 状态流水：取消事件与状态变更、库存恢复、券释放同事务。
+	changeType := changeTypeCancel
+	operatorType := operatorTypeUser
+	if reason == cancelReasonTimeout {
+		changeType = changeTypeTimeoutCancel
+		operatorType = operatorTypeSystem
+	}
+	if err := insertStatusLogInTx(ctx, tx, orderID, statusPendingPayment, statusCancelled, changeType, operatorType, 0, ""); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -982,6 +1322,8 @@ func (s *sOrder) toOrder(ctx context.Context, r *orderRow) (*v1.Order, error) {
 		OriginalAmount:       r.OriginalAmount,
 		DiscountAmount:       r.DiscountAmount,
 		MemberDiscountAmount: r.MemberDiscountAmount,
+		ShippingFee:          r.ShippingFee,
+		PayType:              r.PayType,
 		UserCouponId:         r.UserCouponId,
 		IdempotencyKey:       r.IdempotencyKey,
 		RecipientName:        r.RecipientName,
@@ -1048,7 +1390,7 @@ func statusToString(s int) string {
 
 // requestHash 计算请求指纹：sha256hex(source|address_id|coupon_id|sku_id:qty...（按 sku_id 升序）)。
 // coupon_id 缺省为 0（无券），使同一幂等键下「是否用券/用哪张券」参与内容一致性判定（INV-C10）。
-func requestHash(source string, addressID int64, couponID int64, lines []lineItem) string {
+func requestHash(source string, address addressv1.Address, couponID int64, lines []lineItem) string {
 	sorted := make([]lineItem, len(lines))
 	copy(sorted, lines)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].SkuID < sorted[j].SkuID })
@@ -1056,14 +1398,38 @@ func requestHash(source string, addressID int64, couponID int64, lines []lineIte
 	var b strings.Builder
 	b.WriteString(source)
 	b.WriteByte('|')
-	b.WriteString(strconv.FormatInt(addressID, 10))
+	b.WriteString(strconv.FormatInt(address.Id, 10))
 	b.WriteByte('|')
 	b.WriteString(strconv.FormatInt(couponID, 10))
+	// 地址内容参与指纹：同一 address_id 被修改后，同幂等键再次提交必须识别为「不同请求」（9006）。
+	b.WriteByte('|')
+	b.WriteString(address.RecipientName)
+	b.WriteByte('|')
+	b.WriteString(address.Phone)
+	b.WriteByte('|')
+	b.WriteString(address.Province)
+	b.WriteByte('|')
+	b.WriteString(address.City)
+	b.WriteByte('|')
+	b.WriteString(address.District)
+	b.WriteByte('|')
+	b.WriteString(address.Detail)
+	if address.RegionId != nil {
+		b.WriteByte('|')
+		b.WriteString(strconv.FormatInt(*address.RegionId, 10))
+	}
 	for _, l := range sorted {
 		b.WriteByte('|')
 		b.WriteString(strconv.FormatInt(l.SkuID, 10))
 		b.WriteByte(':')
 		b.WriteString(strconv.FormatInt(l.Quantity, 10))
+		// 成交价与规格参与指纹：SKU 改价/换规格后，同键同商品也视为不同下单请求。
+		b.WriteByte(':')
+		b.WriteString(strconv.FormatInt(l.Price, 10))
+		b.WriteByte(':')
+		b.WriteString(l.SkuCode)
+		b.WriteByte(':')
+		b.WriteString(l.SpecText)
 	}
 	sum := sha256.Sum256([]byte(b.String()))
 	return hex.EncodeToString(sum[:])

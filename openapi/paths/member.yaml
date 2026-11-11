@@ -260,8 +260,8 @@
           - 1001
           - 1002
           - 1003
-          - 20002
-          - 20004
+          - 24002
+          - 24004
         scope: static-call-chain
         note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
       "400":
@@ -347,9 +347,9 @@
           - 1001
           - 1002
           - 1003
-          - 20001
-          - 20002
-          - 20004
+          - 24001
+          - 24002
+          - 24004
         scope: static-call-chain
         note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
       "400":
@@ -406,8 +406,8 @@
           - 1001
           - 1002
           - 1003
-          - 20001
-          - 20003
+          - 24001
+          - 24003
         scope: static-call-chain
         note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
       "400":

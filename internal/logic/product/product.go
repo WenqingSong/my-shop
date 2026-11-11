@@ -63,17 +63,19 @@ func New() *sProduct {
 
 // product 是 products 表的一条记录。
 type product struct {
-	Id         int64       `json:"id"`
-	Name       string      `json:"name"`
-	Brand      string      `json:"brand"`
-	CategoryId int64       `json:"category_id"`
-	Price      int64       `json:"price"`
-	MainImage  string      `json:"main_image"`
-	Detail     *string     `json:"detail"`
-	Status     int         `json:"status"`
-	ViewCount  int64       `json:"view_count"`
-	CreatedAt  *gtime.Time `json:"created_at"`
-	UpdatedAt  *gtime.Time `json:"updated_at"`
+	Id         int64   `json:"id"`
+	Name       string  `json:"name"`
+	Brand      string  `json:"brand"`
+	CategoryId int64   `json:"category_id"`
+	Price      int64   `json:"price"`
+	MainImage  string  `json:"main_image"`
+	Detail     *string `json:"detail"`
+	Status     int     `json:"status"`
+	// FreightTemplateId 是商品绑定的运费模板 id（可空）。
+	FreightTemplateId *int64      `json:"freight_template_id"`
+	ViewCount         int64       `json:"view_count"`
+	CreatedAt         *gtime.Time `json:"created_at"`
+	UpdatedAt         *gtime.Time `json:"updated_at"`
 }
 
 // productImage 是 product_images 表的一条记录。
@@ -233,17 +235,26 @@ func (s *sProduct) Create(ctx context.Context, req *v1.CreateReq) (*v1.CreateRes
 	if err != nil {
 		return nil, err
 	}
+	// 运费模板绑定：必须存在且启用，不允许把商品绑到无效模板上（避免下单时静默零运费）。
+	var freightTemplateID *int64
+	if req.FreightTemplateId != nil && *req.FreightTemplateId > 0 {
+		if err := service.Freight().ValidateTemplateForBinding(ctx, *req.FreightTemplateId); err != nil {
+			return nil, err
+		}
+		freightTemplateID = req.FreightTemplateId
+	}
 
 	var id int64
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		pid, e := tx.Model("products").Ctx(ctx).Data(g.Map{
-			"name":        name,
-			"brand":       brand,
-			"category_id": req.CategoryId,
-			"price":       price,
-			"main_image":  mainImage,
-			"detail":      req.Detail,
-			"status":      statusDraft,
+			"name":                name,
+			"brand":               brand,
+			"category_id":         req.CategoryId,
+			"price":               price,
+			"main_image":          mainImage,
+			"detail":              req.Detail,
+			"status":              statusDraft,
+			"freight_template_id": freightTemplateID,
 		}).InsertAndGetId()
 		if e != nil {
 			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("写入商品: %w", e))
@@ -330,15 +341,31 @@ func (s *sProduct) Update(ctx context.Context, req *v1.UpdateReq) (*v1.UpdateRes
 		needReplaceImg = true
 	}
 
+	data := g.Map{
+		"name":        name,
+		"brand":       brand,
+		"category_id": categoryID,
+		"price":       price,
+		"main_image":  mainImage,
+		"detail":      detail,
+	}
+	// 运费模板绑定：省略=不修改；0=解绑写 NULL；>0=必须存在且启用。
+	if req.FreightTemplateId != nil {
+		if *req.FreightTemplateId < 0 {
+			return nil, codes.New(codes.CodeInvalidArgument)
+		}
+		if *req.FreightTemplateId == 0 {
+			data["freight_template_id"] = nil
+		} else {
+			if err := service.Freight().ValidateTemplateForBinding(ctx, *req.FreightTemplateId); err != nil {
+				return nil, err
+			}
+			data["freight_template_id"] = *req.FreightTemplateId
+		}
+	}
+
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		if _, e := tx.Model("products").Ctx(ctx).Where("id", req.Id).Data(g.Map{
-			"name":        name,
-			"brand":       brand,
-			"category_id": categoryID,
-			"price":       price,
-			"main_image":  mainImage,
-			"detail":      detail,
-		}).Update(); e != nil {
+		if _, e := tx.Model("products").Ctx(ctx).Where("id", req.Id).Data(data).Update(); e != nil {
 			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("更新商品: %w", e))
 		}
 		if needReplaceImg {
@@ -560,18 +587,19 @@ func (s *sProduct) toProduct(r *product, images []string) *v1.Product {
 		images = []string{}
 	}
 	return &v1.Product{
-		Id:         r.Id,
-		Name:       r.Name,
-		Brand:      r.Brand,
-		CategoryId: r.CategoryId,
-		Price:      r.Price,
-		MainImage:  r.MainImage,
-		Detail:     productDetail(r),
-		Status:     statusToString(r.Status),
-		ViewCount:  r.ViewCount,
-		Images:     images,
-		CreatedAt:  r.CreatedAt,
-		UpdatedAt:  r.UpdatedAt,
+		Id:                r.Id,
+		Name:              r.Name,
+		Brand:             r.Brand,
+		CategoryId:        r.CategoryId,
+		Price:             r.Price,
+		MainImage:         r.MainImage,
+		Detail:            productDetail(r),
+		Status:            statusToString(r.Status),
+		FreightTemplateId: r.FreightTemplateId,
+		ViewCount:         r.ViewCount,
+		Images:            images,
+		CreatedAt:         r.CreatedAt,
+		UpdatedAt:         r.UpdatedAt,
 	}
 }
 

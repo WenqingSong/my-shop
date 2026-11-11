@@ -108,6 +108,7 @@
           - 9007
           - 19003
           - 19007
+          - 21008
         scope: static-call-chain
         note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
       "400":
@@ -165,6 +166,103 @@
         $ref: '#/components/responses/Forbidden'
       "404":
         $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+/orders/quote:
+  post:
+    tags:
+      - 订单
+    summary: 订单算价预览
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: orderQuote
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: order.Quote
+    x-source: routes_frontend.go
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              source:
+                type: string
+                x-go-validate: required
+                description: 来源：cart/direct
+              address_id:
+                type: integer
+                format: int64
+                x-go-type: int64
+                x-go-validate: required
+                description: 收货地址 id（必须属于当前用户，决定运费）
+              sku_code:
+                type: string
+                description: 直接购买 SKU 编码（source=direct 推荐）
+              sku_id:
+                type: integer
+                format: int64
+                x-go-type: int64
+                description: 直接购买 SKU id（source=direct 兼容字段）
+              quantity:
+                type: integer
+                format: int64
+                x-go-type: int64
+                description: 直接购买数量（source=direct 必填）
+              coupon_id:
+                type: integer
+                format: int64
+                x-go-type: int64
+                description: 可选使用的用户券 id（只读预览，不占用/不核销）
+            required:
+              - source
+              - address_id
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    x-known-issue:
+      - id: B1-02-D1
+        summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
+        actual_http_status: 500
+        actual_business_code: 51
+        remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/OrderQuoteResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 5001
+          - 9003
+          - 9004
+          - 9005
+          - 9007
+          - 21008
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "409":
+        $ref: '#/components/responses/Conflict'
       "500":
         $ref: '#/components/responses/InternalError'
 /orders/{id}:
@@ -226,7 +324,7 @@
   post:
     tags:
       - 订单
-    summary: 支付订单（Mock）
+    summary: 支付订单（Mock / 钱包余额）
     description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
     operationId: orderPay
     security:
@@ -243,6 +341,16 @@
           format: int64
           x-go-type: int64
         description: 订单 id
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              pay_type:
+                type: string
+                description: 支付方式：mock（默认）/balance；其它值返回 1001
     x-pagination-mode: none
     x-idempotency:
       mode: none

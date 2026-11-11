@@ -19,18 +19,20 @@ const (
 
 // Product 商品结构，前台/后台查询与写接口复用。
 type Product struct {
-	Id         int64       `json:"id" dc:"商品 id"`
-	Name       string      `json:"name" dc:"商品名"`
-	Brand      string      `json:"brand" dc:"品牌"`
-	CategoryId int64       `json:"category_id" dc:"分类 id"`
-	Price      int64       `json:"price" dc:"价格（整数分）"`
-	MainImage  string      `json:"main_image" dc:"主图 URL"`
-	Detail     string      `json:"detail" dc:"商品详情"`
-	Status     string      `json:"status" dc:"状态：draft/on_shelf/off_shelf"`
-	ViewCount  int64       `json:"view_count" dc:"累计浏览量（只读）"`
-	Images     []string    `json:"images" dc:"图片 URL 列表（按 sort 升序）"`
-	CreatedAt  *gtime.Time `json:"created_at" dc:"创建时间"`
-	UpdatedAt  *gtime.Time `json:"updated_at" dc:"更新时间"`
+	Id         int64  `json:"id" dc:"商品 id"`
+	Name       string `json:"name" dc:"商品名"`
+	Brand      string `json:"brand" dc:"品牌"`
+	CategoryId int64  `json:"category_id" dc:"分类 id"`
+	Price      int64  `json:"price" dc:"价格（整数分）"`
+	MainImage  string `json:"main_image" dc:"主图 URL"`
+	Detail     string `json:"detail" dc:"商品详情"`
+	Status     string `json:"status" dc:"状态：draft/on_shelf/off_shelf"`
+	// FreightTemplateId 是商品绑定的运费模板 id（软引用 freight_templates.id）；null 表示未绑定（零运费兼容）。
+	FreightTemplateId *int64      `json:"freight_template_id" dc:"运费模板 id（null=未绑定，零运费兼容）"`
+	ViewCount         int64       `json:"view_count" dc:"累计浏览量（只读）"`
+	Images            []string    `json:"images" dc:"图片 URL 列表（按 sort 升序）"`
+	CreatedAt         *gtime.Time `json:"created_at" dc:"创建时间"`
+	UpdatedAt         *gtime.Time `json:"updated_at" dc:"更新时间"`
 }
 
 // ListReq 前台商品列表请求（仅 on_shelf）。
@@ -130,6 +132,8 @@ type CreateReq struct {
 	MainImage  string      `json:"main_image" dc:"主图 URL，可选，不超过 512 字符"`
 	Detail     string      `json:"detail" dc:"商品详情，可选"`
 	Images     []string    `json:"images" dc:"图片 URL 列表，可选"`
+	// FreightTemplateId 可选：绑定运费模板（必须存在且启用）；缺省/0 表示不绑定。
+	FreightTemplateId *int64 `json:"freight_template_id" dc:"运费模板 id（可选，必须存在且启用；缺省=不绑定）"`
 }
 
 // CreateRes 创建商品响应（status 恒为 draft）。
@@ -149,6 +153,8 @@ type UpdateReq struct {
 	Detail     *string      `json:"detail" dc:"商品详情"`
 	Status     *string      `json:"status" dc:"普通更新不改状态：合法值被忽略、非法值拒绝"`
 	Images     *[]string    `json:"images" dc:"图片 URL 列表；提供则全量替换，未提供则保留"`
+	// FreightTemplateId：省略=不修改；0=解绑（写 NULL）；>0=绑定（必须存在且启用）。
+	FreightTemplateId *int64 `json:"freight_template_id" dc:"运费模板 id：省略不改、0=解绑、>0 必须存在且启用"`
 }
 
 // UpdateRes 更新商品响应。

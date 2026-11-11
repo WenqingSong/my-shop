@@ -47,6 +47,51 @@ codes:
     http_status: 404
     message: 轮播图不存在
     domain: banner
+  - code: 23002
+    constant: CodeBargainActivityInvalid
+    http_status: 400
+    message: 砍价活动参数非法
+    domain: bargain
+  - code: 23001
+    constant: CodeBargainActivityNotFound
+    http_status: 404
+    message: 砍价活动不存在
+    domain: bargain
+  - code: 23003
+    constant: CodeBargainActivityUnavailable
+    http_status: 409
+    message: 砍价活动暂不可参与
+    domain: bargain
+  - code: 23008
+    constant: CodeBargainHelpDuplicated
+    http_status: 409
+    message: 已助力过该砍价
+    domain: bargain
+  - code: 23007
+    constant: CodeBargainHelpUnavailable
+    http_status: 409
+    message: 该砍价不可助力
+    domain: bargain
+  - code: 23005
+    constant: CodeBargainInstanceExists
+    http_status: 409
+    message: 已有进行中的砍价
+    domain: bargain
+  - code: 23004
+    constant: CodeBargainInstanceNotFound
+    http_status: 404
+    message: 砍价记录不存在
+    domain: bargain
+  - code: 23009
+    constant: CodeBargainInvalidStatusTransition
+    http_status: 409
+    message: 砍价状态迁移非法
+    domain: bargain
+  - code: 23006
+    constant: CodeBargainSelfHelpForbidden
+    http_status: 409
+    message: 不能给自己砍价
+    domain: bargain
   - code: 8002
     constant: CodeCartInvalidQuantity
     http_status: 400
@@ -137,6 +182,21 @@ codes:
     http_status: 409
     message: 已绑定推荐人，不可变更
     domain: distribution
+  - code: 20005
+    constant: CodeDistributionCommissionNotFound
+    http_status: 404
+    message: 佣金记录不存在
+    domain: distribution
+  - code: 20006
+    constant: CodeDistributionCommissionStatus
+    http_status: 409
+    message: 佣金状态迁移非法
+    domain: distribution
+  - code: 20004
+    constant: CodeDistributionCycle
+    http_status: 409
+    message: 推荐关系成环
+    domain: distribution
   - code: 20002
     constant: CodeDistributionReferrerUnavailable
     http_status: 404
@@ -207,6 +267,53 @@ codes:
     http_status: 403
     message: 禁止访问
     domain: common
+  - code: 21008
+    constant: CodeFreightRegionNotFound
+    http_status: 404
+    message: 地区不存在
+    domain: freight
+    reused_by_domains:
+      - order
+  - code: 21009
+    constant: CodeFreightRegionRuleMissing
+    http_status: 409
+    message: 该地区未配置运费规则
+    domain: freight
+  - code: 21006
+    constant: CodeFreightRuleDuplicate
+    http_status: 409
+    message: 该地区规则已存在
+    domain: freight
+  - code: 21007
+    constant: CodeFreightRuleInvalid
+    http_status: 400
+    message: 运费规则参数非法
+    domain: freight
+  - code: 21005
+    constant: CodeFreightRuleNotFound
+    http_status: 404
+    message: 运费区域规则不存在
+    domain: freight
+  - code: 21004
+    constant: CodeFreightTemplateDisabled
+    http_status: 409
+    message: 运费模板已停用
+    domain: freight
+  - code: 21003
+    constant: CodeFreightTemplateInvalid
+    http_status: 400
+    message: 运费模板参数非法
+    domain: freight
+  - code: 21002
+    constant: CodeFreightTemplateNameExists
+    http_status: 409
+    message: 运费模板名称已存在
+    domain: freight
+  - code: 21001
+    constant: CodeFreightTemplateNotFound
+    http_status: 404
+    message: 运费模板不存在
+    domain: freight
   - code: 1000
     constant: CodeInternalError
     http_status: 500
@@ -217,6 +324,7 @@ codes:
       - admin
       - article
       - banner
+      - bargain
       - cart
       - categories
       - coupon
@@ -224,9 +332,11 @@ codes:
       - distribution
       - favorite
       - flashsale
+      - freight
       - iam
       - inventory
       - like
+      - member
       - order
       - product
       - profile
@@ -236,6 +346,7 @@ codes:
       - review
       - sku
       - spec
+      - wallet
   - code: 1001
     constant: CodeInvalidArgument
     http_status: 400
@@ -245,6 +356,7 @@ codes:
       - address
       - admin
       - article
+      - bargain
       - cart
       - categories
       - coupon
@@ -252,9 +364,12 @@ codes:
       - distribution
       - favorite
       - flashsale
+      - freight
       - iam
       - like
+      - member
       - order
+      - pricing
       - product
       - profile
       - refund
@@ -262,6 +377,7 @@ codes:
       - review
       - sku
       - spec
+      - wallet
   - code: 2002
     constant: CodeInvalidCredentials
     http_status: 401
@@ -284,6 +400,31 @@ codes:
     http_status: 409
     message: 商品不可点赞
     domain: like
+  - code: 24005
+    constant: CodeMemberGrowthInsufficient
+    http_status: 409
+    message: 成长值不足
+    domain: member
+  - code: 24004
+    constant: CodeMemberLevelDuplicate
+    http_status: 409
+    message: 会员等级序号或成长值门槛已存在
+    domain: member
+  - code: 24003
+    constant: CodeMemberLevelInUse
+    http_status: 409
+    message: 会员等级已被用户使用，不能删除
+    domain: member
+  - code: 24002
+    constant: CodeMemberLevelInvalid
+    http_status: 400
+    message: 会员等级配置非法
+    domain: member
+  - code: 24001
+    constant: CodeMemberLevelNotFound
+    http_status: 404
+    message: 会员等级不存在
+    domain: member
   - code: 1004
     constant: CodeNotFound
     http_status: 404
@@ -354,6 +495,27 @@ codes:
     domain: iam
     reused_by_domains:
       - profile
+  - code: 21012
+    constant: CodePricingAmountOverflow
+    http_status: 400
+    message: 计价金额溢出
+    domain: freight
+    reused_by_domains:
+      - pricing
+  - code: 21011
+    constant: CodePricingDiscountExceeds
+    http_status: 400
+    message: 优惠金额超过可优惠金额
+    domain: freight
+    reused_by_domains:
+      - pricing
+  - code: 21010
+    constant: CodePricingInvalidAmount
+    http_status: 400
+    message: 计价金额非法
+    domain: freight
+    reused_by_domains:
+      - pricing
   - code: 4007
     constant: CodeProductCategoryDisabled
     http_status: 400
@@ -609,8 +771,10 @@ codes:
     domain: common
     reused_by_domains:
       - admin
+      - bargain
       - distribution
       - iam
+      - wallet
   - code: 17002
     constant: CodeUploadConfigInvalid
     http_status: 500
@@ -638,3 +802,53 @@ codes:
     http_status: 409
     message: 用户名已存在
     domain: iam
+  - code: 22001
+    constant: CodeWalletAccountUnavailable
+    http_status: 500
+    message: 钱包账户不可用
+    domain: wallet
+  - code: 22010
+    constant: CodeWalletAmountOverflow
+    http_status: 409
+    message: 金额超出可表示范围
+    domain: wallet
+  - code: 22006
+    constant: CodeWalletDuplicatePayment
+    http_status: 409
+    message: 订单已支付
+    domain: wallet
+  - code: 22008
+    constant: CodeWalletIdempotencyConflict
+    http_status: 409
+    message: 资金流水幂等冲突
+    domain: wallet
+  - code: 22002
+    constant: CodeWalletInsufficientBalance
+    http_status: 409
+    message: 余额不足
+    domain: wallet
+  - code: 22003
+    constant: CodeWalletInvalidRechargeAmount
+    http_status: 400
+    message: 充值金额非法
+    domain: wallet
+  - code: 22009
+    constant: CodeWalletMockRechargeDisabled
+    http_status: 403
+    message: Mock 充值未启用
+    domain: wallet
+  - code: 22004
+    constant: CodeWalletRechargeOrderNotFound
+    http_status: 404
+    message: 充值订单不存在
+    domain: wallet
+  - code: 22005
+    constant: CodeWalletRechargeStatusNotAllowed
+    http_status: 409
+    message: 充值订单状态不允许该操作
+    domain: wallet
+  - code: 22007
+    constant: CodeWalletRefundCreditFailed
+    http_status: 409
+    message: 退款入账失败
+    domain: wallet

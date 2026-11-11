@@ -47,6 +47,10 @@ type IFreight interface {
 	// AdminReplaceRules 单事务整体替换模板的区域规则；重复区域 20006，地区不存在 20008。
 	AdminReplaceRules(ctx context.Context, req *v1.AdminReplaceRulesReq) (*v1.AdminReplaceRulesRes, error)
 
+	// ValidateTemplateForBinding 校验运费模板可被商品绑定：必须存在且启用。
+	// 不存在返回 21001，已停用返回 21004；商品管理侧写 freight_template_id 前必须调用。
+	ValidateTemplateForBinding(ctx context.Context, id int64) error
+
 	// Quote 计算一笔订单的运费（服务端唯一入口，只读）。
 	//
 	// 语义：

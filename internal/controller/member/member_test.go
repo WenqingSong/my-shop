@@ -193,13 +193,13 @@ func TestMemberAndDistributionAuth(t *testing.T) {
 	userToken, _ := registerLoginUser(t, base, "apiuser", "password123")
 
 	// 未认证：全部 401/1002。
-	for _, path := range []string{"/members/levels", "/my/membership", "/my/membership/growth-logs", "/my/referral", "/my/commissions", "/my/commissions/summary"} {
+	for _, path := range []string{"/members/levels", "/my/membership", "/my/membership/growth-logs", "/distribution/me", "/distribution/commissions"} {
 		res := doRequest(t, base, "GET", path, nil, nil)
 		if res.Status != 401 || res.Code != 1002 {
 			t.Fatalf("%s 未认证期望 401/1002，实际 %d/%d", path, res.Status, res.Code)
 		}
 	}
-	if res := doRequest(t, base, "POST", "/referrals/bind", map[string]any{"referrer_user_id": 1}, nil); res.Status != 401 || res.Code != 1002 {
+	if res := doRequest(t, base, "POST", "/distribution/referral", map[string]any{"referrer_user_id": 1}, nil); res.Status != 401 || res.Code != 1002 {
 		t.Fatalf("未认证绑定期望 401/1002，实际 %d/%d", res.Status, res.Code)
 	}
 
@@ -210,10 +210,9 @@ func TestMemberAndDistributionAuth(t *testing.T) {
 		{"PUT", "/admin/member-levels/1"},
 		{"DELETE", "/admin/member-levels/1"},
 		{"GET", "/admin/members/1"},
-		{"GET", "/admin/referrals"},
-		{"GET", "/admin/commissions"},
-		{"GET", "/admin/commissions/1"},
-		{"POST", "/admin/commissions/1/settle"},
+		{"GET", "/admin/distributions/referrals"},
+		{"GET", "/admin/distributions/commissions"},
+		{"POST", "/admin/distributions/commissions/1/settle"},
 	}
 	for _, ap := range adminPaths {
 		res := doRequest(t, base, ap.method, ap.path, map[string]any{}, authHeader(userToken))
@@ -272,20 +271,20 @@ func TestMemberAPIContract(t *testing.T) {
 		t.Fatalf("创建等级结果不符: %+v", level)
 	}
 
-	// 重复序号：409/20004。
+	// 重复序号：409/24004。
 	dup := doRequest(t, base, "POST", "/admin/member-levels", map[string]any{
 		"level_no": 1, "name": "重复", "growth_threshold": 100, "discount_rate_bp": 9000, "status": 1,
 	}, authHeader(adminToken))
-	if dup.Status != 409 || dup.Code != 20004 {
-		t.Fatalf("重复序号期望 409/20004，实际 %d/%d", dup.Status, dup.Code)
+	if dup.Status != 409 || dup.Code != 24004 {
+		t.Fatalf("重复序号期望 409/24004，实际 %d/%d", dup.Status, dup.Code)
 	}
 
-	// 非法折扣率：400/20002。
+	// 非法折扣率：400/24002。
 	bad := doRequest(t, base, "POST", "/admin/member-levels", map[string]any{
 		"level_no": 2, "name": "越界", "growth_threshold": 100, "discount_rate_bp": 0, "status": 1,
 	}, authHeader(adminToken))
-	if bad.Status != 400 || bad.Code != 20002 {
-		t.Fatalf("非法折扣率期望 400/20002，实际 %d/%d", bad.Status, bad.Code)
+	if bad.Status != 400 || bad.Code != 24002 {
+		t.Fatalf("非法折扣率期望 400/24002，实际 %d/%d", bad.Status, bad.Code)
 	}
 
 	// 前台可见启用等级；本人按门槛 0 享 9.8 折。
@@ -330,53 +329,55 @@ func TestDistributionAPIContract(t *testing.T) {
 	base, adminToken := setupServer(t)
 	inviteeToken, inviteeID := registerLoginUser(t, base, "distinviteeapi", "password123")
 	inviterToken, inviterID := registerLoginUser(t, base, "distinviterapi", "password123")
+	_, otherID := registerLoginUser(t, base, "distotherapi", "password123")
 
-	// 自荐：400/21003。
-	self := doRequest(t, base, "POST", "/referrals/bind", map[string]any{"referrer_user_id": inviteeID}, authHeader(inviteeToken))
-	if self.Status != 400 || self.Code != 21003 {
-		t.Fatalf("自荐期望 400/21003，实际 %d/%d", self.Status, self.Code)
+	// 自荐：400/20001。
+	self := doRequest(t, base, "POST", "/distribution/referral", map[string]any{"referrer_user_id": inviteeID}, authHeader(inviteeToken))
+	if self.Status != 400 || self.Code != 20001 {
+		t.Fatalf("自荐期望 400/20001，实际 %d/%d", self.Status, self.Code)
 	}
-	// 推荐人不存在：400/21005。
-	missing := doRequest(t, base, "POST", "/referrals/bind", map[string]any{"referrer_user_id": 999999}, authHeader(inviteeToken))
-	if missing.Status != 400 || missing.Code != 21005 {
-		t.Fatalf("推荐人不存在期望 400/21005，实际 %d/%d", missing.Status, missing.Code)
+	// 推荐人不存在：404/20002（防枚举）。
+	missing := doRequest(t, base, "POST", "/distribution/referral", map[string]any{"referrer_user_id": 999999}, authHeader(inviteeToken))
+	if missing.Status != 404 || missing.Code != 20002 {
+		t.Fatalf("推荐人不存在期望 404/20002，实际 %d/%d", missing.Status, missing.Code)
 	}
 	// 正常绑定。
-	ok := doRequest(t, base, "POST", "/referrals/bind", map[string]any{"referrer_user_id": inviterID}, authHeader(inviteeToken))
+	ok := doRequest(t, base, "POST", "/distribution/referral", map[string]any{"referrer_user_id": inviterID}, authHeader(inviteeToken))
 	if ok.Status != 200 || ok.Code != 0 {
 		t.Fatalf("绑定期望 200/0，实际 %d/%d %s", ok.Status, ok.Code, ok.Message)
 	}
-	// 改绑：409/21002。
-	rebind := doRequest(t, base, "POST", "/referrals/bind", map[string]any{"referrer_user_id": 999999}, authHeader(inviteeToken))
-	if rebind.Status != 400 && rebind.Status != 409 {
-		t.Fatalf("改绑应被拒绝（400/409），实际 %d/%d", rebind.Status, rebind.Code)
+	// 改绑：409/20003。
+	rebind := doRequest(t, base, "POST", "/distribution/referral", map[string]any{"referrer_user_id": otherID}, authHeader(inviteeToken))
+	if rebind.Status != 409 || rebind.Code != 20003 {
+		t.Fatalf("改绑期望 409/20003，实际 %d/%d", rebind.Status, rebind.Code)
 	}
-	// 反向绑成环：409/21004。
-	cycle := doRequest(t, base, "POST", "/referrals/bind", map[string]any{"referrer_user_id": inviteeID}, authHeader(inviterToken))
-	if cycle.Status != 409 || cycle.Code != 21004 {
-		t.Fatalf("成环期望 409/21004，实际 %d/%d", cycle.Status, cycle.Code)
+	// 反向绑成环：409/20004。
+	cycle := doRequest(t, base, "POST", "/distribution/referral", map[string]any{"referrer_user_id": inviteeID}, authHeader(inviterToken))
+	if cycle.Status != 409 || cycle.Code != 20004 {
+		t.Fatalf("成环期望 409/20004，实际 %d/%d", cycle.Status, cycle.Code)
 	}
 
-	// 我的推荐关系：已绑定。
-	myRef := doRequest(t, base, "GET", "/my/referral", nil, authHeader(inviteeToken))
+	// 我的分销信息：已绑定到 inviter。
+	myRef := doRequest(t, base, "GET", "/distribution/me", nil, authHeader(inviteeToken))
 	if myRef.Status != 200 || myRef.Code != 0 {
-		t.Fatalf("我的推荐关系: %d/%d", myRef.Status, myRef.Code)
+		t.Fatalf("我的分销信息: %d/%d", myRef.Status, myRef.Code)
 	}
 	var refData struct {
-		Bound            bool   `json:"bound"`
-		ReferrerUserId   *int64 `json:"referrer_user_id"`
-		ReferrerUsername string `json:"referrer_username"`
-		InviteeCount     int    `json:"invitee_count"`
+		UserId   int64 `json:"user_id"`
+		Referrer *struct {
+			ReferrerUserId int64 `json:"referrer_user_id"`
+		} `json:"referrer"`
+		SubordinateCount int `json:"subordinate_count"`
 	}
 	if err := json.Unmarshal(myRef.Data, &refData); err != nil {
 		t.Fatalf("unmarshal referral: %v", err)
 	}
-	if !refData.Bound || refData.ReferrerUserId == nil || *refData.ReferrerUserId != inviterID || refData.ReferrerUsername != "distinviterapi" {
+	if refData.Referrer == nil || refData.Referrer.ReferrerUserId != inviterID {
 		t.Fatalf("推荐关系不符: %+v", refData)
 	}
 
 	// 我的佣金：空列表 + 全零汇总。
-	mine := doRequest(t, base, "GET", "/my/commissions?page=1&size=10", nil, authHeader(inviterToken))
+	mine := doRequest(t, base, "GET", "/distribution/commissions?page=1&size=10", nil, authHeader(inviterToken))
 	if mine.Status != 200 || mine.Code != 0 {
 		t.Fatalf("我的佣金: %d/%d", mine.Status, mine.Code)
 	}
@@ -390,20 +391,32 @@ func TestDistributionAPIContract(t *testing.T) {
 		t.Fatalf("初始佣金应为 0，实际 %d", listData.Total)
 	}
 	// 非法状态过滤：400/1001。
-	badStatus := doRequest(t, base, "GET", "/my/commissions?status=bogus", nil, authHeader(inviterToken))
+	badStatus := doRequest(t, base, "GET", "/distribution/commissions?status=bogus", nil, authHeader(inviterToken))
 	if badStatus.Status != 400 || badStatus.Code != 1001 {
 		t.Fatalf("非法状态过滤期望 400/1001，实际 %d/%d", badStatus.Status, badStatus.Code)
 	}
-	summary := doRequest(t, base, "GET", "/my/commissions/summary", nil, authHeader(inviterToken))
+	summary := doRequest(t, base, "GET", "/distribution/me", nil, authHeader(inviterToken))
 	if summary.Status != 200 || summary.Code != 0 {
 		t.Fatalf("佣金汇总: %d/%d", summary.Status, summary.Code)
 	}
+	var summaryData struct {
+		Commission struct {
+			PendingCount  int   `json:"pending_count"`
+			PendingAmount int64 `json:"pending_amount"`
+		} `json:"commission"`
+	}
+	if err := json.Unmarshal(summary.Data, &summaryData); err != nil {
+		t.Fatalf("unmarshal summary: %v", err)
+	}
+	if summaryData.Commission.PendingCount != 0 || summaryData.Commission.PendingAmount != 0 {
+		t.Fatalf("初始汇总应为 0，实际 %+v", summaryData.Commission)
+	}
 
 	// 后台佣金列表与推荐关系列表可读。
-	if res := doRequest(t, base, "GET", "/admin/commissions", nil, authHeader(adminToken)); res.Status != 200 || res.Code != 0 {
+	if res := doRequest(t, base, "GET", "/admin/distributions/commissions", nil, authHeader(adminToken)); res.Status != 200 || res.Code != 0 {
 		t.Fatalf("后台佣金列表: %d/%d", res.Status, res.Code)
 	}
-	refs := doRequest(t, base, "GET", "/admin/referrals", nil, authHeader(adminToken))
+	refs := doRequest(t, base, "GET", "/admin/distributions/referrals", nil, authHeader(adminToken))
 	if refs.Status != 200 || refs.Code != 0 {
 		t.Fatalf("后台推荐关系: %d/%d", refs.Status, refs.Code)
 	}

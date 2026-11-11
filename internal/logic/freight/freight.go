@@ -152,6 +152,25 @@ func (s *sFreight) AdminDetail(ctx context.Context, id int64) (*v1.AdminDetailRe
 	return &v1.AdminDetailRes{Template: *toTemplate(row), Rules: rules}, nil
 }
 
+// ValidateTemplateForBinding 校验模板可被商品绑定：必须存在且启用。
+// 用于商品管理写入 products.freight_template_id 前的有效性校验，避免把商品绑到不存在/停用的模板上。
+func (s *sFreight) ValidateTemplateForBinding(ctx context.Context, id int64) error {
+	if id <= 0 {
+		return codes.New(codes.CodeInvalidArgument)
+	}
+	row, err := s.findTemplate(ctx, id)
+	if err != nil {
+		return err
+	}
+	if row == nil {
+		return codes.New(codes.CodeFreightTemplateNotFound)
+	}
+	if row.Status != templateStatusEnabled {
+		return codes.New(codes.CodeFreightTemplateDisabled)
+	}
+	return nil
+}
+
 // AdminUpdate 更新模板基础信息（不改状态与规则）；不存在 20001，重名 20002。
 func (s *sFreight) AdminUpdate(ctx context.Context, req *v1.AdminUpdateReq) (*v1.AdminUpdateRes, error) {
 	if req == nil {

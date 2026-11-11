@@ -120,6 +120,7 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 
 		// 订单（仅登录用户，作用于本人数据）。
 		user.POST("/orders", orderCtrl.Create)
+		user.POST("/orders/quote", orderCtrl.Quote)
 		user.GET("/orders", orderCtrl.List)
 		user.GET("/orders/:id", orderCtrl.Detail)
 		user.POST("/orders/:id/pay", orderCtrl.Pay)

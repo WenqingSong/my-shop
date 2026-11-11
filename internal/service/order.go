@@ -16,8 +16,11 @@ type IOrder interface {
 	List(ctx context.Context, userID int64) (*v1.ListRes, error)
 	// Detail 查询本人订单详情；不存在或非本人统一 9001。
 	Detail(ctx context.Context, userID, id int64) (*v1.DetailRes, error)
-	// Pay Mock 支付（仅本人，待支付→已支付，幂等；已过期订单先懒取消）。
-	Pay(ctx context.Context, userID, id int64) (*v1.PayRes, error)
+	// Quote 订单算价预览（只读，不占券/不扣库存；返回金额不是最终可信金额）。
+	Quote(ctx context.Context, userID int64, req *v1.QuoteReq) (*v1.QuoteRes, error)
+	// Pay 支付（仅本人，待支付→已支付，幂等；已过期订单先懒取消）。
+	// payType 为空视为 mock；balance 走钱包余额渠道并与订单状态推进同事务。
+	Pay(ctx context.Context, userID, id int64, payType string) (*v1.PayRes, error)
 	// Cancel 取消本人待支付订单（恢复库存，原子）。
 	Cancel(ctx context.Context, userID, id int64) (*v1.CancelRes, error)
 	// Receive 确认收货（仅本人，已发货→已完成，同请求原子推进）。

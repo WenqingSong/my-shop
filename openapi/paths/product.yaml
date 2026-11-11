@@ -277,6 +277,11 @@
                 items:
                   type: string
                 description: 图片 URL 列表，可选
+              freight_template_id:
+                type: [integer, "null"]
+                format: int64
+                x-go-type: int64
+                description: 运费模板 id（可选，必须存在且启用；缺省=不绑定）
     x-pagination-mode: none
     x-idempotency:
       mode: none
@@ -427,6 +432,11 @@
                 items:
                   type: string
                 description: 图片 URL 列表；提供则全量替换，未提供则保留
+              freight_template_id:
+                type: [integer, "null"]
+                format: int64
+                x-go-type: int64
+                description: 运费模板 id：省略不改、0=解绑、>0 必须存在且启用
     x-pagination-mode: none
     x-idempotency:
       mode: none

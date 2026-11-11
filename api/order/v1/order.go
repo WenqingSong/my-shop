@@ -40,6 +40,8 @@ type Order struct {
 	OriginalAmount       int64        `json:"original_amount" dc:"优惠前金额（整数分，快照 = Σ 订单项 price×quantity）"`
 	DiscountAmount       int64        `json:"discount_amount" dc:"优惠券优惠金额（整数分，快照，无券为 0）"`
 	MemberDiscountAmount int64        `json:"member_discount_amount" dc:"会员等级折扣金额（整数分，快照，无会员权益/无折扣为 0；不占用 discount_amount 的券语义）"`
+	ShippingFee          int64        `json:"shipping_fee" dc:"运费（整数分，快照；未绑定运费模板的商品为 0）"`
+	PayType              string       `json:"pay_type" dc:"支付方式：mock（默认）/balance（钱包余额）；未支付为空串"`
 	UserCouponId         *int64       `json:"user_coupon_id" dc:"下单时使用的用户券 id（软引用，快照，无券为空）"`
 	IdempotencyKey       string       `json:"idempotency_key" dc:"幂等键"`
 	RecipientName        string       `json:"recipient_name" dc:"收货人姓名快照"`
@@ -119,10 +121,55 @@ type DetailRes struct {
 	Order
 }
 
-// PayReq 支付请求（Mock 支付，仅本人）。
+// 订单支付方式（pay_type）。
+const (
+	PayTypeMock    = "mock"    // Mock 支付（默认）：只推进订单状态，不产生资金流水
+	PayTypeBalance = "balance" // 钱包余额支付：同事务内扣减余额并写资金流水
+)
+
+// PayReq 支付请求（仅本人）。
+//
+// pay_type 为空视为 mock；balance 走钱包余额渠道，余额不足返回 22002 且订单状态不变。
 type PayReq struct {
-	g.Meta `path:"/orders/:id/pay" method:"post" tags:"订单" summary:"支付订单（Mock）"`
-	Id     int64 `json:"id" in:"path" v:"required" dc:"订单 id"`
+	g.Meta  `path:"/orders/:id/pay" method:"post" tags:"订单" summary:"支付订单（Mock / 钱包余额）"`
+	Id      int64  `json:"id" in:"path" v:"required" dc:"订单 id"`
+	PayType string `json:"pay_type" dc:"支付方式：mock（默认）/balance；其它值返回 1001"`
+}
+
+// QuoteReq 订单算价预览请求（不接受客户端金额）。
+//
+// 预览金额不是最终可信金额：创建订单时会在事务内重新读取 SKU 权威价格、会员折扣与运费并复核。
+type QuoteReq struct {
+	g.Meta    `path:"/orders/quote" method:"post" tags:"订单" summary:"订单算价预览"`
+	Source    string `json:"source" v:"required" dc:"来源：cart/direct"`
+	AddressId int64  `json:"address_id" v:"required" dc:"收货地址 id（必须属于当前用户，决定运费）"`
+	SkuCode   string `json:"sku_code" dc:"直接购买 SKU 编码（source=direct 推荐）"`
+	SkuId     int64  `json:"sku_id" dc:"直接购买 SKU id（source=direct 兼容字段）"`
+	Quantity  int64  `json:"quantity" dc:"直接购买数量（source=direct 必填）"`
+	CouponId  int64  `json:"coupon_id" dc:"可选使用的用户券 id（只读预览，不占用/不核销）"`
+}
+
+// QuoteItem 算价明细行（服务端权威价格快照，仅用于展示）。
+type QuoteItem struct {
+	SkuId     int64  `json:"sku_id" dc:"SKU id"`
+	SkuCode   string `json:"sku_code" dc:"SKU 编码"`
+	ProductId int64  `json:"product_id" dc:"商品 id"`
+	Name      string `json:"name" dc:"SKU 名称"`
+	SpecText  string `json:"spec_text" dc:"规格文本"`
+	Price     int64  `json:"price" dc:"服务端成交价（整数分）"`
+	Quantity  int64  `json:"quantity" dc:"数量"`
+	Amount    int64  `json:"amount" dc:"行金额 = price × quantity（整数分）"`
+}
+
+// QuoteRes 订单算价预览响应（六槽位与守恒关系）。
+type QuoteRes struct {
+	OriginalAmount int64        `json:"original_amount" dc:"商品原始金额（整数分）"`
+	CouponDiscount int64        `json:"coupon_discount" dc:"优惠券折扣（整数分）"`
+	MemberDiscount int64        `json:"member_discount" dc:"会员折扣（整数分）"`
+	PointsDiscount int64        `json:"points_discount" dc:"积分抵扣（整数分，当前恒 0）"`
+	ShippingFee    int64        `json:"shipping_fee" dc:"运费（整数分）"`
+	PayableAmount  int64        `json:"payable_amount" dc:"应付金额（整数分）"`
+	Items          []*QuoteItem `json:"items" dc:"算价明细（服务端权威价格）"`
 }
 
 // PayRes 支付响应。

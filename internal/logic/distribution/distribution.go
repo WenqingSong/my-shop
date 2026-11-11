@@ -11,7 +11,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/go-sql-driver/mysql"
@@ -50,6 +49,10 @@ const (
 // maxReferralChainDepth 是推荐关系向上遍历的深度上限。
 // 一级分销下每个用户至多一个上级，正常数据深度很小；上限只用于防御脏数据导致遍历不终止。
 const maxReferralChainDepth = 200
+
+// errReferralDuplicate 表示绑定推荐关系命中 uk_user_id（并发下另一请求已先绑定）。
+// 事务内不做「回读 + 判定」，而是整体回滚后在新快照中判定，避免 RR 快照读不到已提交行。
+var errReferralDuplicate = errors.New("distribution: referral already bound")
 
 // reversalReasonRefund 是退款触发的冲回原因（distribution_commissions.reversal_reason）。
 const reversalReasonRefund = "refund"
@@ -130,21 +133,15 @@ func (s *sDistribution) BindReferral(ctx context.Context, userID, referrerUserID
 
 	var bound *v1.Referral
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		lockIDs := []int64{userID, referrerUserID}
-		sort.Slice(lockIDs, func(i, j int) bool { return lockIDs[i] < lockIDs[j] })
-		var locked []*referralRow
-		if e := tx.Model("user_referrals").Ctx(ctx).
-			WhereIn("user_id", lockIDs).
-			Order("user_id ASC").
-			LockUpdate().
-			Scan(&locked); e != nil {
-			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("锁定推荐关系: %w", e))
+		// 不使用 SELECT ... FOR UPDATE：不存在的行在 REPEATABLE READ 下会加间隙锁，
+		// 并发绑定同一用户到不同推荐人时容易死锁。并发仲裁交给 uk_user_id：
+		// 只有一个事务能插入成功，其余事务命中 1062 后结束本事务，由调用方在新快照中判定幂等/冲突。
+		existing, e := s.findReferralInTx(ctx, tx, userID)
+		if e != nil {
+			return e
 		}
-		for _, row := range locked {
-			if row.UserId != userID {
-				continue
-			}
-			res, e := s.existingReferralResult(toReferral(row), referrerUserID)
+		if existing != nil {
+			res, e := s.existingReferralResult(existing, referrerUserID)
 			if e != nil {
 				return e
 			}
@@ -156,23 +153,10 @@ func (s *sDistribution) BindReferral(ctx context.Context, userID, referrerUserID
 			"user_id":          userID,
 			"referrer_user_id": referrerUserID,
 		}).Insert(); e != nil {
-			if duplicateKeyName(e) == "" {
-				return codes.Wrap(codes.CodeInternalError, fmt.Errorf("绑定推荐关系: %w", e))
+			if duplicateKeyName(e) != "" {
+				return errReferralDuplicate
 			}
-			// 并发下另一请求已先绑定：唯一约束是最终仲裁，按其结果判定幂等或冲突。
-			concurrent, ce := s.findReferralInTx(ctx, tx, userID)
-			if ce != nil {
-				return ce
-			}
-			if concurrent == nil {
-				return codes.Wrap(codes.CodeInternalError, fmt.Errorf("推荐关系唯一冲突后未找到记录: %w", e))
-			}
-			res, ce := s.existingReferralResult(concurrent, referrerUserID)
-			if ce != nil {
-				return ce
-			}
-			bound = &res.Referral
-			return nil
+			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("绑定推荐关系: %w", e))
 		}
 
 		// 写后环检测：本事务内已可见新关系，从本人向上遍历，回到本人即成环并整体回滚。
@@ -190,6 +174,17 @@ func (s *sDistribution) BindReferral(ctx context.Context, userID, referrerUserID
 		bound = row
 		return nil
 	})
+	// 唯一键冲突：本事务已回滚，重新以新快照读取并发落库的关系再判定幂等/改绑冲突。
+	if errors.Is(err, errReferralDuplicate) {
+		concurrent, e := s.findReferral(ctx, userID)
+		if e != nil {
+			return nil, e
+		}
+		if concurrent == nil {
+			return nil, codes.Wrap(codes.CodeInternalError, errors.New("推荐关系唯一冲突后未找到记录"))
+		}
+		return s.existingReferralResult(concurrent, referrerUserID)
+	}
 	if err != nil {
 		return nil, err
 	}

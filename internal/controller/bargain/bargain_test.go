@@ -292,11 +292,11 @@ func TestBargainHTTPFlow(t *testing.T) {
 		res = doRequest(t, base, "PUT", fmt.Sprintf("/admin/bargain-activities/%d", activity.Id), update, adminToken)
 		requireStatus(t, res, 200, 0, "编辑砍价活动")
 
-		// 改绑商品被拒绝：21002。
+		// 改绑商品被拒绝：23002。
 		otherProductID, otherSkuID := createCategoryProductSku(t, 10000)
 		rebind := createActivityRequest(otherProductID, otherSkuID, 10000, 9000, 100, 20)
 		res = doRequest(t, base, "PUT", fmt.Sprintf("/admin/bargain-activities/%d", activity.Id), rebind, adminToken)
-		requireStatus(t, res, 400, 21002, "编辑活动改绑商品")
+		requireStatus(t, res, 400, 23002, "编辑活动改绑商品")
 	})
 
 	// 发起 → 自助拒绝 → 重复助力 → 助力 → 越权放弃 → 放弃。
@@ -317,15 +317,15 @@ func TestBargainHTTPFlow(t *testing.T) {
 		instanceID = inst.Id
 
 		res = doRequest(t, base, "POST", fmt.Sprintf("/bargain-activities/%d/instances", activity.Id), nil, ownerToken)
-		requireStatus(t, res, 409, 21005, "重复发起砍价")
+		requireStatus(t, res, 409, 23005, "重复发起砍价")
 
 		res = doRequest(t, base, "GET", "/bargain-instances/999999", nil, ownerToken)
-		requireStatus(t, res, 404, 21004, "查询不存在实例")
+		requireStatus(t, res, 404, 23004, "查询不存在实例")
 	})
 
 	t.Run("助力与重复助力", func(t *testing.T) {
 		res := doRequest(t, base, "POST", fmt.Sprintf("/bargain-instances/%d/help", instanceID), nil, ownerToken)
-		requireStatus(t, res, 409, 21006, "给自己助力")
+		requireStatus(t, res, 409, 23006, "给自己助力")
 
 		res = doRequest(t, base, "POST", fmt.Sprintf("/bargain-instances/%d/help", instanceID), nil, helperToken)
 		requireStatus(t, res, 200, 0, "好友助力")
@@ -344,7 +344,7 @@ func TestBargainHTTPFlow(t *testing.T) {
 		}
 
 		res = doRequest(t, base, "POST", fmt.Sprintf("/bargain-instances/%d/help", instanceID), nil, helperToken)
-		requireStatus(t, res, 409, 21008, "重复助力")
+		requireStatus(t, res, 409, 23008, "重复助力")
 
 		res = doRequest(t, base, "GET", fmt.Sprintf("/bargain-instances/%d/helps", instanceID), nil, helperToken)
 		requireStatus(t, res, 200, 0, "查询助力记录")
@@ -366,7 +366,7 @@ func TestBargainHTTPFlow(t *testing.T) {
 
 	t.Run("放弃砍价", func(t *testing.T) {
 		otherToken := registerUser(t, base)
-		requireStatus(t, doRequest(t, base, "POST", fmt.Sprintf("/bargain-instances/%d/abandon", instanceID), nil, otherToken), 404, 21004, "非本人放弃")
+		requireStatus(t, doRequest(t, base, "POST", fmt.Sprintf("/bargain-instances/%d/abandon", instanceID), nil, otherToken), 404, 23004, "非本人放弃")
 
 		res := doRequest(t, base, "POST", fmt.Sprintf("/bargain-instances/%d/abandon", instanceID), nil, ownerToken)
 		requireStatus(t, res, 200, 0, "本人放弃")
@@ -377,7 +377,7 @@ func TestBargainHTTPFlow(t *testing.T) {
 		if inst.Status != "failed" {
 			t.Fatalf("放弃后状态 = %q, want failed", inst.Status)
 		}
-		requireStatus(t, doRequest(t, base, "POST", fmt.Sprintf("/bargain-instances/%d/abandon", instanceID), nil, ownerToken), 409, 21009, "重复放弃")
+		requireStatus(t, doRequest(t, base, "POST", fmt.Sprintf("/bargain-instances/%d/abandon", instanceID), nil, ownerToken), 409, 23009, "重复放弃")
 	})
 
 	// 成功路径：一次助力直达底价 → 成功，终态拒绝再次助力。
@@ -408,7 +408,7 @@ func TestBargainHTTPFlow(t *testing.T) {
 		}
 
 		thirdToken := registerUser(t, base)
-		requireStatus(t, doRequest(t, base, "POST", fmt.Sprintf("/bargain-instances/%d/help", inst.Id), nil, thirdToken), 409, 21007, "成功实例继续助力")
+		requireStatus(t, doRequest(t, base, "POST", fmt.Sprintf("/bargain-instances/%d/help", inst.Id), nil, thirdToken), 409, 23007, "成功实例继续助力")
 
 		res = doRequest(t, base, "GET", "/my/bargain-instances", nil, ownerToken)
 		requireStatus(t, res, 200, 0, "查询我的砍价记录")
@@ -428,6 +428,6 @@ func TestBargainHTTPFlow(t *testing.T) {
 	t.Run("停用活动阻止新发起", func(t *testing.T) {
 		requireStatus(t, doRequest(t, base, "POST", fmt.Sprintf("/admin/bargain-activities/%d/status", activity.Id), map[string]any{"status": 0}, adminToken), 200, 0, "停用活动")
 		res := doRequest(t, base, "POST", fmt.Sprintf("/bargain-activities/%d/instances", activity.Id), nil, registerUser(t, base))
-		requireStatus(t, res, 409, 21003, "停用活动发起砍价")
+		requireStatus(t, res, 409, 23003, "停用活动发起砍价")
 	})
 }

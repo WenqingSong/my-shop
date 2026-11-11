@@ -45,13 +45,22 @@ func (c *ControllerV1) Detail(ctx context.Context, req *v1.DetailReq) (res *v1.D
 	return service.Order().Detail(ctx, userID, req.Id)
 }
 
-// Pay 处理 Mock 支付。
+// Quote 处理订单算价预览（只读）。
+func (c *ControllerV1) Quote(ctx context.Context, req *v1.QuoteReq) (res *v1.QuoteRes, err error) {
+	userID, err := currentUserID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return service.Order().Quote(ctx, userID, req)
+}
+
+// Pay 处理支付（mock 或钱包余额）。
 func (c *ControllerV1) Pay(ctx context.Context, req *v1.PayReq) (res *v1.PayRes, err error) {
 	userID, err := currentUserID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return service.Order().Pay(ctx, userID, req.Id)
+	return service.Order().Pay(ctx, userID, req.Id, req.PayType)
 }
 
 // Cancel 处理取消订单。
