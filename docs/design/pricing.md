@@ -2,7 +2,7 @@
 
 本文说明 SurgeCart 的金额单位、统一计价入口、当前已实现的计价公式、目标公式与历史兼容边界。
 
-自 B1-04-03 起，项目建立**唯一计价入口** `internal/logic/pricing.Quote`：商品原始金额、优惠券折扣、运费与应付金额必须经该入口得出，禁止各业务模块各自实现一套金额公式。会员折扣与积分抵扣在 `Breakdown` 中已预留独立槽位（当前恒 0），由 B1-04-08 / B1-04-05 通过同一入口扩展。
+自 B1-04-03 起，项目建立**唯一计价入口** `internal/logic/pricing.Quote`：商品原始金额、优惠券折扣、运费与应付金额必须经该入口得出，禁止各业务模块各自实现一套金额公式。会员折扣在 `Breakdown` 中已有独立槽位，自 B1-04-08 起由会员等级折扣率产生实际值；积分抵扣槽位保留但尚未实现业务规则（当前恒 0）。
 
 当前状态需严格区分：
 
@@ -103,8 +103,8 @@ PayableAmount = OriginalAmount - CouponDiscount - MemberDiscount - PointsDiscoun
 type Breakdown struct {
     OriginalAmount  int64 // 商品原始金额
     CouponDiscount  int64 // 优惠券折扣
-    MemberDiscount  int64 // 会员折扣（当前恒 0）
-    PointsDiscount  int64 // 积分抵扣（当前恒 0）
+    MemberDiscount  int64 // 会员折扣（B1-04-08 起由会员等级折扣率产生，无等级权益时为 0）
+    PointsDiscount  int64 // 积分抵扣（尚未实现，当前恒 0）
     ShippingFee     int64 // 运费
     PayableAmount   int64 // 应付金额
 }

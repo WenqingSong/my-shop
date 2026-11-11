@@ -15,6 +15,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	"cnb.cool/go-cloud-devops/my-shop/internal/codes"
+	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
 	"cnb.cool/go-cloud-devops/my-shop/internal/service"
 )
 
@@ -345,14 +346,17 @@ func TestIntegrationSchemaVersion(t *testing.T) {
 	ctx := context.Background()
 	setupIntegrationDB(t)
 
+	// 期望值为内嵌迁移的最新版本，而不是硬编码版本号：后续任务新增迁移后，
+	// 本用例应继续校验「隔离库已迁移到最新」，而不是因版本号推进而误报失败。
+	want := int64(migrations.LatestVersion())
 	value, err := g.DB().GetValue(ctx, "SELECT MAX(version) FROM schema_migrations")
 	if err != nil {
 		t.Fatalf("查询迁移版本失败: %v", err)
 	}
-	if value.Int64() != 20261111000002 {
-		t.Fatalf("隔离库迁移版本 = %d，期望 20261111000002", value.Int64())
+	if value.Int64() != want {
+		t.Fatalf("隔离库迁移版本 = %d，期望 %d（内嵌迁移最新版本）", value.Int64(), want)
 	}
-	dirty, err := g.DB().GetValue(ctx, "SELECT dirty FROM schema_migrations WHERE version = 20261111000002")
+	dirty, err := g.DB().GetValue(ctx, "SELECT dirty FROM schema_migrations WHERE version = ?", want)
 	if err != nil {
 		t.Fatalf("查询 dirty 失败: %v", err)
 	}

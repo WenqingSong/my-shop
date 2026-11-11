@@ -109,9 +109,12 @@ type commissionRow struct {
 //   - 推荐人必须存在且 status=1（20002）；
 //   - 一人一个上级：同人重复提交幂等返回既有关系，换人返回 20003（不可改绑）；
 //   - 不成环（20004）：从推荐人向上遍历，回到本人即成环（吸收 B1-04-08 的环校验）；
-//   - 并发安全：绑定在单事务内完成，先按 user_id 升序锁定双方推荐关系行（不存在的行由
-//     唯一索引间隙锁兜底），写入后做写后环检测；uk_user_id 仍是最终仲裁，
-//     1062 时以已落库关系为准判定幂等/冲突。
+//   - 并发安全：绑定在单事务内完成，不显式使用 SELECT ... FOR UPDATE（不存在的行在
+//     REPEATABLE READ 下会加间隙锁，并发绑定同一用户到不同推荐人时容易死锁）；
+//     并发仲裁交给 uk_user_id，写入后做写后环检测，1062 时以已落库关系为准判定幂等/冲突。
+//     已知残留：两个用户并发互绑时，双方的写后环检测可能各自看不到对方未提交的插入，
+//     理论上可产生 A→B→A 的双节点环（一级分销不遍历链路，暂无资金影响），修复方案见
+//     B1-04 最终验收报告「遗留事项」。
 func (s *sDistribution) BindReferral(ctx context.Context, userID, referrerUserID int64) (*v1.BindReferralRes, error) {
 	if userID <= 0 || referrerUserID <= 0 {
 		return nil, codes.New(codes.CodeInvalidArgument)

@@ -7,8 +7,8 @@
 //
 //	OriginalAmount 商品原始金额
 //	  ↓ CouponDiscount 优惠券折扣
-//	  ↓ MemberDiscount 会员折扣（本批次不产生业务规则，恒 0）
-//	  ↓ PointsDiscount 积分抵扣（本批次不产生业务规则，恒 0）
+//	  ↓ MemberDiscount 会员折扣（B1-04-08 起由会员等级折扣率产生；无等级权益时为 0）
+//	  ↓ PointsDiscount 积分抵扣（尚未实现业务规则，调用方必须传 0）
 //	  + ShippingFee    运费
 //	= PayableAmount  应付金额
 //
@@ -32,8 +32,8 @@ const MaxTotalAmount int64 = math.MaxUint32
 type Breakdown struct {
 	OriginalAmount int64 `json:"original_amount" dc:"商品原始金额（整数分）"`
 	CouponDiscount int64 `json:"coupon_discount" dc:"优惠券折扣（整数分）"`
-	MemberDiscount int64 `json:"member_discount" dc:"会员折扣（整数分，本批次恒 0）"`
-	PointsDiscount int64 `json:"points_discount" dc:"积分抵扣（整数分，本批次恒 0）"`
+	MemberDiscount int64 `json:"member_discount" dc:"会员折扣（整数分，无等级权益时为 0）"`
+	PointsDiscount int64 `json:"points_discount" dc:"积分抵扣（整数分，尚未实现，当前恒 0）"`
 	ShippingFee    int64 `json:"shipping_fee" dc:"运费（整数分）"`
 	PayableAmount  int64 `json:"payable_amount" dc:"应付金额（整数分）"`
 }
@@ -42,9 +42,9 @@ type Breakdown struct {
 //
 // OriginalAmount 由调用方按服务端权威价格汇总（订单场景为下单时重读的 skus.price × quantity），
 // CouponDiscount 由优惠券模块在事务内校验并计算后传入，ShippingFee 由运费模块计算后传入。
-// MemberDiscount/PointsDiscount 为后续任务预留：本批次没有产生这两个值的业务规则，
-// 调用方必须传 0；槽位保留是为了让 B1-04-08（会员折扣）与 B1-04-05（积分）在同一入口扩展，
-// 而不是各自新增第二套公式。
+// MemberDiscount 由订单模块按会员等级折扣率（B1-04-08）计算后传入，无等级权益时传 0。
+// PointsDiscount 仍为后续任务预留：当前没有产生该值的业务规则，调用方必须传 0，
+// 槽位保留是为了让积分抵扣在同一入口扩展，而不是各自新增第二套公式。
 type QuoteRequest struct {
 	OriginalAmount int64
 	CouponDiscount int64
