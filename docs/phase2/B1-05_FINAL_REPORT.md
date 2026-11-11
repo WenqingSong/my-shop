@@ -209,7 +209,7 @@
 
 | 风险 | 核对结果 |
 |---|---|
-| `int64` 被误生成成 string | 未发现。`int/int64` 统一生成 `type: integer, format: int64` + `x-go-type`；`json.Number` 生成 `oneOf: [integer, string]`（金额入参） |
+| `int64` 被误生成成 string | 未发现。`int/int64` 统一生成 `type: integer, format: int64` + `x-go-type`；`json.Number` 在 operation 请求体内联 schema 中生成 `oneOf: [{integer,int64}, {string, 数字 pattern}]`（如订单明细 `quantity`、秒杀价），未降级为纯 string |
 | 金额被转成浮点 | 未发现。金额字段一律 `integer` + `x-unit: cent`（当前 83 处），仅 `avg_rating` 为 `number/double` |
 | Go JSON 字段名与 OpenAPI 不一致 | 未发现。Schema 字段名来自 AST 的 `json` tag，`-check` 步骤 8 深比较 `schemas.yaml` 与重新解析结果 |
 | `omitempty` 与 null 语义混淆 | 请求侧 `required` 仅取 `v:"required"`；响应侧按"非 `omitempty` 即必出现"生成 `required`；`*T` 生成 `type: [T, "null"]` |
@@ -723,7 +723,8 @@
 | 分支 | `feat/b1-05-04-openapi-report` |
 | 起点 SHA | `d1fa065a5620f7430596de236a60c0613aaac557` |
 | 提交信息 | `test(contract): finalize B1-05-04 OpenAPI audit` |
-| 提交 SHA | 见提交后回填（本报告 §11.3 的 SHA 由提交动作决定，避免自引用） |
+| 交付提交 SHA | `6ffe875193b1bc4bbb7f62f4450b85745bdd8cc3`（契约核对 + 重新生成 + 本报告） |
+| 本行回填提交 | 仅回填上面一行 SHA 的元数据提交（其父提交即 `6ffe875`） |
 | Push / Merge | 均未执行 |
 
 ### 11.4 测试结果汇总
