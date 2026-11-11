@@ -12,11 +12,12 @@ import (
 const contractBaseline = "82243c0fbce614e03c4ff57dcc829b5f68fb08f2"
 
 // 常驻 API 的期望分布：B1-01 §3.1 的 142 条 + B1-04-05 一级分销新增 8 条（前台 4、后台 4）
-// + B1-04-01 用户资料与地区字典新增 5 条（前台 5：/profile 2 条、/regions 3 条）。
+// + B1-04-01 用户资料与地区字典新增 5 条（前台 5：/profile 2 条、/regions 3 条）
+// + B1-04-06 拼团新增 15 条（前台 7：活动浏览 3 + 开团/参团/详情/我的 4；后台 8）。
 const (
-	expectedTotal    = 155
-	expectedFrontend = 76
-	expectedAdmin    = 77
+	expectedTotal    = 170
+	expectedFrontend = 83
+	expectedAdmin    = 85
 	expectedHealth   = 2
 )
 
@@ -25,7 +26,7 @@ var codesByValue = map[int]*ErrorCode{}
 // pathFileOrder 固定分域视图文件的输出顺序。
 var pathFileOrder = []string{
 	"iam", "profile", "admin", "categories", "product", "sku", "inventory", "address", "region",
-	"cart", "order", "refund", "coupon", "distribution", "flashsale", "banner",
+	"cart", "order", "refund", "coupon", "distribution", "groupbuy", "flashsale", "banner",
 	"recommendation", "article", "review", "favorite", "like", "upload", "dashboard", "health",
 }
 
@@ -51,6 +52,7 @@ var tagDescriptions = []struct {
 	{"退款", "退款申请、撤销、审核、执行与审计"},
 	{"优惠券", "优惠券模板管理与用户领取"},
 	{"分销", "一级推荐关系与订单佣金（只做一级，不含提现与结算）"},
+	{"拼团", "拼团活动管理与开团/参团/成团/过期"},
 	{"秒杀", "秒杀活动管理与下单"},
 	{"轮播图", "轮播图查询与后台管理"},
 	{"推荐位", "推荐位查询与后台管理"},

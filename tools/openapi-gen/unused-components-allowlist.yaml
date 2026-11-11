@@ -103,6 +103,22 @@ groups:
       - FlashSaleListRequestAuditsRequest
       - FlashSaleRepairRequestRequest
       - FlashSaleUpdateRequest
+      # B1-04-06 拼团
+      - GroupBuyActivityDetailRequest
+      - GroupBuyAdminCloseTeamRequest
+      - GroupBuyAdminCreateRequest
+      - GroupBuyAdminDetailRequest
+      - GroupBuyAdminListRequest
+      - GroupBuyAdminListTeamsRequest
+      - GroupBuyAdminStatusRequest
+      - GroupBuyAdminTeamDetailRequest
+      - GroupBuyAdminUpdateRequest
+      - GroupBuyCreateTeamRequest
+      - GroupBuyJoinTeamRequest
+      - GroupBuyListActivitiesRequest
+      - GroupBuyListTeamsRequest
+      - GroupBuyMyListRequest
+      - GroupBuyTeamDetailRequest
       - HealthLivenessRequest
       - HealthReadinessRequest
       - InventoryDeductRequest

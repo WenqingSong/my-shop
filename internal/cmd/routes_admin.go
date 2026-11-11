@@ -10,6 +10,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/dashboard"
 	distributionController "cnb.cool/go-cloud-devops/my-shop/internal/controller/distribution"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/flashsale"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/groupbuy"
 	iamController "cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/inventory"
 	orderController "cnb.cool/go-cloud-devops/my-shop/internal/controller/order"
@@ -49,6 +50,7 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 	refundAdminCtrl := refundController.NewAdminV1()
 	couponAdminCtrl := coupon.NewAdminV1()
 	distributionAdminCtrl := distributionController.NewAdminV1()
+	groupBuyAdminCtrl := groupbuy.NewAdminV1()
 
 	// 后台公开接口：管理员登录（无需 token）。
 	root.POST("/admin/login", adminCtrl.Login)
@@ -197,5 +199,16 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 		require("distribution:referral_list").GET("/admin/distributions/distributors", distributionAdminCtrl.AdminListDistributors)
 		require("distribution:commission_list").GET("/admin/distributions/commissions", distributionAdminCtrl.AdminListCommissions)
 		require("distribution:commission_list").GET("/admin/distributions/commissions/stats", distributionAdminCtrl.AdminCommissionStats)
+
+		// B1-04-06 BEGIN：拼团后台（活动管理与团查询/关闭）。
+		require("group_buy:create").POST("/admin/group-buys", groupBuyAdminCtrl.AdminCreate)
+		require("group_buy:update").PUT("/admin/group-buys/:id", groupBuyAdminCtrl.AdminUpdate)
+		require("group_buy:update").POST("/admin/group-buys/:id/status", groupBuyAdminCtrl.AdminStatus)
+		require("group_buy:list").GET("/admin/group-buys", groupBuyAdminCtrl.AdminList)
+		require("group_buy:view").GET("/admin/group-buys/:id", groupBuyAdminCtrl.AdminDetail)
+		require("group_buy:list").GET("/admin/group-buy-teams", groupBuyAdminCtrl.AdminListTeams)
+		require("group_buy:view").GET("/admin/group-buy-teams/:id", groupBuyAdminCtrl.AdminTeamDetail)
+		require("group_buy:close").POST("/admin/group-buy-teams/:id/close", groupBuyAdminCtrl.AdminCloseTeam)
+		// B1-04-06 END
 	})
 }

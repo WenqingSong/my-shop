@@ -48,9 +48,9 @@ func collectRoutes(t *testing.T) map[string]bool {
 	return got
 }
 
-// fullRouteTable 是 155 条常驻 JSON API 的完整清单
+// fullRouteTable 是 170 条常驻 JSON API 的完整清单
 // （B1-01 §3.1 冻结的 142 条，B1-02-04 补齐，B1-04-05 新增一级分销 8 条，
-// B1-04-01 新增用户资料 2 条与地区字典 3 条）。
+// B1-04-01 新增用户资料 2 条与地区字典 3 条，B1-04-06 新增拼团 15 条）。
 // 任何新增、删除或路径/方法变更都必须同步更新本清单与 openapi/。
 //
 // 不计入本清单的路由：
@@ -62,7 +62,7 @@ func fullRouteTable() []string {
 		"GET /health",
 		"GET /ready",
 
-		// ---- 前台公开接口（17）----
+		// ---- 前台公开接口（20）----
 		"POST /register",
 		"POST /login",
 		"POST /refresh",
@@ -80,8 +80,12 @@ func fullRouteTable() []string {
 		"GET /articles",
 		"GET /articles/:id",
 		"GET /articles/:id/like/count",
+		// B1-04-06：拼团活动浏览（公开只读）
+		"GET /group-buys",
+		"GET /group-buys/:id",
+		"GET /group-buys/:id/teams",
 
-		// ---- 前台用户认证（58）----
+		// ---- 前台用户认证（62）----
 		"GET /me",
 		"GET /profile",
 		"PUT /profile",
@@ -131,6 +135,11 @@ func fullRouteTable() []string {
 		"GET /my/articles/favorites",
 		"POST /coupons/:template_id/claim",
 		"GET /my/coupons",
+		// B1-04-06：拼团开团/参团/详情/我的拼团
+		"POST /group-buys/:id/teams",
+		"POST /group-buy-teams/:id/join",
+		"GET /group-buy-teams/:id",
+		"GET /my/group-buys",
 		"POST /distribution/referral",
 		"GET /distribution/me",
 		"GET /distribution/subordinates",
@@ -256,17 +265,27 @@ func fullRouteTable() []string {
 		"GET /admin/distributions/distributors",
 		"GET /admin/distributions/commissions",
 		"GET /admin/distributions/commissions/stats",
+
+		// ---- 拼团后台（8）----
+		"POST /admin/group-buys",
+		"GET /admin/group-buys",
+		"GET /admin/group-buys/:id",
+		"PUT /admin/group-buys/:id",
+		"POST /admin/group-buys/:id/status",
+		"GET /admin/group-buy-teams",
+		"GET /admin/group-buy-teams/:id",
+		"POST /admin/group-buy-teams/:id/close",
 	}
 }
 
 // TestRouteTable 双向锁定最终路由表：
-// 期望的 155 条必须存在，且不允许出现任何未登记的额外路由。
+// 期望的 170 条必须存在，且不允许出现任何未登记的额外路由。
 func TestRouteTable(t *testing.T) {
 	got := collectRoutes(t)
 	want := fullRouteTable()
 
-	if len(want) != 155 {
-		t.Fatalf("期望路由清单为 155 条，实际 %d 条（清单本身写错了）", len(want))
+	if len(want) != 170 {
+		t.Fatalf("期望路由清单为 170 条，实际 %d 条（清单本身写错了）", len(want))
 	}
 
 	wantSet := make(map[string]bool, len(want))
@@ -337,8 +356,8 @@ func TestRouteTableMatchesContract(t *testing.T) {
 			t.Errorf("OpenAPI 中的 %q 不是实际注册路由（虚构接口）", route)
 		}
 	}
-	if len(contract) != 155 {
-		t.Errorf("OpenAPI 实际 API 数为 %d，期望 155", len(contract))
+	if len(contract) != 170 {
+		t.Errorf("OpenAPI 实际 API 数为 %d，期望 170", len(contract))
 	}
 }
 
@@ -435,10 +454,10 @@ func TestRouteCountByScope(t *testing.T) {
 			frontend++
 		}
 	}
-	if frontend != 76 || admin != 77 || healthCount != 2 {
-		t.Errorf("路由分布 frontend=%d admin=%d health=%d，期望 76/77/2", frontend, admin, healthCount)
+	if frontend != 83 || admin != 85 || healthCount != 2 {
+		t.Errorf("路由分布 frontend=%d admin=%d health=%d，期望 83/85/2", frontend, admin, healthCount)
 	}
-	if total := frontend + admin + healthCount; total != 155 {
-		t.Errorf("常驻路由总数为 %d，期望 155: %s", total, fmt.Sprint(got))
+	if total := frontend + admin + healthCount; total != 170 {
+		t.Errorf("常驻路由总数为 %d，期望 170: %s", total, fmt.Sprint(got))
 	}
 }

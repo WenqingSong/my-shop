@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"sync"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -143,6 +144,17 @@ func serve(ctx context.Context, _ *gcmd.Parser) error {
 				"error": err.Error(),
 			})
 		}
+	}()
+
+	// B1-04-06：拼团超时过期扫描独立于秒杀 runtime（db_scanner / kafka 两种模式都必须运行）。
+	// 生命周期：HTTP drain 结束后（serveHTTP 返回）先停扫描器，再由上面的 defer 停秒杀 runtime；
+	// 在途单事务由数据库原子性保证回滚或完成，不产生半成品订单/库存。
+	groupBuyCtx, groupBuyCancel := context.WithCancel(runtimeCtx)
+	var groupBuyWG sync.WaitGroup
+	worker.StartGroupBuyExpireScanner(groupBuyCtx, &groupBuyWG)
+	defer func() {
+		groupBuyCancel()
+		groupBuyWG.Wait()
 	}()
 
 	// 终止预算契约（T2-03）：termination_grace_period 必须覆盖

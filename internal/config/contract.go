@@ -91,6 +91,9 @@ const (
 	// distribution.*（一级分销计佣比例）
 	KeyDistributionCommissionRateBP Key = "distribution.commission_rate_bp"
 
+	// group_buy.*（拼团过期扫描）
+	KeyGroupBuyExpireScanInterval Key = "group_buy.expire_scan_interval"
+
 	// flash_sale.*
 	KeyFlashSaleDispatchMode          Key = "flash_sale.dispatch_mode"
 	KeyFlashSaleShutdownTimeout       Key = "flash_sale.shutdown_timeout"
@@ -260,6 +263,9 @@ var specs = []Spec{
 
 	// ---------- distribution ----------
 	{KeyDistributionCommissionRateBP, "DISTRIBUTION_COMMISSION_RATE_BP", KindInt, 0, false, "订单支付事务内计佣（service.Distribution().AccrueOrderCommissionInTx）", "一级佣金比例（万分比，500=5%）；0=关闭计佣，>10000 视为配置非法"},
+
+	// ---------- group_buy ----------
+	{KeyGroupBuyExpireScanInterval, "GROUP_BUY_EXPIRE_SCAN_INTERVAL", KindInt, 60, false, "拼团超时过期扫描器（worker.StartGroupBuyExpireScanner）", "扫描周期秒数"},
 
 	// ---------- flash_sale 基础 ----------
 	{KeyFlashSaleDispatchMode, "FLASH_SALE_DISPATCH_MODE", KindString, "db_scanner", false, "秒杀 Runtime 装配", "消费入口模式：db_scanner | kafka"},

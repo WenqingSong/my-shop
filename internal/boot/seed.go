@@ -77,6 +77,11 @@ var seedPermissionList = []permissionSeed{
 	{Code: "coupon:stop", Name: "停止优惠券领取"},
 	{Code: "distribution:referral_list", Name: "查看分销关系与分销用户"},
 	{Code: "distribution:commission_list", Name: "查看佣金记录与佣金统计"},
+	{Code: "group_buy:create", Name: "创建拼团活动"},
+	{Code: "group_buy:update", Name: "修改与启停拼团活动"},
+	{Code: "group_buy:list", Name: "查看拼团活动与拼团列表"},
+	{Code: "group_buy:view", Name: "查看拼团活动与拼团详情"},
+	{Code: "group_buy:close", Name: "关闭拼团"},
 }
 
 // seedPermissions 幂等写入标准权限：已存在（code 唯一）则跳过。

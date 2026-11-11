@@ -67,6 +67,7 @@ var domainByConstantPrefix = []struct {
 	{"CodeRefund", "refund"},
 	{"CodeCoupon", "coupon"},
 	{"CodeDistribution", "distribution"},
+	{"CodeGroupBuy", "groupbuy"},
 	{"CodeInternalError", "common"},
 	{"CodeInvalidArgument", "common"},
 	{"CodeUnauthorized", "common"},

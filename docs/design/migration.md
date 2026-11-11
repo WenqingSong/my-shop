@@ -78,7 +78,7 @@ B1-03-02 的六项交易与资金迁移、B1-04-01 的 profile_region_address）
 | `20261110000008` | `points` | `user_points_accounts` + `user_points_logs`（积分账户 + 流水；含 down） |
 | `20261110000009` | `coupon_snapshot` | `user_coupons` 增 `coupon_title`/`coupon_price`/`use_min_price`/`end_time` 可空快照列（无回填；含 down） |
 | `20261110000010` | `coupon_batch` | `coupon_templates` 增 `discount_type`/`discount_rate_bp`/`per_user_limit`；新增 `coupon_batches`/`coupon_template_scopes`；`user_coupons` 增 `batch_id`/`claim_no`，`uk_user_template` 替换为 `uk_user_template_claim`（含 down，down 会裁剪 `claim_no>1` 的多领记录） |
-| `20261110000011` | `group_buy` | `group_buy_activities` + `group_buy_teams` + `group_buy_participants`（拼团活动/团/参与记录；含 down） |
+| `20261110000011` | `group_buy` | `group_buy_activities` + `group_buy_teams` + `group_buy_participants`（拼团活动/团/参与记录；含 down）。B1-04-06 拼团业务直接复用本版本，未新增/修改任何 DDL |
 | `20261110000012` | `bargain` | `bargain_activities` + `bargain_instances` + `bargain_help_records`（砍价活动/实例/助力；含 down） |
 | `20261110000013` | `member` | `member_levels` + `user_memberships` + `member_growth_logs`（等级/用户会员/成长值流水；不重复创建积分账本；含 down） |
 | `20261110000014` | `distribution` | `user_referrals` + `distribution_commissions`（一级推荐关系/订单佣金；含 down） |

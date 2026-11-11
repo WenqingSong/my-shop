@@ -12,6 +12,7 @@ import (
 	distributionCtrl "cnb.cool/go-cloud-devops/my-shop/internal/controller/distribution"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/favorite"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/flashsale"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/groupbuy"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/like"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/order"
@@ -57,6 +58,7 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	refundCtrlV1 := refundCtrl.NewV1()
 	couponCtrl := coupon.NewV1()
 	distributionCtrlV1 := distributionCtrl.NewV1()
+	groupBuyCtrl := groupbuy.NewV1()
 
 	// 前台公开接口：注册、登录、刷新、分类查询、商品查询、轮播图列表（无需 token）。
 	root.POST("/register", iamCtrl.Register)
@@ -84,6 +86,12 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	root.GET("/regions/tree", regionCtrl.Tree)
 	root.GET("/regions/:id", regionCtrl.Detail)
 	// B1-04-01 END
+
+	// B1-04-06 BEGIN：拼团活动浏览（公开只读；名单详情需登录，见下方 Auth 分组）
+	root.GET("/group-buys", groupBuyCtrl.ListActivities)
+	root.GET("/group-buys/:id", groupBuyCtrl.ActivityDetail)
+	root.GET("/group-buys/:id/teams", groupBuyCtrl.ListTeams)
+	// B1-04-06 END
 
 	// 前台登录用户接口：/me、收货地址、购物车与会话管理均需要认证 + 会话有效性校验。
 	root.Group("/", func(user *ghttp.RouterGroup) {
@@ -157,6 +165,13 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 		user.DELETE("/articles/:id/favorite", articleCtrl.Unfavorite)
 		user.GET("/articles/:id/favorite/check", articleCtrl.FavoriteCheck)
 		user.GET("/my/articles/favorites", articleCtrl.MyFavorites)
+
+		// B1-04-06 BEGIN：拼团开团/参团与本人的拼团记录（需登录，身份取自 Principal）
+		user.POST("/group-buys/:id/teams", groupBuyCtrl.CreateTeam)
+		user.POST("/group-buy-teams/:id/join", groupBuyCtrl.JoinTeam)
+		user.GET("/group-buy-teams/:id", groupBuyCtrl.TeamDetail)
+		user.GET("/my/group-buys", groupBuyCtrl.MyList)
+		// B1-04-06 END
 
 		// 优惠券（仅登录用户，作用于本人数据）。
 		user.POST("/coupons/:template_id/claim", couponCtrl.Claim)

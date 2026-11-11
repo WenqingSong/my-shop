@@ -79,6 +79,9 @@
 
 ## 7. 跨模块关系
 
+- 拼团（B1-04-06）：拼团**不建活动库存**，开团/参团下单经 `IInventory.DeductInTx` 扣减 SKU 库存
+  （每人 1 件，库存不足返回 6001 并整体回滚）；拼团失败（过期/运营关闭）取消未支付订单时经
+  `IInventory.IncreaseInTx` 恢复库存，恢复次数由订单 `status=10→60` 条件更新闸门保证。详见 `marketing.md`。
 - `inventories.sku_id`、`inventory_logs.sku_id` → `skus.id`（FK `ON DELETE RESTRICT`）：SKU 一旦有库存记录或流水即不可物理删除，SKU 删除接口返回 5005，见 `sku.md`。
 - 库存绑定 `sku_id` 而非 `product_id`；`skus` 不含 `stock`。
 - `quantity` 增加量/扣减量均为正整数（`≥1`），非法返回 6002，无额外业务上限（`INT UNSIGNED` 兜底）。

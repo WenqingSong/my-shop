@@ -166,6 +166,11 @@
   （订单保持 10，可重试）。订单状态机与错误码不因分销改变，详见 `distribution.md`。
 - 钱包/积分：`wallet_transactions`/`user_points_logs` 通过 `biz_type` + `biz_id` 软关联订单（无 FK）；当前订单支付/退款**不读写钱包与积分**，余额支付、退款入账、积分抵扣/返还在 B1-04 实现，见 `wallet.md`、`member.md`、`pricing.md`。
 - 建表经 golang-migrate 迁移（`20261001000007_orders.up.sql`）；金额三列（`original_amount`/`discount_amount`/`user_coupon_id`）由 `20261001000022_order_coupon_amounts.up.sql` 增列并回填；运费/支付/履约字段与 `order_items.spec_text` 由 `20261110000004_order_shipping_payment.up.sql` 增列（无回填）；状态流水由 `20261110000005_order_status_logs.up.sql` 建表，见 `migration.md`。
+- 拼团（B1-04-06）：开团/参团经 `IOrder.CreateGroupBuyInTx` 在调用方事务内创建普通订单
+  （`original_amount` = 下单时 `skus.price`；`discount_amount` = 原价与拼团价差额；
+  `total_amount` 与 `order_items.price` = 拼团价），拼团失败补偿经 `IOrder.CancelInTx`
+  取消未支付订单。订单状态机、金额公式与退款规则不变；拼团与订单的关系只通过
+  `group_buy_participants.order_id`，不在 `orders` 增加拼团列。详见 `marketing.md` §2.6-§2.8。
 - 配置：`order.pay_timeout`（支付超时秒，默认 900）、`order.cancel_scan_interval`（扫描周期秒，默认 60）。
 
 ## 9. Deferred / 已知留白

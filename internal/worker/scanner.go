@@ -14,6 +14,8 @@ import (
 const (
 	// orderCancelScanIntervalDefault 是订单超时取消扫描周期默认值。
 	defaultOrderCancelScanInterval = 60
+	// defaultGroupBuyExpireScanInterval 是拼团超时过期扫描周期默认值。
+	defaultGroupBuyExpireScanInterval = 60
 	// defaultFlashSaleConsumeScanInterval 是秒杀异步消费扫描周期默认值（保证低延迟落单）。
 	defaultFlashSaleConsumeScanInterval = 1
 	// defaultFlashSaleReconcileScanInterval 是秒杀缓存对账扫描周期默认值。
@@ -22,6 +24,9 @@ const (
 
 // orderCancelScanBatch 是每轮超时取消扫描处理的最大订单数。
 const orderCancelScanBatch = 100
+
+// groupBuyExpireScanBatch 是每轮拼团过期扫描处理的最大团数。
+const groupBuyExpireScanBatch = 100
 
 // scanInterval 读取扫描周期（秒）并转为 duration。
 //
@@ -61,6 +66,31 @@ func StartOrderCancelScanner(ctx context.Context, wg *sync.WaitGroup) {
 			case <-ticker.C:
 				if _, err := service.Order().CancelExpired(ctx, orderCancelScanBatch); err != nil {
 					logx.Warning(ctx, "order_cancel_scan_failed", "订单超时取消扫描失败", logx.Fields{"error": err.Error()})
+				}
+			}
+		}
+	}()
+}
+
+// StartGroupBuyExpireScanner 启动拼团超时过期后台扫描器（goroutine + ticker）。
+// 周期由 group_buy.expire_scan_interval 配置（秒，默认 60）；多实例并发依赖
+// 「status=10 AND expire_at<=NOW() 条件更新 + RowsAffected」原子闸门，同一团只会被推进一次，
+// 未命中者的订单/库存不会被重复补偿。
+// ctx 取消（SIGINT/SIGTERM）时停止领取新任务；在途单事务由数据库原子性保证回滚或完成。
+func StartGroupBuyExpireScanner(ctx context.Context, wg *sync.WaitGroup) {
+	period := scanInterval(ctx, config.KeyGroupBuyExpireScanInterval, defaultGroupBuyExpireScanInterval)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ticker := time.NewTicker(period)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if _, err := service.GroupBuy().ExpireTeams(ctx, groupBuyExpireScanBatch); err != nil {
+					logx.Warning(ctx, "group_buy_expire_scan_failed", "拼团过期扫描失败", logx.Fields{"error": err.Error()})
 				}
 			}
 		}

@@ -154,6 +154,17 @@ const (
 	CodeDistributionSelfReferral        Code = 20001 // 绑定自己为推荐人 → 400
 	CodeDistributionReferrerUnavailable Code = 20002 // 推荐人不存在或已禁用 → 404
 	CodeDistributionAlreadyBound        Code = 20003 // 已绑定其他推荐人，不可改绑 → 409
+
+	// 拼团域（Group Buy）21000-21999（域序 21 = max(20)+1，见 .agent/registry/error-codes.md）。
+	CodeGroupBuyNotFound         Code = 21001 // 拼团活动不存在 → 404
+	CodeGroupBuyInvalidArgument  Code = 21002 // 活动/参团参数非法（价格、人数、有效期、时间窗）→ 400
+	CodeGroupBuyActivityInactive Code = 21003 // 活动未开始/已结束/已停用，不可开团 → 409
+	CodeGroupBuyPriceInvalid     Code = 21004 // 拼团价非法（<=0 或高于 SKU 现价）→ 400
+	CodeGroupBuyTeamNotFound     Code = 21005 // 团不存在或不可见 → 404
+	CodeGroupBuyTeamNotJoinable  Code = 21006 // 团已满/已成团/已失败/已过期，不可参与 → 409
+	CodeGroupBuyAlreadyJoined    Code = 21007 // 该用户已在本团中（uk_team_user 兜底）→ 409
+	CodeGroupBuySkuUnavailable   Code = 21008 // 拼团商品不可购买（SKU 禁用/商品下架）→ 409
+	CodeGroupBuyTeamNotClosable  Code = 21009 // 团不在拼团中，不可关闭 → 409
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -275,6 +286,16 @@ var codeTable = map[Code]codeInfo{
 	CodeDistributionSelfReferral:        {http.StatusBadRequest, "不能绑定自己为推荐人"},
 	CodeDistributionReferrerUnavailable: {http.StatusNotFound, "推荐人不存在或不可用"},
 	CodeDistributionAlreadyBound:        {http.StatusConflict, "已绑定推荐人，不可变更"},
+
+	CodeGroupBuyNotFound:         {http.StatusNotFound, "拼团活动不存在"},
+	CodeGroupBuyInvalidArgument:  {http.StatusBadRequest, "拼团参数非法"},
+	CodeGroupBuyActivityInactive: {http.StatusConflict, "拼团活动当前不可参与"},
+	CodeGroupBuyPriceInvalid:     {http.StatusBadRequest, "拼团价格非法"},
+	CodeGroupBuyTeamNotFound:     {http.StatusNotFound, "拼团不存在"},
+	CodeGroupBuyTeamNotJoinable:  {http.StatusConflict, "该团已满或已结束，不可参与"},
+	CodeGroupBuyAlreadyJoined:    {http.StatusConflict, "您已参与该团"},
+	CodeGroupBuySkuUnavailable:   {http.StatusConflict, "拼团商品不可购买"},
+	CodeGroupBuyTeamNotClosable:  {http.StatusConflict, "拼团状态不允许关闭"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。

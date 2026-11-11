@@ -684,6 +684,128 @@ func (s *sOrder) CompleteRefundInTx(ctx context.Context, tx gdb.TX, orderID int6
 	return nil
 }
 
+// CreateGroupBuyInTx 在既有事务内创建拼团订单（orders + order_items + 扣库存）。
+//
+// 金额语义（不破坏既有订单快照）：
+//   - original_amount 仍为服务端重读的 skus.price × quantity；
+//   - discount_amount 记录拼团优惠 (skus.price - groupPrice) × quantity；
+//   - total_amount 与 order_items.price 为拼团成交价 groupPrice × quantity。
+//
+// 因此「拼团价」不是绕过定价校验的第二套金额体系，而是既有「原价 - 优惠」公式下的优惠额；
+// 若 SKU 现价已低于拼团价（活动创建后调价），拒绝下单（21004），不产生负优惠。
+func (s *sOrder) CreateGroupBuyInTx(ctx context.Context, tx gdb.TX, in *service.GroupBuyOrderInput) (int64, error) {
+	if in == nil || in.UserID <= 0 || in.AddressID <= 0 || in.SkuID <= 0 {
+		return 0, codes.New(codes.CodeInvalidArgument)
+	}
+	if in.Quantity < 1 || in.Quantity > maxOrderQuantity {
+		return 0, codes.New(codes.CodeOrderInvalidQuantity)
+	}
+	if in.GroupPrice <= 0 {
+		return 0, codes.New(codes.CodeGroupBuyPriceInvalid)
+	}
+	idempotencyKey := strings.TrimSpace(in.IdempotencyKey)
+	if idempotencyKey == "" {
+		return 0, codes.New(codes.CodeInvalidArgument)
+	}
+
+	address, err := service.Address().Detail(ctx, in.UserID, in.AddressID)
+	if err != nil {
+		return 0, err
+	}
+
+	line, err := s.resolveLine(ctx, in.SkuID, in.Quantity)
+	if err != nil {
+		if c := codes.FromError(err); c == codes.CodeOrderSkuUnavailable || c == codes.CodeSkuNotFound {
+			return 0, codes.New(codes.CodeGroupBuySkuUnavailable)
+		}
+		return 0, err
+	}
+	if in.GroupPrice > line.Price {
+		return 0, codes.New(codes.CodeGroupBuyPriceInvalid)
+	}
+
+	originalAmount := line.Price * in.Quantity
+	discountAmount := (line.Price - in.GroupPrice) * in.Quantity
+	totalAmount := in.GroupPrice * in.Quantity
+	hash := groupBuyRequestHash(in.SkuID, in.Quantity, in.GroupPrice)
+
+	var orderID int64
+	for attempt := 0; attempt < maxOrderNoRetry; attempt++ {
+		data := g.Map{
+			"order_no":        generateOrderNo(),
+			"user_id":         in.UserID,
+			"status":          statusPendingPayment,
+			"total_amount":    totalAmount,
+			"original_amount": originalAmount,
+			"discount_amount": discountAmount,
+			"idempotency_key": idempotencyKey,
+			"request_hash":    hash,
+			"recipient_name":  address.RecipientName,
+			"phone":           address.Phone,
+			"province":        address.Province,
+			"city":            address.City,
+			"district":        address.District,
+			"detail":          address.Detail,
+			"address_id":      in.AddressID,
+			// 与普通订单一致：支付截止用 MySQL NOW() 计算，消除 Go↔MySQL 时区漂移。
+			"expire_at": gdb.Raw("DATE_ADD(NOW(), INTERVAL " + strconv.FormatInt(payTimeout(ctx), 10) + " SECOND)"),
+		}
+		id, e := tx.Model("orders").Ctx(ctx).Data(data).InsertAndGetId()
+		if e == nil {
+			orderID = id
+			break
+		}
+		key := duplicateKeyName(e)
+		switch {
+		case strings.Contains(key, "uk_user_idempotency"):
+			// 同一幂等键已被使用：拼团侧应先命中参与记录，走到这里说明请求内容冲突或跨团复用键。
+			return 0, codes.New(codes.CodeOrderIdempotencyConflict)
+		case strings.Contains(key, "uk_order_no"):
+			continue // 撞号，重生成订单号重试
+		default:
+			return 0, codes.Wrap(codes.CodeInternalError, fmt.Errorf("写入拼团订单: %w", e))
+		}
+	}
+	if orderID == 0 {
+		return 0, codes.Wrap(codes.CodeInternalError, fmt.Errorf("生成拼团订单号重试失败"))
+	}
+
+	// 订单项成交价使用拼团价：订单快照自足，后续活动改价不影响已生成订单。
+	if _, e := tx.Model("order_items").Ctx(ctx).Data(g.Map{
+		"order_id":           orderID,
+		"sku_id":             line.SkuID,
+		"product_id":         line.ProductID,
+		"sku_name":           line.SkuName,
+		"product_name":       line.ProductName,
+		"product_main_image": line.ProductMainImage,
+		"price":              in.GroupPrice,
+		"quantity":           line.Quantity,
+	}).Insert(); e != nil {
+		return 0, codes.Wrap(codes.CodeInternalError, fmt.Errorf("写入拼团订单项: %w", e))
+	}
+
+	if _, e := service.Inventory().DeductInTx(ctx, tx, line.SkuID, line.Quantity, nil); e != nil {
+		return 0, e
+	}
+	return orderID, nil
+}
+
+// CancelInTx 在既有事务内取消待支付订单（status=10→60 + 恢复库存 + 释放券）。
+// 复用 cancelInTx，不复制订单状态迁移与库存恢复规则；返回 false 表示订单已非待支付（幂等无副作用）。
+func (s *sOrder) CancelInTx(ctx context.Context, tx gdb.TX, orderID int64) (bool, error) {
+	return s.cancelInTx(ctx, tx, orderID, cancelReasonTimeout, false)
+}
+
+// groupBuyRequestHash 计算拼团订单请求指纹：sha256hex(group_buy|sku|qty|group_price)。
+// 订单本身不落拼团 id，指纹只用于同幂等键的内容一致性判定。
+func groupBuyRequestHash(skuID, quantity, groupPrice int64) string {
+	raw := "group_buy|" + strconv.FormatInt(skuID, 10) +
+		"|" + strconv.FormatInt(quantity, 10) +
+		"|" + strconv.FormatInt(groupPrice, 10)
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])
+}
+
 // CancelExpired 取消过期的待支付订单（供后台扫描器复用），逐单原子取消，返回本次实际取消数量。
 // 单单失败不影响其他订单与后续轮次。
 func (s *sOrder) CancelExpired(ctx context.Context, limit int) (int, error) {

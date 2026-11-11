@@ -207,6 +207,55 @@ codes:
     http_status: 403
     message: 禁止访问
     domain: common
+  - code: 21003
+    constant: CodeGroupBuyActivityInactive
+    http_status: 409
+    message: 拼团活动当前不可参与
+    domain: groupbuy
+  - code: 21007
+    constant: CodeGroupBuyAlreadyJoined
+    http_status: 409
+    message: 您已参与该团
+    domain: groupbuy
+  - code: 21002
+    constant: CodeGroupBuyInvalidArgument
+    http_status: 400
+    message: 拼团参数非法
+    domain: groupbuy
+  - code: 21001
+    constant: CodeGroupBuyNotFound
+    http_status: 404
+    message: 拼团活动不存在
+    domain: groupbuy
+  - code: 21004
+    constant: CodeGroupBuyPriceInvalid
+    http_status: 400
+    message: 拼团价格非法
+    domain: groupbuy
+    reused_by_domains:
+      - order
+  - code: 21008
+    constant: CodeGroupBuySkuUnavailable
+    http_status: 409
+    message: 拼团商品不可购买
+    domain: groupbuy
+    reused_by_domains:
+      - order
+  - code: 21009
+    constant: CodeGroupBuyTeamNotClosable
+    http_status: 409
+    message: 拼团状态不允许关闭
+    domain: groupbuy
+  - code: 21005
+    constant: CodeGroupBuyTeamNotFound
+    http_status: 404
+    message: 拼团不存在
+    domain: groupbuy
+  - code: 21006
+    constant: CodeGroupBuyTeamNotJoinable
+    http_status: 409
+    message: 该团已满或已结束，不可参与
+    domain: groupbuy
   - code: 1000
     constant: CodeInternalError
     http_status: 500
@@ -224,6 +273,7 @@ codes:
       - distribution
       - favorite
       - flashsale
+      - groupbuy
       - iam
       - inventory
       - like
@@ -251,6 +301,7 @@ codes:
       - distribution
       - favorite
       - flashsale
+      - groupbuy
       - iam
       - like
       - order
