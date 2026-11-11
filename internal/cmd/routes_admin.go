@@ -5,6 +5,7 @@ import (
 
 	adminController "cnb.cool/go-cloud-devops/my-shop/internal/controller/admin"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/banner"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/bargain"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/coupon"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/dashboard"
@@ -53,6 +54,7 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 	couponAdminCtrl := coupon.NewAdminV1()
 	distributionAdminCtrl := distributionController.NewAdminV1()
 	freightAdminCtrl := freightController.NewAdminV1()
+	bargainAdminCtrl := bargain.NewAdminV1()
 
 	// 后台公开接口：管理员登录（无需 token）。
 	root.POST("/admin/login", adminCtrl.Login)
@@ -222,5 +224,13 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 		require("freight:update").PUT("/admin/freight-templates/:id/status", freightAdminCtrl.AdminUpdateStatus)
 		require("freight:view").GET("/admin/freight-templates/:id/rules", freightAdminCtrl.AdminListRules)
 		require("freight:update").PUT("/admin/freight-templates/:id/rules", freightAdminCtrl.AdminReplaceRules)
+		// 砍价活动后台管理（AdminAuth + RequirePermission）：
+		//   - 列表持 bargain:list、详情持 bargain:view；
+		//   - 创建持 bargain:create，编辑与启停持 bargain:update。
+		require("bargain:create").POST("/admin/bargain-activities", bargainAdminCtrl.AdminCreate)
+		require("bargain:list").GET("/admin/bargain-activities", bargainAdminCtrl.AdminList)
+		require("bargain:view").GET("/admin/bargain-activities/:id", bargainAdminCtrl.AdminDetail)
+		require("bargain:update").PUT("/admin/bargain-activities/:id", bargainAdminCtrl.AdminUpdate)
+		require("bargain:update").POST("/admin/bargain-activities/:id/status", bargainAdminCtrl.AdminStatus)
 	})
 }

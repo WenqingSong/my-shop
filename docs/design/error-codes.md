@@ -74,4 +74,4 @@ B1-04 八分支集成核实（2026-11-11）：实际进入集成分支的错误�
 
 各业务模块 Design 继续在自身「错误码域」章节记录本模块具体错误码与归属声明，不在此重复，也不要求各模块重复全局 Namespace 规则：
 
-- `iam.md`、`rbac.md`、`category.md`、`product.md`、`sku.md`、`inventory.md`、`address.md`、`cart.md`、`order.md`、`review.md`、`favorite.md`、`like.md`、`flash-sale.md`、`banner.md`、`recommendation.md`、`article.md`、`storage.md`、`refund.md`、`coupon.md`、`freight.md`（含统一计价错误码 `21010`–`21012`，与运费同处域序 21）、`wallet.md`（域序 22）。
+- `iam.md`、`rbac.md`、`category.md`、`product.md`、`sku.md`、`inventory.md`、`address.md`、`cart.md`、`order.md`、`review.md`、`favorite.md`、`like.md`、`flash-sale.md`、`banner.md`、`recommendation.md`、`article.md`、`storage.md`、`refund.md`、`coupon.md`、`freight.md`（含统一计价错误码 `21010`–`21012`，与运费同处域序 21）、`wallet.md`（域序 22）、`marketing.md`（砍价域 `23000-23999`，域序 23）。

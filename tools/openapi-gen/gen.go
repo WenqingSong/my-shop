@@ -13,11 +13,13 @@ const contractBaseline = "82243c0fbce614e03c4ff57dcc829b5f68fb08f2"
 
 // 常驻 API 的期望分布：B1-01 §3.1 的 142 条 + B1-04-05 一级分销新增 8 条（前台 4、后台 4）
 // + B1-04-01 用户资料与地区字典新增 5 条（前台 5：/profile 2 条、/regions 3 条）
-// + B1-04-02 商品规格 6 条与 SKU 组合生成 1 条（后台 7 条）。
+// + B1-04-02 商品规格 6 条与 SKU 组合生成 1 条（后台 7 条）
+// + B1-04-04 钱包 3 条（前台 3）
+// + B1-04-07 砍价 13 条（公开 2、前台 6、后台 5）。
 const (
-	expectedTotal    = 162
-	expectedFrontend = 76
-	expectedAdmin    = 84
+	expectedTotal    = 175
+	expectedFrontend = 84
+	expectedAdmin    = 89
 	expectedHealth   = 2
 )
 
@@ -26,7 +28,7 @@ var codesByValue = map[int]*ErrorCode{}
 // pathFileOrder 固定分域视图文件的输出顺序。
 var pathFileOrder = []string{
 	"iam", "profile", "admin", "categories", "product", "spec", "sku", "inventory", "address", "region",
-	"cart", "order", "refund", "coupon", "distribution", "flashsale", "banner",
+	"cart", "order", "refund", "coupon", "distribution", "bargain", "flashsale", "banner",
 	"recommendation", "article", "review", "favorite", "like", "upload", "wallet", "dashboard", "health",
 }
 
@@ -53,6 +55,7 @@ var tagDescriptions = []struct {
 	{"退款", "退款申请、撤销、审核、执行与审计"},
 	{"优惠券", "优惠券模板管理与用户领取"},
 	{"分销", "一级推荐关系与订单佣金（只做一级，不含提现与结算）"},
+	{"砍价", "砍价活动管理与用户发起/好友助力"},
 	{"秒杀", "秒杀活动管理与下单"},
 	{"轮播图", "轮播图查询与后台管理"},
 	{"推荐位", "推荐位查询与后台管理"},

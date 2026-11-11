@@ -194,6 +194,18 @@ const (
 	CodeWalletIdempotencyConflict      Code = 22008 // 资金流水幂等键冲突（同键不同业务金额）→ 409
 	CodeWalletMockRechargeDisabled     Code = 22009 // Mock 充值未启用（安全开关关闭）→ 403
 	CodeWalletAmountOverflow           Code = 22010 // 金额溢出（余额超出 INT UNSIGNED 可表示范围）→ 409
+
+	// 砍价域（Bargain）23000-23999（域序 23）。
+	// B1-04 八分支集成：原编号 21001-21009 与运费/计价域（域序 21）冲突，按域序 23 重新分配。
+	CodeBargainActivityNotFound        Code = 23001 // 砍价活动不存在 → 404
+	CodeBargainActivityInvalid         Code = 23002 // 活动参数非法（价格/时间/商品/SKU/助力参数）→ 400
+	CodeBargainActivityUnavailable     Code = 23003 // 活动不可参与（停用/未开始/已结束）→ 409
+	CodeBargainInstanceNotFound        Code = 23004 // 砍价实例不存在或不属于当前用户（防枚举）→ 404
+	CodeBargainInstanceExists          Code = 23005 // 同一活动已存在进行中的实例 → 409
+	CodeBargainSelfHelpForbidden       Code = 23006 // 不能给自己的砍价助力 → 409
+	CodeBargainHelpUnavailable         Code = 23007 // 实例不可助力（已成功/已失败/已过期/次数用尽/已到底价）→ 409
+	CodeBargainHelpDuplicated          Code = 23008 // 已助力过该实例 → 409
+	CodeBargainInvalidStatusTransition Code = 23009 // 砍价实例状态迁移非法（终态不可重复推进）→ 409
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -348,6 +360,15 @@ var codeTable = map[Code]codeInfo{
 	CodeWalletIdempotencyConflict:      {http.StatusConflict, "资金流水幂等冲突"},
 	CodeWalletMockRechargeDisabled:     {http.StatusForbidden, "Mock 充值未启用"},
 	CodeWalletAmountOverflow:           {http.StatusConflict, "金额超出可表示范围"},
+	CodeBargainActivityNotFound:        {http.StatusNotFound, "砍价活动不存在"},
+	CodeBargainActivityInvalid:         {http.StatusBadRequest, "砍价活动参数非法"},
+	CodeBargainActivityUnavailable:     {http.StatusConflict, "砍价活动暂不可参与"},
+	CodeBargainInstanceNotFound:        {http.StatusNotFound, "砍价记录不存在"},
+	CodeBargainInstanceExists:          {http.StatusConflict, "已有进行中的砍价"},
+	CodeBargainSelfHelpForbidden:       {http.StatusConflict, "不能给自己砍价"},
+	CodeBargainHelpUnavailable:         {http.StatusConflict, "该砍价不可助力"},
+	CodeBargainHelpDuplicated:          {http.StatusConflict, "已助力过该砍价"},
+	CodeBargainInvalidStatusTransition: {http.StatusConflict, "砍价状态迁移非法"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。

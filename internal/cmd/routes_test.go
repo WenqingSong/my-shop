@@ -50,7 +50,8 @@ func collectRoutes(t *testing.T) map[string]bool {
 
 // fullRouteTable 是 162 条常驻 JSON API 的完整清单
 // （B1-01 §3.1 冻结的 142 条，B1-02-04 补齐，B1-04-05 新增一级分销 8 条，
-// B1-04-01 新增用户资料 2 条与地区字典 3 条，B1-04-02 新增商品规格 6 条与组合生成 1 条）。
+// B1-04-01 新增用户资料 2 条与地区字典 3 条，B1-04-02 新增商品规格 6 条与组合生成 1 条，
+// B1-04-07 新增砍价前台 6 条/公开 1 条/后台 5 条）。
 // 任何新增、删除或路径/方法变更都必须同步更新本清单与 openapi/。
 //
 // 不计入本清单的路由：
@@ -62,7 +63,7 @@ func fullRouteTable() []string {
 		"GET /health",
 		"GET /ready",
 
-		// ---- 前台公开接口（17）----
+		// ---- 前台公开接口（19）----
 		"POST /register",
 		"POST /login",
 		"POST /refresh",
@@ -77,11 +78,13 @@ func fullRouteTable() []string {
 		"GET /likes/count",
 		"GET /banners",
 		"GET /recommendations/:code",
+		"GET /bargain-activities",
+		"GET /bargain-activities/:id",
 		"GET /articles",
 		"GET /articles/:id",
 		"GET /articles/:id/like/count",
 
-		// ---- 前台用户认证（58）----
+		// ---- 前台用户认证（64）----
 		"GET /me",
 		"GET /profile",
 		"PUT /profile",
@@ -135,6 +138,12 @@ func fullRouteTable() []string {
 		"GET /distribution/me",
 		"GET /distribution/subordinates",
 		"GET /distribution/commissions",
+		"POST /bargain-activities/:id/instances",
+		"GET /my/bargain-instances",
+		"GET /bargain-instances/:id",
+		"GET /bargain-instances/:id/helps",
+		"POST /bargain-instances/:id/help",
+		"POST /bargain-instances/:id/abandon",
 		"GET /sessions",
 		"DELETE /sessions/:sid",
 		"POST /sessions/revoke-others",
@@ -265,6 +274,12 @@ func fullRouteTable() []string {
 		"GET /admin/distributions/distributors",
 		"GET /admin/distributions/commissions",
 		"GET /admin/distributions/commissions/stats",
+		// ---- 砍价后台（5）----
+		"POST /admin/bargain-activities",
+		"GET /admin/bargain-activities",
+		"GET /admin/bargain-activities/:id",
+		"PUT /admin/bargain-activities/:id",
+		"POST /admin/bargain-activities/:id/status",
 	}
 }
 
@@ -448,6 +463,6 @@ func TestRouteCountByScope(t *testing.T) {
 		t.Errorf("路由分布 frontend=%d admin=%d health=%d，期望 76/84/2", frontend, admin, healthCount)
 	}
 	if total := frontend + admin + healthCount; total != 162 {
-		t.Errorf("常驻路由总数为 %d，期望 155: %s", total, fmt.Sprint(got))
+		t.Errorf("常驻路由总数为 %d，期望 162: %s", total, fmt.Sprint(got))
 	}
 }
