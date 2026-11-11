@@ -180,6 +180,20 @@ const (
 	CodePricingInvalidAmount      Code = 21010 // 计价金额非法（负数/超上限）→ 400
 	CodePricingDiscountExceeds    Code = 21011 // 优惠累计超过可优惠金额 → 400
 	CodePricingAmountOverflow     Code = 21012 // 计价金额溢出 int64 安全区间 → 400
+
+	// 钱包域（Wallet）22000-22999（域序 22，B1-04-04）。
+	// B1-04 集成：原编号 21001-21010 与运费/计价域（域序 21）冲突，整体迁移到域序 22；
+	// 约定 22001-22099 为钱包业务码，22000 保留不用。
+	CodeWalletAccountUnavailable       Code = 22001 // 钱包账户不存在或初始化失败 → 500
+	CodeWalletInsufficientBalance      Code = 22002 // 余额不足（扣款条件更新 0 行）→ 409
+	CodeWalletInvalidRechargeAmount    Code = 22003 // 充值金额非法（非正/超上限）→ 400
+	CodeWalletRechargeOrderNotFound    Code = 22004 // 充值订单不存在或不属于当前用户（防枚举）→ 404
+	CodeWalletRechargeStatusNotAllowed Code = 22005 // 充值订单状态不允许该操作 → 409
+	CodeWalletDuplicatePayment         Code = 22006 // 重复支付（订单已扣款）→ 409
+	CodeWalletRefundCreditFailed       Code = 22007 // 退款入账失败 → 409
+	CodeWalletIdempotencyConflict      Code = 22008 // 资金流水幂等键冲突（同键不同业务金额）→ 409
+	CodeWalletMockRechargeDisabled     Code = 22009 // Mock 充值未启用（安全开关关闭）→ 403
+	CodeWalletAmountOverflow           Code = 22010 // 金额溢出（余额超出 INT UNSIGNED 可表示范围）→ 409
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -323,6 +337,17 @@ var codeTable = map[Code]codeInfo{
 	CodePricingInvalidAmount:      {http.StatusBadRequest, "计价金额非法"},
 	CodePricingDiscountExceeds:    {http.StatusBadRequest, "优惠金额超过可优惠金额"},
 	CodePricingAmountOverflow:     {http.StatusBadRequest, "计价金额溢出"},
+
+	CodeWalletAccountUnavailable:       {http.StatusInternalServerError, "钱包账户不可用"},
+	CodeWalletInsufficientBalance:      {http.StatusConflict, "余额不足"},
+	CodeWalletInvalidRechargeAmount:    {http.StatusBadRequest, "充值金额非法"},
+	CodeWalletRechargeOrderNotFound:    {http.StatusNotFound, "充值订单不存在"},
+	CodeWalletRechargeStatusNotAllowed: {http.StatusConflict, "充值订单状态不允许该操作"},
+	CodeWalletDuplicatePayment:         {http.StatusConflict, "订单已支付"},
+	CodeWalletRefundCreditFailed:       {http.StatusConflict, "退款入账失败"},
+	CodeWalletIdempotencyConflict:      {http.StatusConflict, "资金流水幂等冲突"},
+	CodeWalletMockRechargeDisabled:     {http.StatusForbidden, "Mock 充值未启用"},
+	CodeWalletAmountOverflow:           {http.StatusConflict, "金额超出可表示范围"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。

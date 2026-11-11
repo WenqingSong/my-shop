@@ -33,4 +33,5 @@ import (
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/spec"
 	// B1-04-02 END
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/upload"
+	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/wallet"
 )

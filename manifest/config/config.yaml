@@ -127,6 +127,15 @@ distribution:
   # 比例来源与基数口径见 docs/design/distribution.md §3.2。
   commission_rate_bp: 0
 
+# 钱包配置（以下均为开发默认值，可通过环境变量覆盖）
+# 对应环境变量：WALLET_MOCK_RECHARGE_ENABLED
+wallet:
+  mock_recharge:
+    # 是否启用 Mock 充值接口（默认关闭）。
+    # Mock 充值会凭空增加用户余额，仅限本地/联调环境；部署严格模式
+    # （DEPLOYMENT_REQUIRE_EXTERNAL_ENDPOINTS=true）下开启会导致进程启动失败。
+    enabled: false
+
 # 秒杀配置（以下均为开发默认值，可通过环境变量覆盖）
 # 对应环境变量：FLASH_SALE_RECONCILE_SCAN_INTERVAL / FLASH_SALE_CONSUME_SCAN_INTERVAL /
 #              FLASH_SALE_KAFKA_*

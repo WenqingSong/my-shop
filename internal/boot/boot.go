@@ -74,6 +74,10 @@ func ValidateConfig(ctx context.Context) error {
 	if err := config.ValidateExternalEndpoints(ctx); err != nil {
 		return gerror.Wrap(err, "部署严格配置校验失败")
 	}
+	// 资金安全闸门：严格部署模式下禁止启用会凭空造钱的 Mock 充值能力。
+	if err := config.Default().ValidateMockRechargeDisabled(ctx); err != nil {
+		return gerror.Wrap(err, "Mock 资金能力安全校验失败")
+	}
 	return nil
 }
 

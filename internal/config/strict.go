@@ -63,6 +63,33 @@ func (l *Loader) ValidateExternalEndpoints(ctx context.Context) error {
 	return l.validateStrictEndpoints(ctx, strictEndpoints, "Kubernetes 严格配置模式")
 }
 
+// ValidateMockRechargeDisabled 在部署严格模式下禁止启用钱包 Mock 充值。
+//
+// Mock 充值会让任意登录用户凭空增加自己的余额，属于只能存在于开发/联调环境的资金能力。
+// 严格模式（DEPLOYMENT_REQUIRE_EXTERNAL_ENDPOINTS=true，Kubernetes 生产部署使用）下
+// 一旦检测到 wallet.mock_recharge.enabled=true，进程必须启动失败，而不是「配置生效后再补救」。
+// 严格模式关闭时不干预本地开发配置。
+func (l *Loader) ValidateMockRechargeDisabled(ctx context.Context) error {
+	required, err := l.RequireExternalEndpoints(ctx)
+	if err != nil {
+		return err
+	}
+	if !required {
+		return nil
+	}
+	enabled, err := l.Bool(ctx, KeyWalletMockRechargeEnabled)
+	if err != nil {
+		return err
+	}
+	if enabled {
+		return fmt.Errorf(
+			"部署严格模式下禁止启用 Mock 充值：环境变量 %s 必须为 false（该能力可让任意登录用户凭空增加余额）",
+			MustSpecOf(KeyWalletMockRechargeEnabled).Env,
+		)
+	}
+	return nil
+}
+
 // validateStrictEndpoints 按给定连接项集合执行严格模式校验，scope 用于错误信息前缀。
 func (l *Loader) validateStrictEndpoints(ctx context.Context, endpoints []strictEndpoint, scope string) error {
 	required, err := l.RequireExternalEndpoints(ctx)

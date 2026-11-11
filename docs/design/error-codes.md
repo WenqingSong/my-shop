@@ -48,6 +48,7 @@
 | 19 | 19000-19999 | coupon-v1 | ACTIVE |
 | 20 | 20000-20999 | distribution-v1 | RESERVED |
 | 21 | 21000-21999 | freight-pricing（B1-04-03） | RESERVED |
+| 22 | 22000-22999 | wallet（B1-04-04） | RESERVED |
 
 （本表为长期设计快照；分配状态与未来 RESERVED/ACTIVE/RELEASED 变化以 `.agent/registry/error-codes.md` 为唯一权威。）
 
@@ -73,4 +74,4 @@ B1-04 八分支集成核实（2026-11-11）：实际进入集成分支的错误�
 
 各业务模块 Design 继续在自身「错误码域」章节记录本模块具体错误码与归属声明，不在此重复，也不要求各模块重复全局 Namespace 规则：
 
-- `iam.md`、`rbac.md`、`category.md`、`product.md`、`sku.md`、`inventory.md`、`address.md`、`cart.md`、`order.md`、`review.md`、`favorite.md`、`like.md`、`flash-sale.md`、`banner.md`、`recommendation.md`、`article.md`、`storage.md`、`refund.md`、`coupon.md`、`freight.md`（含统一计价错误码 `20010`–`20012`，与运费同处域序 20）。
+- `iam.md`、`rbac.md`、`category.md`、`product.md`、`sku.md`、`inventory.md`、`address.md`、`cart.md`、`order.md`、`review.md`、`favorite.md`、`like.md`、`flash-sale.md`、`banner.md`、`recommendation.md`、`article.md`、`storage.md`、`refund.md`、`coupon.md`、`freight.md`（含统一计价错误码 `21010`–`21012`，与运费同处域序 21）、`wallet.md`（域序 22）。

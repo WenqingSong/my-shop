@@ -124,13 +124,18 @@
   把该订单佣金 `10/20 → 30` 并写 `reversed_amount/reversed_at/refund_id/reversal_reason`；
   `WHERE status IN (10,20)` + `uk_refund_id` 保证同一退款单只冲一次，无佣金时 no-op。佣金不回写退款单与订单，
   详见 `distribution.md`。
-- 钱包：当前 Mock 退款**不产生资金流水**（`wallet_transactions` 无用例）。B1-04 引入余额支付后，退款成功需在退款事务内写一条退款入账流水（`biz_type='refund'`、`biz_id=refund_requests.id`、确定性幂等键），见 `wallet.md`。
+- 会员成长值：退款成功事务内调用 `IMember.DeductForRefundInTx`，按该订单原发放额扣减，幂等键
+  `growth:refund_deduct:<refund_id>`，等级只升不降，详见 `member.md`。
+- 钱包：退款成功事务内调用 `IWallet.CreditForRefundInTx`（`tx_type=order_refund`、`biz_type=refund`、
+  `biz_id=refund_requests.id`、幂等键 `refund:<refund_id>`），**仅当订单原支付渠道为余额（`pay_type='balance'`）**时调用，
+  见 `wallet.md` §6/§7。三者在「订单 `20→70` + 库存恢复 + 退款 `→60`」的同一事务内完成，任一步失败整体回滚。
 - 建表经 golang-migrate 迁移（`20261001000020_refund.up.sql`），见 `migration.md`。
 
 ## 9. Deferred / 已知留白
 
 - 真实支付平台退款、到账、对账、资金回调（执行退款为人工 Mock 确认）。
-- 退款钱包入账/余额回退（`wallet_transactions` 结构已建，退款入账在 B1-04 与余额支付一起实现）。
+- 退款钱包入账/余额回退：钱包侧原语已就绪（`CreditForRefundInTx`，含幂等与回滚测试），退款执行入口尚未接入（阻塞于 B1-04-03 未合入）；当前退款成功后余额不变。
+- 部分退款：`refund_requests.amount` 当前恒等于订单 `total_amount`，`CreditForRefundInTx` 已按传入金额入账，支持未来部分退款接入。
 - 部分退款、多次累计退款、换货、退货物流（寄回、物流单号、入库验收）。
 - 自动审核、自动退款、超时自动处理、自动重试。
 - 秒杀订单退款（无支付、下单即成交、库存独立不恢复）。

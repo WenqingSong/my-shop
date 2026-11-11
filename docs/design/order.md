@@ -179,7 +179,11 @@
 - 一级分销：`POST /orders/:id/pay` 的事务内、订单置 `paid(20)` 后调用 `IDistribution.AccrueOrderCommissionInTx`，
   以 `orders.total_amount` 为基数、配置 `distribution.commission_rate_bp` 为比例写入佣金；计佣失败整体回滚
   （订单保持 10，可重试）。订单状态机与错误码不因分销改变，详见 `distribution.md`。
-- 钱包/积分：`wallet_transactions`/`user_points_logs` 通过 `biz_type` + `biz_id` 软关联订单（无 FK）；当前订单支付/退款**不读写钱包与积分**，余额支付、退款入账、积分抵扣/返还在 B1-04 实现，见 `wallet.md`、`member.md`、`pricing.md`。
+- 会员成长值：同一支付事务内调用 `IMember.AccrueForOrderInTx`，按实付金额发放成长值并推进等级；
+  幂等键 `growth:order_reward:<order_id>`，详见 `member.md`。
+- 钱包/积分：`wallet_transactions`/`user_points_logs` 通过 `biz_type` + `biz_id` 软关联订单（无 FK）。
+  余额支付渠道在 `10→20` 同一事务内调用 `IWallet.DebitForOrderInTx`（幂等键 `order_pay:<order_id>`）；
+  积分抵扣由 `pricing.Quote` 的 `points_discount` 槽位承载，当前无积分账本实现，恒为 0。
 - 建表经 golang-migrate 迁移（`20261001000007_orders.up.sql`）；金额三列（`original_amount`/`discount_amount`/`user_coupon_id`）由 `20261001000022_order_coupon_amounts.up.sql` 增列并回填；运费/支付/履约字段与 `order_items.spec_text` 由 `20261110000004_order_shipping_payment.up.sql` 增列（无回填）；状态流水由 `20261110000005_order_status_logs.up.sql` 建表，见 `migration.md`。
 - 配置：`order.pay_timeout`（支付超时秒，默认 900）、`order.cancel_scan_interval`（扫描周期秒，默认 60）。
 
@@ -187,9 +191,9 @@
 
 - 真实支付/退款到账/对账/资金回调（支付仅 Mock）。
 - 履约字段（`delivery_type`/`delivery_name`/`delivery_sn`）只有结构与默认值：发货接口仍只推进状态，承运商/运单号写入、物流轨迹查询与发货单回传未实现。
-- 订单链路接入统一计价与运费：`/orders/quote`、下单事务内复核、`shipping_fee` 落库、幂等指纹扩展与状态流水写入，均待 B1-04-02 的 SKU 规格快照改造进入共同基线后实施（运费计算模块与计价入口本身已由 B1-04-03 交付，见 `freight.md`、`pricing.md`）。
-- 余额支付、退款入账、积分抵扣/返还、会员折扣未实现（结构与边界见 `pricing.md`、`wallet.md`、`member.md`）。
-- `order_status_logs` 只有结构：既有状态推进逻辑未改，流水写入随上述订单链路接入一并补齐。
+- 积分抵扣/返还未实现：`user_points_accounts`/`user_points_logs` 只有 Schema，无账本实现，`pricing.Quote` 的
+  `points_discount` 槽位当前恒为 0（见 `pricing.md`）。
+- 历史订单金额不重算：`member_discount_amount`/`shipping_fee` 对迁移前订单保持 0，`total_amount` 不被回填改写。
 - `shipped/received/completed` 后的退款/退货/售后（留 After-sales/Refund 模块）。
 - 订单导出、收货人姓名/手机号模糊搜索等高级筛选（后台列表已支持 `order_no`/`user_id`/`status`/`start_time`/`end_time` 组合筛选与 7 态状态统计）。
 - 库存流水 `reason` 字段固定为空，订单驱动的扣减/恢复不落 `reason`，审计粒度有限。

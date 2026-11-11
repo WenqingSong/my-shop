@@ -91,6 +91,9 @@ const (
 	// distribution.*（一级分销计佣比例）
 	KeyDistributionCommissionRateBP Key = "distribution.commission_rate_bp"
 
+	// wallet.*（资金安全开关：Mock 充值能凭空增加余额，默认关闭）
+	KeyWalletMockRechargeEnabled Key = "wallet.mock_recharge.enabled"
+
 	// flash_sale.*
 	KeyFlashSaleDispatchMode          Key = "flash_sale.dispatch_mode"
 	KeyFlashSaleShutdownTimeout       Key = "flash_sale.shutdown_timeout"
@@ -260,6 +263,9 @@ var specs = []Spec{
 
 	// ---------- distribution ----------
 	{KeyDistributionCommissionRateBP, "DISTRIBUTION_COMMISSION_RATE_BP", KindInt, 0, false, "订单支付事务内计佣（service.Distribution().AccrueOrderCommissionInTx）", "一级佣金比例（万分比，500=5%）；0=关闭计佣，>10000 视为配置非法"},
+
+	// ---------- wallet ----------
+	{KeyWalletMockRechargeEnabled, "WALLET_MOCK_RECHARGE_ENABLED", KindBool, false, false, "钱包 Mock 充值接口", "是否启用 Mock 充值（凭空造钱能力，默认关闭；部署严格模式禁止启用）"},
 
 	// ---------- flash_sale 基础 ----------
 	{KeyFlashSaleDispatchMode, "FLASH_SALE_DISPATCH_MODE", KindString, "db_scanner", false, "秒杀 Runtime 装配", "消费入口模式：db_scanner | kafka"},
