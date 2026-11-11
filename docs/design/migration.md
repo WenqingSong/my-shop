@@ -112,6 +112,19 @@ baseline 内容 = 迁移前 `boot.go` 中 7 张既有表的等价 DDL（`users`�
 | 缺失语义 | 记录缺失时应用 fail-closed（拒绝绑定并返回内部错误），不回退为无锁写入 |
 | 运维注意 | 不得在运行期手工 `DELETE` / `INSERT` 该表；如被误删，重新执行迁移或补插 `id=1` 即可恢复（无数据损失） |
 
+### 2.5 数据初始化（不属于 migration）
+
+migration 只负责 schema。少数**只读基础字典**的数据初始化与 schema 分离，以保证「migrate 幂等、可重复、不因数据内容变化而重跑 DDL」：
+
+| 数据 | 初始化入口 | 数据文件 | 幂等语义 |
+| --- | --- | --- | --- |
+| 地区字典 `regions`（3938 条） | `my-shop region-seed import`（`region-seed dry-run` 只校验） | `internal/regiondata/regions_v1.tsv`（`go:embed`） | 空库全量写入；已有数据只补缺失；同 id 内容冲突或存在额外节点时**拒绝写入**；单事务提交并复核总行数 |
+
+- 集成测试 setup（`internal/controller/region`、`internal/controller/address`）调用同一 `regiondata.Ensure`，
+  新建隔离测试库无需人工导入；
+- 数据来源、字段映射、更新与故障恢复见 `docs/dev/region-data-initialization.md`；
+- 不要把地区数据写成新的 migration：migration 是一次性版本，无法表达「补缺失 / 拒绝覆盖」的幂等语义。
+
 ## 3. 业务不变量
 
 - INV-001（幂等、按序一次）：同一 version 在任何后续 `migrate up` 中不重复执行；未应用 migration 按 version 升序各执行一次（由 `schema_migrations` 保证）。

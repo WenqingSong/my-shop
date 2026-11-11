@@ -8,8 +8,11 @@
 
 边界：不实现订单/快照表；不设地址数量上限；不实现地址标签/分组；不提供后台查看/管理用户地址；不改动 IAM/认证/会话语义。事实来源为单一 MySQL。
 
-地区字典 `regions`（省/市/区三级）由 migration `20261110000003_regions` 建立结构，并已由 B1-03-04 从历史
-`system_city` 导入 3938 条数据（`id` 复用 `city_id`、`level` 0/1/2 → 1/2/3）。B1-04-01 起：
+地区字典 `regions`（省/市/区三级）由 migration `20261110000003_regions` 建立结构，数据来自历史
+`system_city`（3938 条：34 省 / 369 市 / 3535 区县，`id` 复用 `city_id`、`level` 0/1/2 → 1/2/3）。
+自 B1-04-FIX-02 起，字典数据以仓库内嵌数据文件（`internal/regiondata/regions_v1.tsv`）分发，
+通过 `my-shop region-seed import` 幂等初始化，不再依赖旧 staging 库或本机 `tmp/`；
+导入语义与故障恢复见 `docs/dev/region-data-initialization.md`。B1-04-01 起：
 `addresses` 增加可空 `region_id`（指向 `regions.level=3` 区/县节点），同时**保留**省/市/区自由文本列以兼容
 历史地址与旧客户端；`region_id` 为软引用，不建外键（与 `regions` 既有约定一致）。
 

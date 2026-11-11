@@ -25,6 +25,9 @@ import (
 )
 
 // insertRegion 插入一条地区并返回 id（level 1=省、2=市、3=区）。
+//
+// 只清理本用例插入的行：regions 自 B1-04-FIX-02 起是种子化的只读字典（3938 行），
+// 不允许测试整表 DELETE（见 docs/dev/region-data-initialization.md）。
 func insertRegion(t *testing.T, parentID int64, name string, level int) int64 {
 	t.Helper()
 	id, err := g.DB().Model("regions").Ctx(context.Background()).Data(g.Map{
@@ -33,6 +36,9 @@ func insertRegion(t *testing.T, parentID int64, name string, level int) int64 {
 	if err != nil {
 		t.Fatalf("insert region: %v", err)
 	}
+	t.Cleanup(func() {
+		_, _ = g.DB().Model("regions").Ctx(context.Background()).Where("id", id).Delete()
+	})
 	return id
 }
 

@@ -90,7 +90,7 @@ Dry Run 只解析、映射、校验与统计，不写目标库；依赖域使用
 | `store_product_attr_value` | `skus` + `sku_spec_values` + `inventories` | 每行一个 SKU；SKU 级库存 |
 | `eshop_user` | `users` | 资料迁移；密码强制重置 |
 | `user_address` | `addresses` | 仅有效且用户已迁移的地址 |
-| `system_city` | `regions` | 全量 3938，ID 复用 |
+| `system_city` | `regions` | 全量 3938，ID 复用；同一份数据亦以 `internal/regiondata/regions_v1.tsv` 内嵌分发，可用 `my-shop region-seed import` 独立初始化（B1-04-FIX-02，见 `docs/dev/region-data-initialization.md`） |
 | `store_order` | `orders` | 状态由流水重建；金额元→分 |
 | `store_order_cart_info` | `order_items` | 解析 `cart_info` JSON 快照 |
 | `store_order_status` | `order_status_logs` | 全量 132 条，保留时间线 |

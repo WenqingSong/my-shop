@@ -23,6 +23,7 @@ import (
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
+	"cnb.cool/go-cloud-devops/my-shop/internal/regiondata"
 )
 
 const (
@@ -158,6 +159,13 @@ func setupAddressServer(t *testing.T) string {
 		t.Fatalf("bootstrap: %v", err)
 	}
 	requireActualDB(t)
+
+	// 地区字典初始化：与 `my-shop region-seed import` 完全同一实现，幂等可重复执行。
+	// 结构化地址（region_id=3/203）依赖真实地区数据，这里保证新建测试库也能自愈。
+	if _, err := regiondata.Ensure(ctx, g.DB(), false); err != nil {
+		t.Fatalf("初始化地区字典: %v", err)
+	}
+
 	// 清空前台用户与地址表，保证每个用例从干净状态开始（不触碰后台 admins/RBAC seed）。
 	for _, table := range []string{"addresses", "users"} {
 		if _, err := g.DB().Exec(ctx, "DELETE FROM "+table); err != nil {

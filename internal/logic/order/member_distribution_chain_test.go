@@ -79,7 +79,7 @@ func cleanChainTables(t *testing.T, ctx context.Context) {
 		"wallet_transactions", "wallet_accounts", "recharge_orders",
 		"order_status_logs", "order_items", "orders",
 		"addresses", "inventory_logs", "inventories", "cart_items",
-		"skus", "product_images", "products", "categories", "users", "freight_template_rules", "freight_templates", "regions",
+		"skus", "product_images", "products", "categories", "users", "freight_template_rules", "freight_templates",
 	} {
 		if _, err := g.DB().Exec(ctx, "DELETE FROM "+table); err != nil {
 			t.Fatalf("clean %s: %v", table, err)

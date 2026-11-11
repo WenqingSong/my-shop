@@ -21,6 +21,7 @@ import (
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
+	"cnb.cool/go-cloud-devops/my-shop/internal/regiondata"
 )
 
 // safeTestDBs 是允许执行测试的隔离测试库白名单（逐库显式列名，绝不落到 my_shop）；
@@ -130,6 +131,12 @@ func setupRegionServer(t *testing.T) string {
 		t.Fatalf("bootstrap: %v", err)
 	}
 	requireActualDB(t)
+
+	// 地区字典初始化：与 `my-shop region-seed import` 完全同一实现，幂等可重复执行。
+	// 新建隔离测试库时无需人工导入 system_city，也不会覆盖已有数据（冲突即失败）。
+	if _, err := regiondata.Ensure(ctx, g.DB(), false); err != nil {
+		t.Fatalf("初始化地区字典: %v", err)
+	}
 
 	s := g.Server(guid.S())
 	s.SetAddr(":0")

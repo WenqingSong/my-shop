@@ -148,6 +148,15 @@ func ServerGracefulTimeout(ctx context.Context) (time.Duration, error) {
 	return time.Duration(seconds) * time.Second, nil
 }
 
+// ApplyDatabaseConfig 按统一配置层（config.yaml + 环境变量）初始化 GoFrame 全局数据库配置。
+//
+// 供不启动 HTTP 服务的独立命令与集成测试复用同一份数据库配置来源（不复制 DSN 拼装逻辑）：
+//   - `my-shop region-seed`；
+//   - 地区字典初始化等不经过 Bootstrap 的数据任务/测试。
+//
+// 语义与 serve 启动时一致：数据库密码无内置默认回退，缺失 DATABASE_DEFAULT_PASS 时 fail-fast。
+func ApplyDatabaseConfig(ctx context.Context) error { return applyDatabaseConfig(ctx) }
+
 func applyDatabaseConfig(ctx context.Context) error {
 	timeZoneExtra, err := databaseTimeZoneExtra(ctx)
 	if err != nil {

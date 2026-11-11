@@ -5,8 +5,10 @@
 ## 1. 当前实现状态
 
 - `addresses` 的增删改查、默认地址唯一（生成列 `default_key` + `uk_user_default`）已完整。
-- 地区字典 `regions`（省/市/区三级）由 migration `20261110000003_regions` 建表，
-  B1-03-04 从 `system_city` 导入 3938 条数据（34 省 + 369 市 + 3535 区县）。
+- 地区字典 `regions`（省/市/区三级）由 migration `20261110000003_regions` 建表；
+  数据来自历史 `system_city`（3938 条 = 34 省 + 369 市 + 3535 区县），自 B1-04-FIX-02 起
+  以仓库内嵌数据文件 + `my-shop region-seed import` 幂等初始化（不再依赖旧 staging 库或本机 `tmp/`），
+  见 `docs/dev/region-data-initialization.md`。
 - B1-04-01 起 `addresses` 增加可空 `region_id`（软引用 `regions.level=3`），并新增只读地区接口；
   省/市/区自由文本列保留，历史地址与旧客户端行为不变。
 
@@ -70,14 +72,17 @@ regions(id, parent_id, level, name, created_at, updated_at)
 ## 7. 测试方式
 
 ```bash
-# 独立测试库（禁止使用 my_shop_b10304_verify）
+# 独立测试库（禁止使用 my_shop_b10304_verify / my_shop）
 mysql -h127.0.0.1 -uroot -p -e "CREATE DATABASE IF NOT EXISTS my_shop_b104_test"
 DATABASE_DEFAULT_NAME=my_shop_b104_test DATABASE_DEFAULT_PASS=root go run . migrate up
-# 地区数据（测试库需导入 3938 条，可从验证库只读导出）
-mysqldump -h127.0.0.1 -uroot -p --no-create-info my_shop_b10304_verify regions \
-  | mysql -h127.0.0.1 -uroot -p my_shop_b104_test
+# 地区数据：从仓库内嵌数据文件幂等初始化（3938 条，不需要旧 staging 库 / my_shop_b10304_verify）
+DATABASE_DEFAULT_NAME=my_shop_b104_test DATABASE_DEFAULT_PASS=root go run . region-seed import
 DATABASE_DEFAULT_NAME=my_shop_b104_test DATABASE_DEFAULT_PASS=root \
   go test -count=1 ./internal/controller/address/ ./internal/controller/region/
 ```
+
+说明：Region/Address 的测试 setup 也会调用同一个 `regiondata.Ensure`，因此即使跳过
+`region-seed import`，测试在空字典上也能自愈；显式执行该命令便于人工核对导入统计。
+多个包共享同一测试库时必须 `-p 1` 串行执行（`scripts/test-integration.sh` 已固定）。
 
 测试内部会两次核实库名（环境变量 + `SELECT DATABASE()`），不一致直接失败，不会执行 DELETE。
