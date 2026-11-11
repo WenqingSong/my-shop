@@ -6,7 +6,7 @@
 | 分支 | `feat/p2-backend` |
 | 验收基线 SHA | `05a84c2`（工作区干净，`ahead 25`） |
 | 本轮修复提交 | `63cd568` |
-| 本报告提交 | 提交后回填（见 `git log -1`） |
+| 本报告提交 | `952999d`（最终 HEAD 为随后仅回填该 SHA 的元数据提交） |
 | 执行日期 | 2026-11-11 |
 | 隔离测试库 | `my_shop_b104_test`（本轮新建）、`my_shop_bargain_test`（既有，测试自清理） |
 | 业务库 `my_shop` | 仅只读查询，未作为任何写操作目标 |
@@ -66,7 +66,7 @@
 | 提交 | 内容 | 文件 |
 | --- | --- | --- |
 | `63cd568` | `fix(b1-04): 修正迁移版本断言漂移与计价/分销文档偏差` | `internal/logic/freight/integration_test.go`、`internal/migrations/migrations.go`、`internal/logic/pricing/pricing.go`、`internal/logic/distribution/distribution.go`、`docs/design/pricing.md` |
-| 本报告提交 | `docs(report): B1-04 最终验收报告` | `docs/reports/B1-04-final-acceptance.md` |
+| `952999d` | `docs(report): B1-04 最终验收报告` | `docs/reports/B1-04-final-acceptance.md` |
 
 ### 2.4 Push 状态
 
