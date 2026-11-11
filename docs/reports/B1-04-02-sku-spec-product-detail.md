@@ -9,7 +9,8 @@
 | 基线分支 | `feat/p2-backend` |
 | 基线提交 SHA | `637ae2d35d98892094b82184bc8045e6fda3b42c` |
 | 开发分支 | `feat/b1-04-02-sku-spec-product-detail` |
-| 最终提交 SHA | 本报告所在提交（见 `git log -1 --oneline`） |
+| 实现提交 SHA | `b97357fd73adc335f6a32385a493c851ec49b151` |
+| 最终提交 SHA | 本报告 SHA 回填提交（`git log -1 --oneline`） |
 | 结论 | PASS（限本报告 §8 声明的验证范围） |
 
 ## 2. 实施范围
