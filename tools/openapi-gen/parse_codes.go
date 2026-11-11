@@ -70,6 +70,7 @@ var domainByConstantPrefix = []struct {
 	{"CodeDistribution", "distribution"},
 	{"CodeWallet", "wallet"},
 	{"CodeBargain", "bargain"},
+	{"CodeGroupBuy", "groupbuy"},
 	{"CodeMember", "member"},
 	// 计价校验错误与运费同属 freight-pricing 域（域序 21），对外归入 API 业务域「运费」。
 	{"CodePricing", "freight"},

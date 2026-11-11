@@ -13,11 +13,11 @@
 
 | 指标 | 数值 |
 |---|---|
-| DTO 结构体总数 | 453 |
-| Request 结构体 | 195 |
-| Response 结构体 | 194 |
-| 业务实体结构体 | 64 |
-| 已登记 API | 195 |
+| DTO 结构体总数 | 488 |
+| Request 结构体 | 210 |
+| Response 结构体 | 209 |
+| 业务实体结构体 | 69 |
+| 已登记 API | 210 |
 | OperationId 唯一性 | 通过（生成期强制校验） |
 | 无法确认的字段 | 0（遇到未登记类型直接失败，不猜测） |
 
@@ -289,6 +289,41 @@
 | `FreightAdminListRulesResponse` | `freight.AdminListRulesRes` | Response | 1 | - | - | - | - |
 | `FreightAdminReplaceRulesRequest` | `freight.AdminReplaceRulesReq` | Request | 2 | - | - | - | - |
 | `FreightAdminReplaceRulesResponse` | `freight.AdminReplaceRulesRes` | Response | 1 | - | - | - | - |
+| `GroupBuyActivity` | `groupbuy.Activity` | Entity | 17 | `group_price`<br>`sku_price` | - | `start_time`<br>`end_time`<br>`created_at`<br>`updated_at` | `start_time`<br>`end_time`<br>`created_at`<br>`updated_at` |
+| `GroupBuyTeam` | `groupbuy.Team` | Entity | 11 | `group_price` | - | `expire_at`<br>`closed_at`<br>`created_at`<br>`updated_at` | `expire_at`<br>`closed_at`<br>`created_at`<br>`updated_at` |
+| `GroupBuyParticipant` | `groupbuy.Participant` | Entity | 6 | - | - | `created_at` | `created_at` |
+| `GroupBuyTeamDetail` | `groupbuy.TeamDetail` | Entity | 10 | - | - | - | `my_participant`<br>`my_order_id` |
+| `GroupBuyMyTeamItem` | `groupbuy.MyTeamItem` | Entity | 7 | - | - | `joined_at` | `order_id`<br>`joined_at` |
+| `GroupBuyListActivitiesRequest` | `groupbuy.ListActivitiesReq` | Request | 2 | - | - | - | `page`<br>`size` |
+| `GroupBuyListActivitiesResponse` | `groupbuy.ListActivitiesRes` | Response | 4 | - | - | - | - |
+| `GroupBuyActivityDetailRequest` | `groupbuy.ActivityDetailReq` | Request | 1 | - | - | - | - |
+| `GroupBuyActivityDetailResponse` | `groupbuy.ActivityDetailRes` | Response | 1 | - | - | - | - |
+| `GroupBuyListTeamsRequest` | `groupbuy.ListTeamsReq` | Request | 3 | - | - | - | `page`<br>`size` |
+| `GroupBuyListTeamsResponse` | `groupbuy.ListTeamsRes` | Response | 4 | - | - | - | - |
+| `GroupBuyCreateTeamRequest` | `groupbuy.CreateTeamReq` | Request | 3 | - | - | - | - |
+| `GroupBuyCreateTeamResponse` | `groupbuy.CreateTeamRes` | Response | 1 | - | - | - | - |
+| `GroupBuyJoinTeamRequest` | `groupbuy.JoinTeamReq` | Request | 3 | - | - | - | - |
+| `GroupBuyJoinTeamResponse` | `groupbuy.JoinTeamRes` | Response | 1 | - | - | - | - |
+| `GroupBuyTeamDetailRequest` | `groupbuy.TeamDetailReq` | Request | 1 | - | - | - | - |
+| `GroupBuyTeamDetailResponse` | `groupbuy.TeamDetailRes` | Response | 1 | - | - | - | - |
+| `GroupBuyMyListRequest` | `groupbuy.MyListReq` | Request | 3 | - | - | - | `page`<br>`size` |
+| `GroupBuyMyListResponse` | `groupbuy.MyListRes` | Response | 4 | - | - | - | - |
+| `GroupBuyAdminCreateRequest` | `groupbuy.AdminCreateReq` | Request | 8 | `group_price` | - | `start_time`<br>`end_time` | `start_time`<br>`end_time` |
+| `GroupBuyAdminCreateResponse` | `groupbuy.AdminCreateRes` | Response | 1 | - | - | - | - |
+| `GroupBuyAdminUpdateRequest` | `groupbuy.AdminUpdateReq` | Request | 7 | `group_price` | - | `start_time`<br>`end_time` | `start_time`<br>`end_time` |
+| `GroupBuyAdminUpdateResponse` | `groupbuy.AdminUpdateRes` | Response | 1 | - | - | - | - |
+| `GroupBuyAdminStatusRequest` | `groupbuy.AdminStatusReq` | Request | 2 | - | - | - | - |
+| `GroupBuyAdminStatusResponse` | `groupbuy.AdminStatusRes` | Response | 1 | - | - | - | - |
+| `GroupBuyAdminListRequest` | `groupbuy.AdminListReq` | Request | 5 | - | - | - | `page`<br>`size`<br>`product_id`<br>`sku_id` |
+| `GroupBuyAdminListResponse` | `groupbuy.AdminListRes` | Response | 4 | - | - | - | - |
+| `GroupBuyAdminDetailRequest` | `groupbuy.AdminDetailReq` | Request | 1 | - | - | - | - |
+| `GroupBuyAdminDetailResponse` | `groupbuy.AdminDetailRes` | Response | 1 | - | - | - | - |
+| `GroupBuyAdminListTeamsRequest` | `groupbuy.AdminListTeamsReq` | Request | 5 | - | - | - | `page`<br>`size`<br>`activity_id`<br>`leader_user_id` |
+| `GroupBuyAdminListTeamsResponse` | `groupbuy.AdminListTeamsRes` | Response | 4 | - | - | - | - |
+| `GroupBuyAdminTeamDetailRequest` | `groupbuy.AdminTeamDetailReq` | Request | 1 | - | - | - | - |
+| `GroupBuyAdminTeamDetailResponse` | `groupbuy.AdminTeamDetailRes` | Response | 1 | - | - | - | - |
+| `GroupBuyAdminCloseTeamRequest` | `groupbuy.AdminCloseTeamReq` | Request | 1 | - | - | - | - |
+| `GroupBuyAdminCloseTeamResponse` | `groupbuy.AdminCloseTeamRes` | Response | 1 | - | - | - | - |
 | `HealthLivenessRequest` | `health.LivenessReq` | Request | 0 | - | - | - | - |
 | `HealthLivenessResponse` | `health.LivenessRes` | Response | 2 | - | - | - | - |
 | `HealthReadinessRequest` | `health.ReadinessReq` | Request | 0 | - | - | - | - |
@@ -544,6 +579,11 @@
 | `DistributionAdminCommissionStatsResponse` | `total_amount` | int64 |
 | `FlashSaleActivitySku` | `flash_price` | int64 |
 | `FlashSaleOrder` | `flash_price` | int64 |
+| `GroupBuyActivity` | `group_price` | int64 |
+| `GroupBuyActivity` | `sku_price` | int64 |
+| `GroupBuyTeam` | `group_price` | int64 |
+| `GroupBuyAdminCreateRequest` | `group_price` | int64 |
+| `GroupBuyAdminUpdateRequest` | `group_price` | int64 |
 | `MemberGrowthLog` | `change_amount` | int64 |
 | `Order` | `total_amount` | int64 |
 | `Order` | `original_amount` | int64 |
@@ -685,6 +725,20 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 | `FreightTemplate` | `updated_at` | *gtime | response |
 | `FreightRule` | `created_at` | *gtime | response |
 | `FreightRule` | `updated_at` | *gtime | response |
+| `GroupBuyActivity` | `start_time` | *gtime | response |
+| `GroupBuyActivity` | `end_time` | *gtime | response |
+| `GroupBuyActivity` | `created_at` | *gtime | response |
+| `GroupBuyActivity` | `updated_at` | *gtime | response |
+| `GroupBuyTeam` | `expire_at` | *gtime | response |
+| `GroupBuyTeam` | `closed_at` | *gtime | response |
+| `GroupBuyTeam` | `created_at` | *gtime | response |
+| `GroupBuyTeam` | `updated_at` | *gtime | response |
+| `GroupBuyParticipant` | `created_at` | *gtime | response |
+| `GroupBuyMyTeamItem` | `joined_at` | *gtime | response |
+| `GroupBuyAdminCreateRequest` | `start_time` | *gtime | request |
+| `GroupBuyAdminCreateRequest` | `end_time` | *gtime | request |
+| `GroupBuyAdminUpdateRequest` | `start_time` | *gtime | request |
+| `GroupBuyAdminUpdateRequest` | `end_time` | *gtime | request |
 | `Inventory` | `created_at` | *gtime | response |
 | `Inventory` | `updated_at` | *gtime | response |
 | `InventoryLog` | `created_at` | *gtime | response |
@@ -858,6 +912,37 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 | `FreightAdminCreateRequest` | `is_free` |
 | `FreightAdminUpdateRequest` | `is_free` |
 | `FreightAdminUpdateStatusRequest` | `status` |
+| `GroupBuyActivity` | `start_time` |
+| `GroupBuyActivity` | `end_time` |
+| `GroupBuyActivity` | `created_at` |
+| `GroupBuyActivity` | `updated_at` |
+| `GroupBuyTeam` | `expire_at` |
+| `GroupBuyTeam` | `closed_at` |
+| `GroupBuyTeam` | `created_at` |
+| `GroupBuyTeam` | `updated_at` |
+| `GroupBuyParticipant` | `created_at` |
+| `GroupBuyTeamDetail` | `my_participant` |
+| `GroupBuyTeamDetail` | `my_order_id` |
+| `GroupBuyMyTeamItem` | `order_id` |
+| `GroupBuyMyTeamItem` | `joined_at` |
+| `GroupBuyListActivitiesRequest` | `page` |
+| `GroupBuyListActivitiesRequest` | `size` |
+| `GroupBuyListTeamsRequest` | `page` |
+| `GroupBuyListTeamsRequest` | `size` |
+| `GroupBuyMyListRequest` | `page` |
+| `GroupBuyMyListRequest` | `size` |
+| `GroupBuyAdminCreateRequest` | `start_time` |
+| `GroupBuyAdminCreateRequest` | `end_time` |
+| `GroupBuyAdminUpdateRequest` | `start_time` |
+| `GroupBuyAdminUpdateRequest` | `end_time` |
+| `GroupBuyAdminListRequest` | `page` |
+| `GroupBuyAdminListRequest` | `size` |
+| `GroupBuyAdminListRequest` | `product_id` |
+| `GroupBuyAdminListRequest` | `sku_id` |
+| `GroupBuyAdminListTeamsRequest` | `page` |
+| `GroupBuyAdminListTeamsRequest` | `size` |
+| `GroupBuyAdminListTeamsRequest` | `activity_id` |
+| `GroupBuyAdminListTeamsRequest` | `leader_user_id` |
 | `Inventory` | `created_at` |
 | `Inventory` | `updated_at` |
 | `InventoryLog` | `operator_admin_id` |

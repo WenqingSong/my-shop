@@ -314,6 +314,55 @@ codes:
     http_status: 404
     message: 运费模板不存在
     domain: freight
+  - code: 25003
+    constant: CodeGroupBuyActivityInactive
+    http_status: 409
+    message: 拼团活动当前不可参与
+    domain: groupbuy
+  - code: 25007
+    constant: CodeGroupBuyAlreadyJoined
+    http_status: 409
+    message: 您已参与该团
+    domain: groupbuy
+  - code: 25002
+    constant: CodeGroupBuyInvalidArgument
+    http_status: 400
+    message: 拼团参数非法
+    domain: groupbuy
+  - code: 25001
+    constant: CodeGroupBuyNotFound
+    http_status: 404
+    message: 拼团活动不存在
+    domain: groupbuy
+  - code: 25004
+    constant: CodeGroupBuyPriceInvalid
+    http_status: 400
+    message: 拼团价格非法
+    domain: groupbuy
+    reused_by_domains:
+      - order
+  - code: 25008
+    constant: CodeGroupBuySkuUnavailable
+    http_status: 409
+    message: 拼团商品不可购买
+    domain: groupbuy
+    reused_by_domains:
+      - order
+  - code: 25009
+    constant: CodeGroupBuyTeamNotClosable
+    http_status: 409
+    message: 拼团状态不允许关闭
+    domain: groupbuy
+  - code: 25005
+    constant: CodeGroupBuyTeamNotFound
+    http_status: 404
+    message: 拼团不存在
+    domain: groupbuy
+  - code: 25006
+    constant: CodeGroupBuyTeamNotJoinable
+    http_status: 409
+    message: 该团已满或已结束，不可参与
+    domain: groupbuy
   - code: 1000
     constant: CodeInternalError
     http_status: 500
@@ -333,6 +382,7 @@ codes:
       - favorite
       - flashsale
       - freight
+      - groupbuy
       - iam
       - inventory
       - like
@@ -365,6 +415,7 @@ codes:
       - favorite
       - flashsale
       - freight
+      - groupbuy
       - iam
       - like
       - member

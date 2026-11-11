@@ -267,6 +267,7 @@ DEPLOYMENT_REQUIRE_EXTERNAL_ENDPOINTS: "true"
 | `order.pay_timeout` | `ORDER_PAY_TIMEOUT` | int64 | 900 | 非敏感 | 订单创建 |
 | `order.cancel_scan_interval` | `ORDER_CANCEL_SCAN_INTERVAL` | int | 60 | 非敏感 | 订单超时取消扫描器 |
 | `distribution.commission_rate_bp` | `DISTRIBUTION_COMMISSION_RATE_BP` | int | 0 | 非敏感 | 订单支付事务内计佣（service.Distribution().AccrueOrderCommissionInTx） |
+| `group_buy.expire_scan_interval` | `GROUP_BUY_EXPIRE_SCAN_INTERVAL` | int | 60 | 非敏感 | 拼团超时过期扫描器（worker.StartGroupBuyExpireScanner） |
 | `wallet.mock_recharge.enabled` | `WALLET_MOCK_RECHARGE_ENABLED` | bool | false | 非敏感 | 钱包 Mock 充值接口 |
 | `flash_sale.dispatch_mode` | `FLASH_SALE_DISPATCH_MODE` | string | db_scanner | 非敏感 | 秒杀 Runtime 装配 |
 | `flash_sale.shutdown_timeout` | `FLASH_SALE_SHUTDOWN_TIMEOUT` | duration | 30s | 非敏感 | 秒杀 Runtime 关闭 |

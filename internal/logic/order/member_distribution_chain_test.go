@@ -70,6 +70,9 @@ func setupChainTest(t *testing.T) (userID, skuID, addressID int64) {
 func cleanChainTables(t *testing.T, ctx context.Context) {
 	t.Helper()
 	for _, table := range []string{
+		// 营销表通过 FK 引用 skus/products，必须在它们之前清理（B1-04-06/07 合入后）。
+		"group_buy_participants", "group_buy_teams", "group_buy_activities",
+		"bargain_help_records", "bargain_instances", "bargain_activities",
 		"distribution_commissions", "user_referrals",
 		"member_growth_logs", "user_memberships", "member_levels",
 		"refund_audits", "refund_requests",

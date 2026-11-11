@@ -242,3 +242,13 @@ B1-04 集成后订单链路**已接入**运费计算（`service.IFreight.Quote`�
 - **`created_at` 时间范围筛选无索引**：查询走主键倒序扫描 + `Using where` 过滤（表 #5）。因 `ORDER BY id DESC` 与 `created_at` 序不同，即便新增 `created_at` 索引仍无法消除 `id` 排序的 filesort，收益仅缩小扫描范围；当前为低 QPS 后台只读场景，故 V1 不新增索引、不新增 migration。
 - **优化触发信号**：当「后台时间范围筛选出现可感知延迟」或「`EXPLAIN` 显示时间范围过滤后扫描行数超阈值」时，再评估新增 `created_at` 相关索引；届时需走 Registry 预留 migration version，并说明收益、写入开销与兼容性影响。
 - **其余路径已覆盖**：默认 `id DESC`、`order_no`、`user_id`、`status` 精确筛选与状态统计分别由 `PRIMARY`/`uk_order_no`/`uk_user_idempotency`/`idx_user_id`/`idx_status_expire` 支撑，无需新增索引。
+
+## 拼团订单（B1-04-06）
+
+- 开团/参团经 `IOrder.CreateGroupBuyInTx` 在**调用方事务内**创建普通订单：事务内 `FOR UPDATE` 重读 SKU 价格，
+  `original_amount = skus.price × quantity`，拼团价与现价的差额进入 `discount_amount`（拼团优惠），
+  `order_items.price` 记拼团成交价、`original_price` 记权威原价；应付金额经 `pricing.Quote` 计算
+  （会员折扣不叠加，运费按模板与地区照常计算），`total_amount = original - discount + shipping`。
+- 拼团失败补偿经 `IOrder.CancelInTx` 取消**待支付**订单（10→60 + 恢复库存 + 流水），已支付订单保持 `paid`，
+  由用户走既有退款流程，不存在系统自动退款。
+- 订单与拼团的关系只通过 `group_buy_participants.order_id`，不在 `orders` 增加拼团列。

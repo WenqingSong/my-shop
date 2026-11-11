@@ -59,6 +59,24 @@ var opMetaByKey = map[string]*opMeta{
 	"PUT /admin/freight-templates/:id":        {KnownIssues: []*OMap{d1Issue()}},
 	"PUT /admin/freight-templates/:id/status": {KnownIssues: []*OMap{d1Issue()}},
 
+	// ---- B1-04-06 拼团：写接口带 required body 字段（D1 同上）+ 严格分页 ----
+	"POST /group-buys/:id/teams": {
+		KnownIssues: []*OMap{d1Issue()},
+		Idempotency: idemBody("idempotency_key", true),
+	},
+	"POST /group-buy-teams/:id/join": {
+		KnownIssues: []*OMap{d1Issue()},
+		Idempotency: idemBody("idempotency_key", true),
+	},
+	"POST /admin/group-buys":            {KnownIssues: []*OMap{d1Issue()}},
+	"PUT /admin/group-buys/:id":         {KnownIssues: []*OMap{d1Issue()}},
+	"POST /admin/group-buys/:id/status": {KnownIssues: []*OMap{d1Issue()}},
+	"GET /group-buys":                   {Pagination: "strict"},
+	"GET /group-buys/:id/teams":         {Pagination: "strict"},
+	"GET /my/group-buys":                {Pagination: "strict"},
+	"GET /admin/group-buys":             {Pagination: "strict"},
+	"GET /admin/group-buy-teams":        {Pagination: "strict"},
+
 	// ---- data 为 null 的成功响应（controller 显式 return nil, nil）----
 	"POST /logout":                                       {NullData: true},
 	"DELETE /sessions/:sid":                              {NullData: true},

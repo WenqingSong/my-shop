@@ -13,6 +13,7 @@ import (
 	distributionCtrl "cnb.cool/go-cloud-devops/my-shop/internal/controller/distribution"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/favorite"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/flashsale"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/groupbuy"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/like"
 	memberCtrl "cnb.cool/go-cloud-devops/my-shop/internal/controller/member"
@@ -62,6 +63,7 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	distributionCtrlV1 := distributionCtrl.NewV1()
 	walletCtrl := wallet.NewV1()
 	bargainCtrl := bargain.NewV1()
+	groupBuyCtrl := groupbuy.NewV1()
 	memberCtrlV1 := memberCtrl.NewV1()
 
 	// 前台公开接口：注册、登录、刷新、分类查询、商品查询、轮播图列表（无需 token）。
@@ -83,6 +85,12 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	// 公开砍价活动列表/详情（无需 token；列表仅返回启用且在时间窗内的活动）。
 	root.GET("/bargain-activities", bargainCtrl.List)
 	root.GET("/bargain-activities/:id", bargainCtrl.Detail)
+
+	// B1-04-06 BEGIN：拼团活动浏览（公开只读；团详情需登录，见下方 Auth 分组）
+	root.GET("/group-buys", groupBuyCtrl.ListActivities)
+	root.GET("/group-buys/:id", groupBuyCtrl.ActivityDetail)
+	root.GET("/group-buys/:id/teams", groupBuyCtrl.ListTeams)
+	// B1-04-06 END
 	// 公开文章列表/详情/点赞数（无需 token）。
 	root.GET("/articles", articleCtrl.List)
 	root.GET("/articles/:id", articleCtrl.Detail)
@@ -183,6 +191,13 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 		user.GET("/distribution/subordinates", distributionCtrlV1.ListSubordinates)
 		user.GET("/distribution/commissions", distributionCtrlV1.ListMyCommissions)
 		// 砍价（仅登录用户，作用于本人数据；实例详情与助力记录允许登录用户查看已分享的实例）。
+		// B1-04-06 BEGIN：拼团开团/参团与本人的拼团记录（身份取自 Principal）
+		user.POST("/group-buys/:id/teams", groupBuyCtrl.CreateTeam)
+		user.POST("/group-buy-teams/:id/join", groupBuyCtrl.JoinTeam)
+		user.GET("/group-buy-teams/:id", groupBuyCtrl.TeamDetail)
+		user.GET("/my/group-buys", groupBuyCtrl.MyList)
+		// B1-04-06 END
+
 		user.POST("/bargain-activities/:id/instances", bargainCtrl.Start)
 		user.GET("/my/bargain-instances", bargainCtrl.MyList)
 		user.GET("/bargain-instances/:id", bargainCtrl.InstanceDetail)

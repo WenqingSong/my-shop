@@ -12,6 +12,7 @@ import (
 	distributionController "cnb.cool/go-cloud-devops/my-shop/internal/controller/distribution"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/flashsale"
 	freightController "cnb.cool/go-cloud-devops/my-shop/internal/controller/freight"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/groupbuy"
 	iamController "cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/inventory"
 	memberAdminCtrl "cnb.cool/go-cloud-devops/my-shop/internal/controller/member"
@@ -54,6 +55,7 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 	refundAdminCtrl := refundController.NewAdminV1()
 	couponAdminCtrl := coupon.NewAdminV1()
 	distributionAdminCtrl := distributionController.NewAdminV1()
+	groupBuyAdminCtrl := groupbuy.NewAdminV1()
 	freightAdminCtrl := freightController.NewAdminV1()
 	bargainAdminCtrl := bargain.NewAdminV1()
 	memberAdminCtrlV1 := memberAdminCtrl.NewAdminV1()
@@ -215,6 +217,17 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 		require("distribution:referral_list").GET("/admin/distributions/distributors", distributionAdminCtrl.AdminListDistributors)
 		require("distribution:commission_list").GET("/admin/distributions/commissions", distributionAdminCtrl.AdminListCommissions)
 		require("distribution:commission_list").GET("/admin/distributions/commissions/stats", distributionAdminCtrl.AdminCommissionStats)
+
+		// B1-04-06 BEGIN：拼团后台（活动管理与团查询/关闭）
+		require("group_buy:create").POST("/admin/group-buys", groupBuyAdminCtrl.AdminCreate)
+		require("group_buy:update").PUT("/admin/group-buys/:id", groupBuyAdminCtrl.AdminUpdate)
+		require("group_buy:update").POST("/admin/group-buys/:id/status", groupBuyAdminCtrl.AdminStatus)
+		require("group_buy:list").GET("/admin/group-buys", groupBuyAdminCtrl.AdminList)
+		require("group_buy:view").GET("/admin/group-buys/:id", groupBuyAdminCtrl.AdminDetail)
+		require("group_buy:list").GET("/admin/group-buy-teams", groupBuyAdminCtrl.AdminListTeams)
+		require("group_buy:view").GET("/admin/group-buy-teams/:id", groupBuyAdminCtrl.AdminTeamDetail)
+		require("group_buy:close").POST("/admin/group-buy-teams/:id/close", groupBuyAdminCtrl.AdminCloseTeam)
+		// B1-04-06 END
 		require("distribution:settle").POST("/admin/distributions/commissions/:id/settle", distributionAdminCtrl.AdminSettleCommission)
 
 		// 会员等级后台维护（AdminAuth + RequirePermission）。

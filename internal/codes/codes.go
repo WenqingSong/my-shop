@@ -217,6 +217,18 @@ const (
 	CodeMemberLevelInUse         Code = 24003 // 等级被用户会员记录引用，不可删除 → 409
 	CodeMemberLevelDuplicate     Code = 24004 // 等级序号或成长值门槛已被占用 → 409
 	CodeMemberGrowthInsufficient Code = 24005 // 成长值扣减超过当前余额（防御性拒绝）→ 409
+
+	// 拼团域（Group Buy）25000-25999（域序 25，B1-04-06）。
+	// B1-04 八分支集成：原编号 21001-21009 与运费/计价域（域序 21）冲突，按域序 25 重新分配。
+	CodeGroupBuyNotFound         Code = 25001 // 拼团活动不存在 → 404
+	CodeGroupBuyInvalidArgument  Code = 25002 // 活动/参团参数非法（价格、人数、有效期、时间窗）→ 400
+	CodeGroupBuyActivityInactive Code = 25003 // 活动未开始/已结束/已停用，不可开团 → 409
+	CodeGroupBuyPriceInvalid     Code = 25004 // 拼团价非法（<=0 或高于 SKU 现价）→ 400
+	CodeGroupBuyTeamNotFound     Code = 25005 // 团不存在或不可见 → 404
+	CodeGroupBuyTeamNotJoinable  Code = 25006 // 团已满/已成团/已失败/已过期，不可参与 → 409
+	CodeGroupBuyAlreadyJoined    Code = 25007 // 该用户已在本团中（uk_team_user 兜底）→ 409
+	CodeGroupBuySkuUnavailable   Code = 25008 // 拼团商品不可购买（SKU 禁用/商品下架）→ 409
+	CodeGroupBuyTeamNotClosable  Code = 25009 // 团不在拼团中，不可关闭 → 409
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -389,6 +401,16 @@ var codeTable = map[Code]codeInfo{
 	CodeMemberLevelInUse:         {http.StatusConflict, "会员等级已被用户使用，不能删除"},
 	CodeMemberLevelDuplicate:     {http.StatusConflict, "会员等级序号或成长值门槛已存在"},
 	CodeMemberGrowthInsufficient: {http.StatusConflict, "成长值不足"},
+
+	CodeGroupBuyNotFound:         {http.StatusNotFound, "拼团活动不存在"},
+	CodeGroupBuyInvalidArgument:  {http.StatusBadRequest, "拼团参数非法"},
+	CodeGroupBuyActivityInactive: {http.StatusConflict, "拼团活动当前不可参与"},
+	CodeGroupBuyPriceInvalid:     {http.StatusBadRequest, "拼团价格非法"},
+	CodeGroupBuyTeamNotFound:     {http.StatusNotFound, "拼团不存在"},
+	CodeGroupBuyTeamNotJoinable:  {http.StatusConflict, "该团已满或已结束，不可参与"},
+	CodeGroupBuyAlreadyJoined:    {http.StatusConflict, "您已参与该团"},
+	CodeGroupBuySkuUnavailable:   {http.StatusConflict, "拼团商品不可购买"},
+	CodeGroupBuyTeamNotClosable:  {http.StatusConflict, "拼团状态不允许关闭"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。

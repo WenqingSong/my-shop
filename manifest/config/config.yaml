@@ -129,6 +129,13 @@ distribution:
 
 # 钱包配置（以下均为开发默认值，可通过环境变量覆盖）
 # 对应环境变量：WALLET_MOCK_RECHARGE_ENABLED
+# 拼团配置（开发默认值，可通过环境变量覆盖）
+# 对应环境变量：GROUP_BUY_EXPIRE_SCAN_INTERVAL
+group_buy:
+  # 拼团超时过期扫描周期（秒）：扫描 status=10 且 expire_at<=NOW() 的团，
+  # 条件更新为 expired 并取消未支付订单恢复库存；多实例并发靠条件更新保证只处理一次。
+  expire_scan_interval: 60
+
 wallet:
   mock_recharge:
     # 是否启用 Mock 充值接口（默认关闭）。

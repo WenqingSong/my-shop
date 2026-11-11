@@ -56,6 +56,8 @@ tags:
     description: 一级推荐关系与订单佣金（只做一级，不含提现与真实资金结算）
   - name: 砍价
     description: 砍价活动管理与用户发起/好友助力
+  - name: 拼团
+    description: 拼团活动管理、开团参团、成团与失败补偿
   - name: 秒杀
     description: 秒杀活动管理与下单
   - name: 轮播图
@@ -983,6 +985,265 @@ paths:
           $ref: '#/components/responses/BadRequest'
         "404":
           $ref: '#/components/responses/NotFound'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /group-buys:
+    get:
+      tags:
+        - 拼团
+      summary: 拼团活动列表
+      description: 公开接口，无需认证。
+      operationId: groupBuyListActivities
+      security: []
+      x-auth: public
+      x-handler: groupbuy.ListActivities
+      x-source: routes_frontend.go
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int
+          description: 页码，默认 1；<1 或非整数返回 400
+          x-pagination-mode: strict
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int
+          description: 每页数量，默认 20、上限 100；越界或非整数返回 400
+          x-pagination-mode: strict
+      x-pagination-mode: strict
+      x-pagination-contract: 严格行为：page/size 非正整数或越界返回 HTTP 400 + code 1001。
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/GroupBuyListActivitiesResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /group-buys/{id}:
+    get:
+      tags:
+        - 拼团
+      summary: 拼团活动详情
+      description: 公开接口，无需认证。
+      operationId: groupBuyActivityDetail
+      security: []
+      x-auth: public
+      x-handler: groupbuy.ActivityDetail
+      x-source: routes_frontend.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 拼团活动 id
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/GroupBuyActivityDetailResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 25001
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /group-buys/{id}/teams:
+    get:
+      tags:
+        - 拼团
+      summary: 进行中的拼团列表
+      description: 公开接口，无需认证。
+      operationId: groupBuyListTeams
+      security: []
+      x-auth: public
+      x-handler: groupbuy.ListTeams
+      x-source: routes_frontend.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 拼团活动 id
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int
+          description: 页码，默认 1；<1 或非整数返回 400
+          x-pagination-mode: strict
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int
+          description: 每页数量，默认 20、上限 100；越界或非整数返回 400
+          x-pagination-mode: strict
+      x-pagination-mode: strict
+      x-pagination-contract: 严格行为：page/size 非正整数或越界返回 HTTP 400 + code 1001。
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/GroupBuyListTeamsResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 25001
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "500":
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags:
+        - 拼团
+      summary: 发起拼团（开团并下单）
+      description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+      operationId: groupBuyCreateTeam
+      security:
+        - bearerAuth: []
+      x-auth: user
+      x-handler: groupbuy.CreateTeam
+      x-source: routes_frontend.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 拼团活动 id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                address_id:
+                  type: integer
+                  format: int64
+                  x-go-type: int64
+                  x-go-validate: required
+                  description: 收货地址 id（必须属于当前用户）
+                idempotency_key:
+                  type: string
+                  x-go-validate: required
+                  description: 下单幂等键（同键不同内容 9006）
+              required:
+                - address_id
+                - idempotency_key
+      x-pagination-mode: none
+      x-idempotency:
+        mode: body
+        field: idempotency_key
+        required: true
+        header_supported: false
+      x-known-issue:
+        - id: B1-02-D1
+          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
+          actual_http_status: 500
+          actual_business_code: 51
+          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/GroupBuyCreateTeamResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 25001
+            - 25003
+            - 25005
+            - 25007
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
         "500":
           $ref: '#/components/responses/InternalError'
   /articles:
@@ -4676,6 +4937,220 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/DistributionListCommissionsResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /group-buy-teams/{id}/join:
+    post:
+      tags:
+        - 拼团
+      summary: 参与拼团
+      description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+      operationId: groupBuyJoinTeam
+      security:
+        - bearerAuth: []
+      x-auth: user
+      x-handler: groupbuy.JoinTeam
+      x-source: routes_frontend.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 团 id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                address_id:
+                  type: integer
+                  format: int64
+                  x-go-type: int64
+                  x-go-validate: required
+                  description: 收货地址 id（必须属于当前用户）
+                idempotency_key:
+                  type: string
+                  x-go-validate: required
+                  description: 下单幂等键（同键不同内容 9006）
+              required:
+                - address_id
+                - idempotency_key
+      x-pagination-mode: none
+      x-idempotency:
+        mode: body
+        field: idempotency_key
+        required: true
+        header_supported: false
+      x-known-issue:
+        - id: B1-02-D1
+          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
+          actual_http_status: 500
+          actual_business_code: 51
+          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/GroupBuyJoinTeamResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 25001
+            - 25005
+            - 25006
+            - 25007
+            - 25008
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /group-buy-teams/{id}:
+    get:
+      tags:
+        - 拼团
+      summary: 拼团详情
+      description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+      operationId: groupBuyTeamDetail
+      security:
+        - bearerAuth: []
+      x-auth: user
+      x-handler: groupbuy.TeamDetail
+      x-source: routes_frontend.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 团 id
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/GroupBuyTeamDetailResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 25005
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /my/group-buys:
+    get:
+      tags:
+        - 拼团
+      summary: 我的拼团记录
+      description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+      operationId: groupBuyMyList
+      security:
+        - bearerAuth: []
+      x-auth: user
+      x-handler: groupbuy.MyList
+      x-source: routes_frontend.go
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int
+          description: 页码，默认 1；<1 或非整数返回 400
+          x-pagination-mode: strict
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int
+          description: 每页数量，默认 20、上限 100；越界或非整数返回 400
+          x-pagination-mode: strict
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 按团状态过滤：pending/success/failed/expired；空表示全部
+      x-pagination-mode: strict
+      x-pagination-contract: 严格行为：page/size 非正整数或越界返回 HTTP 400 + code 1001。
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/GroupBuyMyListResponse'
         x-error-codes:
           codes:
             - 1000
@@ -10938,6 +11413,659 @@ paths:
           $ref: '#/components/responses/Forbidden'
         "500":
           $ref: '#/components/responses/InternalError'
+  /admin/group-buys:
+    post:
+      tags:
+        - 拼团
+      summary: 创建拼团活动
+      description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`group_buy:create`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+      operationId: groupBuyAdminCreate
+      security:
+        - bearerAuth: []
+      x-auth: admin
+      x-permission: group_buy:create
+      x-handler: groupbuy.AdminCreate
+      x-source: routes_admin.go
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  x-go-validate: required
+                  description: 活动名称（1-64 字符）
+                product_id:
+                  type: integer
+                  format: int64
+                  x-go-type: int64
+                  x-go-validate: required
+                  description: 商品 id
+                sku_id:
+                  type: integer
+                  format: int64
+                  x-go-type: int64
+                  x-go-validate: required
+                  description: SKU id（必须属于该商品）
+                group_price:
+                  type: integer
+                  format: int64
+                  x-go-type: int64
+                  x-unit: cent
+                  x-go-validate: required
+                  description: 拼团价（整数分，>0 且 ≤ SKU 现价）
+                group_size:
+                  type: integer
+                  format: int64
+                  x-go-type: int64
+                  x-go-validate: required
+                  description: 成团人数（含团长，≥2）
+                team_ttl_minutes:
+                  type: integer
+                  format: int64
+                  x-go-type: int64
+                  x-go-validate: required
+                  description: 开团有效分钟数（1-10080）
+                start_time:
+                  type: [string, "null"]
+                  x-go-type: gtime.Time
+                  x-format: gtime-lenient
+                  x-go-validate: required
+                  description: 活动开始时间（RFC3339）；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+                end_time:
+                  type: [string, "null"]
+                  x-go-type: gtime.Time
+                  x-format: gtime-lenient
+                  x-go-validate: required
+                  description: 活动结束时间（RFC3339，晚于开始时间）；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+              required:
+                - name
+                - product_id
+                - sku_id
+                - group_price
+                - group_size
+                - team_ttl_minutes
+                - start_time
+                - end_time
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      x-known-issue:
+        - id: B1-02-D1
+          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
+          actual_http_status: 500
+          actual_business_code: 51
+          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/GroupBuyAdminCreateResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 25001
+            - 25002
+            - 25004
+            - 25008
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+        "500":
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags:
+        - 拼团
+      summary: 后台拼团活动列表
+      description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`group_buy:list`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+      operationId: groupBuyAdminList
+      security:
+        - bearerAuth: []
+      x-auth: admin
+      x-permission: group_buy:list
+      x-handler: groupbuy.AdminList
+      x-source: routes_admin.go
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int
+          description: 页码，默认 1；<1 或非整数返回 400
+          x-pagination-mode: strict
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int
+          description: 每页数量，默认 20、上限 100；越界或非整数返回 400
+          x-pagination-mode: strict
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 状态过滤：enabled/disabled；空表示全部
+        - name: product_id
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 商品 id 精确过滤；<=0 返回 400
+        - name: sku_id
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: SKU id 精确过滤；<=0 返回 400
+      x-pagination-mode: strict
+      x-pagination-contract: 严格行为：page/size 非正整数或越界返回 HTTP 400 + code 1001。
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/GroupBuyAdminListResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /admin/group-buys/{id}:
+    put:
+      tags:
+        - 拼团
+      summary: 修改拼团活动
+      description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`group_buy:update`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+      operationId: groupBuyAdminUpdate
+      security:
+        - bearerAuth: []
+      x-auth: admin
+      x-permission: group_buy:update
+      x-handler: groupbuy.AdminUpdate
+      x-source: routes_admin.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 拼团活动 id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  x-go-validate: required
+                  description: 活动名称（1-64 字符）
+                group_price:
+                  type: integer
+                  format: int64
+                  x-go-type: int64
+                  x-unit: cent
+                  x-go-validate: required
+                  description: 拼团价（整数分，>0 且 ≤ SKU 现价）
+                group_size:
+                  type: integer
+                  format: int64
+                  x-go-type: int64
+                  x-go-validate: required
+                  description: 成团人数（含团长，≥2）
+                team_ttl_minutes:
+                  type: integer
+                  format: int64
+                  x-go-type: int64
+                  x-go-validate: required
+                  description: 开团有效分钟数（1-10080）
+                start_time:
+                  type: [string, "null"]
+                  x-go-type: gtime.Time
+                  x-format: gtime-lenient
+                  x-go-validate: required
+                  description: 活动开始时间（RFC3339）；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+                end_time:
+                  type: [string, "null"]
+                  x-go-type: gtime.Time
+                  x-format: gtime-lenient
+                  x-go-validate: required
+                  description: 活动结束时间（RFC3339）；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+              required:
+                - name
+                - group_price
+                - group_size
+                - team_ttl_minutes
+                - start_time
+                - end_time
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      x-known-issue:
+        - id: B1-02-D1
+          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
+          actual_http_status: 500
+          actual_business_code: 51
+          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/GroupBuyAdminUpdateResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 25001
+            - 25002
+            - 25004
+            - 25008
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+        "500":
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags:
+        - 拼团
+      summary: 后台拼团活动详情
+      description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`group_buy:view`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+      operationId: groupBuyAdminDetail
+      security:
+        - bearerAuth: []
+      x-auth: admin
+      x-permission: group_buy:view
+      x-handler: groupbuy.AdminDetail
+      x-source: routes_admin.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 拼团活动 id
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/GroupBuyAdminDetailResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 25001
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /admin/group-buys/{id}/status:
+    post:
+      tags:
+        - 拼团
+      summary: 启用/停用拼团活动
+      description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`group_buy:update`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+      operationId: groupBuyAdminStatus
+      security:
+        - bearerAuth: []
+      x-auth: admin
+      x-permission: group_buy:update
+      x-handler: groupbuy.AdminStatus
+      x-source: routes_admin.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 拼团活动 id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  x-go-validate: required
+                  description: 目标状态：enabled/disabled
+              required:
+                - status
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      x-known-issue:
+        - id: B1-02-D1
+          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
+          actual_http_status: 500
+          actual_business_code: 51
+          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/GroupBuyAdminStatusResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 25001
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /admin/group-buy-teams:
+    get:
+      tags:
+        - 拼团
+      summary: 后台拼团列表
+      description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`group_buy:list`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+      operationId: groupBuyAdminListTeams
+      security:
+        - bearerAuth: []
+      x-auth: admin
+      x-permission: group_buy:list
+      x-handler: groupbuy.AdminListTeams
+      x-source: routes_admin.go
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int
+          description: 页码，默认 1；<1 或非整数返回 400
+          x-pagination-mode: strict
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int
+          description: 每页数量，默认 20、上限 100；越界或非整数返回 400
+          x-pagination-mode: strict
+        - name: activity_id
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 活动 id 精确过滤；<=0 返回 400
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 团状态过滤：pending/success/failed/expired；空表示全部
+        - name: leader_user_id
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 团长 user id 精确过滤；<=0 返回 400
+      x-pagination-mode: strict
+      x-pagination-contract: 严格行为：page/size 非正整数或越界返回 HTTP 400 + code 1001。
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/GroupBuyAdminListTeamsResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /admin/group-buy-teams/{id}:
+    get:
+      tags:
+        - 拼团
+      summary: 后台拼团详情
+      description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`group_buy:view`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+      operationId: groupBuyAdminTeamDetail
+      security:
+        - bearerAuth: []
+      x-auth: admin
+      x-permission: group_buy:view
+      x-handler: groupbuy.AdminTeamDetail
+      x-source: routes_admin.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 团 id
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/GroupBuyAdminTeamDetailResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 25005
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /admin/group-buy-teams/{id}/close:
+    post:
+      tags:
+        - 拼团
+      summary: 关闭拼团（判定失败）
+      description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`group_buy:close`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+      operationId: groupBuyAdminCloseTeam
+      security:
+        - bearerAuth: []
+      x-auth: admin
+      x-permission: group_buy:close
+      x-handler: groupbuy.AdminCloseTeam
+      x-source: routes_admin.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 团 id
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/GroupBuyAdminCloseTeamResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 25005
+            - 25009
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+        "500":
+          $ref: '#/components/responses/InternalError'
   /admin/distributions/commissions/{id}/settle:
     post:
       tags:
@@ -12878,6 +14006,76 @@ components:
       $ref: ./components/schemas.yaml#/FreightAdminReplaceRulesRequest
     FreightAdminReplaceRulesResponse:
       $ref: ./components/schemas.yaml#/FreightAdminReplaceRulesResponse
+    GroupBuyActivity:
+      $ref: ./components/schemas.yaml#/GroupBuyActivity
+    GroupBuyTeam:
+      $ref: ./components/schemas.yaml#/GroupBuyTeam
+    GroupBuyParticipant:
+      $ref: ./components/schemas.yaml#/GroupBuyParticipant
+    GroupBuyTeamDetail:
+      $ref: ./components/schemas.yaml#/GroupBuyTeamDetail
+    GroupBuyMyTeamItem:
+      $ref: ./components/schemas.yaml#/GroupBuyMyTeamItem
+    GroupBuyListActivitiesRequest:
+      $ref: ./components/schemas.yaml#/GroupBuyListActivitiesRequest
+    GroupBuyListActivitiesResponse:
+      $ref: ./components/schemas.yaml#/GroupBuyListActivitiesResponse
+    GroupBuyActivityDetailRequest:
+      $ref: ./components/schemas.yaml#/GroupBuyActivityDetailRequest
+    GroupBuyActivityDetailResponse:
+      $ref: ./components/schemas.yaml#/GroupBuyActivityDetailResponse
+    GroupBuyListTeamsRequest:
+      $ref: ./components/schemas.yaml#/GroupBuyListTeamsRequest
+    GroupBuyListTeamsResponse:
+      $ref: ./components/schemas.yaml#/GroupBuyListTeamsResponse
+    GroupBuyCreateTeamRequest:
+      $ref: ./components/schemas.yaml#/GroupBuyCreateTeamRequest
+    GroupBuyCreateTeamResponse:
+      $ref: ./components/schemas.yaml#/GroupBuyCreateTeamResponse
+    GroupBuyJoinTeamRequest:
+      $ref: ./components/schemas.yaml#/GroupBuyJoinTeamRequest
+    GroupBuyJoinTeamResponse:
+      $ref: ./components/schemas.yaml#/GroupBuyJoinTeamResponse
+    GroupBuyTeamDetailRequest:
+      $ref: ./components/schemas.yaml#/GroupBuyTeamDetailRequest
+    GroupBuyTeamDetailResponse:
+      $ref: ./components/schemas.yaml#/GroupBuyTeamDetailResponse
+    GroupBuyMyListRequest:
+      $ref: ./components/schemas.yaml#/GroupBuyMyListRequest
+    GroupBuyMyListResponse:
+      $ref: ./components/schemas.yaml#/GroupBuyMyListResponse
+    GroupBuyAdminCreateRequest:
+      $ref: ./components/schemas.yaml#/GroupBuyAdminCreateRequest
+    GroupBuyAdminCreateResponse:
+      $ref: ./components/schemas.yaml#/GroupBuyAdminCreateResponse
+    GroupBuyAdminUpdateRequest:
+      $ref: ./components/schemas.yaml#/GroupBuyAdminUpdateRequest
+    GroupBuyAdminUpdateResponse:
+      $ref: ./components/schemas.yaml#/GroupBuyAdminUpdateResponse
+    GroupBuyAdminStatusRequest:
+      $ref: ./components/schemas.yaml#/GroupBuyAdminStatusRequest
+    GroupBuyAdminStatusResponse:
+      $ref: ./components/schemas.yaml#/GroupBuyAdminStatusResponse
+    GroupBuyAdminListRequest:
+      $ref: ./components/schemas.yaml#/GroupBuyAdminListRequest
+    GroupBuyAdminListResponse:
+      $ref: ./components/schemas.yaml#/GroupBuyAdminListResponse
+    GroupBuyAdminDetailRequest:
+      $ref: ./components/schemas.yaml#/GroupBuyAdminDetailRequest
+    GroupBuyAdminDetailResponse:
+      $ref: ./components/schemas.yaml#/GroupBuyAdminDetailResponse
+    GroupBuyAdminListTeamsRequest:
+      $ref: ./components/schemas.yaml#/GroupBuyAdminListTeamsRequest
+    GroupBuyAdminListTeamsResponse:
+      $ref: ./components/schemas.yaml#/GroupBuyAdminListTeamsResponse
+    GroupBuyAdminTeamDetailRequest:
+      $ref: ./components/schemas.yaml#/GroupBuyAdminTeamDetailRequest
+    GroupBuyAdminTeamDetailResponse:
+      $ref: ./components/schemas.yaml#/GroupBuyAdminTeamDetailResponse
+    GroupBuyAdminCloseTeamRequest:
+      $ref: ./components/schemas.yaml#/GroupBuyAdminCloseTeamRequest
+    GroupBuyAdminCloseTeamResponse:
+      $ref: ./components/schemas.yaml#/GroupBuyAdminCloseTeamResponse
     HealthLivenessRequest:
       $ref: ./components/schemas.yaml#/HealthLivenessRequest
     HealthLivenessResponse:
@@ -13347,9 +14545,9 @@ components:
       $ref: ./components/security.yaml#/bearerAuth
 x-contract-baseline: 82243c0fbce614e03c4ff57dcc829b5f68fb08f2
 x-api-count:
-  total: 195
-  frontend: 91
-  admin: 102
+  total: 210
+  frontend: 98
+  admin: 110
   health: 2
   conditional: 1
   static: 1
@@ -13397,7 +14595,7 @@ x-planned-apis:
 x-known-issues:
   - id: B1-02-D1
     summary: DTO gvalid 校验失败返回 HTTP 500 + code 51，与目标规范 400 + 1001 不一致
-    affected: 22 条带 v:"required" 的写接口，见各 operation 的 x-known-issue
+    affected: 27 条带 v:"required" 的写接口，见各 operation 的 x-known-issue
     remediation: 需单独立项修复错误码映射；B1-02 仅在契约层标注
   - id: B1-01-H15.4
     summary: 分页三种形态并存：clamp（静默归一）/ strict（越界 400）/ none（无分页）

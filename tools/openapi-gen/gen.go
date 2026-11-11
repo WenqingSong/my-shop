@@ -19,10 +19,11 @@ const contractBaseline = "82243c0fbce614e03c4ff57dcc829b5f68fb08f2"
 // + B1-04-08 会员 8 条（前台 3、后台 5）与佣金人工结算 1 条（后台）
 // + B1-04-04 钱包 3 条（前台）、B1-04-03 运费模板后台 7 条。
 // + B1-04 集成新增订单算价预览 1 条（前台）。
+// + B1-04-06 拼团 15 条（公开 3、前台 4、后台 8）。
 const (
-	expectedTotal    = 195
-	expectedFrontend = 91
-	expectedAdmin    = 102
+	expectedTotal    = 210
+	expectedFrontend = 98
+	expectedAdmin    = 110
 	expectedHealth   = 2
 )
 
@@ -31,7 +32,7 @@ var codesByValue = map[int]*ErrorCode{}
 // pathFileOrder 固定分域视图文件的输出顺序。
 var pathFileOrder = []string{
 	"iam", "profile", "admin", "categories", "product", "spec", "sku", "inventory", "address", "region",
-	"cart", "order", "refund", "coupon", "distribution", "bargain", "member", "freight", "flashsale", "banner",
+	"cart", "order", "refund", "coupon", "distribution", "bargain", "member", "freight", "groupbuy", "flashsale", "banner",
 	"recommendation", "article", "review", "favorite", "like", "upload", "wallet", "dashboard", "health",
 }
 
@@ -61,6 +62,7 @@ var tagDescriptions = []struct {
 	{"运费", "运费模板、区域计费规则与服务端运费计算"},
 	{"分销", "一级推荐关系与订单佣金（只做一级，不含提现与真实资金结算）"},
 	{"砍价", "砍价活动管理与用户发起/好友助力"},
+	{"拼团", "拼团活动管理、开团参团、成团与失败补偿"},
 	{"秒杀", "秒杀活动管理与下单"},
 	{"轮播图", "轮播图查询与后台管理"},
 	{"推荐位", "推荐位查询与后台管理"},

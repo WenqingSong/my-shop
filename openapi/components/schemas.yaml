@@ -4571,6 +4571,868 @@ FreightAdminReplaceRulesResponse:
       items:
         oneOf: [{$ref: '#/FreightRule'}, {type: "null"}]
       description: 替换后的区域规则列表
+GroupBuyActivity:
+  type: object
+  description: Activity 拼团活动（查询与写接口复用）。
+  required:
+    - id
+    - product_id
+    - sku_id
+    - name
+    - group_price
+    - group_size
+    - team_ttl_minutes
+    - start_time
+    - end_time
+    - status
+    - created_at
+    - updated_at
+    - sku_name
+    - sku_price
+    - product_name
+    - product_main_image
+    - ongoing_teams
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 拼团活动 id
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 商品 id（FK products.id）
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 参与拼团的 SKU id（FK skus.id）
+    name:
+      type: string
+      description: 活动名称
+    group_price:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 拼团价（整数分）
+    group_size:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 成团人数（含团长，≥2）
+    team_ttl_minutes:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 开团后有效分钟数
+    start_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 活动开始时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    end_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 活动结束时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    status:
+      type: string
+      description: 状态：enabled/disabled
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 创建时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    updated_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 更新时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    sku_name:
+      type: string
+      description: SKU 名称（当前值）
+    sku_price:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: SKU 当前原价（整数分，当前值）
+    product_name:
+      type: string
+      description: 商品名称（当前值）
+    product_main_image:
+      type: string
+      description: 商品主图（当前值）
+    ongoing_teams:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 进行中的团数量
+GroupBuyTeam:
+  type: object
+  description: Team 团实例（不含成员明细）。
+  required:
+    - id
+    - activity_id
+    - leader_user_id
+    - group_price
+    - required_size
+    - joined_count
+    - status
+    - expire_at
+    - closed_at
+    - created_at
+    - updated_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 团 id
+    activity_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 拼团活动 id
+    leader_user_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 团长用户 id
+    group_price:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 拼团价快照（整数分，开团时固定）
+    required_size:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 成团人数快照（含团长）
+    joined_count:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 当前有效参与人数（含团长）
+    status:
+      type: string
+      description: 状态：pending/success/failed/expired
+    expire_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 团截止时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    closed_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 进入终态的时间（可空）；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 开团时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    updated_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 更新时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+GroupBuyParticipant:
+  type: object
+  description: Participant 参与记录（对外不暴露成员订单 id，避免泄露他人订单）。
+  required:
+    - id
+    - team_id
+    - user_id
+    - username
+    - status
+    - created_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 参与记录 id
+    team_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 团 id
+    user_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 参与用户 id
+    username:
+      type: string
+      description: 参与用户名（实时只读摘要）
+    status:
+      type: string
+      description: 状态：active/quit
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 参团时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+GroupBuyTeamDetail:
+  type: object
+  description: TeamDetail 团详情：团 + 活动摘要 + 成员 + 当前用户的参与记录。
+  allOf:
+    - $ref: '#/GroupBuyTeam'
+  required:
+    - activity_name
+    - product_id
+    - sku_id
+    - sku_name
+    - product_name
+    - product_main_image
+    - participants
+    - my_participant
+    - my_order_id
+  properties:
+    activity_name:
+      type: string
+      description: 活动名称（当前值）
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 商品 id
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: SKU id
+    sku_name:
+      type: string
+      description: SKU 名称（当前值）
+    product_name:
+      type: string
+      description: 商品名称（当前值）
+    product_main_image:
+      type: string
+      description: 商品主图（当前值）
+    participants:
+      type: array
+      items:
+        oneOf: [{$ref: '#/GroupBuyParticipant'}, {type: "null"}]
+      description: 参与成员（按 id 升序）
+    my_participant:
+      oneOf: [{$ref: '#/GroupBuyParticipant'}, {type: "null"}]
+      description: 当前登录用户的参与记录；未参与为 null
+    my_order_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 当前登录用户的参团订单 id；未参与为 null
+GroupBuyMyTeamItem:
+  type: object
+  description: MyTeamItem 我的拼团记录项。
+  allOf:
+    - $ref: '#/GroupBuyTeam'
+  required:
+    - activity_name
+    - product_name
+    - sku_name
+    - order_id
+    - joined_at
+    - is_leader
+  properties:
+    activity_name:
+      type: string
+      description: 活动名称（当前值）
+    product_name:
+      type: string
+      description: 商品名称（当前值）
+    sku_name:
+      type: string
+      description: SKU 名称（当前值）
+    order_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 本人参团订单 id
+    joined_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 本人参团时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+    is_leader:
+      type: boolean
+      description: 是否团长
+GroupBuyListActivitiesRequest:
+  type: object
+  description: ListActivitiesReq 前台拼团活动列表请求（仅启用且在时间窗内的活动）。
+  properties:
+    page:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 页码，默认 1；<1 或非整数返回 400
+    size:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 每页数量，默认 20、上限 100；越界或非整数返回 400
+GroupBuyListActivitiesResponse:
+  type: object
+  description: ListActivitiesRes 前台拼团活动分页列表响应。
+  required:
+    - items
+    - total
+    - page
+    - size
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/GroupBuyActivity'}, {type: "null"}]
+      description: 拼团活动列表（按 id 倒序）
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 总记录数
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量
+GroupBuyActivityDetailRequest:
+  type: object
+  description: ActivityDetailReq 前台拼团活动详情请求。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 拼团活动 id
+GroupBuyActivityDetailResponse:
+  type: object
+  description: ActivityDetailRes 前台拼团活动详情响应。
+  allOf:
+    - $ref: '#/GroupBuyActivity'
+GroupBuyListTeamsRequest:
+  type: object
+  description: ListTeamsReq 查询指定活动进行中的团列表请求。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 拼团活动 id
+    page:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 页码，默认 1；<1 或非整数返回 400
+    size:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 每页数量，默认 20、上限 100；越界或非整数返回 400
+GroupBuyListTeamsResponse:
+  type: object
+  description: ListTeamsRes 进行中的拼团列表响应。
+  required:
+    - items
+    - total
+    - page
+    - size
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/GroupBuyTeam'}, {type: "null"}]
+      description: 进行中的团列表（按 id 倒序）
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 总记录数
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量
+GroupBuyCreateTeamRequest:
+  type: object
+  description: CreateTeamReq 发起拼团请求（团长开团 + 同事务创建拼团订单）。
+  required:
+    - id
+    - address_id
+    - idempotency_key
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 拼团活动 id
+    address_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-go-validate: required
+      description: 收货地址 id（必须属于当前用户）
+    idempotency_key:
+      type: string
+      x-go-validate: required
+      description: 下单幂等键（同键不同内容 9006）
+GroupBuyCreateTeamResponse:
+  type: object
+  description: CreateTeamRes 发起拼团响应（含团详情与本次订单 id）。
+  allOf:
+    - $ref: '#/GroupBuyTeamDetail'
+GroupBuyJoinTeamRequest:
+  type: object
+  description: JoinTeamReq 参与已有拼团请求（同事务创建拼团订单）。
+  required:
+    - id
+    - address_id
+    - idempotency_key
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 团 id
+    address_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-go-validate: required
+      description: 收货地址 id（必须属于当前用户）
+    idempotency_key:
+      type: string
+      x-go-validate: required
+      description: 下单幂等键（同键不同内容 9006）
+GroupBuyJoinTeamResponse:
+  type: object
+  description: JoinTeamRes 参与拼团响应（含团详情与本次订单 id）。
+  allOf:
+    - $ref: '#/GroupBuyTeamDetail'
+GroupBuyTeamDetailRequest:
+  type: object
+  description: TeamDetailReq 查询团详情请求。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 团 id
+GroupBuyTeamDetailResponse:
+  type: object
+  description: TeamDetailRes 团详情响应。
+  allOf:
+    - $ref: '#/GroupBuyTeamDetail'
+GroupBuyMyListRequest:
+  type: object
+  description: MyListReq 查询本人拼团记录请求。
+  properties:
+    page:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 页码，默认 1；<1 或非整数返回 400
+    size:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 每页数量，默认 20、上限 100；越界或非整数返回 400
+    status:
+      type: string
+      description: 按团状态过滤：pending/success/failed/expired；空表示全部
+GroupBuyMyListResponse:
+  type: object
+  description: MyListRes 本人拼团记录响应。
+  required:
+    - items
+    - total
+    - page
+    - size
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/GroupBuyMyTeamItem'}, {type: "null"}]
+      description: 我的拼团记录（按团 id 倒序）
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 总记录数
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量
+GroupBuyAdminCreateRequest:
+  type: object
+  description: AdminCreateReq 创建拼团活动请求（后台，持 group_buy:create）。
+  required:
+    - name
+    - product_id
+    - sku_id
+    - group_price
+    - group_size
+    - team_ttl_minutes
+    - start_time
+    - end_time
+  properties:
+    name:
+      type: string
+      x-go-validate: required
+      description: 活动名称（1-64 字符）
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-go-validate: required
+      description: 商品 id
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-go-validate: required
+      description: SKU id（必须属于该商品）
+    group_price:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      x-go-validate: required
+      description: 拼团价（整数分，>0 且 ≤ SKU 现价）
+    group_size:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-go-validate: required
+      description: 成团人数（含团长，≥2）
+    team_ttl_minutes:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-go-validate: required
+      description: 开团有效分钟数（1-10080）
+    start_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      x-format: gtime-lenient
+      x-go-validate: required
+      description: 活动开始时间（RFC3339）；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+    end_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      x-format: gtime-lenient
+      x-go-validate: required
+      description: 活动结束时间（RFC3339，晚于开始时间）；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+GroupBuyAdminCreateResponse:
+  type: object
+  description: AdminCreateRes 创建拼团活动响应。
+  allOf:
+    - $ref: '#/GroupBuyActivity'
+GroupBuyAdminUpdateRequest:
+  type: object
+  description: AdminUpdateReq 修改拼团活动请求（后台，持 group_buy:update；商品与 SKU 不可变）。
+  required:
+    - id
+    - name
+    - group_price
+    - group_size
+    - team_ttl_minutes
+    - start_time
+    - end_time
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 拼团活动 id
+    name:
+      type: string
+      x-go-validate: required
+      description: 活动名称（1-64 字符）
+    group_price:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      x-go-validate: required
+      description: 拼团价（整数分，>0 且 ≤ SKU 现价）
+    group_size:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-go-validate: required
+      description: 成团人数（含团长，≥2）
+    team_ttl_minutes:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-go-validate: required
+      description: 开团有效分钟数（1-10080）
+    start_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      x-format: gtime-lenient
+      x-go-validate: required
+      description: 活动开始时间（RFC3339）；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+    end_time:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      x-format: gtime-lenient
+      x-go-validate: required
+      description: 活动结束时间（RFC3339）；请求侧为宽松解析：支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD、RFC3339 等格式，无偏移值按服务端时区解释
+GroupBuyAdminUpdateResponse:
+  type: object
+  description: AdminUpdateRes 修改拼团活动响应。
+  allOf:
+    - $ref: '#/GroupBuyActivity'
+GroupBuyAdminStatusRequest:
+  type: object
+  description: AdminStatusReq 启用/停用拼团活动请求（后台，持 group_buy:update）。
+  required:
+    - id
+    - status
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 拼团活动 id
+    status:
+      type: string
+      x-go-validate: required
+      description: 目标状态：enabled/disabled
+GroupBuyAdminStatusResponse:
+  type: object
+  description: AdminStatusRes 启用/停用拼团活动响应。
+  allOf:
+    - $ref: '#/GroupBuyActivity'
+GroupBuyAdminListRequest:
+  type: object
+  description: AdminListReq 后台拼团活动分页列表请求（持 group_buy:list）。
+  properties:
+    page:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 页码，默认 1；<1 或非整数返回 400
+    size:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 每页数量，默认 20、上限 100；越界或非整数返回 400
+    status:
+      type: string
+      description: 状态过滤：enabled/disabled；空表示全部
+    product_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 商品 id 精确过滤；<=0 返回 400
+    sku_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: SKU id 精确过滤；<=0 返回 400
+GroupBuyAdminListResponse:
+  type: object
+  description: AdminListRes 后台拼团活动分页列表响应。
+  required:
+    - items
+    - total
+    - page
+    - size
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/GroupBuyActivity'}, {type: "null"}]
+      description: 拼团活动列表（按 id 倒序）
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 总记录数
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量
+GroupBuyAdminDetailRequest:
+  type: object
+  description: AdminDetailReq 后台拼团活动详情请求（持 group_buy:view）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 拼团活动 id
+GroupBuyAdminDetailResponse:
+  type: object
+  description: AdminDetailRes 后台拼团活动详情响应。
+  allOf:
+    - $ref: '#/GroupBuyActivity'
+GroupBuyAdminListTeamsRequest:
+  type: object
+  description: AdminListTeamsReq 后台团列表请求（持 group_buy:list）。
+  properties:
+    page:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 页码，默认 1；<1 或非整数返回 400
+    size:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 每页数量，默认 20、上限 100；越界或非整数返回 400
+    activity_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 活动 id 精确过滤；<=0 返回 400
+    status:
+      type: string
+      description: 团状态过滤：pending/success/failed/expired；空表示全部
+    leader_user_id:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int64
+      description: 团长 user id 精确过滤；<=0 返回 400
+GroupBuyAdminListTeamsResponse:
+  type: object
+  description: AdminListTeamsRes 后台团列表响应。
+  required:
+    - items
+    - total
+    - page
+    - size
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/GroupBuyTeam'}, {type: "null"}]
+      description: 团列表（按 id 倒序）
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 总记录数
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量
+GroupBuyAdminTeamDetailRequest:
+  type: object
+  description: AdminTeamDetailReq 后台团详情请求（持 group_buy:view）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 团 id
+GroupBuyAdminTeamDetailResponse:
+  type: object
+  description: AdminTeamDetailRes 后台团详情响应。
+  allOf:
+    - $ref: '#/GroupBuyTeamDetail'
+GroupBuyAdminCloseTeamRequest:
+  type: object
+  description: AdminCloseTeamReq 运营关闭团请求（持 group_buy:close；仅拼团中可关闭）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 团 id
+GroupBuyAdminCloseTeamResponse:
+  type: object
+  description: AdminCloseTeamRes 关闭团响应。
+  allOf:
+    - $ref: '#/GroupBuyTeamDetail'
 HealthLivenessRequest:
   type: object
   description: LivenessReq is the request of the liveness probe.

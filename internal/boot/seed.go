@@ -97,6 +97,13 @@ var seedPermissionList = []permissionSeed{
 	{Code: "member:create", Name: "创建会员等级"},
 	{Code: "member:update", Name: "更新会员等级"},
 	{Code: "member:delete", Name: "删除会员等级"},
+
+	// B1-04-06 拼团（活动管理、团查询与关闭）
+	{Code: "group_buy:create", Name: "创建拼团活动"},
+	{Code: "group_buy:update", Name: "修改与启停拼团活动"},
+	{Code: "group_buy:list", Name: "查看拼团活动与拼团列表"},
+	{Code: "group_buy:view", Name: "查看拼团活动与拼团详情"},
+	{Code: "group_buy:close", Name: "关闭拼团"},
 }
 
 // seedPermissions 幂等写入标准权限：已存在（code 唯一）则跳过。

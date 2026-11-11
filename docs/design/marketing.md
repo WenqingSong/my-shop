@@ -1,9 +1,8 @@
 # 拼团与砍价设计（Marketing）
 
-本文说明拼团与砍价的长期数据模型、状态、跨模块边界与关键不变量。**B1-03-03 只落数据库结构**：
-没有开团/参团/成团、发起砍价/助力/成功判定、超时扫描、订单计价或真实支付的业务代码。
-**B1-04-07 已在同一批表上落地砍价业务**（活动管理、发起、助力、成功/失败/过期与查询，见 §3.6–§3.10），
-拼团仍只有结构。任何实现必须先遵守本文的不变量，再更新 `pricing.md`/`order.md`。
+本文说明拼团与砍价的长期数据模型、状态、跨模块边界与关键不变量。
+**B1-03-03 只落数据库结构**；**B1-04-06 已实现拼团业务**（活动管理、开团/参团、成团、超时过期、
+运营关闭，与订单/库存/退款协同），砍价业务仍未实现（留给 B1-04-07）。任何实现必须先遵守本文的不变量。
 
 ## 1. 职责与边界
 
@@ -15,6 +14,18 @@
 - 不拥有支付：Mock 支付沿用 `orders` 的现有支付状态；拼团/砍价只通过 `order_id` 关联订单。
 - 不拥有订单金额：订单金额仍由 `orders`/`order_items` 快照承载；营销活动只在自身表保存价格快照，
   不新增 `orders.*_id` 列，也不改写既有订单金额语义。
+
+### 1.1 B1-04-06 拼团实现范围（事实）
+
+- 管理端：创建/修改/启停活动、活动列表与详情、团列表与详情、运营关闭团。
+- 用户端：活动列表/详情、进行中团列表、开团、参团、团详情、我的拼团记录。
+- 状态推进：开团（10）→ 满员成团（20）/ 运营关闭（30）/ 超时过期（40），全部为条件更新。
+- 订单：每次开团/参团在同一事务内创建一条普通订单（`orders`/`order_items`），
+  `group_buy_participants.order_id` 唯一关联；不新增订单表、不新增订单状态机。
+- 失败补偿：团进入 30/40 时，同事务取消该团所有**待支付**订单并恢复库存；
+  **已支付订单不自动退款、也不伪造退款**（见 §2.8）。
+- 未实现：活动库存/配额、团长主动退出/解散（仅运营关闭）、拼团成功后自动支付、
+  已支付订单的系统自动退款、退款后回补团名额、前端页面与联调。
 
 ## 2. 拼团模型
 
@@ -100,6 +111,131 @@
 
 `joined_count` 是容量事实，不能用「事后 `COUNT(*)`」代替并发闸门；参与记录与计数器在同一事务内保持一致。
 团人数不能超过 `required_size`（条件更新保证），也不会为负（`INT UNSIGNED`）。
+
+### 2.6 拼团订单与价格快照（B1-04-06 落地）
+
+拼团不新增订单表，也不新增 `orders` 列；每次开团/参团都在**同一事务**内创建一条普通订单：
+
+| 订单字段 | 拼团写入值 | 说明 |
+| --- | --- | --- |
+| `orders.original_amount` | `skus.price × 1` | 服务端重读 SKU 现价，不信任客户端；保持既有「优惠前金额」语义 |
+| `orders.discount_amount` | `(skus.price - group_price) × 1` | 拼团优惠额；不引入第二套金额体系 |
+| `orders.total_amount` | `group_price × 1` | 应付金额 |
+| `orders.shipping_fee` | 0（默认） | 当前阶段无运费 |
+| `order_items.price` | `group_price` | 成交价快照；后续活动改价不影响已生成订单 |
+| `orders.status` | 10（待支付） | 与普通订单一致，支付/取消/退款复用既有状态机 |
+
+- 一人一份：`quantity` 固定为 1（拼团语义），客户端不能指定数量。
+- 拼团价由服务端从**团快照**读取（`group_buy_teams.group_price`）或活动快照派生；
+  下单时若 `group_price > skus.price`（活动创建后 SKU 降价），拒绝下单（21004），
+  不产生「负优惠」或零优惠订单。
+- 订单创建复用 `IOrder.CreateGroupBuyInTx`（事务内方法），内部仍走
+  `resolveLine`（SKU enabled + 商品 on_shelf + 重读价格）与 `IInventory.DeductInTx`；
+  不创建第二套订单/支付系统，不绕过商品价格校验与库存管理。
+- `group_buy_participants.order_id` 唯一（`uk_order_id`），一个订单只能参团一次；
+  `participants` 的 `order_id` 是订单与拼团关系的唯一事实，不在 `orders` 增加拼团列。
+
+### 2.7 事务边界
+
+| 操作 | 单事务内容 | 失败语义 |
+| --- | --- | --- |
+| 开团 | `FOR UPDATE` 读活动并校验有效期 → 写团（价格/人数/有效期快照）→ 写订单 + 订单项 → 扣库存 → 写团长参与记录 | 任一失败整体回滚：不留下团、订单、库存扣减或参与记录 |
+| 参团 | 条件更新 `joined_count + 1`（容量闸门）→ 重读团 → 写订单 + 订单项 → 扣库存 → 写参与记录 → 若满员条件更新 `status=20` | 唯一键冲突（`uk_team_user`）整体回滚，计数器一并回滚 |
+| 超时过期 | 条件更新 `status=40, closed_at=NOW() WHERE status=10 AND expire_at<=NOW()` → 逐条取消未支付订单（条件 `status=10→60` + 恢复库存 + 释放券） | 单团失败只记录日志并跳过，其他团继续；已提交事务不回滚 |
+| 运营关闭 | 条件更新 `status=30, closed_at=NOW() WHERE status=10` → 同上取消未支付订单 | 非 `pending` 团返回 21009，无副作用 |
+
+**订单一致性**：订单创建与参与记录在同一事务，禁止「订单成功但参与记录缺失」；
+也禁止先建订单后异步补参与记录。
+
+### 2.8 超时、失败补偿与退款边界
+
+- 超时推进：后台扫描器 `worker.StartGroupBuyExpireScanner`（周期 `group_buy.expire_scan_interval`，
+  默认 60s）调用 `IGroupBuy.ExpireTeams`，逐团条件更新为 `40=expired`。
+  多实例并发由条件更新 + `RowsAffected` 保证同一团只被推进一次。
+- 失败补偿（30/40 共用 `terminateTeam`）：
+  - **待支付订单（status=10）**：复用 `IOrder.CancelInTx` 条件取消（`10→60`）并
+    `IInventory.IncreaseInTx` 恢复库存，同时释放已占用优惠券（与普通订单取消一致）；
+  - **已支付订单（status=20）**：保持 `paid` 不动，**不自动退款、不改订单状态、不伪造退款成功**；
+    用户通过现有 `POST /orders/:id/refund` 发起退款，由退款模块审核/执行，
+    成功后由 `IOrder.CompleteRefundInTx` 推进 `20→70` 并恢复库存。
+  - 已发货/已收货订单不在拼团失败补偿范围（拼团订单为单 SKU 单件，正常履约后不因团失败回滚）。
+- 参与记录不回写：团 `status` 是团队结果的权威事实；`group_buy_participants.status`
+  只表达有效/退出，终态不逐行改写（保留历史参与事实）。
+- 超时与参团竞争：参团条件要求 `expire_at > NOW()`，过期推进条件要求 `expire_at <= NOW()`，
+  两者在同一团队行上互斥，不会出现「已过期但仍参团成功」或「已成团又过期」。
+
+### 2.9 并发控制要点
+
+| 场景 | 控制手段 | 结果 |
+| --- | --- | --- |
+| 多人同时抢最后名额 | 条件更新 `joined_count < required_size` + 行锁串行化 | 成功数恰好等于剩余名额，`joined_count ≤ required_size` |
+| 同一用户并发重复参团 | `uk_team_user` 唯一键 + 事务回滚 | 至多一条参与记录、一个订单、一次库存扣减 |
+| 同一订单重复参团 | `uk_order_id` 唯一键 | 订单与参与一对一 |
+| 重复成团 | `status=20 WHERE status=10 AND joined_count>=required_size` | 只有一个事务命中 |
+| 成团与超时同时发生 | 同一行上的 `status=10` 条件更新 | 只有一个终态成立 |
+| 开团与活动停用/改价 | 活动行 `FOR UPDATE` | 团快照稳定，不受并发编辑影响 |
+| 多实例过期扫描 | 条件更新 + `RowsAffected` | 同一团只补偿一次订单/库存 |
+
+容量判定禁止「先 `SELECT COUNT(*)` 再写入」：测试 `TestGroupBuyConcurrentJoinCapacity`
+用 10 个真实用户竞争 2 个名额，错误实现会 `success=10`，正确实现必须 `success=2`。
+
+### 2.10 API、权限与错误码
+
+前台（公开只读 + 登录写）：
+
+| 方法 | 路径 | 认证 | 说明 |
+| --- | --- | --- | --- |
+| GET | `/group-buys` | 公开 | 进行中活动分页列表 |
+| GET | `/group-buys/:id` | 公开 | 活动详情（含已结束/停用，便于历史追溯） |
+| GET | `/group-buys/:id/teams` | 公开 | 该活动进行中的团 |
+| POST | `/group-buys/:id/teams` | 用户 JWT | 开团 + 下单 |
+| POST | `/group-buy-teams/:id/join` | 用户 JWT | 参团 + 下单 |
+| GET | `/group-buy-teams/:id` | 用户 JWT | 团详情（含成员用户名与本人参与） |
+| GET | `/my/group-buys` | 用户 JWT | 我的拼团记录 |
+
+后台（`AdminAuth + RequirePermission`）：
+
+| 方法 | 路径 | 权限 code |
+| --- | --- | --- |
+| POST | `/admin/group-buys` | `group_buy:create` |
+| PUT | `/admin/group-buys/:id` | `group_buy:update` |
+| POST | `/admin/group-buys/:id/status` | `group_buy:update` |
+| GET | `/admin/group-buys` | `group_buy:list` |
+| GET | `/admin/group-buys/:id` | `group_buy:view` |
+| GET | `/admin/group-buy-teams` | `group_buy:list` |
+| GET | `/admin/group-buy-teams/:id` | `group_buy:view` |
+| POST | `/admin/group-buy-teams/:id/close` | `group_buy:close` |
+
+错误码域 `21000-21999`（域序 21，见 `.agent/registry/error-codes.md`）：
+
+| code | 语义 | HTTP |
+| --- | --- | --- |
+| 21001 | 拼团活动不存在 | 404 |
+| 21002 | 活动/参团参数非法（价格、人数、有效期、时间窗、SKU 归属） | 400 |
+| 21003 | 活动未开始/已结束/已停用，不可开团 | 409 |
+| 21004 | 拼团价非法（≤0 或高于 SKU 现价） | 400 |
+| 21005 | 团不存在 | 404 |
+| 21006 | 团已满/已成团/已失败/已过期，不可参与 | 409 |
+| 21007 | 该用户已在本团中（唯一键兜底） | 409 |
+| 21008 | 拼团商品不可购买（SKU 禁用/商品下架） | 409 |
+| 21009 | 团不在拼团中，不可关闭 | 409 |
+
+复用：`9006`（订单幂等键冲突）、`9003`/`5001`（转换为 21008）、`6001`（库存不足）、
+`7001`（地址不存在/非本人）、`18002`（退款状态迁移非法）、`1001`/`1002`/`1003`。
+
+### 2.11 配置
+
+| 配置键 | 环境变量 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `group_buy.expire_scan_interval` | `GROUP_BUY_EXPIRE_SCAN_INTERVAL` | 60 | 过期扫描周期（秒），由 `worker.StartGroupBuyExpireScanner` 读取 |
+
+### 2.12 已知留白（B1-04-06 范围内）
+
+- 活动不设库存/配额：热门活动可能产生大量拼团订单，库存仍由 SKU 库存兜底（不足返回 6001）。
+- 无团长退出/解散接口：仅运营关闭（`group_buy:close`）；成员不能主动退出已参与的团。
+- 已支付订单的自动退款未实现：需要退款模块提供「系统发起 + 自动执行」能力（当前仅用户发起 + 人工审核/执行）。
+- 拼团成功后不自动支付：订单仍需用户按普通订单流程支付。
+- 退款成功后不回补团名额：`joined_count` 不回退，团终态与参与历史不变。
 
 ## 3. 砍价模型
 
@@ -318,10 +454,10 @@ price_after = current_price - cut_amount        （恒 ≥ floor_price）
 | --- | --- | --- |
 | `products` / `skus` | 活动 `product_id`/`sku_id` FK RESTRICT | 被活动引用的商品/SKU 不可删除；活动不复制商品名/图片/库存 |
 | `users` | `user_id`/`leader_user_id`/`helper_user_id` 软引用 | 沿用项目「用户表不做物理 FK」约定；用户删除不影响活动历史 |
-| `orders` | 参与记录 `order_id`、砍价实例 `order_id` 软引用 + 唯一索引 | 订单删除后营销记录仍可读；一个订单只能参团一次/砍价一次 |
-| `inventories` / `inventory_logs` | **无引用** | 拼团/砍价不建库存、不扣库存；成交仍走现有库存链路 |
+| `orders` | 参与记录 `order_id`、砍价实例 `order_id` 软引用 + 唯一索引 | 订单删除后营销记录仍可读；一个订单只能参团一次/砍价一次。拼团已由 B1-04-06 在开团/参团同事务写入订单并回填 `order_id` |
+| `inventories` / `inventory_logs` | **无引用** | 拼团/砍价不建库存、不扣库存；成交仍走现有库存链路（拼团下单经 `IInventory.DeductInTx`，失败补偿经 `IncreaseInTx`） |
 | `flash_sale_*` | **无引用** | 秒杀库存与拼团/砍价完全隔离，不共享 `sold`/`total_stock` |
-| `orders` 金额 | **不改写** | 拼团价/砍价成交价由 B1-04 在下单时写入现有订单金额快照；本任务不新增订单列 |
+| `orders` 金额 | **不改写语义** | 拼团价以 `discount_amount`（原价与拼团价差额）表达，`order_items.price` 记拼团成交价；统一计价后 `total = original - discount - member + shipping`（拼团不叠加会员折扣，运费照常计算）；不新增订单列 |
 
 - 拼团/砍价的订单识别通过参与记录/实例上的 `order_id` 反查，不在 `orders` 加 `combination_id`/`bargain_id`；
   这样既不破坏既有订单语义，也避免历史 SQL 的冗余列。
@@ -332,12 +468,24 @@ price_after = current_price - cut_amount        （恒 ≥ floor_price）
 ### 拼团
 
 - INV-GB01（价格与人数快照）：`group_buy_teams.group_price`/`required_size` 在开团时固定，不随活动修改漂移。
+  *实现*：开团事务内 `FOR UPDATE` 读活动并写入快照；参团只读团快照。
 - INV-GB02（容量）：`joined_count ≤ required_size`，由条件更新 + `INT UNSIGNED` 保证；不得用 `COUNT(*)` 事后补救并发。
+  *实现*：`UPDATE ... SET joined_count=joined_count+1 WHERE status=10 AND joined_count<required_size AND expire_at>NOW()`；
+  `TestGroupBuyConcurrentJoinCapacity`（10 用户抢 2 名额）为回归证据。
 - INV-GB03（一人一团一次）：`uk_team_user` 保证同一用户在同一团至多一条参与记录。
+  *实现*：冲突 1062 回滚并返回 25007；`TestGroupBuyConcurrentDuplicateJoin` 为回归证据。
 - INV-GB04（一单一团一次）：`uk_order_id` 保证一个订单只能参团一次（多个 NULL 允许）。
+  *实现*：下单与参与同事务，参与失败即回滚订单。
 - INV-GB05（团长归属）：团长必须有参与记录且 `user_id = leader_user_id`（应用事务保证；DB 不设冗余列）。
+  *实现*：开团事务内写团后立即写团长参与记录。
 - INV-GB06（状态机）：团队仅 `10→20/30/40` 合法；终态不可回退；`closed_at` 只写一次。
+  *实现*：三种终态均为条件更新（`WHERE status=10` + 各自前置条件），命中者才写 `closed_at`。
 - INV-GB07（活动引用）：有团的活动不可删除（FK RESTRICT）；活动停用不影响已开的团。
+  *实现*：参团不校验活动启停/时间窗，只校验团状态、团截止时间与 SKU 可售性。
+- INV-GB08（订单一致性，B1-04-06 新增）：`group_buy_participants.order_id` 必须指向同事务创建的订单；
+  禁止存在「有订单无参与」或「有参与无订单」的团记录。
+- INV-GB09（失败补偿只一次）：团终态推进与未支付订单取消均为条件更新，
+  多实例/重复扫描不会重复取消订单或重复恢复库存。
 
 ### 砍价
 
@@ -350,31 +498,33 @@ price_after = current_price - cut_amount        （恒 ≥ floor_price）
   可小于 `help_amount`，但 `price_after = price_before - cut_amount` 且不低于 `floor_price`。
 - INV-BG07（状态机）：实例仅 `10→20/30/40` 合法；`completed_at` 只在成功时写入。
 - INV-BG08（活动引用）：有实例的活动不可删除（FK RESTRICT）；活动停用不改变已创建实例的历史。
-- INV-BG09（禁止自助）：实例发起者不能给自己的实例助力（应用层校验 `user_id != helper_user_id`，返回 `23006`，
-  且不产生助力记录、不改价格）。
-- INV-BG10（活动可达成）：`ceil((start_price - floor_price) / help_amount) ≤ max_help_count`，否则活动创建/编辑被拒（`23002`），
-  避免上架一个永远无法成功的活动。
 
 ## 6. Migration
 
 | 版本 | 文件 | 内容 |
 | --- | --- | --- |
-| `20261110000011` | `group_buy` | `group_buy_activities` + `group_buy_teams` + `group_buy_participants`（含 down） |
+| `20261110000011` | `group_buy` | `group_buy_activities` + `group_buy_teams` + `group_buy_participants`（含 down）。B1-04-06 直接复用，未新增 DDL |
 | `20261110000012` | `bargain` | `bargain_activities` + `bargain_instances` + `bargain_help_records`（含 down） |
 
 两组均只新增表，不改既有表；down 只删除本组表，破坏性（数据丢失）在各 down 文件顶部说明。
 真实结构与约束由 `internal/migrations/marketing_schema_migration_test.go` 在真实 MySQL 上验证。
 
+**B1-04-06 未新增或修改任何 migration**：直接复用 `20261110000011_group_buy` 的三张表；
+现有字段（`group_price`/`required_size`/`joined_count`/`expire_at`/`closed_at`/`order_id`）
+足以承载已批准业务，无需扩大数据库变更范围。
+
 ## 7. Deferred / 已知留白
 
-- 拼团：开团/参团/成团/失败/过期与相关 API 本次未集成（B1-04-06 分支在仓库中不存在，只有 §2 的表结构）。
-- 砍价：活动管理、用户发起、好友助力、并发控制、最低价保护与懒过期已实现（B1-04-07）；砍价成功后创建订单仍是待办，业务规则未冻结前不实现。
-- 拼团/砍价的下单计价、Mock 支付联动、取消/退款后的团状态与价格恢复；砍价 `order_id` 回填与砍价成交价下单。
-- 活动库存/配额、拼团失败自动退款、砍价成功后的下单有效期。
-- 砍价过期**只做读取路径懒推进**，没有独立扫描器：无人读取的过期实例会在库中保持 `status=10`（状态呈现时机差异，
-  不影响助力与成功判定）。若后续需要「到期即对外不可见/可统计」，再按现有 `internal/worker` ticker 模式补扫描器，
-  不需要 MQ/Redis。
-- 防刷规则（同一 IP/设备、助力者与发起人关系限制、黑名单）。
-- 管理端/前台页面（本任务只交付后端 API 与 OpenAPI 契约）。
-- 拼团/砍价订单的退款规则（是否退券、是否恢复活动名额）需 Owner 决策后写入 `refund.md` 与本文。
-- `bargain_activities` 无「逻辑删除」：有实例的活动受 FK RESTRICT 保护，只能停用，不能删除。
+已由 B1-04-06 完成：拼团下单计价与订单关联、开团/参团/成团/过期/运营关闭、超时扫描器、
+管理端 API/权限码/错误码/OpenAPI、拼团订单与库存/取消/退款的协同。
+
+已由 B1-04-07 完成：砍价活动管理、实例发起、好友助力、并发与最低价保护、懒过期、状态推进。
+
+仍未实现：
+
+- 砍价成功后的订单创建：成交价、下单时机与订单关联方式尚无冻结契约，待 Owner 决策。
+- 活动库存/配额；拼团失败时已支付订单的**自动**退款（依赖退款模块的系统发起能力）。
+- 团长主动退出/解散、成员退出、退款后回补团名额。
+- 防刷规则（同一 IP/设备、黑名单、频率限制）。
+- 前端页面与前后端联调。
+- 拼团专属退款规则 Owner 决策（当前完全复用普通订单退款：整单全额、退券规则不变、不回补名额）。
