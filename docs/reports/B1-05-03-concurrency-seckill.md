@@ -13,7 +13,7 @@
 | 开发分支 | `feat/b1-05-03-concurrency-seckill` |
 | 基线分支 | `feat/p2-backend` |
 | 基线 Commit | `d1fa065a5620f7430596de236a60c0613aaac557` |
-| 最终 Commit | 见紧随本报告之后的 docs 回填提交（本报告随代码提交入库） |
+| 最终 Commit | `9990c1ff464f14c5e73bd7c6c1b80e9f90dd14a4`（test(b1-05-03): add concurrency and flashsale regression tests） |
 | Git 工作区 | 独立 Worktree `/root/projects/my-shop-b1-05-03`（主工作区由 `feat/p2-backend` 与 `feat/b1-05-01` 分支占用） |
 | 测试环境 | linux/amd64 · Go 1.26.0 · MySQL 8.0（compose，127.0.0.1:3306）· Redis 7-alpine（测试专用 DB 15） |
 
