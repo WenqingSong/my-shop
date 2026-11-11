@@ -160,10 +160,26 @@ const (
 	CodeCouponClaimSoldOut     Code = 19006 // 发放总量已满 → 409
 	CodeCouponUnavailable      Code = 19007 // 下单用券：已使用/被占用/不在使用期/未达门槛 → 409
 
-	// 一级分销域（Distribution）20000-20999。
+	// 一级分销域（Distribution）20000-20999（域序 20，B1-04-05）。
 	CodeDistributionSelfReferral        Code = 20001 // 绑定自己为推荐人 → 400
 	CodeDistributionReferrerUnavailable Code = 20002 // 推荐人不存在或已禁用 → 404
 	CodeDistributionAlreadyBound        Code = 20003 // 已绑定其他推荐人，不可改绑 → 409
+
+	// 运费与统一计价域（Freight / Pricing）21000-21999（域序 21）。
+	// B1-04 集成：B1-04-03 原编号 20001-20012 与已合入的一级分销域（域序 20）冲突，
+	// 按 Registry「域序 = max(已记录域序)+1」规则整体迁移到域序 21，语义与 HTTP 状态不变。
+	CodeFreightTemplateNotFound   Code = 21001 // 运费模板不存在 → 404
+	CodeFreightTemplateNameExists Code = 21002 // 模板名已存在 → 409
+	CodeFreightTemplateInvalid    Code = 21003 // 模板参数非法（名称/阈值/状态）→ 400
+	CodeFreightTemplateDisabled   Code = 21004 // 模板已停用，不可用于计价 → 409
+	CodeFreightRuleNotFound       Code = 21005 // 区域运费规则不存在 → 404
+	CodeFreightRuleDuplicate      Code = 21006 // 同一模板下区域规则重复配置 → 409
+	CodeFreightRuleInvalid        Code = 21007 // 规则参数非法（首件/续件数量为 0、金额越界）→ 400
+	CodeFreightRegionNotFound     Code = 21008 // 地区不存在 → 404
+	CodeFreightRegionRuleMissing  Code = 21009 // 模板无匹配当前地区的规则，拒绝静默免费 → 409
+	CodePricingInvalidAmount      Code = 21010 // 计价金额非法（负数/超上限）→ 400
+	CodePricingDiscountExceeds    Code = 21011 // 优惠累计超过可优惠金额 → 400
+	CodePricingAmountOverflow     Code = 21012 // 计价金额溢出 int64 安全区间 → 400
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -294,6 +310,19 @@ var codeTable = map[Code]codeInfo{
 	CodeDistributionSelfReferral:        {http.StatusBadRequest, "不能绑定自己为推荐人"},
 	CodeDistributionReferrerUnavailable: {http.StatusNotFound, "推荐人不存在或不可用"},
 	CodeDistributionAlreadyBound:        {http.StatusConflict, "已绑定推荐人，不可变更"},
+
+	CodeFreightTemplateNotFound:   {http.StatusNotFound, "运费模板不存在"},
+	CodeFreightTemplateNameExists: {http.StatusConflict, "运费模板名称已存在"},
+	CodeFreightTemplateInvalid:    {http.StatusBadRequest, "运费模板参数非法"},
+	CodeFreightTemplateDisabled:   {http.StatusConflict, "运费模板已停用"},
+	CodeFreightRuleNotFound:       {http.StatusNotFound, "运费区域规则不存在"},
+	CodeFreightRuleDuplicate:      {http.StatusConflict, "该地区规则已存在"},
+	CodeFreightRuleInvalid:        {http.StatusBadRequest, "运费规则参数非法"},
+	CodeFreightRegionNotFound:     {http.StatusNotFound, "地区不存在"},
+	CodeFreightRegionRuleMissing:  {http.StatusConflict, "该地区未配置运费规则"},
+	CodePricingInvalidAmount:      {http.StatusBadRequest, "计价金额非法"},
+	CodePricingDiscountExceeds:    {http.StatusBadRequest, "优惠金额超过可优惠金额"},
+	CodePricingAmountOverflow:     {http.StatusBadRequest, "计价金额溢出"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。

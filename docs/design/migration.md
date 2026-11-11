@@ -84,8 +84,10 @@ B1-03-02 的六项交易与资金迁移、B1-04-01 的 profile_region_address）
 | `20261110000014` | `distribution` | `user_referrals` + `distribution_commissions`（一级推荐关系/订单佣金；含 down） |
 | `20261110000015` | `profile_region_address` | `users` 增 `birthday DATE NULL`；`addresses` 增 `region_id`（可空，软引用 `regions.level=3`）+ `idx_region_id`（含 down；不重建/不回填 `regions`） |
 | `20261111000001` | `sku_code_pricing` | `skus` 增 `sku_code`（唯一）/`original_price` + `uk_sku_code`，历史行回填 `SKU<id>` 与售价；`order_items` 增 `sku_code`/`original_price`（含 down；不回算历史订单金额） |
+| `20261111000002` | `freight` | `freight_templates` + `freight_template_rules`（运费模板与区域计费规则）；`products` 增可空 `freight_template_id`（无回填；含 down） |
+| `20261111000003` | `order_member_discount` | `orders` 增 `member_discount_amount`（会员折扣金额快照，默认 0、不回填；含 down） |
 
-**版本分配（B1-04 八分支集成核实，2026-11-11）**：集成时逐一核对实际 SQL 文件、Registry 与已知数据库的 `schema_migrations`——`20261110000015` 仅由 B1-04-01（`profile_region_address`）使用；`my_shop_b104_test`、`my_shop_b10401_migrate` 上的版本 15 对应同一 Schema（`users.birthday` + `addresses.region_id`），未出现同一版本号对应不同 Schema 的数据库。B1-04-02 使用 `20261111000001`（`sku_code_pricing`），与上述版本不冲突。当前最高版本为 `20261111000001`，下一个可用版本为 `20261111000002`；新增迁移必须按 Registry 规则单独领取，不得复用已被实现占用的版本号。
+**版本分配（B1-04 八分支集成核实，2026-11-11）**：集成时逐一核对实际 SQL 文件、Registry 与已知数据库的 `schema_migrations`——`20261110000015` 仅由 B1-04-01（`profile_region_address`）使用，B1-04-08 分支内的同名版本 `order_member_discount` 从未进入任何持久化环境，已按 Registry 规则上移为 `20261111000003`，不存在同一版本号对应两套 Schema 的数据库。`my_shop` 已应用到 `20261111000001`，因此 B1-04-03 的运费迁移从原拟 `20261110000016` 上移为 `20261111000002`：否则 golang-migrate 会因版本号小于当前版本而**静默跳过**该迁移。当前最高版本为 `20261111000003`，下一个可用版本为 `20261111000004`；新增迁移必须按 Registry 规则单独领取，不得复用已被实现占用的版本号。
 
 ### 2.2 baseline 模型
 

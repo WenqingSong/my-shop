@@ -65,7 +65,16 @@
 
 订单金额分三列快照：`original_amount`（优惠前金额）= Σ `order_items.price×quantity`（下单时重读 `skus.price`，不信任客户端提交价、也不信任购物车 `price_snapshot`）；`discount_amount`（优惠金额，由服务端按已选券计算，无券为 0）；`total_amount`（应付金额）= `original_amount - discount_amount + shipping_fee`。订单快照为「锁定金额」，下单后改价/改模板不影响订单；`products.price` 与订单无关（订单为 SKU 粒度）。无券时 `original_amount = total_amount`、`discount_amount = 0`，与历史订单语义一致（历史订单迁移回填 `original_amount = total_amount`）。
 
-`shipping_fee` 为运费快照（整数分），由 migration `20261110000004_order_shipping_payment` 新增，默认 0；**当前阶段未实现运费计算**，因此 `= original - discount` 仍等价成立。历史订单不重算 `total_amount`（保持迁移前已存值），运费/优惠/应付的完整公式与扩展顺序见 `pricing.md`。
+`shipping_fee` 为运费快照（整数分），由 migration `20261110000004_order_shipping_payment` 新增，默认 0。B1-04-03 已实现运费计算模块（`service.IFreight.Quote`，见 `freight.md`）与统一计价入口（`pricing.Quote`，见 `pricing.md`），但**订单链路尚未接入**：下单仍写 `shipping_fee = 0`，`total_amount = original_amount - discount_amount` 仍等价成立。
+
+订单接入的边界（待 B1-04-02 的 SKU 规格快照改造进入共同基线后实施）：
+
+- 新增 `/orders/quote` 返回六槽位明细（`original_amount`/`coupon_discount`/`member_discount`/`points_discount`/`shipping_fee`/`payable_amount`）；
+- 下单事务内重读 SKU 价格、商品状态、券有效性、运费模板与区域规则后重新计价，落库金额取事务内结果；
+- 幂等指纹纳入 address_id、coupon_id、SKU 与数量等全部计价参数；
+- 状态推进同事务写入 `order_status_logs`。
+
+在接入完成前，订单金额仍以数据库现有三列 + `shipping_fee` 快照为准。历史订单不重算 `total_amount`（保持迁移前已存值）。
 
 ### 2.4 `order_status_logs`（订单状态流水）
 
@@ -116,7 +125,7 @@
 - INV-008（权限）：发货仅管理员（含超管，持 `order:ship`）；退款走 refund 模块（`refund:*` 权限，见 `refund.md`）；无权限 403、越权 404，均无 DB 副作用。
 - INV-009（唯一订单号）：`order_no` 全局唯一（`uk_order_no` 兜底，撞号重试）。
 - INV-010（支付幂等）：重复支付回调不重复改状态，仅待支付→已支付合法。
-- INV-011（运费历史兼容）：`shipping_fee` 默认 0，迁移不回填、不重算历史 `total_amount`；非零运费的计价与写入在 B1-04 实现，公式见 `pricing.md`。
+- INV-011（运费历史兼容）：`shipping_fee` 默认 0，迁移不回填、不重算历史 `total_amount`；运费计算模块已由 B1-04-03 交付，但订单链路尚未接入（当前恒写 0），接入条件与范围见 §2.3 与 §9。
 - INV-012（支付事实单一）：`pay_type`/`transaction_no`/`paid_at` 只记录支付事实，不构成第二套支付状态机；订单是否已支付以 `status` + `paid_at` 判定，Mock 支付仍仅 `10→20` 一次推进。
 - INV-013（状态流水只追加）：`order_status_logs` 每个订单可多条、状态值取自 10..70；流水写入必须与对应状态推进同事务（B1-04 实现），当前尚未写入，不改变既有状态机行为。
 
@@ -159,10 +168,11 @@
 - `order_items.sku_id`/`product_id` → `skus.id`/`products.id`（软引用，无 FK），快照自足；SKU/商品删除后订单仍可读。
 - 库存：下单经 `IInventory.DeductInTx` 扣减、取消经 `IInventory.IncreaseInTx` 恢复，复用其「条件更新 + RowsAffected + 流水」规则；`operator_admin_id` 落 NULL（用户/系统驱动）。
 - 退款：退款成功推进订单 `paid→refunded` 由 refund 模块经 `IOrder.CompleteRefundInTx` 复用（订单 `20→70` + `refunded_at` + 恢复库存，`WHERE status=20` 闸门），见 `refund.md`。
-- 定价：`original_amount` 重读 `skus.price` 求和，校验 SKU enabled 且商品 on_shelf（否则 9003）；用券经 `ICoupon` 校验归属/有效期/状态/门槛并计算 `discount_amount`。
+- 定价：`original_amount` 重读 `skus.price` 求和，校验 SKU enabled 且商品 on_shelf（否则 9003）；用券经 `ICoupon` 校验归属/有效期/状态/门槛并计算 `discount_amount`。金额统一由 `pricing.Quote` 产出，运费由 `IFreight.Quote` 产出，见 `pricing.md`、`freight.md`。
 - SKU 定位（B1-04-02）：`source=direct` 优先按 `sku_code` 查库（`ISku.GetByCode`），兼容 `sku_id`；两者同时提交必须一致（否则 9003）。
   编码不存在 → 5001；客户端 `price` 仅用于防伪比对，与服务端售价不一致 → 9007（`source=cart` 提交 `price` 一律 9007），
   该字段永不参与金额计算。订单项快照 `sku_code`/`spec_text`/`original_price`。
+- 运费：`products.freight_template_id` → `freight_templates.id`（软引用，可空）；已绑定模板的商品由 `IFreight.Quote` 按区域规则计算运费，未绑定模板（NULL）保持零运费兼容，见 `freight.md`。
 - 优惠券：`orders.user_coupon_id` → `user_coupons.id`（软引用，快照）；预占/核销/释放经 `ICoupon` 与订单状态变更同事务，见 `coupon.md`。
 - 地址：快照自 `addresses`，下单后地址变更不影响订单。
 - 状态流水：`order_status_logs.order_id` → `orders.id`（软引用，无 FK，只追加）；写入时机与事务边界在 B1-04 与状态推进一起实现。
@@ -177,8 +187,9 @@
 
 - 真实支付/退款到账/对账/资金回调（支付仅 Mock）。
 - 履约字段（`delivery_type`/`delivery_name`/`delivery_sn`）只有结构与默认值：发货接口仍只推进状态，承运商/运单号写入、物流轨迹查询与发货单回传未实现。
-- 运费计算、余额支付、退款入账、积分抵扣/返还、会员折扣未实现（结构与边界见 `pricing.md`、`wallet.md`、`member.md`）。
-- `order_status_logs` 只有结构：既有状态推进逻辑未改，流水写入在 B1-04 补齐。
+- 订单链路接入统一计价与运费：`/orders/quote`、下单事务内复核、`shipping_fee` 落库、幂等指纹扩展与状态流水写入，均待 B1-04-02 的 SKU 规格快照改造进入共同基线后实施（运费计算模块与计价入口本身已由 B1-04-03 交付，见 `freight.md`、`pricing.md`）。
+- 余额支付、退款入账、积分抵扣/返还、会员折扣未实现（结构与边界见 `pricing.md`、`wallet.md`、`member.md`）。
+- `order_status_logs` 只有结构：既有状态推进逻辑未改，流水写入随上述订单链路接入一并补齐。
 - `shipped/received/completed` 后的退款/退货/售后（留 After-sales/Refund 模块）。
 - 订单导出、收货人姓名/手机号模糊搜索等高级筛选（后台列表已支持 `order_no`/`user_id`/`status`/`start_time`/`end_time` 组合筛选与 7 态状态统计）。
 - 库存流水 `reason` 字段固定为空，订单驱动的扣减/恢复不落 `reason`，审计粒度有限。

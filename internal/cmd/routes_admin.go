@@ -10,6 +10,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/dashboard"
 	distributionController "cnb.cool/go-cloud-devops/my-shop/internal/controller/distribution"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/flashsale"
+	freightController "cnb.cool/go-cloud-devops/my-shop/internal/controller/freight"
 	iamController "cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/inventory"
 	orderController "cnb.cool/go-cloud-devops/my-shop/internal/controller/order"
@@ -51,6 +52,7 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 	refundAdminCtrl := refundController.NewAdminV1()
 	couponAdminCtrl := coupon.NewAdminV1()
 	distributionAdminCtrl := distributionController.NewAdminV1()
+	freightAdminCtrl := freightController.NewAdminV1()
 
 	// 后台公开接口：管理员登录（无需 token）。
 	root.POST("/admin/login", adminCtrl.Login)
@@ -209,5 +211,16 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 		require("distribution:referral_list").GET("/admin/distributions/distributors", distributionAdminCtrl.AdminListDistributors)
 		require("distribution:commission_list").GET("/admin/distributions/commissions", distributionAdminCtrl.AdminListCommissions)
 		require("distribution:commission_list").GET("/admin/distributions/commissions/stats", distributionAdminCtrl.AdminCommissionStats)
+
+		// 运费模板后台管理（AdminAuth + RequirePermission）。
+		//   - 模板与区域规则的写操作持 freight:update；查询持 freight:list/freight:view。
+		//   - 区域规则采用整体替换（PUT .../rules），保证「同模板同区域至多一条规则」。
+		require("freight:create").POST("/admin/freight-templates", freightAdminCtrl.AdminCreate)
+		require("freight:list").GET("/admin/freight-templates", freightAdminCtrl.AdminList)
+		require("freight:view").GET("/admin/freight-templates/:id", freightAdminCtrl.AdminDetail)
+		require("freight:update").PUT("/admin/freight-templates/:id", freightAdminCtrl.AdminUpdate)
+		require("freight:update").PUT("/admin/freight-templates/:id/status", freightAdminCtrl.AdminUpdateStatus)
+		require("freight:view").GET("/admin/freight-templates/:id/rules", freightAdminCtrl.AdminListRules)
+		require("freight:update").PUT("/admin/freight-templates/:id/rules", freightAdminCtrl.AdminReplaceRules)
 	})
 }

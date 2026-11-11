@@ -62,3 +62,5 @@
 | 20261110000013 | member | B1-03-03 | RESERVED | member_levels + user_memberships + member_growth_logs 等级/用户会员/成长值流水，不重复创建积分账本（含 down） |
 | 20261110000014 | distribution | B1-03-03 | RESERVED | user_referrals + distribution_commissions 一级推荐关系与订单佣金（含 down） |
 | 20261110000015 | profile_region_address | B1-04-01 | RESERVED | users 增 birthday DATE NULL；addresses 增 region_id（可空，软引用 regions.level=3）+ idx_region_id（含 down；不重建/不回填 regions）。B1-04 八分支集成核实：本版本号唯一，无其它分支占用 |
+| 20261111000001 | sku_code_pricing | B1-04-02 | RESERVED | skus 增 sku_code（唯一）/original_price + uk_sku_code，历史行回填 SKU<id> 与售价；order_items 增 sku_code/original_price（含 down；不回算历史订单金额） |
+| 20261111000002 | freight | B1-04-03 | RESERVED | freight_templates + freight_template_rules；products 增可空 freight_template_id（含 down）。B1-04 八分支集成：原拟 `20261110000016` 在已应用 `20261111000001` 的数据库上会被 golang-migrate 跳过（版本号更小），故整体上移至当前最高版本之后；该号未被任何环境应用过，语义不变 |

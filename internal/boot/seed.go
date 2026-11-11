@@ -80,6 +80,10 @@ var seedPermissionList = []permissionSeed{
 	{Code: "coupon:stop", Name: "停止优惠券领取"},
 	{Code: "distribution:referral_list", Name: "查看分销关系与分销用户"},
 	{Code: "distribution:commission_list", Name: "查看佣金记录与佣金统计"},
+	{Code: "freight:create", Name: "创建运费模板"},
+	{Code: "freight:list", Name: "查看运费模板列表"},
+	{Code: "freight:view", Name: "查看运费模板详情与区域规则"},
+	{Code: "freight:update", Name: "更新运费模板与区域规则"},
 }
 
 // seedPermissions 幂等写入标准权限：已存在（code 唯一）则跳过。
