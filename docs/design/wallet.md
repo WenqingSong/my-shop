@@ -6,7 +6,8 @@
 
 - **已实现**：余额查询、资金流水分页查询、Mock 充值、账户按需初始化，以及供订单/退款模块复用的
   **事务内**扣款/入账能力（`IWallet.DebitForOrderInTx` / `IWallet.CreditForRefundInTx`）。
-- **尚未接入**：订单支付入口 `order.Pay` 与退款执行入口 `refund.Execute` 仍只做状态推进，
+- **已接入（B1-04 集成）**：订单支付入口 `order.Pay` 支持 `pay_type=balance`，退款执行入口 `refund.Execute`
+  对余额渠道退回余额；两者与订单/退款状态推进同事务。原表述保留供追溯：
   未调用钱包能力。原因是本任务基线（`origin/feat/p2-backend` @ `af512f9`）尚未合入 B1-04-03
   的订单/计价契约改动，按任务约束不抢改这两个文件；接入顺序与失败语义见 §7。
 
@@ -204,7 +205,7 @@ CreditForRefundInTx(ctx, tx, service.WalletCreditInput{UserID, RefundID, OrderID
 
 ## 10. Deferred / 已知留白
 
-- 订单支付与退款执行入口的实际接入（阻塞于 B1-04-03 未合入，见 §7 与交付报告）。
+- 订单支付与退款执行入口的接入已由 B1-04 集成交付（见 §7）；真实支付渠道、对账与提现仍未实现。
 - 充值单查询接口（列表/详情）、充值取消与过期。
 - 充值方案/套餐（`recharge_plans`）：未获 Owner 决策，不建表、不建迁移。
 - 冻结余额/在途资金、多币种、流水冲正（红冲）、提现与对账任务。

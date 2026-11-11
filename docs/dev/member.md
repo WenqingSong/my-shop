@@ -22,7 +22,7 @@
 | 服务注册 | `internal/logic/logic.go`（空白导入 `logic/member`） |
 | 路由 | `internal/cmd/routes_frontend.go`、`internal/cmd/routes_admin.go` |
 | 权限码 seed | `internal/boot/seed.go`（`member:list/view/create/update/delete`） |
-| 错误码 | `internal/codes/codes.go`（`20001-20005`） |
+| 错误码 | `internal/codes/codes.go`（`24001-24005`） |
 | 订单侧接入 | `internal/logic/order/order.go`（`resolveMemberDiscount`、`Pay`） |
 | 退款侧接入 | `internal/logic/refund/refund.go`（`Execute` 成功分支） |
 | 表结构 | `internal/migrations/sql/20261110000013_member.up.sql`、`20261110000015_order_member_discount.up.sql` |
@@ -106,7 +106,7 @@ POST /admin/refunds/:id/execute（success）→ logic/refund.Execute（单事务
 | 下单算折扣 | 无（只读） | 无 | 依赖订单幂等键（既有） |
 | 支付发成长值 | 订单支付事务 | `user_memberships` 行 `FOR UPDATE` | `growth:order_reward:<order_id>` |
 | 退款扣成长值 | 退款成功事务 | `user_memberships` 行 `FOR UPDATE` | `growth:refund_deduct:<refund_id>` |
-| 等级配置写 | 独立事务 | 全表 `member_levels` 行 `FOR UPDATE` | 唯一键 1062 → 20004 |
+| 等级配置写 | 独立事务 | 全表 `member_levels` 行 `FOR UPDATE` | 唯一键 1062 → 24004 |
 
 要点：
 
@@ -128,8 +128,8 @@ POST /admin/refunds/:id/execute（success）→ logic/refund.Execute（单事务
 | DELETE | `/admin/member-levels/:id` | `member:delete` |
 | GET | `/admin/members/:user_id` | `member:view` |
 
-错误码：`20001` 等级不存在、`20002` 配置非法（含破坏单调性）、`20003` 等级被引用不可删、
-`20004` 序号/门槛重复、`20005` 成长值不足扣减。详见 `docs/design/member.md` §10。
+错误码：`24001` 等级不存在、`24002` 配置非法（含破坏单调性）、`24003` 等级被引用不可删、
+`24004` 序号/门槛重复、`24005` 成长值不足扣减。详见 `docs/design/member.md` §10。
 
 ## 8. 测试地图
 
@@ -164,9 +164,9 @@ DATABASE_DEFAULT_PASS=root DATABASE_DEFAULT_NAME=my_shop_b10408_test REDIS_DEFAU
 - **退款后等级没降**：符合设计（只升不降）。若业务需要降级，必须先改 `docs/design/member.md` 并补级联测试。
 - **下单会员折扣为 0**：依次检查 ① 用户有档案时看 `level.discount_rate_bp` 是否为 10000；
   ② 无档案时看是否存在 `status=1 AND growth_threshold=0` 的等级；③ 券是否已把商品金额抵满（夹紧为 0）。
-- **管理员创建的等级报 20002**：多半是破坏了「`level_no` 升序时门槛严格递增」。该约束是刻意引入的
+- **管理员创建的等级报 24002**：多半是破坏了「`level_no` 升序时门槛严格递增」。该约束是刻意引入的
   （避免升级歧义），插入中间等级时需同时调整相邻等级的 `level_no`/门槛。
-- **删除等级报 20003**：该等级被 `user_memberships.level_id` 引用。需要先把用户迁到其他等级（当前无换级入口，
+- **删除等级报 24003**：该等级被 `user_memberships.level_id` 引用。需要先把用户迁到其他等级（当前无换级入口，
   只能通过成长值自然升级；迁移需人工 SQL，属运维操作）。
 
 ## 10. 维护注意事项
@@ -177,3 +177,12 @@ DATABASE_DEFAULT_PASS=root DATABASE_DEFAULT_NAME=my_shop_b10408_test REDIS_DEFAU
 - 修改折扣公式时必须同步 `docs/design/pricing.md`（含舍入与夹紧规则）并补金额守恒测试。
 - 修改 `AccrueForOrderInTx` 的读订单字段时，注意它读的是**下单快照**（`original_amount` 等），不要改成重算。
 - 积分账本（`user_points_*`）与本模块隔离：不要为了省事共用流水表或幂等键前缀。
+
+## B1-04 集成补充：折扣进入统一计价
+
+- `IMember.DiscountRateBp(userID)` 只读、不落库；无档案按成长值解析等级，无可用等级返回 10000。
+- 订单侧把折扣换算为**金额**后作为 `pricing.Quote` 的 `MemberDiscount` 槽位，写入 `orders.member_discount_amount`
+  （不占用 `discount_amount` 的券语义），公式：`floor(original × (10000-rate_bp) / 10000)`，并夹紧到 `original - coupon`。
+- 支付成功 `AccrueForOrderInTx`（幂等键 `growth:order_reward:<order_id>`）与退款成功 `DeductForRefundInTx`
+  （幂等键 `growth:refund_deduct:<refund_id>`）都在订单/退款事务内，等级只升不降。
+- 错误码域：会员 `24001-24005`（域序 24）。

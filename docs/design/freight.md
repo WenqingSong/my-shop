@@ -71,8 +71,8 @@
 ```
 
 - 全部金额为整数分（`int64`），向上取整用整数除法实现，**不使用 float64/decimal**。
-- `first_quantity`/`additional_quantity` 必须 >= 1：为零或负数属于非法规则，返回 20007，而不是除零或退化为免费。
-- 溢出：`首件费用 + 续件单位数 × 续件费用` 在计算前做上界检查，溢出返回 20012。
+- `first_quantity`/`additional_quantity` 必须 >= 1：为零或负数属于非法规则，返回 21007，而不是除零或退化为免费。
+- 溢出：`首件费用 + 续件单位数 × 续件费用` 在计算前做上界检查，溢出返回 21012。
 
 示例（首件 1 件 500 分，续件 2 件 100 分）：
 
@@ -89,18 +89,18 @@
 - 收货地址在计价时转换为结构化地区 id（`regions.id`），从该节点沿 `parent_id` 上溯，得到地区链 `[区, 市, 省]`。
 - 规则匹配由近及远：先找区级规则，未命中找市级，再找省级，**首个命中即生效**。
 - 上溯边界：
-  - 本级地区不存在 → 20008（拒绝把地址脏数据当成「无规则」）；
+  - 本级地区不存在 → 21008（拒绝把地址脏数据当成「无规则」）；
   - 上级缺失 → 停止上溯，已收集层级仍然有效；
   - `parent_id` 成环 → 由已访问集合与深度上限（8 层）截断。
-- 全链无命中 → 20009，**不静默返回免费运费**。
+- 全链无命中 → 21009，**不静默返回免费运费**。
 
 ## 5. 免邮规则
 
 计算顺序（同一模板分组内）：
 
-1. 模板 `status != 1` → 20004（停用模板不可计价）。
+1. 模板 `status != 1` → 21004（停用模板不可计价）。
 2. 模板 `is_free = 1` → 该组运费 0（模板级无条件包邮，不需要区域规则）。
-3. 匹配区域规则；无规则 → 20009。
+3. 匹配区域规则；无规则 → 21009。
 4. 生效阈值 = 规则 `free_threshold > 0 ? 规则值 : 模板 free_threshold`。
 5. 阈值 > 0 且「该模板下商品金额合计」>= 阈值 → 该组运费 0。
 6. 否则按 §3 计费。
@@ -137,9 +137,9 @@
 - 事实来源：单一 MySQL（`freight_templates`、`freight_template_rules`、`regions`、`products`）。无缓存、无 MQ、无跨系统事务。
 - 计算只读：`Quote` 不写任何表，可在订单事务内外安全调用；订单事务内复核由订单侧负责（见 `pricing.md` 与订单集成约定）。
 - 管理写操作：
-  - 创建/更新模板为单条 INSERT/UPDATE，名称冲突由 `uk_name` 兜底（1062 → 20002）；
-  - 规则整体替换为单事务「删旧 + 插新」，地区存在性在事务内校验；重复 `region_id` 在应用层先行拒绝（20006），数据库唯一约束兜底。
-- 失败语义：模板不存在 20001、停用 20004、无匹配规则 20009、地区不存在 20008、规则非法 20007、金额溢出 20012；均为明确错误，无「静默 0 运费」路径。
+  - 创建/更新模板为单条 INSERT/UPDATE，名称冲突由 `uk_name` 兜底（1062 → 21002）；
+  - 规则整体替换为单事务「删旧 + 插新」，地区存在性在事务内校验；重复 `region_id` 在应用层先行拒绝（21006），数据库唯一约束兜底。
+- 失败语义：模板不存在 21001、停用 21004、无匹配规则 21009、地区不存在 21008、规则非法 21007、金额溢出 21012；均为明确错误，无「静默 0 运费」路径。
 
 ## 9. 安全与权限
 
@@ -163,20 +163,20 @@
 
 | code | 常量 | 语义 | HTTP |
 | --- | --- | --- | --- |
-| 20001 | `CodeFreightTemplateNotFound` | 运费模板不存在 | 404 |
-| 20002 | `CodeFreightTemplateNameExists` | 模板名已存在 | 409 |
-| 20003 | `CodeFreightTemplateInvalid` | 模板参数非法 | 400 |
-| 20004 | `CodeFreightTemplateDisabled` | 模板已停用，不可计价 | 409 |
-| 20005 | `CodeFreightRuleNotFound` | 区域规则不存在 | 404 |
-| 20006 | `CodeFreightRuleDuplicate` | 同模板同区域规则重复 | 409 |
-| 20007 | `CodeFreightRuleInvalid` | 规则参数非法（数量为 0 等） | 400 |
-| 20008 | `CodeFreightRegionNotFound` | 地区不存在 | 404 |
-| 20009 | `CodeFreightRegionRuleMissing` | 无匹配当前地区的规则 | 409 |
-| 20010 | `CodePricingInvalidAmount` | 计价金额非法（负数等） | 400 |
-| 20011 | `CodePricingDiscountExceeds` | 优惠累计超过可优惠金额 | 400 |
-| 20012 | `CodePricingAmountOverflow` | 计价金额溢出 | 400 |
+| 21001 | `CodeFreightTemplateNotFound` | 运费模板不存在 | 404 |
+| 21002 | `CodeFreightTemplateNameExists` | 模板名已存在 | 409 |
+| 21003 | `CodeFreightTemplateInvalid` | 模板参数非法 | 400 |
+| 21004 | `CodeFreightTemplateDisabled` | 模板已停用，不可计价 | 409 |
+| 21005 | `CodeFreightRuleNotFound` | 区域规则不存在 | 404 |
+| 21006 | `CodeFreightRuleDuplicate` | 同模板同区域规则重复 | 409 |
+| 21007 | `CodeFreightRuleInvalid` | 规则参数非法（数量为 0 等） | 400 |
+| 21008 | `CodeFreightRegionNotFound` | 地区不存在 | 404 |
+| 21009 | `CodeFreightRegionRuleMissing` | 无匹配当前地区的规则 | 409 |
+| 21010 | `CodePricingInvalidAmount` | 计价金额非法（负数等） | 400 |
+| 21011 | `CodePricingDiscountExceeds` | 优惠累计超过可优惠金额 | 400 |
+| 21012 | `CodePricingAmountOverflow` | 计价金额溢出 | 400 |
 
-`20010`–`20012` 属于统一计价错误，定义在 `pricing` 语义下，但与运费同处域序 20（同任务独占域）。
+`21010`–`21012` 属于统一计价错误，定义在 `pricing` 语义下，但与运费同处域序 20（同任务独占域）。
 
 ## 11. 跨模块关系
 

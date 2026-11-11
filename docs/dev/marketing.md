@@ -37,8 +37,8 @@
 | 纯函数单测 | `internal/logic/bargain/bargain_test.go` |
 | 真实 MySQL 集成与并发测试 | `internal/logic/bargain/integration_test.go` |
 | 路由注册 | `internal/cmd/routes_frontend.go`、`internal/cmd/routes_admin.go` |
-| 路由表冻结清单 | `internal/cmd/routes_test.go`（`fullRouteTable`，155 条） |
-| 错误码 | `internal/codes/codes.go`（砍价域 `21001-21009`） |
+| 路由表冻结清单 | `internal/cmd/routes_test.go`（`fullRouteTable`，195 条） |
+| 错误码 | `internal/codes/codes.go`（砍价域 `23001-23009`） |
 | 权限 seed | `internal/boot/seed.go`（`bargain:create/update/list/view`） |
 | OpenAPI | `openapi/paths/bargain.yaml` + `openapi/surgecart.openapi.yaml`（生成，不手工改） |
 
@@ -54,7 +54,7 @@ POST /bargain-activities/:id/instances
   → logic/bargain.Start
       INSERT INTO bargain_instances (...) SELECT ... FROM bargain_activities
         WHERE id=? AND status=1 AND start_time<=NOW() AND end_time>NOW()
-      0 行 → 21001/21003；1062（uk_active_instance）→ 21005
+      0 行 → 23001/23003；1062（uk_active_instance）→ 23005
   → loadInstance（联查活动/商品/SKU 展示字段）
 ```
 
@@ -65,13 +65,13 @@ POST /bargain-instances/:id/help
   → controller/bargain.Help（取 Principal.UserID）
   → logic/bargain.Help → g.DB().Transaction
       1. SELECT ... FROM bargain_instances WHERE id=? FOR UPDATE   // 行锁 + (expire_at<=NOW()) AS expired
-      2. 本人助力 → 21006；非进行中/过期 → 21007；次数用尽 → 21007
+      2. 本人助力 → 23006；非进行中/过期 → 23007；次数用尽 → 23007
       3. 读 bargain_activities.help_amount，cut = min(help, current-floor)
       4. UPDATE bargain_instances SET current_price=current_price-?, helped_count=helped_count+1
            WHERE id=? AND status=10 AND helped_count<max_help_count
              AND current_price>floor_price AND expire_at>NOW()
-         0 行 → 21007（回滚）
-      5. INSERT bargain_help_records（撞 uk_instance_helper → 21008，整体回滚）
+         0 行 → 23007（回滚）
+      5. INSERT bargain_help_records（撞 uk_instance_helper → 23008，整体回滚）
       6. 若 price_after<=floor_price → UPDATE ... SET status=20, completed_at=NOW() WHERE status=10
   → 提交后重新读取实例与助力记录返回
 ```
@@ -113,13 +113,13 @@ GET /bargain-instances/:id | GET /my/bargain-instances | POST /bargain-instances
 | 不变量 | 实现位置 |
 | --- | --- |
 | 无效活动不能发起 | `Start` 的 `INSERT ... SELECT` 条件（status + 时间窗），失败分类 `classifyStartRejection` |
-| 同用户同活动一个进行中实例 | `uk_active_instance`；`Start` 捕获 1062 → `21005` |
-| 同用户不能重复助力 | `uk_instance_helper`；`Help` 捕获 1062 → `21008` 并回滚 |
-| 禁止自助 | `Help` 中 `inst.UserId == helperID` → `21006`（在写之前拒绝） |
+| 同用户同活动一个进行中实例 | `uk_active_instance`；`Start` 捕获 1062 → `23005` |
+| 同用户不能重复助力 | `uk_instance_helper`；`Help` 捕获 1062 → `23008` 并回滚 |
+| 禁止自助 | `Help` 中 `inst.UserId == helperID` → `23006`（在写之前拒绝） |
 | 价格不低于底价 | `calcCutAmount` + 条件更新中的 `current_price > floor_price` + `price_after >= floor_price` |
 | 助力记录与金额一致 | 同事务先更新实例再插入记录；记录值取锁内快照 |
 | 并发安全 | `SELECT ... FOR UPDATE` + 条件更新 + 唯一索引三重保障 |
-| 终态不可推进 | `Help`/`Abandon` 均以 `status=10` 为条件；终态返回 `21007`/`21009` |
+| 终态不可推进 | `Help`/`Abandon` 均以 `status=10` 为条件；终态返回 `23007`/`23009` |
 | 过期幂等 | 懒过期为条件更新（`status=10 AND expire_at<=NOW()`），重复 0 行 |
 
 ## 7. 事务、锁与幂等
@@ -128,9 +128,9 @@ GET /bargain-instances/:id | GET /my/bargain-instances | POST /bargain-instances
   依赖语句原子性（`INSERT ... SELECT`、条件 `UPDATE`）。
 - **锁**：`FOR UPDATE` 加在实例行上；同一实例的并发助力排队，不同实例互不影响。没有全局锁、没有 Redis 锁。
 - **幂等**：
-  - 发起：重复请求 → `21005`（不产生新实例）；
-  - 助力：重复请求 → `21008`（不重复扣减，事务回滚保证价格不变）；
-  - 放弃：重复 → `21009`；
+  - 发起：重复请求 → `23005`（不产生新实例）；
+  - 助力：重复请求 → `23008`（不重复扣减，事务回滚保证价格不变）；
+  - 放弃：重复 → `23009`；
   - 过期：重复推进 → 0 行，无副作用。
 - **失败语义**：所有拒绝路径都不留半成品——事务内错误统一回滚；单语句 0 行即无写入。
 
@@ -141,8 +141,8 @@ GET /bargain-instances/:id | GET /my/bargain-instances | POST /bargain-instances
 - 前台用户身份一律取 `middleware.PrincipalFromContext`（不信任请求体 user_id）；
 - 后台接口经 `AdminAuth + RequirePermission`，controller 内再校验 `AdminPrincipalFromContext`；
 - 实例详情与助力记录对**任何登录用户**开放（好友需要打开分享链接），只有发起/放弃限本人；
-- 错误码：`21001` 活动不存在、`21002` 活动参数非法、`21003` 活动不可参与、`21004` 实例不存在/非本人、
-  `21005` 已有进行中实例、`21006` 给自己助力、`21007` 实例不可助力、`21008` 重复助力、`21009` 非法状态迁移；
+- 错误码：`23001` 活动不存在、`23002` 活动参数非法、`23003` 活动不可参与、`23004` 实例不存在/非本人、
+  `23005` 已有进行中实例、`23006` 给自己助力、`23007` 实例不可助力、`23008` 重复助力、`23009` 非法状态迁移；
 - 参数错误（分页越界、路径 id ≤0）复用通用 `1001`。
 
 改完 API 必须执行：
@@ -161,7 +161,7 @@ bash scripts/contract-check.sh
 | --- | --- | --- |
 | 纯函数单测 | `internal/logic/bargain/bargain_test.go` | 砍减额算法、可达成性、活动参数校验（含非法价格/时间/助力参数）、状态映射、分页 |
 | 真实 MySQL 集成 | `internal/logic/bargain/integration_test.go` | 创建校验、发起/重复发起/并发发起、并发助力底价保护、重复助力、自助拒绝、撞唯一键回滚、过期、放弃与重启、成功后终态拒绝 |
-| 路由契约 | `internal/cmd/routes_test.go` | 155 条路由双向锁定 + OpenAPI 一致 |
+| 路由契约 | `internal/cmd/routes_test.go` | 195 条路由双向锁定 + OpenAPI 一致 |
 | 契约工具 | `tools/openapi-gen` 单测 | 生成器自身的路由/DTO/错误码/权限一致性 |
 
 集成测试需要**隔离 MySQL**（默认 `127.0.0.1:13307`，库 `my_shop_bargain_test`），可用环境变量覆盖：
@@ -181,11 +181,11 @@ go test ./internal/logic/bargain/ -run TestBargain -v
 
 | 现象 | 排查顺序 |
 | --- | --- |
-| 发起返回 21003 | 活动 `status` 是否为 1；`NOW()` 是否落在 `[start_time, end_time)`；注意时间比较在 SQL 侧，容器/会话时区不一致会让「看起来在窗口内」的活动被判过期 |
-| 发起返回 21005 | 该用户在该活动已有 `status=10` 实例：`SELECT id,status,active_key FROM bargain_instances WHERE user_id=? AND activity_id=?` |
-| 助力返回 21007 | 实例是否已 `20/30/40`；`helped_count >= max_help_count`；`current_price` 是否已等于 `floor_price`；`expire_at` 是否已过 |
-| 助力返回 21008 | `uk_instance_helper` 命中：该 helper 已助力过（含并发重复请求） |
-| 助力返回 21006 | 助力者是实例发起者本人 |
+| 发起返回 23003 | 活动 `status` 是否为 1；`NOW()` 是否落在 `[start_time, end_time)`；注意时间比较在 SQL 侧，容器/会话时区不一致会让「看起来在窗口内」的活动被判过期 |
+| 发起返回 23005 | 该用户在该活动已有 `status=10` 实例：`SELECT id,status,active_key FROM bargain_instances WHERE user_id=? AND activity_id=?` |
+| 助力返回 23007 | 实例是否已 `20/30/40`；`helped_count >= max_help_count`；`current_price` 是否已等于 `floor_price`；`expire_at` 是否已过 |
+| 助力返回 23008 | `uk_instance_helper` 命中：该 helper 已助力过（含并发重复请求） |
+| 助力返回 23006 | 助力者是实例发起者本人 |
 | 价格「停在半路」且状态仍进行中 | 检查是否 `expire_at` 已过但没人读过（懒过期未触发）；读一次详情即可推进到 40 |
 | 后台列表看不到活动 | `GET /admin/bargain-activities` 需要 `bargain:list`；前台列表只返回启用且在时间窗内的活动 |
 
@@ -198,3 +198,12 @@ go test ./internal/logic/bargain/ -run TestBargain -v
 - 活动有实例后 `product_id`/`sku_id` 不可改绑；需要换商品请新建活动（见 `AdminUpdate`）。
 - 新增前台路由时同步 `internal/cmd/routes_test.go` 的 `fullRouteTable`、`openapi` 生成结果与契约脚本的成功文案计数。
 - 砍价错误码域为 `21000-21999`；`20000-20999` 已归 B1-04-03（运费/计价），不要越界使用。
+
+## B1-04 集成状态
+
+| 能力 | 状态 |
+| --- | --- |
+| 砍价活动管理（后台 CRUD/启停） | 已集成（B1-04-07） |
+| 用户发起砍价 / 好友助力 / 并发与最低价保护 / 懒过期 | 已集成 |
+| 砍价成功后创建订单 | **未实现**：成交价、下单时机与订单关联方式尚无冻结契约，待 Owner 决策；不得绕过 `pricing.Quote` 创建特殊订单 |
+| 拼团 | **未集成**：B1-04-06 分支在本地/远端/对象库/仓库记录中均不存在，只有 B1-03-03 的表结构 |

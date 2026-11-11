@@ -24,7 +24,7 @@
 | `member_discount_amount` | INT UNSIGNED | 非空默认 0，**会员等级折扣**金额快照（B1-04-08 新增，`20261110000015`；无折扣为 0） |
 | `shipping_fee` | INT UNSIGNED | 非空默认 0，运费快照（整数分）；历史订单保持 0，迁移不重算 `total_amount` |
 | `user_coupon_id` | BIGINT UNSIGNED | 可空，下单时使用的用户券 id（软引用，快照，见 `coupon.md`） |
-| `pay_type` | VARCHAR(16) | 非空默认 ''，支付方式（Mock；空串=未支付/未选择，见 §2.5） |
+| `pay_type` | VARCHAR(16) | 非空默认 ''，支付方式：`mock`（默认）/`balance`（钱包余额）；空串=未支付/未选择，见 §2.5 |
 | `transaction_no` | VARCHAR(64) | 非空默认 ''，支付交易编号（Mock；仅追溯，不保证全局唯一） |
 | `idempotency_key` | VARCHAR(64) | 非空，客户端幂等键 |
 | `request_hash` | VARCHAR(64) | 非空，请求指纹（sha256 hex），用于同 key 判内容一致 |
@@ -68,9 +68,20 @@
 与历史订单语义一致（历史订单迁移回填 `original_amount = total_amount`，`member_discount_amount` 默认 0）。
 另见 `pricing.md` 中的叠加顺序与夹紧规则：两项优惠合计不超过 `original_amount`。
 
-`shipping_fee` 为运费快照（整数分），由 migration `20261110000004_order_shipping_payment` 新增，默认 0。B1-04-03 已实现运费计算模块（`service.IFreight.Quote`，见 `freight.md`）与统一计价入口（`pricing.Quote`，见 `pricing.md`），但**订单链路尚未接入**：下单仍写 `shipping_fee = 0`，`total_amount = original_amount - discount_amount` 仍等价成立。
+`shipping_fee` 为运费快照（整数分），由 migration `20261110000004_order_shipping_payment` 新增，默认 0。
+B1-04 集成后订单链路**已接入**运费计算（`service.IFreight.Quote`，见 `freight.md`）与统一计价入口
+（`pricing.Quote`，见 `pricing.md`）：下单时按收货地址 `region_id` 与商品 `freight_template_id` 计算运费，
+`total_amount = original_amount - discount_amount - member_discount_amount + shipping_fee`。
+未绑定运费模板的商品（历史商品）仍按零运费兼容。
 
-订单接入的边界（待 B1-04-02 的 SKU 规格快照改造进入共同基线后实施）：
+订单接入后的边界与保证：
+
+- `POST /orders/quote` 只读预览：按服务端权威价、当前会员折扣、券与运费计算六槽位金额，不占券、不扣库存；
+- 创建订单在单事务内 `SELECT ... FOR UPDATE` 重读 `skus` 与 `products`，重算券/会员/运费后落库（预览金额不是最终可信金额）；
+- 幂等指纹覆盖来源、地址快照（收件人/电话/省市区/详址/`region_id`）、券与行项目（SKU、数量、成交价、编码、规格文本）；
+- `order_status_logs` 与每次状态推进同事务写入（create/pay/cancel/timeout_cancel/ship/receive/complete/refund）。
+
+历史边界（保持不变）：
 
 - 新增 `/orders/quote` 返回六槽位明细（`original_amount`/`coupon_discount`/`member_discount`/`points_discount`/`shipping_fee`/`payable_amount`）；
 - 下单事务内重读 SKU 价格、商品状态、券有效性、运费模板与区域规则后重新计价，落库金额取事务内结果；
@@ -97,7 +108,7 @@
 
 ### 2.5 支付与履约字段（内嵌模型）
 
-- 支付仅 Mock：`pay_type`（如 `mock`）、`transaction_no`、`paid_at` 记录支付事实；**不新增独立 `payments` 表，也不新增支付状态列**。当前 Mock 支付是「待支付→已支付」的一次性幂等推进，没有多次支付尝试/渠道流水/对账需求，订单现有字段足够承载；若未来出现多次支付尝试或独立对账语义，需先向 Owner 报告再扩展模型。
+- 支付渠道：`pay_type` 取值 `mock`（默认，只推进状态）与 `balance`（钱包余额，同事务扣款并写 `wallet_transactions`，`transaction_no=wallet:<流水id>`）；`paid_at` 记录支付事实。**不新增独立 `payments` 表，也不新增支付状态列**。V1 仍是一次性幂等推进，没有多次支付尝试/渠道流水/对账需求；若未来出现多次支付尝试或独立对账语义，需先向 Owner 报告再扩展模型。
 - 订单状态仍是唯一状态机（10..70）：是否已支付由 `status` 与 `paid_at` 判定，`pay_type`/`transaction_no` 不参与状态迁移判定，避免出现第二套支付状态机。
 - 履约信息内嵌：`delivery_type`/`delivery_name`/`delivery_sn` 默认空串，随发货动作写入；不引入物流子表、物流轨迹或外部物流服务，发货仍由 `status=30` 推进。
 
@@ -133,9 +144,9 @@
 - INV-008（权限）：发货仅管理员（含超管，持 `order:ship`）；退款走 refund 模块（`refund:*` 权限，见 `refund.md`）；无权限 403、越权 404，均无 DB 副作用。
 - INV-009（唯一订单号）：`order_no` 全局唯一（`uk_order_no` 兜底，撞号重试）。
 - INV-010（支付幂等）：重复支付回调不重复改状态，仅待支付→已支付合法。
-- INV-011（运费历史兼容）：`shipping_fee` 默认 0，迁移不回填、不重算历史 `total_amount`；运费计算模块已由 B1-04-03 交付，但订单链路尚未接入（当前恒写 0），接入条件与范围见 §2.3 与 §9。
-- INV-012（支付事实单一）：`pay_type`/`transaction_no`/`paid_at` 只记录支付事实，不构成第二套支付状态机；订单是否已支付以 `status` + `paid_at` 判定，Mock 支付仍仅 `10→20` 一次推进。
-- INV-013（状态流水只追加）：`order_status_logs` 每个订单可多条、状态值取自 10..70；流水写入必须与对应状态推进同事务（B1-04 实现），当前尚未写入，不改变既有状态机行为。
+- INV-011（运费历史兼容）：`shipping_fee` 默认 0，迁移不回填、不重算历史 `total_amount`；新订单按运费模板实时计算，未绑定模板的商品保持 0 运费。
+- INV-012（支付事实单一）：`pay_type`/`transaction_no`/`paid_at` 只记录支付事实，不构成第二套支付状态机；订单是否已支付以 `status` + `paid_at` 判定，任一渠道都只在 `10→20` 推进一次。
+- INV-013（状态流水只追加）：`order_status_logs` 每个订单可多条、状态值取自 10..70；流水写入与对应状态推进同事务（B1-04 集成已实现），不改变既有状态机行为。
 
 ## 5. 一致性模型与失败语义
 
@@ -149,7 +160,7 @@
 
 ## 6. 安全与权限边界
 
-- 前台受保护路由（`routes_frontend.go` Auth 分组）：`POST /orders`、`GET /orders`、`GET /orders/:id`、`POST /orders/:id/pay`、`POST /orders/:id/cancel`、`POST /orders/:id/receive`。
+- 前台受保护路由（`routes_frontend.go` Auth 分组）：`POST /orders`、`POST /orders/quote`、`GET /orders`、`GET /orders/:id`、`POST /orders/:id/pay`、`POST /orders/:id/cancel`、`POST /orders/:id/receive`。
 - 后台写路由（`routes_admin.go` require 分组）：`POST /admin/orders/:id/ship`（`order:ship`）。退款后台路由见 `refund.md`（`/admin/refunds/*`，`refund:*` 权限）。
 - 后台只读路由（`routes_admin.go` require 分组，AdminAuth + RequirePermission）：`GET /admin/orders`（`order:list`）、`GET /admin/orders/stats`（`order:list`）、`GET /admin/orders/:id`（`order:view`）。
 - 身份信任：`Principal.UserID` 是用户侧唯一身份来源；发货/退款/后台只读查询仅管理员（含超管），经 `RequirePermission`；普通用户 token（`type=user`）访问后台路由返回 403。

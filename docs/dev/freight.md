@@ -36,8 +36,8 @@ fee, err := feeByPieces(quantity, fareRule{
 
 要点：
 
-- `FirstQuantity`/`AdditionalQuantity` 必须 >= 1，否则返回 `20007`；
-- `FirstFee`/`AdditionalFee` 必须 >= 0，否则返回 `20010`；
+- `FirstQuantity`/`AdditionalQuantity` 必须 >= 1，否则返回 `21007`；
+- `FirstFee`/`AdditionalFee` 必须 >= 0，否则返回 `21010`；
 - 向上取整用整数除法：
 
 ```go
@@ -77,9 +77,9 @@ rule, ok := matchRule(chain, rules)
 `AdminReplaceRules` 的语义是「全量替换」：
 
 - 事务内先 `DELETE` 该模板全部规则，再逐条 `INSERT`；
-- `region_id` 重复在应用层先行拒绝（20006），`uk_template_region` 兜底；
+- `region_id` 重复在应用层先行拒绝（21006），`uk_template_region` 兜底；
 - 空数组表示清空全部规则（合法操作）；
-- 地区存在性在事务内批量校验，任一缺失返回 20008。
+- 地区存在性在事务内批量校验，任一缺失返回 21008。
 
 **不要**改成「按 region_id 做 upsert + 删除多余项」：多一步中间态，且删除语义容易遗漏。
 
@@ -88,8 +88,8 @@ rule, ok := matchRule(chain, rules)
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
 | 运费算成 0 但不该包邮 | 走了「未绑定模板」分支 | 确认 `FreightTemplateID` 非 nil 且模板 id > 0 |
-| 返回 20009 | 地区链上没有该模板的规则 | 检查是否只在市级配了规则、而收货地区是另一个省的区 |
-| 返回 20004 | 模板被停用 | 停用是「不可用」而非「免费」 |
+| 返回 21009 | 地区链上没有该模板的规则 | 检查是否只在市级配了规则、而收货地区是另一个省的区 |
+| 返回 21004 | 模板被停用 | 停用是「不可用」而非「免费」 |
 | 免邮不生效 | 比较基数是**商品金额**而非含运费金额 | 见设计 §5 |
 | `products.freight_template_id` 写入失败 | 该列在 `products`，本模块不提供写接口 | 属商品管理范围 |
 
@@ -111,3 +111,12 @@ go test ./internal/logic/freight/... -count=1 -v
 集成测试有**硬编码库名护栏**（`integration_test.go` 的 `integrationDBName`）：`DATABASE_DEFAULT_NAME` 不是 `my_shop_b104_test` 时直接 `t.Skip`，库名不匹配时 `t.Fatalf` 拒绝执行。新增集成测试必须复用 `setupIntegrationDB`，不要自己拼 DSN 绕开护栏。
 
 测试数据用 `uniqueSuffix()` 加后缀，并通过 `t.Cleanup` 清理；**不要**依赖清空整表。
+
+## 8. B1-04 集成后的订单接入
+
+- 商品绑定入口：`POST/PUT /admin/products`（`freight_template_id`，0=解绑），
+  写入前调用 `IFreight.ValidateTemplateForBinding`（不存在 21001、停用 21004）。
+- 订单创建：`sOrder.freightFee` 组装 `FreightItem{FreightTemplateID, Quantity, Amount}` 调用 `IFreight.Quote`；
+  未绑定模板的商品零运费兼容；一旦有商品绑定模板，收货地址必须有有效 `region_id`，否则 21008。
+- 报价与落库：`/orders/quote` 与下单事务内复核都走同一入口，运费写入 `orders.shipping_fee` 快照。
+- 迁移版本：`20261111000002_freight`（由原拟 `20261110000016` 上移，避免被已应用的 `20261111000001` 跳过）。

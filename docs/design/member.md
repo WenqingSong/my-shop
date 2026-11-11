@@ -15,7 +15,7 @@
   - 积分：`user_points_accounts`（余额）、`user_points_logs`（流水，append-only）。
   - 会员：`member_levels`（等级配置）、`user_memberships`（用户当前等级与累计成长值）、`member_growth_logs`（成长值流水，append-only）。
   - 会员折扣快照：`orders.member_discount_amount`（B1-04-08 新增，见 `pricing.md` §5）。
-- 不负责：优惠券（`coupon.md`）、钱包（`wallet.md`）、分销佣金（`distribution.md`）、运费（Deferred）、积分抵扣（Deferred）。
+- 不负责：优惠券（`coupon.md`）、钱包（`wallet.md`）、分销佣金（`distribution.md`）、运费（`freight.md`）、积分抵扣（Deferred，无实现）。
 - 与钱包隔离：积分、成长值、钱包余额是三套账户，不互相换算；积分与成长值都不是货币，不可提现、不可兑换商品。
 
 ## 2. 数据模型
@@ -62,7 +62,7 @@
 | `created_at`/`updated_at` | DATETIME | 默认 `CURRENT_TIMESTAMP` |
 
 `growth_threshold` 唯一用于消除「两个等级同一门槛」的升级歧义。**「按 `level_no` 升序时 `growth_threshold` 严格递增」由管理端
-在写事务内校验**（violate → 20002 并回滚），见 §5.1。`discount_rate_bp` 的合法区间 `1..10000` 由应用层校验，
+在写事务内校验**（violate → 24002 并回滚），见 §5.1。`discount_rate_bp` 的合法区间 `1..10000` 由应用层校验，
 DB 用 `INT UNSIGNED` 保证非负，不引入 CHECK（与项目既有迁移约定一致）。
 
 ### 2.4 `user_memberships`（用户会员信息）
@@ -161,10 +161,10 @@ levelForGrowth(g) = { L | L.status = 1 且 L.growth_threshold ≤ g } 中 growth
 
 | 校验 | 失败错误码 |
 | --- | --- |
-| `level_no` 为正整数；`name` trim 后 1~64 字符；`growth_threshold ≥ 0`；`discount_rate_bp ∈ [1,10000]`；`status ∈ {0,1}` | 20002 |
-| 「按 `level_no` 升序时 `growth_threshold` 严格递增」 | 20002 |
-| `level_no` / `growth_threshold` 唯一（DB 唯一键，1062） | 20004 |
-| 删除被 `user_memberships.level_id` 引用的等级（FK RESTRICT，1451） | 20003 |
+| `level_no` 为正整数；`name` trim 后 1~64 字符；`growth_threshold ≥ 0`；`discount_rate_bp ∈ [1,10000]`；`status ∈ {0,1}` | 24002 |
+| 「按 `level_no` 升序时 `growth_threshold` 严格递增」 | 24002 |
+| `level_no` / `growth_threshold` 唯一（DB 唯一键，1062） | 24004 |
+| 删除被 `user_memberships.level_id` 引用的等级（FK RESTRICT，1451） | 24003 |
 
 锁定全部等级行是为了让「唯一性 + 单调性」两项校验在并发写入下仍然成立（两个各自合法的写入合并后可能非法）。
 
@@ -173,8 +173,12 @@ levelForGrowth(g) = { L | L.status = 1 且 L.growth_threshold ≤ g } 中 growth
 ```text
 raw_member_discount  = floor(original_amount × (10000 - discount_rate_bp) / 10000)
 member_discount      = min(raw_member_discount, original_amount - coupon_discount)
-total_amount         = original_amount - coupon_discount - member_discount
+member_discount      = pricing.Quote({OriginalAmount, CouponDiscount, MemberDiscount, PointsDiscount:0, ShippingFee}).MemberDiscount
+total_amount         = original_amount - coupon_discount - member_discount + shipping_fee
 ```
+
+折扣金额作为 `MemberDiscount` 槽位交给 `pricing.Quote`（唯一金额公式入口），订单落库取该入口的输出；
+运费在优惠之后相加，不参与折扣（见 `pricing.md` §8）。
 
 - 折扣作用于**商品金额**（Σ `order_items.price × quantity`），不折扣运费。
 - 结果向下取整到分（整数分），无浮点、无小数。
@@ -285,7 +289,7 @@ total_amount         = original_amount - coupon_discount - member_discount
 | GET | `/admin/member-levels` | `member:list` | 全部等级配置（含停用） |
 | POST | `/admin/member-levels` | `member:create` | 创建等级 |
 | PUT | `/admin/member-levels/:id` | `member:update` | 全量更新等级 |
-| DELETE | `/admin/member-levels/:id` | `member:delete` | 删除等级（被引用 → 20003） |
+| DELETE | `/admin/member-levels/:id` | `member:delete` | 删除等级（被引用 → 24003） |
 | GET | `/admin/members/:user_id` | `member:view` | 用户会员信息（含 `has_record`） |
 
 身份信任：用户侧身份只来自 `Principal.UserID`，不接受客户端传 `user_id`；后台来自 `AdminPrincipal` 并经权限码校验。
@@ -296,11 +300,11 @@ total_amount         = original_amount - coupon_discount - member_discount
 
 | code | 语义 | HTTP |
 | --- | --- | --- |
-| 20001 | MEMBER_LEVEL_NOT_FOUND（等级配置不存在） | 404 |
-| 20002 | MEMBER_LEVEL_INVALID（名称/门槛/折扣率/状态非法，或破坏单调性） | 400 |
-| 20003 | MEMBER_LEVEL_IN_USE（等级被用户会员记录引用，不可删除） | 409 |
-| 20004 | MEMBER_LEVEL_DUPLICATE（等级序号或成长值门槛已存在） | 409 |
-| 20005 | MEMBER_GROWTH_INSUFFICIENT（成长值扣减超过余额，防御性拒绝） | 409 |
+| 24001 | MEMBER_LEVEL_NOT_FOUND（等级配置不存在） | 404 |
+| 24002 | MEMBER_LEVEL_INVALID（名称/门槛/折扣率/状态非法，或破坏单调性） | 400 |
+| 24003 | MEMBER_LEVEL_IN_USE（等级被用户会员记录引用，不可删除） | 409 |
+| 24004 | MEMBER_LEVEL_DUPLICATE（等级序号或成长值门槛已存在） | 409 |
+| 24005 | MEMBER_GROWTH_INSUFFICIENT（成长值扣减超过余额，防御性拒绝） | 409 |
 
 复用：`1001`（400）、`1002`（401）、`1003`（403）。
 

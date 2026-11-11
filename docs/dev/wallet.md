@@ -7,7 +7,7 @@
 
 - 已实现：余额查询、资金流水分页查询、Mock 充值、账户按需初始化，
   以及供订单/退款模块在**既有事务**内复用的扣款/入账原语。
-- 未接入：`order.Pay`（余额支付渠道）与 `refund.Execute`（退款退回余额）仍只推进状态。
+- 已接入（B1-04 集成）：`order.Pay` 的 `pay_type=balance` 渠道与 `refund.Execute` 的余额退回，均在调用方事务内复用 `DebitForOrderInTx` / `CreditForRefundInTx`。
   基线未合入 B1-04-03，按任务约束不改这两个文件，接入方式见 `docs/design/wallet.md` §7。
 - 未新增 Migration：`wallet_accounts` / `wallet_transactions` / `recharge_orders` 全部来自 B1-03-02。
 
@@ -198,3 +198,25 @@ REDIS_DEFAULT_ADDRESS=127.0.0.1:6379 \
 | `TestTransactionsPaginationAndIsolation` | 分页、类型过滤、用户隔离 |
 | `TestRechargeFlowIsRepeatableAcrossTransactions` | 余额与流水逐笔闭合 |
 | `TestWalletHTTPFlow` / `TestWalletHTTPValidation` | HTTP 契约、匿名拒绝、错误码、开关 |
+
+## 11. B1-04 集成后的订单/退款接入（真实调用链）
+
+```text
+POST /orders/:id/pay {pay_type:"balance"}
+  → 订单 10→20 条件更新（先行闸门，0 行 → 9002）
+  → IWallet.DebitForOrderInTx（锁账户行 → 幂等判定 → 条件扣减 → 写 order_pay:<id> 流水）
+  → orders.transaction_no = wallet:<流水id>、pay_type='balance'
+  → 券核销 → 会员成长值 → 分销计佣 → order_status_logs(10→20, pay)
+  → 全部同一事务；余额不足 22002 时订单保持待支付
+
+refund.Execute(success)
+  → orders 20→70 + 库存恢复 + order_status_logs(refund)
+  → 仅 orders.pay_type='balance' 时 IWallet.CreditForRefundInTx（refund:<refund_id>）
+  → IDistribution.ReverseOrderCommissionInTx → IMember.DeductForRefundInTx → refund 状态 60
+```
+
+要点：
+
+- 扣款与入账都**不自开事务**，由调用方持有 `gdb.TX`；
+- 重复支付走订单状态幂等快路径，不重复扣款；同一退款单重复执行不会重复入账（`wallet_transactions.idempotency_key` 唯一）；
+- 非余额渠道退款不增加余额（避免凭空造钱）。

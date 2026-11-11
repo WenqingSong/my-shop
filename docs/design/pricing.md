@@ -7,7 +7,8 @@
 当前状态需严格区分：
 
 - **模块级已实现**：`pricing.Quote`（计价公式与守恒约束）、运费计算（`service.IFreight.Quote`，见 `freight.md`）；
-- **订单链路尚未接入**：`/orders/quote`、下单事务内复核与 `orders.shipping_fee` 落库待 B1-04-02 进入共同基线后实施，订单侧仍按既有 `total_amount = original_amount - discount_amount` 运行。
+- **订单链路已接入**：`POST /orders/quote` 预览、下单事务内复核与 `orders.shipping_fee` 落库均由 B1-04 集成交付，
+  订单侧按 `total_amount = original_amount - discount_amount - member_discount_amount + shipping_fee` 运行。
 
 ## 1. 职责与边界
 

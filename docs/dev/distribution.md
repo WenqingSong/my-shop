@@ -208,3 +208,19 @@ DATABASE_DEFAULT_PASS=root go test -race -count=1 -run 'TestDistribution' ./test
 - 权限清单：`docs/design/rbac.md`
 - 错误码域：`docs/design/error-codes.md`、`.agent/registry/error-codes.md`
 - 交付报告：`docs/reports/B1-04-05-distribution.md`
+
+## 12. B1-04 集成变更（统一实现）
+
+1. **唯一实现**：保留本模块（B1-04-05）的 `api/controller/logic/service` 与路由；
+   B1-04-08 的重复分销实现已按集成决策废弃，仅吸收其两项能力：
+   - 推荐关系**成环校验**（`CodeDistributionCycle=20004`）：写后在本事务内从本人向上遍历，回到本人即回滚；
+   - **人工结算** `POST /admin/distributions/commissions/:id/settle`（`distribution:settle`）：
+     `pending(10) → settled(20)` + `settled_at`，幂等；已冲回(30) 返回 20006，不存在返回 20005。
+     该操作**只做状态流转，不做真实资金转账**（无钱包流水、无打款）。
+2. **并发绑定**：不使用 `SELECT ... FOR UPDATE`（不存在的行会加间隙锁并互相死锁）；
+   并发仲裁交给 `uk_user_id`，命中 1062 时事务整体回滚，再由调用方在新快照中读取已提交关系，
+   判定「同推荐人幂等」或「已绑定不可改绑（20003）」。
+3. **佣金比例**：仍由 `distribution.commission_rate_bp` 控制，默认 0（关闭计佣）；
+   测试中通过环境变量注入 500 仅用于验证公式，生产默认值不变。
+4. **计佣基数**：`orders.total_amount`（已含会员折扣与运费），比例万分比、向下取整；一单一条佣金（`uk_order_id`）。
+5. **退款冲回**：`status IN (10,20) → 30` + `uk_refund_id`，与退款成功同事务。

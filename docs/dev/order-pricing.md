@@ -9,9 +9,9 @@
 | `pricing.Quote` 六槽位公式与守恒 | 已实现，有单元测试 |
 | 运费计算 `IFreight.Quote` | 已实现，有单元 + 真实库集成测试 |
 | 优惠券折扣 `ICoupon.GetDiscount` | 已实现（既有） |
-| 订单调用 `pricing.Quote` 落库 | **未接入** |
-| `/orders/quote` | **未接入** |
-| 下单事务内复核 / 幂等指纹扩展 / 状态流水 | **未接入** |
+| 订单调用 `pricing.Quote` 落库 | **已接入**（`insertOrder` 事务内） |
+| `/orders/quote` | **已实现**（`sOrder.Quote`） |
+| 下单事务内复核 / 幂等指纹扩展 / 状态流水 | **已实现** |
 
 原因：B1-04-02（SKU 规格快照）与 B1-04-03 共同修改 `internal/logic/order/order.go`，在 B1-04-02 进入 `feat/p2-backend` 共同基线前，B1-04-03 不得修改该文件，以避免并行分支冲突。
 
@@ -116,3 +116,35 @@ go test ./internal/logic/freight/... -count=1
 `pricing_test.go` 覆盖：无优惠、仅券、仅运费、多槽位、折扣等于/超过商品金额、累计折扣超限、负金额、nil 请求、溢出、数据库列边界、零金额、守恒篡改检测。
 
 订单集成测试目前**无法执行**（`order.go` 未接入、且需要隔离数据库），接入时按 §4 清单补 `orders/quote` 与事务复核用例。
+
+## 8. B1-04 集成后的真实调用链
+
+```text
+POST /orders/quote (sOrder.Quote)
+  → buildLines（sku_code 优先 / cart 勾选）
+  → computeAmounts
+       → ICoupon.GetDiscount（只读，不占券）
+       → resolveMemberDiscount（IMember.DiscountRateBp，夹紧到剩余商品金额）
+       → freightFee（IFreight.Quote，region_id + products.freight_template_id）
+       → pricing.Quote（唯一金额公式）
+  → 返回 QuoteRes（预览，不可信）
+
+POST /orders (sOrder.Create)
+  → 预检：computeAmounts（快速失败）
+  → requestHash(source, address 快照, coupon_id, lines[{sku, qty, price, sku_code, spec_text}])
+  → insertOrder（单事务）
+       1. reloadLinesInTx：SELECT ... FOR UPDATE 重读 skus + products（价格/状态/名称/主图/运费模板）
+       2. computeAmounts：按权威数据重算券/会员/运费（A7）
+       3. INSERT orders（original/discount/member_discount/shipping/total）+ order_items
+       4. 扣库存 → 预占券 → 清购物车 → INSERT order_status_logs(0→10, create)
+```
+
+事务边界：订单、订单项、库存、券、购物车、状态流水同一 MySQL 事务；任一步失败整体回滚。
+幂等：`uk_user_idempotency` 命中后回滚，按 `request_hash` 判断「同请求返回既有订单」或 9006。
+金额语义：`pricing.Quote` 是唯一公式入口；`orders.total_amount` 与六槽位满足守恒，历史订单永不重算。
+
+测试地图：
+
+- `internal/logic/order/order_pricing_wallet_test.go`：预览后改价的事务内复核、运费+会员折扣六槽位、金额守恒；
+- `internal/logic/order/member_distribution_chain_test.go`：下单折扣快照 → 支付成长值/计佣 → 退款冲回/扣减；
+- `internal/logic/pricing/pricing_test.go`：公式、负数、超额优惠、溢出保护。
