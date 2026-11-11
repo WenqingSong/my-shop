@@ -32,11 +32,16 @@
                 type: [integer, "null"]
                 format: int64
                 x-go-type: int
+                enum: [0, 1, null]
+                x-enum-labels:
+                  "0": 按区域规则计费
+                  "1": 无条件包邮
                 description: 1=无条件包邮；0 或缺省=按区域规则计费
               free_threshold:
                 type: integer
                 format: int64
                 x-go-type: int64
+                x-unit: cent
                 description: 满额免邮阈值（整数分，0=不启用）
               remark:
                 type: string
@@ -219,11 +224,16 @@
                 type: [integer, "null"]
                 format: int64
                 x-go-type: int
+                enum: [0, 1, null]
+                x-enum-labels:
+                  "0": 按区域规则计费
+                  "1": 无条件包邮
                 description: 1=无条件包邮；0=按区域规则计费；缺省保持原值
               free_threshold:
                 type: integer
                 format: int64
                 x-go-type: int64
+                x-unit: cent
                 description: 满额免邮阈值（整数分，0=不启用）
               remark:
                 type: string
@@ -307,6 +317,10 @@
                 type: [integer, "null"]
                 format: int64
                 x-go-type: int
+                enum: [0, 1, null]
+                x-enum-labels:
+                  "0": 停用
+                  "1": 启用
                 x-go-validate: required
                 description: 1=启用、0=停用
             required:

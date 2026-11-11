@@ -69,6 +69,7 @@
           format: int64
           x-go-type: int
         description: 页码，默认 1；<1 返回 400
+        x-pagination-mode: strict
       - name: size
         in: query
         required: false
@@ -77,13 +78,16 @@
           format: int64
           x-go-type: int
         description: 每页数量，默认 20、上限 100；越界返回 400
+        x-pagination-mode: strict
       - name: tx_type
         in: query
         required: false
         schema:
           type: string
+          enum: ["", recharge, order_pay, order_refund]
         description: 按交易类型筛选：recharge/order_pay/order_refund；缺省为不过滤
-    x-pagination-mode: none
+    x-pagination-mode: strict
+    x-pagination-contract: 严格行为：page/size 非正整数或越界返回 HTTP 400 + code 1001。
     x-idempotency:
       mode: none
     responses:
@@ -149,7 +153,10 @@
               - idempotency_key
     x-pagination-mode: none
     x-idempotency:
-      mode: none
+      mode: body
+      field: idempotency_key
+      required: true
+      header_supported: false
     x-known-issue:
       - id: B1-02-D1
         summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001

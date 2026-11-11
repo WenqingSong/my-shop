@@ -188,6 +188,27 @@ func check(repoRoot string) error {
 		}
 	}
 
+	// ---- 5.1 opMetaByKey 与真实路由 / DTO 双向对齐 ----
+	// opMetaByKey 是手工维护的 operation 级事实表，容易出现两类漂移：
+	//   1) 路由改名/删除后残留陈旧条目（不会被任何 operation 消费，但会误导评审）；
+	//   2) 新增接口的请求 DTO 已带 page/size，但忘记登记分页模式（契约会误标 none）。
+	for key := range opMetaByKey {
+		if _, ok := expected[key]; !ok {
+			add("opMetaByKey 中的 %s 不是实际注册路由（陈旧元数据，必须删除或改名）", key)
+		}
+	}
+	for key, api := range expected {
+		hasPaging := requestHasPagingFields(api)
+		meta := opMetaByKey[key]
+		declared := meta != nil && meta.Pagination != ""
+		switch {
+		case hasPaging && !declared:
+			add("%s 的请求 DTO 含 page/size 字段，但未在 opMetaByKey 登记分页模式", key)
+		case !hasPaging && declared:
+			add("%s 在 opMetaByKey 声明了分页模式 %q，但请求 DTO 不含 page/size 字段", key, meta.Pagination)
+		}
+	}
+
 	// ---- 6. 权限码与 seed 三向一致 ----
 	seedCodes, err := parsePermissionSeed(repoRoot)
 	if err != nil {
@@ -302,6 +323,23 @@ func check(repoRoot string) error {
 		len(actual), len(planned), schemas.Len(), len(retained))
 	fmt.Printf("Paths 分域一致性：%s\n", viewRep.Summary())
 	return nil
+}
+
+// requestHasPagingFields 判断请求 DTO 是否声明了分页字段（page / size）。
+// 用于保证 opMetaByKey 的分页模式与实际 DTO 字段同步，避免契约把分页接口误标为 none。
+func requestHasPagingFields(api *API) bool {
+	if api == nil || api.Req == nil {
+		return false
+	}
+	for _, f := range api.Req.Fields {
+		if f.Embedded {
+			continue
+		}
+		if f.JSONName == "page" || f.JSONName == "size" {
+			return true
+		}
+	}
+	return false
 }
 
 // successDataShape 提取 200 响应中 data 的形态（null 或 $ref）。

@@ -174,6 +174,69 @@ var enumRegistry = map[string]enumDef{
 	"DashboardStatusItem.status": intEnum(10, 20, 30, 40, 50, 60, 70).
 		withLabels("10", "待支付", "20", "已支付", "30", "已发货", "40", "已收货",
 			"50", "已完成", "60", "已取消", "70", "已退款"),
+
+	// 砍价（B1-04-07）
+	// Activity.status 为整数枚举（DB TINYINT 0/1）；Instance.status 为字符串枚举。
+	"BargainActivity.status":          intEnum(0, 1).withLabels("0", "停用", "1", "启用"),
+	"BargainAdminStatusRequest.status": intEnum(0, 1).withLabels("0", "停用", "1", "启用"),
+	"BargainAdminListRequest.status": intEnum(0, 1).
+		withLabels("0", "停用", "1", "启用"),
+	"BargainInstance.status": strEnum("in_progress", "success", "failed", "expired").
+		withLabels("in_progress", "进行中（DB 10）", "success", "砍价成功（DB 20，终态）",
+			"failed", "砍价失败（DB 30，终态）", "expired", "已过期（DB 40，终态）"),
+
+	// 拼团（B1-04-06）：实体状态 + 请求过滤（空串表示全部）
+	"GroupBuyActivity.status": strEnum("enabled", "disabled").
+		withLabels("enabled", "启用（DB 1）", "disabled", "停用（DB 0）"),
+	"GroupBuyTeam.status": strEnum("pending", "success", "failed", "expired").
+		withLabels("pending", "拼团中（DB 10）", "success", "已成团（DB 20，终态）",
+			"failed", "已失败（DB 30，终态）", "expired", "已过期（DB 40，终态）"),
+	"GroupBuyParticipant.status": strEnum("active", "quit").
+		withLabels("active", "有效（DB 10）", "quit", "已退出（DB 20）"),
+	"GroupBuyMyListRequest.status": strEnum("", "pending", "success", "failed", "expired").
+		withLabels("", "全部", "pending", "拼团中", "success", "已成团",
+			"failed", "已失败", "expired", "已过期"),
+	"GroupBuyAdminStatusRequest.status": strEnum("enabled", "disabled").
+		withLabels("enabled", "启用", "disabled", "停用"),
+	"GroupBuyAdminListRequest.status": strEnum("", "enabled", "disabled").
+		withLabels("", "全部", "enabled", "启用", "disabled", "停用"),
+	"GroupBuyAdminListTeamsRequest.status": strEnum("", "pending", "success", "failed", "expired").
+		withLabels("", "全部", "pending", "拼团中", "success", "已成团",
+			"failed", "已失败", "expired", "已过期"),
+
+	// 钱包（B1-04-04）
+	"WalletTransaction.tx_type": strEnum("recharge", "order_pay", "order_refund").
+		withLabels("recharge", "Mock 充值", "order_pay", "余额支付订单", "order_refund", "退款退回余额"),
+	"WalletTransaction.direction": strEnum("credit", "debit").
+		withLabels("credit", "入账（DB 1）", "debit", "出账（DB 2）"),
+	"WalletTransaction.biz_type": strEnum("recharge", "order", "refund").
+		withLabels("recharge", "充值单", "order", "订单", "refund", "退款单"),
+	"WalletTransactionListRequest.tx_type": strEnum("", "recharge", "order_pay", "order_refund").
+		withLabels("", "不过滤", "recharge", "Mock 充值", "order_pay", "余额支付订单",
+			"order_refund", "退款退回余额"),
+	"WalletRechargeOrder.status": strEnum("pending", "succeeded", "cancelled", "failed").
+		withLabels("pending", "待支付（DB 10）", "succeeded", "支付成功（DB 20）",
+			"cancelled", "已取消（DB 30）", "failed", "支付失败（DB 40）"),
+
+	// 会员（B1-04-08）：等级状态为整数枚举（DB TINYINT 0/1）
+	"MemberLevel.status": intEnum(0, 1).withLabels("0", "停用", "1", "启用"),
+	"MemberAdminCreateLevelRequest.status": intEnum(0, 1).
+		withLabels("0", "停用", "1", "启用"),
+	"MemberAdminUpdateLevelRequest.status": intEnum(0, 1).
+		withLabels("0", "停用", "1", "启用"),
+
+	// 运费（B1-04-03）：模板状态与包邮开关均为整数枚举（DB TINYINT 0/1）
+	"FreightTemplate.status":              intEnum(0, 1).withLabels("0", "停用", "1", "启用"),
+	"FreightTemplate.is_free":             intEnum(0, 1).withLabels("0", "按区域规则计费", "1", "模板级无条件包邮"),
+	"FreightAdminCreateRequest.is_free":   intEnum(0, 1).withLabels("0", "按区域规则计费", "1", "无条件包邮"),
+	"FreightAdminUpdateRequest.is_free":   intEnum(0, 1).withLabels("0", "按区域规则计费", "1", "无条件包邮"),
+	"FreightAdminUpdateStatusRequest.status": intEnum(0, 1).withLabels("0", "停用", "1", "启用"),
+
+	// 订单算价（B1-04 集成）与秒杀活动更新
+	"OrderQuoteRequest.source": strEnum("cart", "direct").
+		withLabels("cart", "购物车勾选计价", "direct", "单 SKU 直接购买计价"),
+	"FlashSaleUpdateRequest.status": strEnum("enabled", "disabled").
+		withLabels("enabled", "启用", "disabled", "禁用"),
 }
 
 // moneyFields 是经逐一核实的金额字段（整数分）。
@@ -189,6 +252,26 @@ var moneyExactFields = map[string]bool{
 	"flash_price":        true,
 	"price_snapshot":     true,
 	"product_price":      true,
+	// B1-04 集成：钱包余额、算价明细、运费模板与砍价助力价格（均为整数分）。
+	"balance":          true,
+	"balance_before":   true,
+	"balance_after":    true,
+	"shipping_fee":     true,
+	"coupon_discount":  true,
+	"member_discount":  true,
+	"points_discount":  true,
+	"first_fee":        true,
+	"additional_fee":   true,
+	"free_threshold":   true,
+	"price_before":     true,
+	"price_after":      true,
+}
+
+// unixSecondFields 是经逐一核实的 unix 秒时间戳字段（不是毫秒、不是金额）。
+// D4.3 要求这类字段声明 x-unit: unix-second，避免消费方按毫秒解析。
+var unixSecondFields = map[string]bool{
+	"login_at":   true, // 会话登录时间（api/iam/v1/iam.go）
+	"expires_at": true, // 七牛直传凭证过期时间（api/upload/v1/upload.go）
 }
 
 // isMoneyField 判断字段是否为"整数分"金额。

@@ -189,6 +189,10 @@
             properties:
               source:
                 type: string
+                enum: [cart, direct]
+                x-enum-labels:
+                  cart: 购物车勾选计价
+                  direct: 单 SKU 直接购买计价
                 x-go-validate: required
                 description: 来源：cart/direct
               address_id:

@@ -264,6 +264,10 @@
                 description: 活动名
               status:
                 type: [string, "null"]
+                enum: [enabled, disabled, null]
+                x-enum-labels:
+                  enabled: 启用
+                  disabled: 禁用
                 description: 状态：enabled/disabled
               start_time:
                 type: [string, "null"]

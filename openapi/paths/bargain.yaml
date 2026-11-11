@@ -24,6 +24,7 @@
           format: int64
           x-go-type: int
         description: 页码，默认 1；<1 返回 400
+        x-pagination-mode: strict
       - name: size
         in: query
         required: false
@@ -32,6 +33,7 @@
           format: int64
           x-go-type: int
         description: 每页数量，默认 20、上限 100；越界返回 400
+        x-pagination-mode: strict
       - name: product_id
         in: query
         required: false
@@ -40,7 +42,8 @@
           format: int64
           x-go-type: int64
         description: 商品 id 精确筛选；<=0 返回 400
-    x-pagination-mode: none
+    x-pagination-mode: strict
+    x-pagination-contract: 严格行为：page/size 非正整数或越界返回 HTTP 400 + code 1001。
     x-idempotency:
       mode: none
     responses:
@@ -193,6 +196,7 @@
           format: int64
           x-go-type: int
         description: 页码，默认 1；<1 返回 400
+        x-pagination-mode: strict
       - name: size
         in: query
         required: false
@@ -201,7 +205,9 @@
           format: int64
           x-go-type: int
         description: 每页数量，默认 20、上限 100；越界返回 400
-    x-pagination-mode: none
+        x-pagination-mode: strict
+    x-pagination-mode: strict
+    x-pagination-contract: 严格行为：page/size 非正整数或越界返回 HTTP 400 + code 1001。
     x-idempotency:
       mode: none
     responses:
@@ -579,6 +585,7 @@
           format: int64
           x-go-type: int
         description: 页码，默认 1；<1 返回 400
+        x-pagination-mode: strict
       - name: size
         in: query
         required: false
@@ -587,6 +594,7 @@
           format: int64
           x-go-type: int
         description: 每页数量，默认 20、上限 100；越界返回 400
+        x-pagination-mode: strict
       - name: status
         in: query
         required: false
@@ -594,6 +602,7 @@
           type: integer
           format: int64
           x-go-type: int
+          enum: [0, 1]
         description: 状态筛选：1=启用、0=停用；省略=全部
       - name: product_id
         in: query
@@ -603,7 +612,8 @@
           format: int64
           x-go-type: int64
         description: 商品 id 精确筛选；<=0 返回 400
-    x-pagination-mode: none
+    x-pagination-mode: strict
+    x-pagination-contract: 严格行为：page/size 非正整数或越界返回 HTTP 400 + code 1001。
     x-idempotency:
       mode: none
     responses:
@@ -832,6 +842,10 @@
                 type: integer
                 format: int64
                 x-go-type: int
+                enum: [0, 1]
+                x-enum-labels:
+                  "0": 停用
+                  "1": 启用
                 description: 目标状态：1=启用、0=停用
     x-pagination-mode: none
     x-idempotency:

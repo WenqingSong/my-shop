@@ -444,6 +444,7 @@
         required: false
         schema:
           type: string
+          enum: ["", pending, success, failed, expired]
         description: 按团状态过滤：pending/success/failed/expired；空表示全部
     x-pagination-mode: strict
     x-pagination-contract: 严格行为：page/size 非正整数或越界返回 HTTP 400 + code 1001。
@@ -634,6 +635,7 @@
         required: false
         schema:
           type: string
+          enum: ["", enabled, disabled]
         description: 状态过滤：enabled/disabled；空表示全部
       - name: product_id
         in: query
@@ -885,6 +887,10 @@
             properties:
               status:
                 type: string
+                enum: [enabled, disabled]
+                x-enum-labels:
+                  enabled: 启用
+                  disabled: 停用
                 x-go-validate: required
                 description: 目标状态：enabled/disabled
             required:
@@ -974,6 +980,7 @@
         required: false
         schema:
           type: string
+          enum: ["", pending, success, failed, expired]
         description: 团状态过滤：pending/success/failed/expired；空表示全部
       - name: leader_user_id
         in: query

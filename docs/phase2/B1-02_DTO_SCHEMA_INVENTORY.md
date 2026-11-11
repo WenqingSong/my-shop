@@ -144,16 +144,16 @@
 | `BannerUpdateResponse` | `banner.UpdateRes` | Response | 1 | - | - | - | - |
 | `BannerDeleteRequest` | `banner.DeleteReq` | Request | 1 | - | - | - | - |
 | `BannerDeleteResponse` | `banner.DeleteRes` | Response | 0 | - | - | - | - |
-| `BargainActivity` | `bargain.Activity` | Entity | 16 | `start_price`<br>`floor_price`<br>`help_amount` | - | `start_time`<br>`end_time`<br>`created_at`<br>`updated_at` | `start_time`<br>`end_time`<br>`created_at`<br>`updated_at` |
-| `BargainInstance` | `bargain.Instance` | Entity | 21 | `start_price`<br>`floor_price`<br>`current_price`<br>`remaining_amount` | - | `expire_at`<br>`completed_at`<br>`created_at`<br>`updated_at` | `expire_at`<br>`completed_at`<br>`order_id`<br>`created_at`<br>`updated_at` |
-| `BargainHelpRecord` | `bargain.HelpRecord` | Entity | 9 | `cut_amount` | - | `created_at` | `created_at` |
+| `BargainActivity` | `bargain.Activity` | Entity | 16 | `start_price`<br>`floor_price`<br>`help_amount` | `status` | `start_time`<br>`end_time`<br>`created_at`<br>`updated_at` | `start_time`<br>`end_time`<br>`created_at`<br>`updated_at` |
+| `BargainInstance` | `bargain.Instance` | Entity | 21 | `start_price`<br>`floor_price`<br>`current_price`<br>`remaining_amount` | `status` | `expire_at`<br>`completed_at`<br>`created_at`<br>`updated_at` | `expire_at`<br>`completed_at`<br>`order_id`<br>`created_at`<br>`updated_at` |
+| `BargainHelpRecord` | `bargain.HelpRecord` | Entity | 9 | `cut_amount`<br>`price_before`<br>`price_after` | - | `created_at` | `created_at` |
 | `BargainAdminCreateRequest` | `bargain.AdminCreateReq` | Request | 9 | `start_price`<br>`floor_price`<br>`help_amount` | - | `start_time`<br>`end_time` | `start_time`<br>`end_time` |
 | `BargainAdminCreateResponse` | `bargain.AdminCreateRes` | Response | 1 | - | - | - | - |
 | `BargainAdminUpdateRequest` | `bargain.AdminUpdateReq` | Request | 10 | `start_price`<br>`floor_price`<br>`help_amount` | - | `start_time`<br>`end_time` | `start_time`<br>`end_time` |
 | `BargainAdminUpdateResponse` | `bargain.AdminUpdateRes` | Response | 1 | - | - | - | - |
-| `BargainAdminStatusRequest` | `bargain.AdminStatusReq` | Request | 2 | - | - | - | - |
+| `BargainAdminStatusRequest` | `bargain.AdminStatusReq` | Request | 2 | - | `status` | - | - |
 | `BargainAdminStatusResponse` | `bargain.AdminStatusRes` | Response | 1 | - | - | - | - |
-| `BargainAdminListRequest` | `bargain.AdminListReq` | Request | 4 | - | - | - | `page`<br>`size`<br>`status`<br>`product_id` |
+| `BargainAdminListRequest` | `bargain.AdminListReq` | Request | 4 | - | `status` | - | `page`<br>`size`<br>`status`<br>`product_id` |
 | `BargainAdminListResponse` | `bargain.AdminListRes` | Response | 4 | - | - | - | - |
 | `BargainAdminDetailRequest` | `bargain.AdminDetailReq` | Request | 1 | - | - | - | - |
 | `BargainAdminDetailResponse` | `bargain.AdminDetailRes` | Response | 1 | - | - | - | - |
@@ -261,7 +261,7 @@
 | `FlashSaleActivitySkuInput` | `flashsale.ActivitySkuInput` | Entity | 3 | - | - | - | - |
 | `FlashSaleCreateRequest` | `flashsale.CreateReq` | Request | 4 | - | - | `start_time`<br>`end_time` | `start_time`<br>`end_time` |
 | `FlashSaleCreateResponse` | `flashsale.CreateRes` | Response | 1 | - | - | - | - |
-| `FlashSaleUpdateRequest` | `flashsale.UpdateReq` | Request | 6 | - | - | `start_time`<br>`end_time` | `name`<br>`status`<br>`start_time`<br>`end_time` |
+| `FlashSaleUpdateRequest` | `flashsale.UpdateReq` | Request | 6 | - | `status` | `start_time`<br>`end_time` | `name`<br>`status`<br>`start_time`<br>`end_time` |
 | `FlashSaleUpdateResponse` | `flashsale.UpdateRes` | Response | 1 | - | - | - | - |
 | `FlashSaleCreateOrderRequest` | `flashsale.CreateOrderReq` | Request | 3 | - | - | - | - |
 | `FlashSaleCreateOrderResponse` | `flashsale.CreateOrderRes` | Response | 4 | - | `status` | - | - |
@@ -272,26 +272,26 @@
 | `FlashSaleListRequestAuditsRequest` | `flashsale.ListRequestAuditsReq` | Request | 1 | - | - | - | - |
 | `FlashSaleRequestAudit` | `flashsale.RequestAudit` | Entity | 9 | - | `before_status`<br>`after_status` | `created_at` | `created_at` |
 | `FlashSaleListRequestAuditsResponse` | `flashsale.ListRequestAuditsRes` | Response | 1 | - | - | - | - |
-| `FreightTemplate` | `freight.Template` | Entity | 8 | - | - | `created_at`<br>`updated_at` | `created_at`<br>`updated_at` |
-| `FreightRule` | `freight.Rule` | Entity | 10 | - | - | `created_at`<br>`updated_at` | `created_at`<br>`updated_at` |
-| `FreightRuleInput` | `freight.RuleInput` | Entity | 6 | - | - | - | - |
-| `FreightAdminCreateRequest` | `freight.AdminCreateReq` | Request | 4 | - | - | - | `is_free` |
+| `FreightTemplate` | `freight.Template` | Entity | 8 | `free_threshold` | `is_free`<br>`status` | `created_at`<br>`updated_at` | `created_at`<br>`updated_at` |
+| `FreightRule` | `freight.Rule` | Entity | 10 | `first_fee`<br>`additional_fee`<br>`free_threshold` | - | `created_at`<br>`updated_at` | `created_at`<br>`updated_at` |
+| `FreightRuleInput` | `freight.RuleInput` | Entity | 6 | `first_fee`<br>`additional_fee`<br>`free_threshold` | - | - | - |
+| `FreightAdminCreateRequest` | `freight.AdminCreateReq` | Request | 4 | `free_threshold` | `is_free` | - | `is_free` |
 | `FreightAdminCreateResponse` | `freight.AdminCreateRes` | Response | 1 | - | - | - | - |
 | `FreightAdminListRequest` | `freight.AdminListReq` | Request | 0 | - | - | - | - |
 | `FreightAdminListResponse` | `freight.AdminListRes` | Response | 1 | - | - | - | - |
 | `FreightAdminDetailRequest` | `freight.AdminDetailReq` | Request | 1 | - | - | - | - |
 | `FreightAdminDetailResponse` | `freight.AdminDetailRes` | Response | 2 | - | - | - | - |
-| `FreightAdminUpdateRequest` | `freight.AdminUpdateReq` | Request | 5 | - | - | - | `is_free` |
+| `FreightAdminUpdateRequest` | `freight.AdminUpdateReq` | Request | 5 | `free_threshold` | `is_free` | - | `is_free` |
 | `FreightAdminUpdateResponse` | `freight.AdminUpdateRes` | Response | 1 | - | - | - | - |
-| `FreightAdminUpdateStatusRequest` | `freight.AdminUpdateStatusReq` | Request | 2 | - | - | - | `status` |
+| `FreightAdminUpdateStatusRequest` | `freight.AdminUpdateStatusReq` | Request | 2 | - | `status` | - | `status` |
 | `FreightAdminUpdateStatusResponse` | `freight.AdminUpdateStatusRes` | Response | 1 | - | - | - | - |
 | `FreightAdminListRulesRequest` | `freight.AdminListRulesReq` | Request | 1 | - | - | - | - |
 | `FreightAdminListRulesResponse` | `freight.AdminListRulesRes` | Response | 1 | - | - | - | - |
 | `FreightAdminReplaceRulesRequest` | `freight.AdminReplaceRulesReq` | Request | 2 | - | - | - | - |
 | `FreightAdminReplaceRulesResponse` | `freight.AdminReplaceRulesRes` | Response | 1 | - | - | - | - |
-| `GroupBuyActivity` | `groupbuy.Activity` | Entity | 17 | `group_price`<br>`sku_price` | - | `start_time`<br>`end_time`<br>`created_at`<br>`updated_at` | `start_time`<br>`end_time`<br>`created_at`<br>`updated_at` |
-| `GroupBuyTeam` | `groupbuy.Team` | Entity | 11 | `group_price` | - | `expire_at`<br>`closed_at`<br>`created_at`<br>`updated_at` | `expire_at`<br>`closed_at`<br>`created_at`<br>`updated_at` |
-| `GroupBuyParticipant` | `groupbuy.Participant` | Entity | 6 | - | - | `created_at` | `created_at` |
+| `GroupBuyActivity` | `groupbuy.Activity` | Entity | 17 | `group_price`<br>`sku_price` | `status` | `start_time`<br>`end_time`<br>`created_at`<br>`updated_at` | `start_time`<br>`end_time`<br>`created_at`<br>`updated_at` |
+| `GroupBuyTeam` | `groupbuy.Team` | Entity | 11 | `group_price` | `status` | `expire_at`<br>`closed_at`<br>`created_at`<br>`updated_at` | `expire_at`<br>`closed_at`<br>`created_at`<br>`updated_at` |
+| `GroupBuyParticipant` | `groupbuy.Participant` | Entity | 6 | - | `status` | `created_at` | `created_at` |
 | `GroupBuyTeamDetail` | `groupbuy.TeamDetail` | Entity | 10 | - | - | - | `my_participant`<br>`my_order_id` |
 | `GroupBuyMyTeamItem` | `groupbuy.MyTeamItem` | Entity | 7 | - | - | `joined_at` | `order_id`<br>`joined_at` |
 | `GroupBuyListActivitiesRequest` | `groupbuy.ListActivitiesReq` | Request | 2 | - | - | - | `page`<br>`size` |
@@ -306,19 +306,19 @@
 | `GroupBuyJoinTeamResponse` | `groupbuy.JoinTeamRes` | Response | 1 | - | - | - | - |
 | `GroupBuyTeamDetailRequest` | `groupbuy.TeamDetailReq` | Request | 1 | - | - | - | - |
 | `GroupBuyTeamDetailResponse` | `groupbuy.TeamDetailRes` | Response | 1 | - | - | - | - |
-| `GroupBuyMyListRequest` | `groupbuy.MyListReq` | Request | 3 | - | - | - | `page`<br>`size` |
+| `GroupBuyMyListRequest` | `groupbuy.MyListReq` | Request | 3 | - | `status` | - | `page`<br>`size` |
 | `GroupBuyMyListResponse` | `groupbuy.MyListRes` | Response | 4 | - | - | - | - |
 | `GroupBuyAdminCreateRequest` | `groupbuy.AdminCreateReq` | Request | 8 | `group_price` | - | `start_time`<br>`end_time` | `start_time`<br>`end_time` |
 | `GroupBuyAdminCreateResponse` | `groupbuy.AdminCreateRes` | Response | 1 | - | - | - | - |
 | `GroupBuyAdminUpdateRequest` | `groupbuy.AdminUpdateReq` | Request | 7 | `group_price` | - | `start_time`<br>`end_time` | `start_time`<br>`end_time` |
 | `GroupBuyAdminUpdateResponse` | `groupbuy.AdminUpdateRes` | Response | 1 | - | - | - | - |
-| `GroupBuyAdminStatusRequest` | `groupbuy.AdminStatusReq` | Request | 2 | - | - | - | - |
+| `GroupBuyAdminStatusRequest` | `groupbuy.AdminStatusReq` | Request | 2 | - | `status` | - | - |
 | `GroupBuyAdminStatusResponse` | `groupbuy.AdminStatusRes` | Response | 1 | - | - | - | - |
-| `GroupBuyAdminListRequest` | `groupbuy.AdminListReq` | Request | 5 | - | - | - | `page`<br>`size`<br>`product_id`<br>`sku_id` |
+| `GroupBuyAdminListRequest` | `groupbuy.AdminListReq` | Request | 5 | - | `status` | - | `page`<br>`size`<br>`product_id`<br>`sku_id` |
 | `GroupBuyAdminListResponse` | `groupbuy.AdminListRes` | Response | 4 | - | - | - | - |
 | `GroupBuyAdminDetailRequest` | `groupbuy.AdminDetailReq` | Request | 1 | - | - | - | - |
 | `GroupBuyAdminDetailResponse` | `groupbuy.AdminDetailRes` | Response | 1 | - | - | - | - |
-| `GroupBuyAdminListTeamsRequest` | `groupbuy.AdminListTeamsReq` | Request | 5 | - | - | - | `page`<br>`size`<br>`activity_id`<br>`leader_user_id` |
+| `GroupBuyAdminListTeamsRequest` | `groupbuy.AdminListTeamsReq` | Request | 5 | - | `status` | - | `page`<br>`size`<br>`activity_id`<br>`leader_user_id` |
 | `GroupBuyAdminListTeamsResponse` | `groupbuy.AdminListTeamsRes` | Response | 4 | - | - | - | - |
 | `GroupBuyAdminTeamDetailRequest` | `groupbuy.AdminTeamDetailReq` | Request | 1 | - | - | - | - |
 | `GroupBuyAdminTeamDetailResponse` | `groupbuy.AdminTeamDetailRes` | Response | 1 | - | - | - | - |
@@ -369,7 +369,7 @@
 | `LikeCheckResponse` | `like.CheckRes` | Response | 1 | - | - | - | - |
 | `LikeCountRequest` | `like.CountReq` | Request | 1 | - | - | - | - |
 | `LikeCountResponse` | `like.CountRes` | Response | 1 | - | - | - | - |
-| `MemberLevel` | `member.MemberLevel` | Entity | 8 | - | - | `created_at`<br>`updated_at` | `created_at`<br>`updated_at` |
+| `MemberLevel` | `member.MemberLevel` | Entity | 8 | - | `status` | `created_at`<br>`updated_at` | `created_at`<br>`updated_at` |
 | `Membership` | `member.Membership` | Entity | 10 | - | - | `upgraded_at` | `level_id`<br>`level_no`<br>`upgraded_at`<br>`next_level_id`<br>`next_level_growth_threshold` |
 | `MemberGrowthLog` | `member.GrowthLog` | Entity | 9 | `change_amount` | - | `created_at` | `biz_id`<br>`created_at` |
 | `MemberLevelsRequest` | `member.LevelsReq` | Request | 0 | - | - | - | - |
@@ -380,15 +380,15 @@
 | `MemberGrowthLogsResponse` | `member.GrowthLogsRes` | Response | 4 | - | - | - | - |
 | `MemberAdminListLevelsRequest` | `member.AdminListLevelsReq` | Request | 0 | - | - | - | - |
 | `MemberAdminListLevelsResponse` | `member.AdminListLevelsRes` | Response | 1 | - | - | - | - |
-| `MemberAdminCreateLevelRequest` | `member.AdminCreateLevelReq` | Request | 5 | - | - | - | - |
+| `MemberAdminCreateLevelRequest` | `member.AdminCreateLevelReq` | Request | 5 | - | `status` | - | - |
 | `MemberAdminCreateLevelResponse` | `member.AdminCreateLevelRes` | Response | 1 | - | - | - | - |
-| `MemberAdminUpdateLevelRequest` | `member.AdminUpdateLevelReq` | Request | 6 | - | - | - | - |
+| `MemberAdminUpdateLevelRequest` | `member.AdminUpdateLevelReq` | Request | 6 | - | `status` | - | - |
 | `MemberAdminUpdateLevelResponse` | `member.AdminUpdateLevelRes` | Response | 1 | - | - | - | - |
 | `MemberAdminDeleteLevelRequest` | `member.AdminDeleteLevelReq` | Request | 1 | - | - | - | - |
 | `MemberAdminDeleteLevelResponse` | `member.AdminDeleteLevelRes` | Response | 0 | - | - | - | - |
 | `MemberAdminMemberRequest` | `member.AdminMemberReq` | Request | 1 | - | - | - | - |
 | `MemberAdminMemberResponse` | `member.AdminMemberRes` | Response | 2 | - | - | - | - |
-| `Order` | `order.Order` | Entity | 30 | `total_amount`<br>`original_amount`<br>`discount_amount`<br>`member_discount_amount` | `status`<br>`cancel_reason` | `expire_at`<br>`paid_at`<br>`shipped_at`<br>`received_at`<br>`completed_at`<br>`cancelled_at`<br>`refunded_at`<br>`created_at`<br>`updated_at` | `user_coupon_id`<br>`address_id`<br>`expire_at`<br>`cancel_reason`<br>`paid_at`<br>`shipped_at`<br>`received_at`<br>`completed_at`<br>`cancelled_at`<br>`refunded_at`<br>`created_at`<br>`updated_at` |
+| `Order` | `order.Order` | Entity | 30 | `total_amount`<br>`original_amount`<br>`discount_amount`<br>`member_discount_amount`<br>`shipping_fee` | `status`<br>`cancel_reason` | `expire_at`<br>`paid_at`<br>`shipped_at`<br>`received_at`<br>`completed_at`<br>`cancelled_at`<br>`refunded_at`<br>`created_at`<br>`updated_at` | `user_coupon_id`<br>`address_id`<br>`expire_at`<br>`cancel_reason`<br>`paid_at`<br>`shipped_at`<br>`received_at`<br>`completed_at`<br>`cancelled_at`<br>`refunded_at`<br>`created_at`<br>`updated_at` |
 | `OrderItem` | `order.OrderItem` | Entity | 11 | `price`<br>`original_price` | - | - | - |
 | `OrderCreateRequest` | `order.CreateReq` | Request | 8 | - | `source` | - | `price` |
 | `OrderCreateResponse` | `order.CreateRes` | Response | 1 | - | - | - | - |
@@ -397,9 +397,9 @@
 | `OrderDetailRequest` | `order.DetailReq` | Request | 1 | - | - | - | - |
 | `OrderDetailResponse` | `order.DetailRes` | Response | 1 | - | - | - | - |
 | `OrderPayRequest` | `order.PayReq` | Request | 2 | - | - | - | - |
-| `OrderQuoteRequest` | `order.QuoteReq` | Request | 6 | - | - | - | - |
+| `OrderQuoteRequest` | `order.QuoteReq` | Request | 6 | - | `source` | - | - |
 | `OrderQuoteItem` | `order.QuoteItem` | Entity | 8 | `price`<br>`amount` | - | - | - |
-| `OrderQuoteResponse` | `order.QuoteRes` | Response | 7 | `original_amount`<br>`payable_amount` | - | - | - |
+| `OrderQuoteResponse` | `order.QuoteRes` | Response | 7 | `original_amount`<br>`coupon_discount`<br>`member_discount`<br>`points_discount`<br>`shipping_fee`<br>`payable_amount` | - | - | - |
 | `OrderPayResponse` | `order.PayRes` | Response | 1 | - | - | - | - |
 | `OrderCancelRequest` | `order.CancelReq` | Request | 1 | - | - | - | - |
 | `OrderCancelResponse` | `order.CancelRes` | Response | 1 | - | - | - | - |
@@ -532,12 +532,12 @@
 | `UploadAdminTokenRequest` | `upload.AdminTokenReq` | Request | 2 | - | - | - | - |
 | `UploadTokenResponse` | `upload.TokenRes` | Response | 6 | - | - | - | - |
 | `WalletAccountRequest` | `wallet.AccountReq` | Request | 0 | - | - | - | - |
-| `WalletAccountResponse` | `wallet.AccountRes` | Response | 2 | - | - | `updated_at` | `updated_at` |
-| `WalletTransaction` | `wallet.Transaction` | Entity | 10 | `amount` | - | `created_at` | `biz_id`<br>`created_at` |
-| `WalletTransactionListRequest` | `wallet.TransactionListReq` | Request | 3 | - | - | - | `page`<br>`size` |
+| `WalletAccountResponse` | `wallet.AccountRes` | Response | 2 | `balance` | - | `updated_at` | `updated_at` |
+| `WalletTransaction` | `wallet.Transaction` | Entity | 10 | `amount`<br>`balance_before`<br>`balance_after` | `tx_type`<br>`direction`<br>`biz_type` | `created_at` | `biz_id`<br>`created_at` |
+| `WalletTransactionListRequest` | `wallet.TransactionListReq` | Request | 3 | - | `tx_type` | - | `page`<br>`size` |
 | `WalletTransactionListResponse` | `wallet.TransactionListRes` | Response | 4 | - | - | - | - |
 | `WalletRechargeRequest` | `wallet.RechargeReq` | Request | 2 | `amount` | - | - | - |
-| `WalletRechargeOrder` | `wallet.RechargeOrder` | Entity | 7 | `amount` | - | `paid_at`<br>`created_at` | `paid_at`<br>`created_at` |
+| `WalletRechargeOrder` | `wallet.RechargeOrder` | Entity | 7 | `amount` | `status` | `paid_at`<br>`created_at` | `paid_at`<br>`created_at` |
 | `WalletRechargeResponse` | `wallet.RechargeRes` | Response | 1 | - | - | - | - |
 
 ## 5. 金额字段（整数分，`x-unit: cent`）
@@ -552,6 +552,8 @@
 | `BargainInstance` | `current_price` | int64 |
 | `BargainInstance` | `remaining_amount` | int64 |
 | `BargainHelpRecord` | `cut_amount` | int64 |
+| `BargainHelpRecord` | `price_before` | int64 |
+| `BargainHelpRecord` | `price_after` | int64 |
 | `BargainAdminCreateRequest` | `start_price` | int64 |
 | `BargainAdminCreateRequest` | `floor_price` | int64 |
 | `BargainAdminCreateRequest` | `help_amount` | int64 |
@@ -579,6 +581,15 @@
 | `DistributionAdminCommissionStatsResponse` | `total_amount` | int64 |
 | `FlashSaleActivitySku` | `flash_price` | int64 |
 | `FlashSaleOrder` | `flash_price` | int64 |
+| `FreightTemplate` | `free_threshold` | int64 |
+| `FreightRule` | `first_fee` | int64 |
+| `FreightRule` | `additional_fee` | int64 |
+| `FreightRule` | `free_threshold` | int64 |
+| `FreightRuleInput` | `first_fee` | int64 |
+| `FreightRuleInput` | `additional_fee` | int64 |
+| `FreightRuleInput` | `free_threshold` | int64 |
+| `FreightAdminCreateRequest` | `free_threshold` | int64 |
+| `FreightAdminUpdateRequest` | `free_threshold` | int64 |
 | `GroupBuyActivity` | `group_price` | int64 |
 | `GroupBuyActivity` | `sku_price` | int64 |
 | `GroupBuyTeam` | `group_price` | int64 |
@@ -589,11 +600,16 @@
 | `Order` | `original_amount` | int64 |
 | `Order` | `discount_amount` | int64 |
 | `Order` | `member_discount_amount` | int64 |
+| `Order` | `shipping_fee` | int64 |
 | `OrderItem` | `price` | int64 |
 | `OrderItem` | `original_price` | int64 |
 | `OrderQuoteItem` | `price` | int64 |
 | `OrderQuoteItem` | `amount` | int64 |
 | `OrderQuoteResponse` | `original_amount` | int64 |
+| `OrderQuoteResponse` | `coupon_discount` | int64 |
+| `OrderQuoteResponse` | `member_discount` | int64 |
+| `OrderQuoteResponse` | `points_discount` | int64 |
+| `OrderQuoteResponse` | `shipping_fee` | int64 |
 | `OrderQuoteResponse` | `payable_amount` | int64 |
 | `AdminOrderListItem` | `total_amount` | int64 |
 | `Product` | `price` | int64 |
@@ -603,7 +619,10 @@
 | `Refund` | `amount` | int64 |
 | `Sku` | `price` | int64 |
 | `Sku` | `original_price` | int64 |
+| `WalletAccountResponse` | `balance` | int64 |
 | `WalletTransaction` | `amount` | int64 |
+| `WalletTransaction` | `balance_before` | int64 |
+| `WalletTransaction` | `balance_after` | int64 |
 | `WalletRechargeRequest` | `amount` | int64 |
 | `WalletRechargeOrder` | `amount` | int64 |
 
@@ -615,6 +634,10 @@
 | `Banner` | `status` | int |
 | `BannerCreateRequest` | `status` | *int |
 | `BannerUpdateRequest` | `status` | *int |
+| `BargainActivity` | `status` | int |
+| `BargainInstance` | `status` | string |
+| `BargainAdminStatusRequest` | `status` | int |
+| `BargainAdminListRequest` | `status` | *int |
 | `CartItem` | `unavailable_reason` | string |
 | `Category` | `status` | int |
 | `CategoryCreateRequest` | `status` | *int |
@@ -626,18 +649,35 @@
 | `DistributionCommissionStatsItem` | `status` | string |
 | `FavoriteItem` | `unavailable_reason` | string |
 | `FlashSaleActivity` | `status` | string |
+| `FlashSaleUpdateRequest` | `status` | *string |
 | `FlashSaleCreateOrderResponse` | `status` | string |
 | `FlashSaleGetOrderResultResponse` | `status` | string |
 | `FlashSaleRepairRequestRequest` | `target_status` | string |
 | `FlashSaleRepairRequestResponse` | `status` | string |
 | `FlashSaleRequestAudit` | `before_status` | int |
 | `FlashSaleRequestAudit` | `after_status` | int |
+| `FreightTemplate` | `is_free` | int |
+| `FreightTemplate` | `status` | int |
+| `FreightAdminCreateRequest` | `is_free` | *int |
+| `FreightAdminUpdateRequest` | `is_free` | *int |
+| `FreightAdminUpdateStatusRequest` | `status` | *int |
+| `GroupBuyActivity` | `status` | string |
+| `GroupBuyTeam` | `status` | string |
+| `GroupBuyParticipant` | `status` | string |
+| `GroupBuyMyListRequest` | `status` | string |
+| `GroupBuyAdminStatusRequest` | `status` | string |
+| `GroupBuyAdminListRequest` | `status` | string |
+| `GroupBuyAdminListTeamsRequest` | `status` | string |
 | `UserGetUserStatusResponse` | `status` | int |
 | `UserUpdateUserStatusRequest` | `status` | int |
 | `InventoryLog` | `change_type` | string |
+| `MemberLevel` | `status` | int |
+| `MemberAdminCreateLevelRequest` | `status` | int |
+| `MemberAdminUpdateLevelRequest` | `status` | int |
 | `Order` | `status` | string |
 | `Order` | `cancel_reason` | *int |
 | `OrderCreateRequest` | `source` | string |
+| `OrderQuoteRequest` | `source` | string |
 | `OrderAdminListRequest` | `status` | string |
 | `AdminOrderListItem` | `status` | string |
 | `OrderStatsItem` | `status` | string |
@@ -655,6 +695,11 @@
 | `Sku` | `status` | string |
 | `SkuCreateRequest` | `status` | *string |
 | `SkuUpdateRequest` | `status` | *string |
+| `WalletTransaction` | `tx_type` | string |
+| `WalletTransaction` | `direction` | string |
+| `WalletTransaction` | `biz_type` | string |
+| `WalletTransactionListRequest` | `tx_type` | string |
+| `WalletRechargeOrder` | `status` | string |
 
 string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给出数值与业务含义的对照。
 

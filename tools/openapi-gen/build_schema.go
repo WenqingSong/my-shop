@@ -127,6 +127,12 @@ func buildFieldSchema(def *StructDef, f *Field, refPrefix string) (*OMap, error)
 		}
 	}
 
+	// Unix 秒时间戳按 D4.3 标注单位，避免被误读为毫秒或金额（与 x-unit: cent 互斥）。
+	if !f.Type.Pointer && f.Type.Kind == KindScalar && isIntScalar(f.Type.Scalar) &&
+		unixSecondFields[f.JSONName] {
+		s.Set("x-unit", "unix-second")
+	}
+
 	if e, ok := enumRegistry[def.SchemaName+"."+f.JSONName]; ok && len(e.Values) > 0 {
 		values := make(FlowList, 0, len(e.Values)+1)
 		values = append(values, e.Values...)
