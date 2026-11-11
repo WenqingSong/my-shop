@@ -188,6 +188,8 @@ func goTypeOf(t *TypeRef) string {
 		return prefix + t.Ref
 	case KindArray:
 		return prefix + "[]" + goTypeOf(t.Elem)
+	case KindMap:
+		return prefix + "map[string]" + goTypeOf(t.Elem)
 	case KindAny:
 		return "any"
 	}

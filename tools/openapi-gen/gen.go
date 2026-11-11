@@ -12,11 +12,12 @@ import (
 const contractBaseline = "82243c0fbce614e03c4ff57dcc829b5f68fb08f2"
 
 // 常驻 API 的期望分布：B1-01 §3.1 的 142 条 + B1-04-05 一级分销新增 8 条（前台 4、后台 4）
-// + B1-04-01 用户资料与地区字典新增 5 条（前台 5：/profile 2 条、/regions 3 条）。
+// + B1-04-01 用户资料与地区字典新增 5 条（前台 5：/profile 2 条、/regions 3 条）
+// + B1-04-02 商品规格 6 条与 SKU 组合生成 1 条（后台 7 条）。
 const (
-	expectedTotal    = 155
+	expectedTotal    = 162
 	expectedFrontend = 76
-	expectedAdmin    = 77
+	expectedAdmin    = 84
 	expectedHealth   = 2
 )
 
@@ -24,7 +25,7 @@ var codesByValue = map[int]*ErrorCode{}
 
 // pathFileOrder 固定分域视图文件的输出顺序。
 var pathFileOrder = []string{
-	"iam", "profile", "admin", "categories", "product", "sku", "inventory", "address", "region",
+	"iam", "profile", "admin", "categories", "product", "spec", "sku", "inventory", "address", "region",
 	"cart", "order", "refund", "coupon", "distribution", "flashsale", "banner",
 	"recommendation", "article", "review", "favorite", "like", "upload", "dashboard", "health",
 }
@@ -44,7 +45,8 @@ var tagDescriptions = []struct {
 	{"权限", "权限 CRUD"},
 	{"分类", "商品分类树查询与后台写操作"},
 	{"商品", "商品 SPU 查询与后台写操作"},
-	{"SKU", "SKU 写操作"},
+	{"商品规格", "商品规格组与规格值的后台维护"},
+	{"SKU", "SKU 写操作与规格组合生成"},
 	{"库存", "库存查询、增减与流水"},
 	{"购物车", "用户购物车条目管理"},
 	{"订单", "订单创建、支付、取消、收货与后台管理"},

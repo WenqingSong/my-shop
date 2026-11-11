@@ -4,18 +4,21 @@
 
 ## 1. 当前实现状态（先看这一节）
 
-- 商品 SPU、SKU 的**现有读写链路已完整**：后台增删改查、前台详情/列表、库存与订单按 `sku_id` 引用。
-- 商品规格（规格组/规格值/SKU 关联）**目前只有数据库结构**（migration `20261110000001_product_spec`）。
-  `internal/logic/sku`、`api/sku/v1`、`internal/logic/product` **尚未读写** `product_specs`/`product_spec_values`/`sku_spec_values`，
-  也尚未生成/校验 `skus.spec_signature`。
-- 因此：新增列对现有接口是「透明」的（无 `SELECT *`、无 DTO 变更），但**不能**在文档或报告中声称规格功能已完成。
+- 商品 SPU、SKU 的读写链路完整：后台增删改查、前台详情/列表、库存与订单按 `sku_id`/`sku_code` 引用。
+- 商品规格已实现（B1-04-02）：`internal/logic/spec` 维护 `product_specs`/`product_spec_values`；
+  `internal/logic/sku` 负责组合生成、`spec_signature`（`spec_key`）计算与 `sku_spec_values` 写入；
+  `internal/logic/product` 在详情中返回 `attr[]`/`productValue{}`。
+- 迁移：`20261110000001_product_spec`（规格三表 + `image_url`/`spec_signature`）、
+  `20261111000001_sku_code_pricing`（`skus.sku_code`/`original_price`、`order_items.sku_code`/`original_price`）。
+- 无规格 SKU 仍是合法状态：不写 `sku_spec_values`、`spec_signature`/`spec_key` 为空，按 `sku_id` 或 `sku_code` 正常下单。
 
 ## 2. 模块边界
 
 | 模块 | 负责 | 不负责 |
 | --- | --- | --- |
-| `internal/logic/product` | `products` + `product_images`：SPU 主数据、图册、三态、浏览量 | SKU、库存、规格组合 |
-| `internal/logic/sku` | `skus`：名称、价格、状态、SKU 图、稳定引用键 `skus.id` | 库存（`internal/logic/inventory`）、规格定义与组合 |
+| `internal/logic/product` | `products` + `product_images`：SPU 主数据、图册、三态、浏览量；详情组装 `attr`/`productValue` | SKU 写入、库存写入、规格定义写入 |
+| `internal/logic/spec` | `product_specs` + `product_spec_values`：规格组/规格值 CRUD 与归属校验 | SKU 写入、组合生成、库存 |
+| `internal/logic/sku` | `skus`：名称、售价/原价、状态、SKU 图、`sku_code`、规格组合生成与 `spec_key` | 库存（`internal/logic/inventory`）、规格定义（`internal/logic/spec`） |
 | `internal/logic/inventory` | `inventories` + `inventory_logs`，库存唯一事实来源 | SKU 元数据 |
 | `internal/logic/cart` / `order` / `flashsale` | 以 `skus.id` 为稳定引用，读取 `skus.price`/`products.status` | 规格结构解析 |
 | `regions` | 独立只读地区字典（结构已建，无业务代码、无数据） | 地址自由文本（`addresses` 未接地区表） |
@@ -29,7 +32,10 @@
 | --- | --- |
 | SPU 创建/更新/上下架/详情 | `internal/logic/product/product.go` |
 | SKU 创建/更新/删除/按商品列表 | `internal/logic/sku/sku.go` |
+| SKU 组合生成 / `spec_key` / `sku_code` 派生 | `internal/logic/sku/sku.go`（`Generate`、`specKey`、`generatedSkuCode`） |
+| 规格组/规格值 CRUD | `internal/logic/spec/spec.go`、`api/spec/v1/spec.go` |
 | SKU 对外结构与状态枚举 | `api/sku/v1/sku.go` |
+| 详情 `attr`/`productValue` 组装 | `internal/logic/product/product.go`（`buildSkuSelector`） |
 | 商品对外结构与详情组合 | `api/product/v1/product.go` |
 | 服务接口注册（跨 logic 调用） | `internal/service/*.go`（`service.Product()`/`service.Sku()`） |
 | 前台/后台路由 | `internal/cmd/routes_frontend.go`、`internal/cmd/routes_admin.go` |
@@ -57,26 +63,30 @@ skus(id, product_id, name, image_url, price, status, spec_signature)
 
 ## 5. SKU 组合定位方式
 
-写路径（未来实现时）：
+写路径（已实现，`ISku.Generate`）：
 
-1. 校验提交的每个规格值属于该商品（`product_spec_values.spec_id → product_specs.product_id = ?`）。
-2. 规格值按 `spec_id` 升序，拼成 `"<spec_id>:<spec_value_id>"`，逗号连接，取 MD5 32 位小写 hex → `spec_signature`。
-3. 同一事务写 `skus`（含 `spec_signature`）与 `sku_spec_values`；由 `uk_product_signature` 兜底并发重复组合。
+1. 读取商品规格组/值（`ISpec.ListByProduct`，按 `sort,id` 排序），不足两组或任一组无值直接拒绝。
+2. 服务端生成笛卡尔积；每个组合按 `spec_id` 升序拼 `"<spec_id>:<spec_value_id>"`，逗号连接取 MD5 32 位小写 hex → `spec_key`。
+3. 同一事务内按 `(product_id, spec_key)` 判断已存在；已存在则保留原 SKU（不改编码/价格/状态），否则写
+   `skus`（含 `sku_code`、`spec_key`）与 `sku_spec_values`；`uk_product_signature`/`uk_sku_code` 兜底并发重复。
+4. 生成不删除 SKU、不写 `inventories`；库存由 Inventory 模块按 `sku_id` 初始化。
 
 读路径：
 
-- 前台选规格 → 计算指纹 → `SELECT ... FROM skus WHERE product_id=? AND spec_signature=? AND status=1`。
-- SKU → 规格展示 → `sku_spec_values` join `product_specs`/`product_spec_values`（按 `sort`）。
-- 历史 SKU：`spec_signature IS NULL` 且无关联行，按「无规格/单规格」降级展示，不参与组合定位。
+- 详情按商品批量读 SKU（`ListByProduct`）+ 规格取值（一次 join，无 N+1），组装 `attr`/`productValue`。
+- SKU → 规格展示 → `sku_spec_values` join `product_specs`/`product_spec_values`（按 `sort`、`id`）。
+- 下单按 `sku_code` 定位（`ISku.GetByCode`），成交价只取 `skus.price`。
+- 历史 SKU：`spec_signature IS NULL` 且无关联行，按「无规格」展示，不进入 `productValue`。
 
 ## 6. 唯一约束与冲突语义
 
 | 约束 | 保证 | 冲突时 |
 | --- | --- | --- |
 | `uk_product_name (product_id, name)` | 同商品 SKU 名称唯一 | 现有代码映射 1062 → `5004`（409） |
-| `uk_product_signature (product_id, spec_signature)` | 同商品规格组合唯一；多 NULL 允许 | 规格写入实现需映射为「组合已存在」（错误码后续定义） |
-| `uk_product_spec_name (product_id, name)` | 同商品规格组名唯一 | 规格维护实现需返回业务冲突 |
-| `uk_spec_value (spec_id, value)` | 同规格组值唯一 | 同上 |
+| `uk_sku_code (sku_code)` | SKU 业务编码全局唯一；多 NULL 允许（仅离线写入） | 组合生成命中视为已存在；手动创建重试换码 |
+| `uk_product_signature (product_id, spec_signature)` | 同商品规格组合唯一；多 NULL 允许 | 组合生成命中视为已存在（幂等）；其余写入 5016 |
+| `uk_product_spec_name (product_id, name)` | 同商品规格组名唯一 | 5011（409） |
+| `uk_spec_value (spec_id, value)` | 同规格组值唯一 | 5012（409） |
 | `sku_spec_values` 主键 | 同 SKU 同规格组单值 | 写入前校验，DB 兜底 |
 | 复合外键 | 值属于声明的规格组 | 写入前校验，DB 兜底（1452） |
 
@@ -101,6 +111,13 @@ DATABASE_DEFAULT_PASS=root go test -count=1 -p 1 -run 'TestOrder' ./test/e2e/
 
 | 测试 | 覆盖点 |
 | --- | --- |
+| `TestSkuCodeAndOriginalPriceBackfill` | 历史 SKU 回填 `sku_code`/`original_price`；`uk_sku_code` 生效且允许多 NULL；`order_items` 快照列存在 |
+| `TestSkuCodePricingMigrationDownUp` | down → up 后列/索引重建，既有 SKU 行不丢失 |
+| `TestSpecGroupAndValueCRUD`（`TestProductSpecCRUDAndRejections`） | 规格组/值 CRUD、重名冲突、跨商品隔离、非法规格组、RBAC 403 |
+| `TestSkuGenerateCombinations` | 2×3 笛卡尔积、`spec_key` 稳定、重复/并发不重复、跨商品不冲突、无规格 5015、被购物车引用不删除 |
+| `TestProductDetailVanSkuContract` | `attr`/`productValue` 结构、价格/库存、停用SKU 收敛、无规格空数组/空对象、下架 404、无成本价 |
+| `TestOrderPricingBySkuCode` 等（`test/e2e`） | 按 `sku_code` 服务端定价、伪造价 9007、非法编码/停用/下架拒绝、无规格下单、库存不足回滚、购物车忽略客户端价格 |
+| `TestSpecKey`/`TestSkuCodeDerivation`/`TestCombinations` | 指纹算法与编码派生、笛卡尔积（纯内存单测） |
 | `TestProductModelMigrationUpDownUp` | up → down → up；回滚后既有 SKU 行不丢失；新增列默认值正确 |
 | `TestLegacySkuWithoutSpecRemainsUsable` | 无规格历史 SKU 仍可进购物车、建库存、落订单项、绑秒杀活动 |
 | `TestSkuSpecCombinationUniqueness` | 同商品同指纹拒绝重复；NULL 指纹多行；不同商品互不影响；不同组合关联不同 SKU |

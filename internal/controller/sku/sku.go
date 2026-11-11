@@ -33,3 +33,8 @@ func (c *ControllerV1) Delete(ctx context.Context, req *v1.DeleteReq) (res *v1.D
 	}
 	return &v1.DeleteRes{}, nil
 }
+
+// Generate 处理按规格组合生成 SKU。
+func (c *ControllerV1) Generate(ctx context.Context, req *v1.GenerateReq) (res *v1.GenerateRes, err error) {
+	return service.Sku().Generate(ctx, req)
+}

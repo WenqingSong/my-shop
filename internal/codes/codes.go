@@ -68,6 +68,15 @@ const (
 	CodeSkuNameExists    Code = 5004 // 同商品下 name 已存在 → 409
 	CodeSkuHasInventory  Code = 5005 // SKU 存在库存记录，不能删除 → 409
 
+	// 商品规格与 SKU 组合（B1-04-02，仍属 SKU 域）。
+	CodeSpecNotFound     Code = 5010 // 规格组/规格值不存在 → 404
+	CodeSpecNameExists   Code = 5011 // 同商品下规格组名已存在 → 409
+	CodeSpecValueExists  Code = 5012 // 同规格组下规格值已存在 → 409
+	CodeSpecValueInUse   Code = 5013 // 规格值已被 SKU 引用，不能删除 → 409
+	CodeSkuSpecMissing   Code = 5015 // 商品未配置规格，无法生成组合 → 400
+	CodeSkuSpecDuplicate Code = 5016 // 相同规格组合已存在 → 409
+	CodeSkuCodeExists    Code = 5017 // SKU 编码已存在（唯一约束兜底）→ 409
+
 	// 库存域（Inventory）6000-6999。
 	CodeInventoryInsufficient    Code = 6001 // 库存不足 → 409
 	CodeInventoryInvalidQuantity Code = 6002 // 库存数量非正整数 → 400
@@ -88,6 +97,7 @@ const (
 	CodeOrderCartEmpty               Code = 9004 // 从购物车下单无勾选项 → 400
 	CodeOrderInvalidQuantity         Code = 9005 // 直接购买数量非法 → 400
 	CodeOrderIdempotencyConflict     Code = 9006 // 同幂等键不同请求内容 → 409
+	CodeOrderPriceMismatch           Code = 9007 // 客户端提交单价与服务端权威定价不一致 → 409
 
 	// 商品评价域（Review）10000-10999。
 	CodeReviewNotFound      Code = 10001 // 评价不存在/非本人/不可见（防枚举）→ 404
@@ -206,6 +216,14 @@ var codeTable = map[Code]codeInfo{
 	CodeSkuNameExists:    {http.StatusConflict, "SKU 名称已存在"},
 	CodeSkuHasInventory:  {http.StatusConflict, "SKU 存在库存记录，不能删除"},
 
+	CodeSpecNotFound:     {http.StatusNotFound, "规格不存在"},
+	CodeSpecNameExists:   {http.StatusConflict, "规格组名已存在"},
+	CodeSpecValueExists:  {http.StatusConflict, "规格值已存在"},
+	CodeSpecValueInUse:   {http.StatusConflict, "规格值已被 SKU 使用，不能删除"},
+	CodeSkuSpecMissing:   {http.StatusBadRequest, "商品未配置规格"},
+	CodeSkuSpecDuplicate: {http.StatusConflict, "规格组合已存在"},
+	CodeSkuCodeExists:    {http.StatusConflict, "SKU 编码已存在"},
+
 	CodeInventoryInsufficient:    {http.StatusConflict, "库存不足"},
 	CodeInventoryInvalidQuantity: {http.StatusBadRequest, "库存数量非法"},
 
@@ -222,6 +240,7 @@ var codeTable = map[Code]codeInfo{
 	CodeOrderCartEmpty:               {http.StatusBadRequest, "购物车无勾选商品"},
 	CodeOrderInvalidQuantity:         {http.StatusBadRequest, "购买数量非法"},
 	CodeOrderIdempotencyConflict:     {http.StatusConflict, "幂等键冲突"},
+	CodeOrderPriceMismatch:           {http.StatusConflict, "商品价格与当前售价不一致"},
 
 	CodeReviewNotFound:      {http.StatusNotFound, "评价不存在"},
 	CodeReviewNotEligible:   {http.StatusConflict, "暂不可评价"},

@@ -54,6 +54,7 @@ var domainByConstantPrefix = []struct {
 	{"CodeCategory", "category"},
 	{"CodeProduct", "product"},
 	{"CodeSku", "sku"},
+	{"CodeSpec", "sku"},
 	{"CodeInventory", "inventory"},
 	{"CodeAddress", "address"},
 	{"CodeCart", "cart"},

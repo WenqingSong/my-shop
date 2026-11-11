@@ -13,11 +13,11 @@
 
 | 指标 | 数值 |
 |---|---|
-| DTO 结构体总数 | 356 |
-| Request 结构体 | 155 |
-| Response 结构体 | 154 |
-| 业务实体结构体 | 47 |
-| 已登记 API | 155 |
+| DTO 结构体总数 | 375 |
+| Request 结构体 | 162 |
+| Response 结构体 | 161 |
+| 业务实体结构体 | 52 |
+| 已登记 API | 162 |
 | OperationId 唯一性 | 通过（生成期强制校验） |
 | 无法确认的字段 | 0（遇到未登记类型直接失败，不猜测） |
 
@@ -287,8 +287,8 @@
 | `LikeCountRequest` | `like.CountReq` | Request | 1 | - | - | - | - |
 | `LikeCountResponse` | `like.CountRes` | Response | 1 | - | - | - | - |
 | `Order` | `order.Order` | Entity | 27 | `total_amount`<br>`original_amount`<br>`discount_amount` | `status`<br>`cancel_reason` | `expire_at`<br>`paid_at`<br>`shipped_at`<br>`received_at`<br>`completed_at`<br>`cancelled_at`<br>`refunded_at`<br>`created_at`<br>`updated_at` | `user_coupon_id`<br>`address_id`<br>`expire_at`<br>`cancel_reason`<br>`paid_at`<br>`shipped_at`<br>`received_at`<br>`completed_at`<br>`cancelled_at`<br>`refunded_at`<br>`created_at`<br>`updated_at` |
-| `OrderItem` | `order.OrderItem` | Entity | 8 | `price` | - | - | - |
-| `OrderCreateRequest` | `order.CreateReq` | Request | 6 | - | `source` | - | - |
+| `OrderItem` | `order.OrderItem` | Entity | 11 | `price`<br>`original_price` | - | - | - |
+| `OrderCreateRequest` | `order.CreateReq` | Request | 8 | - | `source` | - | `price` |
 | `OrderCreateResponse` | `order.CreateRes` | Response | 1 | - | - | - | - |
 | `OrderListRequest` | `order.ListReq` | Request | 0 | - | - | - | - |
 | `OrderListResponse` | `order.ListRes` | Response | 1 | - | - | - | - |
@@ -314,11 +314,13 @@
 | `ProductListRequest` | `product.ListReq` | Request | 6 | - | - | - | `category_id` |
 | `ProductListResponse` | `product.ListRes` | Response | 4 | - | - | - | - |
 | `ProductDetailRequest` | `product.DetailReq` | Request | 1 | - | - | - | - |
-| `ProductDetailResponse` | `product.DetailRes` | Response | 2 | - | - | - | - |
+| `SkuAttr` | `product.SkuAttr` | Entity | 2 | - | - | - | - |
+| `SkuProductValue` | `product.SkuProductValue` | Entity | 8 | `price`<br>`original_price` | - | - | - |
+| `ProductDetailResponse` | `product.DetailRes` | Response | 4 | - | - | - | - |
 | `ProductAdminListRequest` | `product.AdminListReq` | Request | 6 | - | - | - | `category_id` |
 | `ProductAdminListResponse` | `product.AdminListRes` | Response | 4 | - | - | - | - |
 | `ProductAdminDetailRequest` | `product.AdminDetailReq` | Request | 1 | - | - | - | - |
-| `ProductAdminDetailResponse` | `product.AdminDetailRes` | Response | 2 | - | - | - | - |
+| `ProductAdminDetailResponse` | `product.AdminDetailRes` | Response | 3 | - | - | - | - |
 | `ProductCreateRequest` | `product.CreateReq` | Request | 7 | - | - | - | - |
 | `ProductCreateResponse` | `product.CreateRes` | Response | 1 | - | - | - | - |
 | `ProductUpdateRequest` | `product.UpdateReq` | Request | 9 | - | - | - | `name`<br>`brand`<br>`category_id`<br>`price`<br>`main_image`<br>`detail`<br>`status`<br>`images` |
@@ -397,13 +399,30 @@
 | `ReviewDeleteResponse` | `review.DeleteRes` | Response | 1 | - | - | - | - |
 | `ReviewTakeDownRequest` | `review.TakeDownReq` | Request | 1 | - | - | - | - |
 | `ReviewTakeDownResponse` | `review.TakeDownRes` | Response | 1 | - | - | - | - |
-| `Sku` | `sku.Sku` | Entity | 7 | `price` | `status` | `created_at`<br>`updated_at` | `created_at`<br>`updated_at` |
-| `SkuCreateRequest` | `sku.CreateReq` | Request | 4 | - | `status` | - | `status` |
+| `SkuSpecValue` | `sku.SkuSpecValue` | Entity | 5 | - | - | - | - |
+| `Sku` | `sku.Sku` | Entity | 12 | `price`<br>`original_price` | `status` | `created_at`<br>`updated_at` | `created_at`<br>`updated_at` |
+| `SkuCreateRequest` | `sku.CreateReq` | Request | 6 | - | `status` | - | `original_price`<br>`status` |
 | `SkuCreateResponse` | `sku.CreateRes` | Response | 1 | - | - | - | - |
-| `SkuUpdateRequest` | `sku.UpdateReq` | Request | 4 | - | `status` | - | `name`<br>`price`<br>`status` |
+| `SkuUpdateRequest` | `sku.UpdateReq` | Request | 6 | - | `status` | - | `name`<br>`image_url`<br>`price`<br>`original_price`<br>`status` |
 | `SkuUpdateResponse` | `sku.UpdateRes` | Response | 1 | - | - | - | - |
 | `SkuDeleteRequest` | `sku.DeleteReq` | Request | 1 | - | - | - | - |
 | `SkuDeleteResponse` | `sku.DeleteRes` | Response | 0 | - | - | - | - |
+| `SkuGenerateRequest` | `sku.GenerateReq` | Request | 5 | - | - | - | `price`<br>`original_price`<br>`status` |
+| `SkuGenerateResponse` | `sku.GenerateRes` | Response | 3 | - | - | - | - |
+| `SpecValue` | `spec.SpecValue` | Entity | 4 | - | - | - | - |
+| `SpecGroup` | `spec.SpecGroup` | Entity | 5 | - | - | - | - |
+| `SpecCreateGroupRequest` | `spec.CreateGroupReq` | Request | 3 | - | - | - | - |
+| `SpecCreateGroupResponse` | `spec.CreateGroupRes` | Response | 1 | - | - | - | - |
+| `SpecUpdateGroupRequest` | `spec.UpdateGroupReq` | Request | 3 | - | - | - | `name`<br>`sort` |
+| `SpecUpdateGroupResponse` | `spec.UpdateGroupRes` | Response | 1 | - | - | - | - |
+| `SpecDeleteGroupRequest` | `spec.DeleteGroupReq` | Request | 1 | - | - | - | - |
+| `SpecDeleteGroupResponse` | `spec.DeleteGroupRes` | Response | 0 | - | - | - | - |
+| `SpecCreateValueRequest` | `spec.CreateValueReq` | Request | 3 | - | - | - | - |
+| `SpecCreateValueResponse` | `spec.CreateValueRes` | Response | 1 | - | - | - | - |
+| `SpecUpdateValueRequest` | `spec.UpdateValueReq` | Request | 3 | - | - | - | `value`<br>`sort` |
+| `SpecUpdateValueResponse` | `spec.UpdateValueRes` | Response | 1 | - | - | - | - |
+| `SpecDeleteValueRequest` | `spec.DeleteValueReq` | Request | 1 | - | - | - | - |
+| `SpecDeleteValueResponse` | `spec.DeleteValueRes` | Response | 0 | - | - | - | - |
 | `UploadFrontendTokenRequest` | `upload.FrontendTokenReq` | Request | 2 | - | - | - | - |
 | `UploadAdminTokenRequest` | `upload.AdminTokenReq` | Request | 2 | - | - | - | - |
 | `UploadTokenResponse` | `upload.TokenRes` | Response | 6 | - | - | - | - |
@@ -437,11 +456,15 @@
 | `Order` | `original_amount` | int64 |
 | `Order` | `discount_amount` | int64 |
 | `OrderItem` | `price` | int64 |
+| `OrderItem` | `original_price` | int64 |
 | `AdminOrderListItem` | `total_amount` | int64 |
 | `Product` | `price` | int64 |
+| `SkuProductValue` | `price` | int64 |
+| `SkuProductValue` | `original_price` | int64 |
 | `RecommendItemSnapshot` | `price` | int64 |
 | `Refund` | `amount` | int64 |
 | `Sku` | `price` | int64 |
+| `Sku` | `original_price` | int64 |
 
 ## 6. 枚举字段
 
@@ -694,6 +717,7 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 | `Order` | `refunded_at` |
 | `Order` | `created_at` |
 | `Order` | `updated_at` |
+| `OrderCreateRequest` | `price` |
 | `OrderAdminListRequest` | `page` |
 | `OrderAdminListRequest` | `size` |
 | `OrderAdminListRequest` | `user_id` |
@@ -742,10 +766,20 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 | `Review` | `created_at` |
 | `Sku` | `created_at` |
 | `Sku` | `updated_at` |
+| `SkuCreateRequest` | `original_price` |
 | `SkuCreateRequest` | `status` |
 | `SkuUpdateRequest` | `name` |
+| `SkuUpdateRequest` | `image_url` |
 | `SkuUpdateRequest` | `price` |
+| `SkuUpdateRequest` | `original_price` |
 | `SkuUpdateRequest` | `status` |
+| `SkuGenerateRequest` | `price` |
+| `SkuGenerateRequest` | `original_price` |
+| `SkuGenerateRequest` | `status` |
+| `SpecUpdateGroupRequest` | `name` |
+| `SpecUpdateGroupRequest` | `sort` |
+| `SpecUpdateValueRequest` | `value` |
+| `SpecUpdateValueRequest` | `sort` |
 
 ## 9. 已知限制与不猜测声明
 

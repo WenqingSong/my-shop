@@ -9,7 +9,7 @@ type opMeta struct {
 	Description string
 }
 
-// D1 缺陷的固定描述：13 条接口的实际行为。
+// D1 缺陷的固定描述：所有带非 path required 字段的写接口的实际行为。
 func d1Issue() *OMap {
 	return NewOMap().
 		Set("id", "B1-02-D1").
@@ -35,20 +35,22 @@ var opMetaByKey = map[string]*opMeta{
 	// B1-01 §15.1 与 D1.2 表列为 13 条；B1-02-review-fix R1 复核全部 DTO 的 v:"required"
 	// 字段位置后确认第 14 条 POST /admin/roles/:id/permissions（body.permission_id 必填）
 	// 同样会在绑定阶段触发 gvalid → 51 → 500，契约按实际行为补标（不改生产代码）。
-	"POST /admin/login":                 {KnownIssues: []*OMap{d1Issue()}},
-	"POST /admin/admins":                {KnownIssues: []*OMap{d1Issue()}},
-	"PUT /admin/admins/:id/status":      {KnownIssues: []*OMap{d1Issue()}},
-	"POST /admin/admins/:id/roles":      {KnownIssues: []*OMap{d1Issue()}, NullData: true},
-	"POST /admin/roles":                 {KnownIssues: []*OMap{d1Issue()}},
-	"POST /admin/permissions":           {KnownIssues: []*OMap{d1Issue()}},
-	"PUT /admin/users/:id/status":       {KnownIssues: []*OMap{d1Issue()}},
-	"POST /categories":                  {KnownIssues: []*OMap{d1Issue()}},
-	"POST /admin/skus":                  {KnownIssues: []*OMap{d1Issue()}},
-	"POST /admin/refunds/:id/review":    {KnownIssues: []*OMap{d1Issue()}},
-	"POST /admin/refunds/:id/execute":   {KnownIssues: []*OMap{d1Issue()}},
-	"POST /admin/refunds/:id/close":     {KnownIssues: []*OMap{d1Issue()}},
-	"POST /admin/roles/:id/permissions": {KnownIssues: []*OMap{d1Issue()}, NullData: true},
-	"POST /distribution/referral":       {KnownIssues: []*OMap{d1Issue()}},
+	"POST /admin/login":                    {KnownIssues: []*OMap{d1Issue()}},
+	"POST /admin/admins":                   {KnownIssues: []*OMap{d1Issue()}},
+	"PUT /admin/admins/:id/status":         {KnownIssues: []*OMap{d1Issue()}},
+	"POST /admin/admins/:id/roles":         {KnownIssues: []*OMap{d1Issue()}, NullData: true},
+	"POST /admin/roles":                    {KnownIssues: []*OMap{d1Issue()}},
+	"POST /admin/permissions":              {KnownIssues: []*OMap{d1Issue()}},
+	"PUT /admin/users/:id/status":          {KnownIssues: []*OMap{d1Issue()}},
+	"POST /categories":                     {KnownIssues: []*OMap{d1Issue()}},
+	"POST /admin/skus":                     {KnownIssues: []*OMap{d1Issue()}},
+	"POST /admin/product-specs":            {KnownIssues: []*OMap{d1Issue()}},
+	"POST /admin/product-specs/:id/values": {KnownIssues: []*OMap{d1Issue()}},
+	"POST /admin/refunds/:id/review":       {KnownIssues: []*OMap{d1Issue()}},
+	"POST /admin/refunds/:id/execute":      {KnownIssues: []*OMap{d1Issue()}},
+	"POST /admin/refunds/:id/close":        {KnownIssues: []*OMap{d1Issue()}},
+	"POST /admin/roles/:id/permissions":    {KnownIssues: []*OMap{d1Issue()}, NullData: true},
+	"POST /distribution/referral":          {KnownIssues: []*OMap{d1Issue()}},
 
 	// ---- data 为 null 的成功响应（controller 显式 return nil, nil）----
 	"POST /logout":                                       {NullData: true},

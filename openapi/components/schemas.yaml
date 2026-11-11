@@ -4252,11 +4252,14 @@ OrderItem:
   required:
     - id
     - sku_id
+    - sku_code
     - product_id
     - sku_name
+    - spec_text
     - product_name
     - product_main_image
     - price
+    - original_price
     - quantity
   properties:
     id:
@@ -4269,6 +4272,9 @@ OrderItem:
       format: int64
       x-go-type: int64
       description: SKU id（软引用）
+    sku_code:
+      type: string
+      description: SKU 编码快照（下单时 sku_code）
     product_id:
       type: integer
       format: int64
@@ -4277,6 +4283,9 @@ OrderItem:
     sku_name:
       type: string
       description: SKU 名称快照
+    spec_text:
+      type: string
+      description: 规格文本快照（如「红色,S」；无规格为空串）
     product_name:
       type: string
       description: 商品名快照
@@ -4289,6 +4298,12 @@ OrderItem:
       x-go-type: int64
       x-unit: cent
       description: 成交价（整数分，下单时 skus.price 快照）
+    original_price:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 原价快照（整数分，下单时 skus.original_price）
     quantity:
       type: integer
       format: int64
@@ -4296,7 +4311,7 @@ OrderItem:
       description: 数量
 OrderCreateRequest:
   type: object
-  description: CreateReq 创建订单请求（source=cart 时从购物车勾选项下单，忽略 sku_id/quantity； source=direct 时按单个 SKU + 数量直接购买）。
+  description: CreateReq 创建订单请求（source=cart 时从购物车勾选项下单，忽略 sku_id/sku_code/quantity； source=direct 时按单个 SKU（sku_code 优先，兼容 sku_id）+ 数量直接购买）。 单价一律由服务端按 skus.price 确定；price 字段仅用于检测客户端伪造/篡改价格， 与服务端定价不一致时拒绝下单，不参与任何金额计算。
   required:
     - source
     - address_id
@@ -4320,11 +4335,14 @@ OrderCreateRequest:
       type: string
       x-go-validate: required
       description: 幂等键（同键同内容幂等，同键不同内容 9006）
+    sku_code:
+      type: string
+      description: 直接购买 SKU 编码（source=direct 推荐；与 sku_id 至少填一个）
     sku_id:
       type: integer
       format: int64
       x-go-type: int64
-      description: 直接购买 SKU id（source=direct 必填）
+      description: 直接购买 SKU id（source=direct 兼容字段；与 sku_code 二选一或同时一致）
     quantity:
       type: integer
       format: int64
@@ -4335,6 +4353,10 @@ OrderCreateRequest:
       format: int64
       x-go-type: int64
       description: 可选使用的用户券 id（一笔订单最多一张，0 或缺省表示不使用）
+    price:
+      oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+      x-go-type: json.Number
+      description: 客户端单价（仅用于防伪校验）：必须等于服务端 skus.price，否则 9007 拒绝；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
 OrderCreateResponse:
   type: object
   description: CreateRes 创建订单响应。
@@ -4781,19 +4803,93 @@ ProductDetailRequest:
       x-in: path
       x-go-validate: required
       description: 商品 id
+SkuAttr:
+  type: object
+  description: SkuAttr 是 van-sku 规格选择器所需的规格组结构：attrName 为规格组名， attrValueArr 为该规格组的全部可选值文本（按 sort 升序），与 productValue 的键顺序一致。
+  required:
+    - attrName
+    - attrValueArr
+  properties:
+    attrName:
+      type: string
+      description: 规格组名（如「颜色」「尺码」）
+    attrValueArr:
+      type: array
+      items:
+        type: string
+      description: 规格组可选值文本列表（按 sort 升序）
+SkuProductValue:
+  type: object
+  description: SkuProductValue 是 van-sku 规格组合项：键为按 attr 顺序以逗号连接的规格值文本 （如「红色,S」），值为该组合对应的可售 SKU 信息。
+  required:
+    - unique
+    - sku
+    - sku_id
+    - sku_name
+    - price
+    - original_price
+    - stock
+    - image
+  properties:
+    unique:
+      type: string
+      description: SKU 业务唯一编码（sku_code，van-sku 定位组合用）
+    sku:
+      type: string
+      description: SKU 规格展示文本（规格值按顺序逗号连接；无规格时为 SKU 名称）
+    sku_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: SKU id（稳定引用键）
+    sku_name:
+      type: string
+      description: SKU 名称
+    price:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 售价（整数分）
+    original_price:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 原价/划线价（整数分）
+    stock:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 可售库存（无库存记录为 0）
+    image:
+      type: string
+      description: SKU 规格图 URL；空表示回退商品主图
 ProductDetailResponse:
   type: object
-  description: DetailRes 前台商品详情响应（组合 SPU 与 SKU，仅返回 enabled SKU）。
+  description: DetailRes 前台商品详情响应（组合 SPU 与 SKU，仅返回 enabled SKU）。 attr/productValue 为原 APP 端 van-sku 组件的直接消费结构；无规格商品返回空数组与空对象， 不返回 null，避免前端遍历空值异常。
   allOf:
     - $ref: '#/Product'
   required:
     - skus
+    - attr
+    - productValue
   properties:
     skus:
       type: array
       items:
         oneOf: [{$ref: '#/Sku'}, {type: "null"}]
       description: SKU 列表（前台仅 enabled）
+    attr:
+      type: array
+      items:
+        oneOf: [{$ref: '#/SkuAttr'}, {type: "null"}]
+      description: van-sku 规格组列表（无规格为空数组）
+    productValue:
+      type: object
+      additionalProperties:
+        oneOf: [{$ref: '#/SkuProductValue'}, {type: "null"}]
+      description: van-sku 规格组合映射（键=规格值文本逗号连接；无规格为空对象）
 ProductAdminListRequest:
   type: object
   description: AdminListReq 后台商品列表请求（全部状态）。
@@ -4871,12 +4967,18 @@ ProductAdminDetailResponse:
     - $ref: '#/Product'
   required:
     - skus
+    - specs
   properties:
     skus:
       type: array
       items:
         oneOf: [{$ref: '#/Sku'}, {type: "null"}]
       description: SKU 列表（全部状态）
+    specs:
+      type: array
+      items:
+        oneOf: [{$ref: '#/SpecGroup'}, {type: "null"}]
+      description: 规格组与规格值（含 id，供后台维护；无规格为空数组）
 ProductCreateRequest:
   type: object
   description: CreateReq 创建商品请求（status 强制 draft，不接受客户端指定）。
@@ -6259,15 +6361,51 @@ ReviewTakeDownResponse:
   description: TakeDownRes 下架违规评价响应。
   allOf:
     - $ref: '#/Review'
+SkuSpecValue:
+  type: object
+  description: SkuSpecValue 是 SKU 的一个规格取值（SKU → 规格组/规格值反向展示）。
+  required:
+    - spec_id
+    - spec_name
+    - spec_value_id
+    - value
+    - sort
+  properties:
+    spec_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 规格组 id
+    spec_name:
+      type: string
+      description: 规格组名（如「颜色」）
+    spec_value_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 规格值 id
+    value:
+      type: string
+      description: 规格值文本（如「红色」）
+    sort:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 规格组排序值（升序展示）
 Sku:
   type: object
   description: Sku 商品 SKU 结构，前台/后台商品详情内嵌复用。
   required:
     - id
+    - sku_code
     - product_id
     - name
+    - image_url
     - price
+    - original_price
     - status
+    - spec_key
+    - spec_values
     - created_at
     - updated_at
   properties:
@@ -6276,6 +6414,9 @@ Sku:
       format: int64
       x-go-type: int64
       description: SKU id（稳定引用键，不重用）
+    sku_code:
+      type: string
+      description: SKU 业务唯一编码（下单按它定位 SKU）
     product_id:
       type: integer
       format: int64
@@ -6284,12 +6425,21 @@ Sku:
     name:
       type: string
       description: SKU 名称
+    image_url:
+      type: string
+      description: SKU 规格图 URL；空表示回退商品主图
     price:
       type: integer
       format: int64
       x-go-type: int64
       x-unit: cent
-      description: 价格（整数分）
+      description: 售价（整数分，下单定价唯一来源）
+    original_price:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-unit: cent
+      description: 原价/划线价（整数分）
     status:
       type: string
       enum: [enabled, disabled]
@@ -6297,6 +6447,14 @@ Sku:
         enabled: 启用
         disabled: 禁用
       description: 状态：enabled/disabled
+    spec_key:
+      type: string
+      description: 规格组合指纹（MD5，32 位小写 hex；无规格为空串）
+    spec_values:
+      type: array
+      items:
+        oneOf: [{$ref: '#/SkuSpecValue'}, {type: "null"}]
+      description: 规格取值列表（按规格组 sort 升序；无规格为空数组）
     created_at:
       type: [string, "null"]
       x-go-type: gtime.Time
@@ -6313,7 +6471,7 @@ Sku:
       description: 更新时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
 SkuCreateRequest:
   type: object
-  description: CreateReq 创建 SKU 请求（product_id 在请求体，指向必须存在的商品）。
+  description: CreateReq 创建 SKU 请求（product_id 在请求体，指向必须存在的商品）。 sku_code 由服务端生成，不接受客户端指定；无规格 SKU 使用本接口创建。
   required:
     - product_id
     - name
@@ -6329,11 +6487,18 @@ SkuCreateRequest:
       type: string
       x-go-validate: required
       description: SKU 名称，非空且不超过 128 字符
+    image_url:
+      type: string
+      description: SKU 规格图 URL，可选，不超过 512 字符
     price:
       oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
       x-go-type: json.Number
       x-go-validate: required
-      description: 价格（整数分，0~99999999）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+      description: 售价（整数分，0~99999999）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+    original_price:
+      oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+      x-go-type: json.Number
+      description: 原价/划线价（整数分，0~99999999）；缺省等于售价；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
     status:
       type: [string, "null"]
       enum: [enabled, disabled, null]
@@ -6362,10 +6527,17 @@ SkuUpdateRequest:
     name:
       type: [string, "null"]
       description: SKU 名称，非空且不超过 128 字符
+    image_url:
+      type: [string, "null"]
+      description: SKU 规格图 URL，不超过 512 字符
     price:
       oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
       x-go-type: json.Number
-      description: 价格（整数分，0~99999999）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+      description: 售价（整数分，0~99999999）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+    original_price:
+      oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+      x-go-type: json.Number
+      description: 原价/划线价（整数分，0~99999999）；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
     status:
       type: [string, "null"]
       enum: [enabled, disabled, null]
@@ -6394,6 +6566,259 @@ SkuDeleteRequest:
 SkuDeleteResponse:
   type: object
   description: DeleteRes 删除 SKU 响应（无业务字段）。
+  properties: {}
+  additionalProperties: false
+SkuGenerateRequest:
+  type: object
+  description: GenerateReq 按商品规格组与规格值生成 SKU 组合请求。 组合由服务端按商品规格组的笛卡尔积生成；已存在的组合（同商品同 spec_key）保留原 SKU 与 sku_code，不覆盖其价格/状态/图片。price 等默认值仅用于本次新建的 SKU。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 商品 id
+    price:
+      oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+      x-go-type: json.Number
+      description: 新建 SKU 的售价（整数分）；缺省取商品价格；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+    original_price:
+      oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+      x-go-type: json.Number
+      description: 新建 SKU 的原价（整数分）；缺省等于售价；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
+    image_url:
+      type: string
+      description: 新建 SKU 的规格图 URL，可选
+    status:
+      type: [string, "null"]
+      description: 新建 SKU 的状态，默认 enabled
+SkuGenerateResponse:
+  type: object
+  description: GenerateRes 生成 SKU 组合响应（items 为该商品全部 SKU，含本次保留的既有 SKU）。
+  required:
+    - created
+    - kept
+    - items
+  properties:
+    created:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 本次新建的 SKU 数量
+    kept:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 已存在而保留（未改动）的 SKU 数量
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/Sku'}, {type: "null"}]
+      description: 该商品全部 SKU（按 id 升序）
+SpecValue:
+  type: object
+  description: SpecValue 规格值。
+  required:
+    - id
+    - spec_id
+    - value
+    - sort
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 规格值 id
+    spec_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 所属规格组 id
+    value:
+      type: string
+      description: 规格值文本（同规格组内唯一）
+    sort:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 排序值（升序展示）
+SpecGroup:
+  type: object
+  description: SpecGroup 规格组（含其规格值列表）。
+  required:
+    - id
+    - product_id
+    - name
+    - sort
+    - values
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 规格组 id
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 所属商品 id
+    name:
+      type: string
+      description: 规格组名（如「颜色」「尺码」）
+    sort:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 排序值（升序展示）
+    values:
+      type: array
+      items:
+        oneOf: [{$ref: '#/SpecValue'}, {type: "null"}]
+      description: 规格值列表（按 sort、id 升序）
+SpecCreateGroupRequest:
+  type: object
+  description: CreateGroupReq 创建规格组请求（product_id 在请求体，指向必须存在的商品）。
+  required:
+    - product_id
+    - name
+  properties:
+    product_id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-go-validate: required
+      description: 所属商品 id（必须存在）
+    name:
+      type: string
+      x-go-validate: required
+      description: 规格组名（trim 后非空，≤32 字符，同商品内唯一）
+    sort:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 排序值，升序展示，默认 0
+SpecCreateGroupResponse:
+  type: object
+  description: CreateGroupRes 创建规格组响应。
+  allOf:
+    - $ref: '#/SpecGroup'
+SpecUpdateGroupRequest:
+  type: object
+  description: UpdateGroupReq 更新规格组请求（product_id 不可变）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 规格组 id
+    name:
+      type: [string, "null"]
+      description: 规格组名（trim 后非空，≤32 字符，同商品内唯一）
+    sort:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 排序值
+SpecUpdateGroupResponse:
+  type: object
+  description: UpdateGroupRes 更新规格组响应。
+  allOf:
+    - $ref: '#/SpecGroup'
+SpecDeleteGroupRequest:
+  type: object
+  description: DeleteGroupReq 删除规格组请求（级联删除其规格值；被 SKU 引用的规格值会阻止删除）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 规格组 id
+SpecDeleteGroupResponse:
+  type: object
+  description: DeleteGroupRes 删除规格组响应（无业务字段）。
+  properties: {}
+  additionalProperties: false
+SpecCreateValueRequest:
+  type: object
+  description: CreateValueReq 创建规格值请求（规格组 id 在路径，值归属必须与规格组一致）。
+  required:
+    - id
+    - value
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 规格组 id
+    value:
+      type: string
+      x-go-validate: required
+      description: 规格值文本（trim 后非空，≤32 字符，同规格组内唯一）
+    sort:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 排序值，升序展示，默认 0
+SpecCreateValueResponse:
+  type: object
+  description: CreateValueRes 创建规格值响应。
+  allOf:
+    - $ref: '#/SpecValue'
+SpecUpdateValueRequest:
+  type: object
+  description: UpdateValueReq 更新规格值请求（spec_id 不可变）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 规格值 id
+    value:
+      type: [string, "null"]
+      description: 规格值文本（trim 后非空，≤32 字符，同规格组内唯一）
+    sort:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 排序值
+SpecUpdateValueResponse:
+  type: object
+  description: UpdateValueRes 更新规格值响应。
+  allOf:
+    - $ref: '#/SpecValue'
+SpecDeleteValueRequest:
+  type: object
+  description: DeleteValueReq 删除规格值请求（被 SKU 引用的规格值不可删除）。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 规格值 id
+SpecDeleteValueResponse:
+  type: object
+  description: DeleteValueRes 删除规格值响应（无业务字段）。
   properties: {}
   additionalProperties: false
 UploadFrontendTokenRequest:

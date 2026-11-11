@@ -7,6 +7,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	skuv1 "cnb.cool/go-cloud-devops/my-shop/api/sku/v1"
+	specv1 "cnb.cool/go-cloud-devops/my-shop/api/spec/v1"
 )
 
 // 商品状态枚举（API 出参为字符串枚举；DB 存 TINYINT 0/1/2）。
@@ -57,10 +58,34 @@ type DetailReq struct {
 	Id     int64 `json:"id" in:"path" v:"required" dc:"商品 id"`
 }
 
+// SkuAttr 是 van-sku 规格选择器所需的规格组结构：attrName 为规格组名，
+// attrValueArr 为该规格组的全部可选值文本（按 sort 升序），与 productValue 的键顺序一致。
+type SkuAttr struct {
+	AttrName     string   `json:"attrName" dc:"规格组名（如「颜色」「尺码」）"`
+	AttrValueArr []string `json:"attrValueArr" dc:"规格组可选值文本列表（按 sort 升序）"`
+}
+
+// SkuProductValue 是 van-sku 规格组合项：键为按 attr 顺序以逗号连接的规格值文本
+// （如「红色,S」），值为该组合对应的可售 SKU 信息。
+type SkuProductValue struct {
+	Unique        string `json:"unique" dc:"SKU 业务唯一编码（sku_code，van-sku 定位组合用）"`
+	Sku           string `json:"sku" dc:"SKU 规格展示文本（规格值按顺序逗号连接；无规格时为 SKU 名称）"`
+	SkuId         int64  `json:"sku_id" dc:"SKU id（稳定引用键）"`
+	SkuName       string `json:"sku_name" dc:"SKU 名称"`
+	Price         int64  `json:"price" dc:"售价（整数分）"`
+	OriginalPrice int64  `json:"original_price" dc:"原价/划线价（整数分）"`
+	Stock         int64  `json:"stock" dc:"可售库存（无库存记录为 0）"`
+	Image         string `json:"image" dc:"SKU 规格图 URL；空表示回退商品主图"`
+}
+
 // DetailRes 前台商品详情响应（组合 SPU 与 SKU，仅返回 enabled SKU）。
+// attr/productValue 为原 APP 端 van-sku 组件的直接消费结构；无规格商品返回空数组与空对象，
+// 不返回 null，避免前端遍历空值异常。
 type DetailRes struct {
 	Product
-	Skus []*skuv1.Sku `json:"skus" dc:"SKU 列表（前台仅 enabled）"`
+	Skus         []*skuv1.Sku                `json:"skus" dc:"SKU 列表（前台仅 enabled）"`
+	Attr         []*SkuAttr                  `json:"attr" dc:"van-sku 规格组列表（无规格为空数组）"`
+	ProductValue map[string]*SkuProductValue `json:"productValue" dc:"van-sku 规格组合映射（键=规格值文本逗号连接；无规格为空对象）"`
 }
 
 // AdminListReq 后台商品列表请求（全部状态）。
@@ -91,7 +116,8 @@ type AdminDetailReq struct {
 // AdminDetailRes 后台商品详情响应（组合 SPU 与 SKU，返回全部状态 SKU）。
 type AdminDetailRes struct {
 	Product
-	Skus []*skuv1.Sku `json:"skus" dc:"SKU 列表（全部状态）"`
+	Skus  []*skuv1.Sku        `json:"skus" dc:"SKU 列表（全部状态）"`
+	Specs []*specv1.SpecGroup `json:"specs" dc:"规格组与规格值（含 id，供后台维护；无规格为空数组）"`
 }
 
 // CreateReq 创建商品请求（status 强制 draft，不接受客户端指定）。

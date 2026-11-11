@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -103,23 +104,29 @@ type orderItemRow struct {
 	Id               int64  `json:"id"`
 	OrderId          int64  `json:"order_id"`
 	SkuId            int64  `json:"sku_id"`
+	SkuCode          string `json:"sku_code"`
 	ProductId        int64  `json:"product_id"`
 	SkuName          string `json:"sku_name"`
+	SpecText         string `json:"spec_text"`
 	ProductName      string `json:"product_name"`
 	ProductMainImage string `json:"product_main_image"`
 	Price            int64  `json:"price"`
+	OriginalPrice    int64  `json:"original_price"`
 	Quantity         int64  `json:"quantity"`
 }
 
-// lineItem 是下单时解析出的行项目（含成交价与商品/SKU 快照）。
+// lineItem 是下单时解析出的行项目（含服务端成交价与商品/SKU/规格快照）。
 type lineItem struct {
 	SkuID            int64
+	SkuCode          string
 	Quantity         int64
 	SkuName          string
+	SpecText         string
 	ProductID        int64
 	ProductName      string
 	ProductMainImage string
 	Price            int64
+	OriginalPrice    int64
 }
 
 // duplicateKeyErr 表示订单写入命中唯一约束（携带键名），由 Create 分流幂等/撞号重试。
@@ -216,22 +223,46 @@ func (s *sOrder) Create(ctx context.Context, userID int64, req *v1.CreateReq) (*
 	return &v1.CreateRes{Order: *o}, nil
 }
 
-// buildLines 依据来源组装行项目：直接购买取单个 SKU；购物车购买取全部勾选项。
+// buildLines 依据来源组装行项目：直接购买取单个 SKU（sku_code 优先，兼容 sku_id）；
+// 购物车购买取全部勾选项。单价一律由 resolveLine 从数据库重新读取。
 func (s *sOrder) buildLines(ctx context.Context, source string, userID int64, req *v1.CreateReq) ([]lineItem, error) {
 	switch source {
 	case v1.SourceDirect:
-		if req.SkuId <= 0 {
+		if req.SkuId <= 0 && strings.TrimSpace(req.SkuCode) == "" {
 			return nil, codes.New(codes.CodeInvalidArgument)
 		}
 		if req.Quantity < 1 || req.Quantity > maxOrderQuantity {
 			return nil, codes.New(codes.CodeOrderInvalidQuantity)
 		}
-		line, err := s.resolveLine(ctx, req.SkuId, req.Quantity)
+		skuID := req.SkuId
+		if code := strings.TrimSpace(req.SkuCode); code != "" {
+			sku, err := service.Sku().GetByCode(ctx, code)
+			if err != nil {
+				return nil, err
+			}
+			if sku == nil {
+				return nil, codes.New(codes.CodeSkuNotFound)
+			}
+			// 同时提交 sku_code 与 sku_id 时必须指向同一 SKU，避免客户端拼接两种标识绕过校验。
+			if skuID > 0 && skuID != sku.Id {
+				return nil, codes.New(codes.CodeOrderSkuUnavailable)
+			}
+			skuID = sku.Id
+		}
+		line, err := s.resolveLine(ctx, skuID, req.Quantity)
 		if err != nil {
+			return nil, err
+		}
+		if err := verifyClientPrice(req.Price, line.Price); err != nil {
 			return nil, err
 		}
 		return []lineItem{line}, nil
 	case v1.SourceCart:
+		// 购物车下单不接受客户端单价：多行订单没有单一「客户端单价」语义，
+		// 任何 price 字段都视为不可信输入直接拒绝（定价只取 skus.price）。
+		if req.Price != nil {
+			return nil, codes.New(codes.CodeOrderPriceMismatch)
+		}
 		cart, err := service.Cart().List(ctx, userID)
 		if err != nil {
 			return nil, err
@@ -257,7 +288,7 @@ func (s *sOrder) buildLines(ctx context.Context, source string, userID int64, re
 }
 
 // resolveLine 服务端定价：重读 skus.price 作为成交价，校验 SKU enabled 且商品 on_shelf，
-// 同时快照商品/SKU 名称与主图。不信任客户端提交价、也不信任购物车快照。
+// 同时快照 SKU 编码、规格文本、原价与商品/SKU 名称、主图。不信任客户端提交价、也不信任购物车快照。
 func (s *sOrder) resolveLine(ctx context.Context, skuID, qty int64) (lineItem, error) {
 	sku, err := service.Sku().GetByID(ctx, skuID)
 	if err != nil {
@@ -278,13 +309,43 @@ func (s *sOrder) resolveLine(ctx context.Context, skuID, qty int64) (lineItem, e
 	}
 	return lineItem{
 		SkuID:            skuID,
+		SkuCode:          sku.SkuCode,
 		Quantity:         qty,
 		SkuName:          sku.Name,
+		SpecText:         skuSpecText(sku.SpecValues),
 		ProductID:        sku.ProductId,
 		ProductName:      product.Name,
 		ProductMainImage: product.MainImage,
 		Price:            sku.Price,
+		OriginalPrice:    sku.OriginalPrice,
 	}, nil
+}
+
+// verifyClientPrice 校验客户端提交单价：未提交视为不参与；提交值必须等于服务端权威售价，
+// 否则拒绝（9007）。该值永不参与金额计算，只用于识别伪造/篡改价格的请求。
+func verifyClientPrice(n *json.Number, serverPrice int64) error {
+	if n == nil {
+		return nil
+	}
+	v, err := n.Int64()
+	if err != nil || v < 0 || v != serverPrice {
+		return codes.New(codes.CodeOrderPriceMismatch)
+	}
+	return nil
+}
+
+// skuSpecText 将 SKU 规格取值按展示顺序拼为订单快照文本（如「红色,S」），无规格为空串。
+func skuSpecText(values []*skuv1.SkuSpecValue) string {
+	if len(values) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(values))
+	for _, v := range values {
+		if value := strings.TrimSpace(v.Value); value != "" {
+			parts = append(parts, value)
+		}
+	}
+	return strings.Join(parts, ",")
 }
 
 // insertOrder 在单事务内写订单 + 订单项 + 扣库存（+ 预占券 + 购物车模式删已购条目），返回订单 id。
@@ -337,11 +398,14 @@ func (s *sOrder) insertOrder(
 			if _, e := tx.Model("order_items").Ctx(ctx).Data(g.Map{
 				"order_id":           id,
 				"sku_id":             l.SkuID,
+				"sku_code":           l.SkuCode,
 				"product_id":         l.ProductID,
 				"sku_name":           l.SkuName,
+				"spec_text":          l.SpecText,
 				"product_name":       l.ProductName,
 				"product_main_image": l.ProductMainImage,
 				"price":              l.Price,
+				"original_price":     l.OriginalPrice,
 				"quantity":           l.Quantity,
 			}).Insert(); e != nil {
 				return codes.Wrap(codes.CodeInternalError, fmt.Errorf("写入订单项: %w", e))
@@ -888,11 +952,14 @@ func toOrderItems(rows []*orderItemRow) []*v1.OrderItem {
 		items = append(items, &v1.OrderItem{
 			Id:               r.Id,
 			SkuId:            r.SkuId,
+			SkuCode:          r.SkuCode,
 			ProductId:        r.ProductId,
 			SkuName:          r.SkuName,
+			SpecText:         r.SpecText,
 			ProductName:      r.ProductName,
 			ProductMainImage: r.ProductMainImage,
 			Price:            r.Price,
+			OriginalPrice:    r.OriginalPrice,
 			Quantity:         r.Quantity,
 		})
 	}

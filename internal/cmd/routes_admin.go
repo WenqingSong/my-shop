@@ -18,6 +18,7 @@ import (
 	refundController "cnb.cool/go-cloud-devops/my-shop/internal/controller/refund"
 	reviewController "cnb.cool/go-cloud-devops/my-shop/internal/controller/review"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/sku"
+	specController "cnb.cool/go-cloud-devops/my-shop/internal/controller/spec"
 	uploadCtrl "cnb.cool/go-cloud-devops/my-shop/internal/controller/upload"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 )
@@ -38,6 +39,7 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 	categoriesCtrl := categories.NewV1()
 	productCtrl := product.NewV1()
 	skuCtrl := sku.NewV1()
+	specCtrl := specController.NewV1()
 	inventoryCtrl := inventory.NewV1()
 	orderAdminCtrl := orderController.NewAdminV1()
 	flashsaleAdminCtrl := flashsale.NewAdminV1()
@@ -114,10 +116,20 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 		require("product:on_shelf").POST("/admin/products/:id/on-shelf", productCtrl.OnShelf)
 		require("product:off_shelf").POST("/admin/products/:id/off-shelf", productCtrl.OffShelf)
 
+		// 商品规格写入（AdminAuth + RequirePermission）：规格组/规格值随商品维护。
+		require("spec:create").POST("/admin/product-specs", specCtrl.CreateGroup)
+		require("spec:update").PUT("/admin/product-specs/:id", specCtrl.UpdateGroup)
+		require("spec:delete").DELETE("/admin/product-specs/:id", specCtrl.DeleteGroup)
+		require("spec:create").POST("/admin/product-specs/:id/values", specCtrl.CreateValue)
+		require("spec:update").PUT("/admin/product-spec-values/:id", specCtrl.UpdateValue)
+		require("spec:delete").DELETE("/admin/product-spec-values/:id", specCtrl.DeleteValue)
+
 		// SKU 写操作（AdminAuth + RequirePermission，扁平路由）。
 		require("sku:create").POST("/admin/skus", skuCtrl.Create)
 		require("sku:update").PUT("/admin/skus/:id", skuCtrl.Update)
 		require("sku:delete").DELETE("/admin/skus/:id", skuCtrl.Delete)
+		// 按商品规格组合生成 SKU（幂等：已存在的组合保留原 SKU 与编码）。
+		require("sku:create").POST("/admin/products/:id/skus/generate", skuCtrl.Generate)
 
 		// 库存查询（后台仅 AdminAuth，无读权限）。
 		admin.GET("/admin/inventories/:sku_id", inventoryCtrl.Get)

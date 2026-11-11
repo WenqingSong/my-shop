@@ -29,5 +29,8 @@ import (
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/refund"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/review"
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/sku"
+	// B1-04-02 BEGIN：商品规格组/规格值与 SKU 组合
+	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/spec"
+	// B1-04-02 END
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic/upload"
 )

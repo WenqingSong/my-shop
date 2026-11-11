@@ -13,6 +13,7 @@ const (
 	KindScalar TypeKind = iota
 	KindRef
 	KindArray
+	KindMap
 	KindAny
 )
 
@@ -139,6 +140,7 @@ var domains = map[string]DomainInfo{
 	"region":         {Name: "region", Prefix: "Region", Camel: "region"},
 	"review":         {Name: "review", Prefix: "Review", Camel: "review"},
 	"sku":            {Name: "sku", Prefix: "Sku", Camel: "sku"},
+	"spec":           {Name: "spec", Prefix: "Spec", Camel: "spec"},
 	"upload":         {Name: "upload", Prefix: "Upload", Camel: "upload"},
 }
 
@@ -193,6 +195,11 @@ var entitySchemaNames = map[string]string{
 	"review.ReviewItem":                "ReviewItem",
 	"review.Review":                    "Review",
 	"sku.Sku":                          "Sku",
+	"sku.SkuSpecValue":                 "SkuSpecValue",
+	"spec.SpecGroup":                   "SpecGroup",
+	"spec.SpecValue":                   "SpecValue",
+	"product.SkuAttr":                  "SkuAttr",
+	"product.SkuProductValue":          "SkuProductValue",
 }
 
 // explicitSchemaOverrides 覆盖 Req/Res 规则推导结果，消除重复词。

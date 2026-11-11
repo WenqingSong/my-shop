@@ -165,6 +165,14 @@ groups:
       - SkuCreateRequest
       - SkuDeleteRequest
       - SkuUpdateRequest
+      # B1-04-02 商品规格与 SKU 组合生成：7 条 API 的完整请求 DTO（同样按字段位置内联生成）。
+      - SkuGenerateRequest
+      - SpecCreateGroupRequest
+      - SpecCreateValueRequest
+      - SpecDeleteGroupRequest
+      - SpecDeleteValueRequest
+      - SpecUpdateGroupRequest
+      - SpecUpdateValueRequest
       - UploadAdminTokenRequest
       - UploadFrontendTokenRequest
       - UserGetUserStatusRequest

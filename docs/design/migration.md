@@ -83,8 +83,9 @@ B1-03-02 的六项交易与资金迁移、B1-04-01 的 profile_region_address）
 | `20261110000013` | `member` | `member_levels` + `user_memberships` + `member_growth_logs`（等级/用户会员/成长值流水；不重复创建积分账本；含 down） |
 | `20261110000014` | `distribution` | `user_referrals` + `distribution_commissions`（一级推荐关系/订单佣金；含 down） |
 | `20261110000015` | `profile_region_address` | `users` 增 `birthday DATE NULL`；`addresses` 增 `region_id`（可空，软引用 `regions.level=3`）+ `idx_region_id`（含 down；不重建/不回填 `regions`） |
+| `20261111000001` | `sku_code_pricing` | `skus` 增 `sku_code`（唯一）/`original_price` + `uk_sku_code`，历史行回填 `SKU<id>` 与售价；`order_items` 增 `sku_code`/`original_price`（含 down；不回算历史订单金额） |
 
-**版本分配（B1-04 八分支集成核实，2026-11-11）**：集成时逐一核对实际 SQL 文件、Registry 与已知数据库的 `schema_migrations`——`20261110000015` 仅由 B1-04-01（`profile_region_address`）使用；`my_shop_b104_test`、`my_shop_b10401_migrate` 上的版本 15 对应同一 Schema（`users.birthday` + `addresses.region_id`），未出现同一版本号对应不同 Schema 的数据库。当前最高版本为 `20261110000015`，下一个可用版本为 `20261110000016`；新增迁移必须按 Registry 规则单独领取，不得复用已被实现占用的版本号。
+**版本分配（B1-04 八分支集成核实，2026-11-11）**：集成时逐一核对实际 SQL 文件、Registry 与已知数据库的 `schema_migrations`——`20261110000015` 仅由 B1-04-01（`profile_region_address`）使用；`my_shop_b104_test`、`my_shop_b10401_migrate` 上的版本 15 对应同一 Schema（`users.birthday` + `addresses.region_id`），未出现同一版本号对应不同 Schema 的数据库。B1-04-02 使用 `20261111000001`（`sku_code_pricing`），与上述版本不冲突。当前最高版本为 `20261111000001`，下一个可用版本为 `20261111000002`；新增迁移必须按 Registry 规则单独领取，不得复用已被实现占用的版本号。
 
 ### 2.2 baseline 模型
 

@@ -41,11 +41,14 @@
                 type: string
                 x-go-validate: required
                 description: 幂等键（同键同内容幂等，同键不同内容 9006）
+              sku_code:
+                type: string
+                description: 直接购买 SKU 编码（source=direct 推荐；与 sku_id 至少填一个）
               sku_id:
                 type: integer
                 format: int64
                 x-go-type: int64
-                description: 直接购买 SKU id（source=direct 必填）
+                description: 直接购买 SKU id（source=direct 兼容字段；与 sku_code 二选一或同时一致）
               quantity:
                 type: integer
                 format: int64
@@ -56,6 +59,10 @@
                 format: int64
                 x-go-type: int64
                 description: 可选使用的用户券 id（一笔订单最多一张，0 或缺省表示不使用）
+              price:
+                oneOf: [{type: integer, format: int64}, {type: string, pattern: '^-?[0-9]+$'}]
+                x-go-type: json.Number
+                description: 客户端单价（仅用于防伪校验）：必须等于服务端 skus.price，否则 9007 拒绝；接受 JSON 整数或数字字符串（GoFrame 绑定行为）
             required:
               - source
               - address_id
@@ -98,6 +105,7 @@
           - 9004
           - 9005
           - 9006
+          - 9007
           - 19003
           - 19007
         scope: static-call-chain

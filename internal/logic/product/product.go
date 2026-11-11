@@ -12,6 +12,8 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	v1 "cnb.cool/go-cloud-devops/my-shop/api/product/v1"
+	skuv1 "cnb.cool/go-cloud-devops/my-shop/api/sku/v1"
+	specv1 "cnb.cool/go-cloud-devops/my-shop/api/spec/v1"
 	"cnb.cool/go-cloud-devops/my-shop/internal/codes"
 	"cnb.cool/go-cloud-devops/my-shop/internal/service"
 )
@@ -118,10 +120,19 @@ func (s *sProduct) Detail(ctx context.Context, id int64) (*v1.DetailRes, error) 
 	if err != nil {
 		return nil, err
 	}
-	return &v1.DetailRes{Product: *p, Skus: skus}, nil
+	groups, err := service.Spec().ListByProduct(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	stocks, err := service.Inventory().QuantitiesBySkuIDs(ctx, skuIDsOf(skus))
+	if err != nil {
+		return nil, err
+	}
+	attr, productValue := buildSkuSelector(groups, skus, stocks)
+	return &v1.DetailRes{Product: *p, Skus: skus, Attr: attr, ProductValue: productValue}, nil
 }
 
-// AdminDetail 后台详情：全部状态，并组合该商品的全部状态 SKU。
+// AdminDetail 后台详情：全部状态，并组合该商品的全部状态 SKU 与规格定义（含 id）。
 func (s *sProduct) AdminDetail(ctx context.Context, id int64) (*v1.AdminDetailRes, error) {
 	p, err := s.load(ctx, id, false)
 	if err != nil {
@@ -131,7 +142,70 @@ func (s *sProduct) AdminDetail(ctx context.Context, id int64) (*v1.AdminDetailRe
 	if err != nil {
 		return nil, err
 	}
-	return &v1.AdminDetailRes{Product: *p, Skus: skus}, nil
+	groups, err := service.Spec().ListByProduct(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return &v1.AdminDetailRes{Product: *p, Skus: skus, Specs: groups}, nil
+}
+
+// skuIDsOf 提取 SKU id 列表（供库存批量查询）。
+func skuIDsOf(skus []*skuv1.Sku) []int64 {
+	ids := make([]int64, 0, len(skus))
+	for _, item := range skus {
+		ids = append(ids, item.Id)
+	}
+	return ids
+}
+
+// buildSkuSelector 把商品规格组与 SKU 组合转换为原 APP 端 van-sku 直接消费的 attr/productValue：
+//   - attr[i].attrName 为规格组名，attrValueArr 为该组全部可选值文本（顺序与 productValue 键一致）；
+//   - productValue 键为按 attr 顺序逗号连接的规格值文本，值为该组合的 SKU 编码/售价/原价/库存；
+//   - 无规格商品返回空数组与空对象；规格值不完整的历史 SKU 不进入 productValue（避免伪造组合键），
+//     但仍保留在 skus 列表中，按 sku_id 直接下单不受影响。
+func buildSkuSelector(
+	groups []*specv1.SpecGroup,
+	skus []*skuv1.Sku,
+	stocks map[int64]int64,
+) ([]*v1.SkuAttr, map[string]*v1.SkuProductValue) {
+	attr := make([]*v1.SkuAttr, 0, len(groups))
+	for _, group := range groups {
+		values := make([]string, 0, len(group.Values))
+		for _, value := range group.Values {
+			values = append(values, value.Value)
+		}
+		attr = append(attr, &v1.SkuAttr{AttrName: group.Name, AttrValueArr: values})
+	}
+
+	productValue := make(map[string]*v1.SkuProductValue, len(skus))
+	if len(groups) == 0 {
+		return attr, productValue
+	}
+	for _, item := range skus {
+		if len(item.SpecValues) != len(groups) {
+			continue
+		}
+		parts := make([]string, 0, len(item.SpecValues))
+		for _, specValue := range item.SpecValues {
+			parts = append(parts, specValue.Value)
+		}
+		key := strings.Join(parts, ",")
+		display := key
+		if display == "" {
+			display = item.Name
+		}
+		productValue[key] = &v1.SkuProductValue{
+			Unique:        item.SkuCode,
+			Sku:           display,
+			SkuId:         item.Id,
+			SkuName:       item.Name,
+			Price:         item.Price,
+			OriginalPrice: item.OriginalPrice,
+			Stock:         stocks[item.Id],
+			Image:         item.ImageUrl,
+		}
+	}
+	return attr, productValue
 }
 
 // Create 创建商品：校验后事务写入 products 与 product_images，status 强制 draft。

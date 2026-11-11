@@ -190,6 +190,28 @@ func (s *sInventory) ListLogs(ctx context.Context, skuID int64, page, size int) 
 	return &v1.ListLogsRes{Items: items, Total: total, Page: page, Size: size}, nil
 }
 
+// QuantitiesBySkuIDs 批量查询多个 SKU 的当前库存数量：返回全部请求 SKU 的条目，
+// 无库存记录记 0（与 Get 的「无记录视为 0」语义一致）；单次查询，避免商品详情 N+1。
+func (s *sInventory) QuantitiesBySkuIDs(ctx context.Context, skuIDs []int64) (map[int64]int64, error) {
+	result := make(map[int64]int64, len(skuIDs))
+	if len(skuIDs) == 0 {
+		return result, nil
+	}
+	for _, id := range skuIDs {
+		result[id] = 0
+	}
+	var rows []*inventory
+	if err := g.DB().Model("inventories").Ctx(ctx).
+		WhereIn("sku_id", skuIDs).
+		Scan(&rows); err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("批量查询库存: %w", err))
+	}
+	for _, r := range rows {
+		result[r.SkuId] = r.Quantity
+	}
+	return result, nil
+}
+
 // normalizeLogPage 归一库存流水分页参数：page 最小 1，size 默认 20、最大 100。
 func normalizeLogPage(page, size int) (int, int) {
 	if page < 1 {
