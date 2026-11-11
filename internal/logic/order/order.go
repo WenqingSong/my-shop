@@ -974,7 +974,7 @@ func (s *sOrder) Cancel(ctx context.Context, userID, id int64) (*v1.CancelRes, e
 	var changed bool
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		var e error
-		changed, e = s.cancelInTx(ctx, tx, id, cancelReasonUser, false)
+		changed, e = s.cancelInTx(ctx, tx, id, cancelReasonUser, false, userID)
 		return e
 	})
 	if err != nil {
@@ -1174,7 +1174,7 @@ func (s *sOrder) cancelExpired(ctx context.Context, orderID int64) (bool, error)
 	var changed bool
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		var e error
-		changed, e = s.cancelInTx(ctx, tx, orderID, cancelReasonTimeout, true)
+		changed, e = s.cancelInTx(ctx, tx, orderID, cancelReasonTimeout, true, 0)
 		return e
 	})
 	if err != nil {
@@ -1185,7 +1185,7 @@ func (s *sOrder) cancelExpired(ctx context.Context, orderID int64) (bool, error)
 
 // cancelInTx 在事务内原子取消订单：条件更新 status=10 → 60 + 恢复库存；仅命中者恢复一次库存。
 // onlyExpired=true 时额外要求 expire_at < NOW()（SQL 判定，避免 Go↔MySQL 时区漂移）。
-func (s *sOrder) cancelInTx(ctx context.Context, tx gdb.TX, orderID int64, reason int, onlyExpired bool) (bool, error) {
+func (s *sOrder) cancelInTx(ctx context.Context, tx gdb.TX, orderID int64, reason int, onlyExpired bool, operatorID int64) (bool, error) {
 	model := tx.Model("orders").Ctx(ctx).
 		Where("id", orderID).
 		Where("status", statusPendingPayment)
@@ -1222,8 +1222,9 @@ func (s *sOrder) cancelInTx(ctx context.Context, tx gdb.TX, orderID int64, reaso
 	if reason == cancelReasonTimeout {
 		changeType = changeTypeTimeoutCancel
 		operatorType = operatorTypeSystem
+		operatorID = 0
 	}
-	if err := insertStatusLogInTx(ctx, tx, orderID, statusPendingPayment, statusCancelled, changeType, operatorType, 0, ""); err != nil {
+	if err := insertStatusLogInTx(ctx, tx, orderID, statusPendingPayment, statusCancelled, changeType, operatorType, operatorID, ""); err != nil {
 		return false, err
 	}
 	return true, nil
