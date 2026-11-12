@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" color="#17191D" role="img" aria-label="Framework 正式图形 v5"><defs>
+      <clipPath id="mark-left"><path d="M0 0H256V180H106.5V256H0Z"/></clipPath>
+      <clipPath id="mark-spine"><path d="M0 0H256V295.8908L0 148.0892Z"/></clipPath>
+      <clipPath id="mark-right"><path d="M0 0H256V123.84L0 271.64Z"/></clipPath>
+    </defs><g transform="translate(6 0)" fill="none" stroke="currentColor" stroke-width="10.5" stroke-linecap="round" stroke-linejoin="round"><path d="M128 28 44 76.4974V173.4923L112.5622 213.077" clip-path="url(#mark-left)"/><path d="M128 28 44 76.4974 128 124.9948V229" clip-path="url(#mark-spine)"/><path d="M128 28 212 76.4974V157" clip-path="url(#mark-right)"/></g></svg>
