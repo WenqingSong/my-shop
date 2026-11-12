@@ -9,6 +9,7 @@ import (
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/glog"
+	"github.com/gogf/gf/v2/os/gtime"
 
 	v1 "cnb.cool/go-cloud-devops/my-shop/api/iam/v1"
 	"cnb.cool/go-cloud-devops/my-shop/internal/auth"
@@ -23,7 +24,97 @@ const (
 	auditResultSuccess = 1
 	// maxUserStatusReasonLen 是禁用/启用原因的最大字符数（与 user_status_audits.reason VARCHAR(255) 对齐）。
 	maxUserStatusReasonLen = 255
+
+	// 后台用户列表分页约定，与 GET /admin/orders 等既有后台列表保持一致：
+	// 默认 20、上限 100，页码从 1 开始，越界视为参数错误（400）。
+	adminUserDefaultPage = 1
+	adminUserDefaultSize = 20
+	adminUserMaxPageSize = 100
 )
+
+// userAdminRow 是后台用户列表/详情的最小字段集（白名单查询结果）。
+// 刻意不含 password_hash、auth_epoch、nickname、phone、birthday 等
+// 认证材料或本轮页面未使用的资料类字段。
+type userAdminRow struct {
+	Id        int64       `json:"id"`
+	Username  string      `json:"username"`
+	Status    int         `json:"status"`
+	CreatedAt *gtime.Time `json:"created_at"`
+}
+
+// ListUser 返回后台用户分页列表（后台域，调用前已由 RequirePermission("user:read") 授权）。
+//
+// 只暴露管理所需的最小公开字段；查询用 Fields 白名单，认证材料从不进入结果集。
+// 排序固定 id 降序（id 唯一，翻页不会重复/遗漏）。
+func (s *sIam) ListUser(ctx context.Context, req *v1.ListUserReq) (*v1.ListUserRes, error) {
+	page, size, err := adminUserPageParams(req.Page, req.Size)
+	if err != nil {
+		return nil, err
+	}
+
+	model := g.DB().Model("users").Ctx(ctx)
+	total, err := model.Count()
+	if err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("统计用户: %w", err))
+	}
+
+	var rows []*userAdminRow
+	if err := model.Fields("id", "username", "status", "created_at").
+		Order("id DESC").Page(page, size).Scan(&rows); err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("查询用户列表: %w", err))
+	}
+
+	items := make([]*v1.AdminUser, 0, len(rows))
+	for _, r := range rows {
+		items = append(items, &v1.AdminUser{
+			Id:        r.Id,
+			Username:  r.Username,
+			Status:    r.Status,
+			CreatedAt: r.CreatedAt,
+		})
+	}
+	return &v1.ListUserRes{Items: items, Total: total, Page: page, Size: size}, nil
+}
+
+// GetUser 返回后台用户详情（后台域，调用前已由 RequirePermission("user:read") 授权）。
+// 目标不存在返回 2015（404），不泄露内部字段。
+func (s *sIam) GetUser(ctx context.Context, req *v1.GetUserReq) (*v1.GetUserRes, error) {
+	record, err := g.DB().Model("users").Ctx(ctx).
+		Fields("id", "username", "status", "created_at").
+		Where("id", req.Id).
+		One()
+	if err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("按 id 查询用户: %w", err))
+	}
+	if record == nil || record.IsEmpty() {
+		return nil, codes.New(codes.CodeUserNotFound)
+	}
+	return &v1.GetUserRes{AdminUser: v1.AdminUser{
+		Id:        record["id"].Int64(),
+		Username:  record["username"].String(),
+		Status:    record["status"].Int(),
+		CreatedAt: record["created_at"].GTime(),
+	}}, nil
+}
+
+// adminUserPageParams 校验后台用户列表分页参数：页码 <1、size 越界均返回 400。
+func adminUserPageParams(page, size *int) (int, int, error) {
+	p := adminUserDefaultPage
+	if page != nil {
+		if *page < 1 {
+			return 0, 0, codes.New(codes.CodeInvalidArgument)
+		}
+		p = *page
+	}
+	sz := adminUserDefaultSize
+	if size != nil {
+		if *size < 1 || *size > adminUserMaxPageSize {
+			return 0, 0, codes.New(codes.CodeInvalidArgument)
+		}
+		sz = *size
+	}
+	return p, sz, nil
+}
 
 // GetUserStatus 查询目标普通用户的账号状态（后台域，调用前已由 RequirePermission("user:read") 授权）。
 // 目标不存在返回 2015（404），不泄露任何内部信息。

@@ -273,6 +273,12 @@ API：
 
 `GET /admin/users/:id/status`（`AdminAuth` + `RequirePermission("user:read")`）返回 `{id, status}`；`PUT /admin/users/:id/status`（`AdminAuth` + `RequirePermission("user:status")`）以请求体 `{status, reason}` 禁用/启用目标用户；目标 id 取自 URL 路径，操作管理员取自 `AdminPrincipal`。
 
+只读查询能力（PHASE2 R5 补齐，均挂 `AdminAuth` + `RequirePermission("user:read")`）：
+
+- `GET /admin/users`：分页列表，`page`（默认 1）、`size`（默认 20，上限 100），越界/非整数返回 400（1001）；返回 `{items,total,page,size}`，固定按 `id DESC` 排序（`id` 唯一，翻页稳定）。
+- `GET /admin/users/:id`：详情；目标不存在返回 `2015 USER_NOT_FOUND`（404）。
+- 两者字段白名单统一为 `id/username/status/created_at`：`Fields(...)` 显式列名，**不查询** `password_hash`、`auth_epoch`、refresh/access token，也不外扩页面未使用的 `nickname/phone/birthday`。关键词与状态筛选未实现（管理端页面无对应控件）。
+
 状态更新在单个 MySQL 事务内以 `SELECT ... FOR UPDATE` 锁定目标行，区分三态：
 
 - 无行 → `2015 USER_NOT_FOUND`（404，无写入）；

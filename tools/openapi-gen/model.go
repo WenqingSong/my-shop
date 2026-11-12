@@ -190,6 +190,7 @@ var entitySchemaNames = map[string]string{
 	"flashsale.ActivitySkuInput":       "FlashSaleActivitySkuInput",
 	"flashsale.RequestAudit":           "FlashSaleRequestAudit",
 	"iam.Session":                      "UserSession",
+	"iam.AdminUser":                    "AdminUser",
 	"inventory.Inventory":              "Inventory",
 	"inventory.Log":                    "InventoryLog",
 	"freight.Template":                 "FreightTemplate",

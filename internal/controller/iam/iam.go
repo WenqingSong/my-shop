@@ -112,6 +112,16 @@ func (c *ControllerV1) RevokeAll(ctx context.Context, req *v1.RevokeAllReq) (res
 	return nil, nil
 }
 
+// ListUser 后台用户分页列表（经 RequirePermission("user:read")）。
+func (c *ControllerV1) ListUser(ctx context.Context, req *v1.ListUserReq) (res *v1.ListUserRes, err error) {
+	return service.Iam().ListUser(ctx, req)
+}
+
+// GetUser 后台用户详情（经 RequirePermission("user:read")），目标 id 来自 URL 路径。
+func (c *ControllerV1) GetUser(ctx context.Context, req *v1.GetUserReq) (res *v1.GetUserRes, err error) {
+	return service.Iam().GetUser(ctx, req)
+}
+
 // GetUserStatus 查询目标用户账号状态（后台域，经 RequirePermission("user:read")）。
 func (c *ControllerV1) GetUserStatus(ctx context.Context, req *v1.GetUserStatusReq) (res *v1.GetUserStatusRes, err error) {
 	return service.Iam().GetUserStatus(ctx, req.Id)

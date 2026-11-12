@@ -70,6 +70,7 @@ var opMetaByKey = map[string]*opMeta{
 	"GET /my/membership/growth-logs": {Pagination: "clamp"},
 
 	// ---- 分页：形态 B（严格校验）----
+	"GET /admin/users":                      {Pagination: "strict"},
 	"GET /admin/orders":                     {Pagination: "strict"},
 	"GET /admin/refunds":                    {Pagination: "strict"},
 	"GET /admin/distributions/referrals":    {Pagination: "strict"},
