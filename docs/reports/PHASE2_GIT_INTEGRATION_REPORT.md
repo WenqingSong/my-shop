@@ -16,7 +16,8 @@
 | 集成工作目录 | `/root/projects/my-shop-integration`（独立 worktree，不干扰原工作目录） |
 | 集成起点 | 本地 `feat/phase2-ecommerce-business` 与 `origin/feat/phase2-ecommerce-business` 均为基线 SHA |
 | 合并完成 SHA（报告提交前） | `b251687b41503c53a4a01df55957fb4e70c6e747` |
-| 报告提交 SHA | 见本报告提交后 `git log -1` |
+| 报告提交 SHA | `8b28bee0557440219b72878253abc3bcd3102040` |
+| 最终集成分支 HEAD（含本 SHA 回填提交） | 见 `git log -1`（元数据回填提交，内容仅本文件） |
 
 三条开发线与基线的共同祖先均为 `82243c0`，三条线之间不存在相互合并（两两 merge-base 均为基线）。集成分支在基线上直接推进，未合入 `main`。
 
