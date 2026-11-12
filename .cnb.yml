@@ -40,6 +40,8 @@ main:
             # 一致，使集成测试以 root/root 连接 MySQL；AUTH_JWT_SECRET 仅为满足生产
             # compose 的 ${AUTH_JWT_SECRET:?} 插值，各测试自身经 t.Setenv 注入密钥。
             export MYSQL_ROOT_PASSWORD=root
+            # B1-05-FINAL：集成/迁移门禁要求显式隔离测试库，CI 使用独立库名而非 my_shop。
+            export MYSQL_DATABASE=my_shop_ci_test
             export AUTH_JWT_SECRET=ci-placeholder-jwt-secret-not-for-prod
             make deps-start
 
@@ -63,7 +65,10 @@ main:
           script: bash scripts/contract-check.sh
 
         - name: test
-          script: make test
+          script: |
+            # B1-05-FINAL：破坏性测试必须显式指向隔离库，禁止默认落到 my_shop。
+            export DATABASE_DEFAULT_NAME=my_shop_ci_test
+            make test
 
         - name: race
           # 复用 start-dependencies 已就绪的 MySQL/Redis：test-race 除了纯内存的熔断器
@@ -85,6 +90,8 @@ main:
           script: |
             # 环境准备：与 pr-check 相同；仅用于测试依赖启动，不用于生产。
             export MYSQL_ROOT_PASSWORD=root
+            # B1-05-FINAL：集成/迁移门禁要求显式隔离测试库，CI 使用独立库名而非 my_shop。
+            export MYSQL_DATABASE=my_shop_ci_test
             export AUTH_JWT_SECRET=ci-placeholder-jwt-secret-not-for-prod
             make deps-start
 
@@ -107,7 +114,10 @@ main:
           script: bash scripts/contract-check.sh
 
         - name: test
-          script: make test
+          script: |
+            # B1-05-FINAL：破坏性测试必须显式指向隔离库，禁止默认落到 my_shop。
+            export DATABASE_DEFAULT_NAME=my_shop_ci_test
+            make test
 
         - name: race
           # 与 pr-check 相同：包含 Outbox 并发 Race 门禁（隔离库 my_shop_outbox_race）。

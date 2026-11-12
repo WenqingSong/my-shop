@@ -24,6 +24,9 @@ cd "${ROOT_DIR}"
 # 测试凭据与 test-integration.sh 同源：显式注入，不依赖应用/迁移代码的内置默认值。
 export DATABASE_DEFAULT_PASS="${DATABASE_DEFAULT_PASS:-${MYSQL_ROOT_PASSWORD:-root}}"
 
+# 本脚本会清空并重建目标库全部业务表，必须先确认目标是隔离测试库。
+assert_isolated_test_db
+
 log_info "go test：migration 真实 MySQL + 多进程语义（约 60s）..."
 go test -count=1 -v -timeout 600s \
   -run 'TestUpFailsWhenLockHeldByAnotherSession|TestUpSucceedsAfterLockHolderDisconnects|TestUpReleasesDatabaseConnections|TestUpCreatesSchemaAndIsIdempotent|TestUpFailsFastAndMarksDirty|TestConcurrentUp|TestMigrateProcess' \

@@ -136,6 +136,32 @@ container_healthy() {
   [[ "${health}" == "healthy" ]]
 }
 
+# ---------------------------------------------------------------------------
+# 破坏性测试的数据库隔离断言（B1-05-FINAL）
+# ---------------------------------------------------------------------------
+# manifest/config/config.yaml 的 database.default.name 默认值是 my_shop（开发/生产同名）。
+# test-integration.sh / test-migration.sh 会执行 DROP TABLE / DELETE 等破坏性清理，
+# 未显式覆盖库名时等同于对共享库执行测试，属于数据安全事故。
+# 本断言 fail-closed：未显式设置、命中禁用清单或不符合测试库命名时，直接退出且不执行任何 SQL。
+assert_isolated_test_db() {
+  local name="${DATABASE_DEFAULT_NAME:-}"
+  if [[ -z "${name}" ]]; then
+    log_error "必须显式设置 DATABASE_DEFAULT_NAME 为隔离测试库（禁止默认落到 my_shop）"
+    log_error "示例：DATABASE_DEFAULT_NAME=my_shop_test DATABASE_DEFAULT_PORT=13306 bash ${BASH_SOURCE[1]:-scripts/test-integration.sh}"
+    exit 1
+  fi
+  case "${name}" in
+    my_shop|my_shop_staging|my_shop_b10304_verify|mysql|sys|information_schema|performance_schema)
+      log_error "拒绝在共享/历史数据库 ${name} 上执行破坏性测试"
+      exit 1
+      ;;
+  esac
+  if [[ "${name}" != *_test && "${name}" != *_race ]]; then
+    log_error "隔离测试库名必须以 _test 或 _race 结尾：${name}"
+    exit 1
+  fi
+}
+
 # 轮询等待 MySQL / Redis 健康（基于 healthcheck 探测，不使用固定 sleep）。
 wait_for_deps() {
   local timeout="${STARTUP_DEPENDENCY_TIMEOUT}"

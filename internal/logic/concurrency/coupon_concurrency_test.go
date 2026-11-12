@@ -33,17 +33,17 @@ import (
 func couponTemplate(t *testing.T, totalQuantity int64) int64 {
 	t.Helper()
 	templateID, err := g.DB().Model("coupon_templates").Ctx(context.Background()).Data(g.Map{
-		"name":              "并发券-" + uniqueSuffix(),
-		"threshold_amount":  10000,
-		"discount_amount":   1000,
-		"total_quantity":    totalQuantity,
-		"issued_quantity":   0,
-		"per_user_limit":    1,
-		"claim_start_time":  mysqlNowOffset(-60),
-		"claim_end_time":    mysqlNowOffset(60),
-		"use_start_time":    mysqlNowOffset(-60),
-		"use_end_time":      mysqlNowOffset(1440),
-		"status":            1,
+		"name":             "并发券-" + uniqueSuffix(),
+		"threshold_amount": 10000,
+		"discount_amount":  1000,
+		"total_quantity":   totalQuantity,
+		"issued_quantity":  0,
+		"per_user_limit":   1,
+		"claim_start_time": mysqlNowOffset(-60),
+		"claim_end_time":   mysqlNowOffset(60),
+		"use_start_time":   mysqlNowOffset(-60),
+		"use_end_time":     mysqlNowOffset(1440),
+		"status":           1,
 	}).InsertAndGetId()
 	if err != nil {
 		t.Fatalf("插入优惠券模板失败: %v", err)
