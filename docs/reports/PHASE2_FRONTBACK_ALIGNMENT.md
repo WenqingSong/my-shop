@@ -189,8 +189,8 @@ GET  /api/admin/roles/1/permissions                  200   ← 移除后回读
 | 开发基线 | `607c022b215c590230d8ae538ddf2ae949d04761` |
 | Worktree | `/root/projects/my-shop-worktrees/frontback-alignment` |
 | 代码提交 | `b83db1a126e3ebaf3932119783c7c646af8bba8f` |
-| 报告提交 | 见本提交（仅新增本文件） |
-| 最终 HEAD | 报告元数据回填后由交付消息给出 |
+| 报告提交 | `f1e3ce95e62b8eff4b43311b502736b9935734f3` |
+| 最终 HEAD | 元数据回填提交（仅改本表两行，SHA 由交付消息给出） |
 | 远端 push | 普通 push（非 force），建立跟踪分支 |
 | 工作区状态 | 提交后 clean（不含被 `.gitignore` 忽略的 `node_modules/dist`） |
 
