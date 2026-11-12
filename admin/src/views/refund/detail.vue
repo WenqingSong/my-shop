@@ -409,9 +409,9 @@ onMounted(load);
 
 .page-header {
   display: flex;
+  gap: 16px;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
 }
 
 .page-title {
@@ -440,9 +440,9 @@ onMounted(load);
 
 .summary {
   display: flex;
+  gap: 16px;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
 }
 
 .summary__label {
@@ -500,7 +500,7 @@ onMounted(load);
 }
 
 .reason-block__text {
-  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .order-descriptions {
@@ -573,6 +573,6 @@ onMounted(load);
 .audit-item__reason {
   font-size: 12px;
   color: var(--el-text-color-secondary);
-  word-break: break-word;
+  overflow-wrap: break-word;
 }
 </style>

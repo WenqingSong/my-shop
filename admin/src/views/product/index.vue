@@ -418,10 +418,10 @@ useListReturn(pageRoot, load);
 
 .product-name {
   overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 13px;
   font-weight: 500;
   color: var(--el-text-color-primary);
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

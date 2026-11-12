@@ -13,16 +13,17 @@ withDefaults(defineProps<{ text?: string }>(), { text: "正在加载详情…" }
 <style scoped>
 .page-loading {
   padding: 24px;
+  background: var(--fw-surface);
   border: 1px solid var(--fw-line);
   border-radius: 6px;
-  background: var(--fw-surface);
 }
+
 .page-loading__label {
   display: flex;
-  align-items: center;
   gap: 12px;
+  align-items: center;
   margin-bottom: 24px;
-  color: var(--fw-muted);
   font-size: 13px;
+  color: var(--fw-muted);
 }
 </style>

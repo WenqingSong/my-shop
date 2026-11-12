@@ -17,37 +17,42 @@
           --boot-text: #b0b2b3;
           --boot-ink: #f0f0ed;
         }
+
         .boot-screen {
           position: fixed;
           inset: 0;
           display: grid;
+          gap: 20px;
           align-content: center;
           justify-items: center;
-          gap: 20px;
-          background: var(--boot-surface, #f2f2ef);
-          color: var(--boot-text, #62656a);
           font:
             12px -apple-system,
             BlinkMacSystemFont,
             "PingFang SC",
             sans-serif;
+          color: var(--boot-text, #62656a);
+          background: var(--boot-surface, #f2f2ef);
         }
+
         .boot-screen svg {
           color: var(--boot-ink, #17191d);
         }
+
         #boot-loading {
           position: fixed;
           inset: 0;
           z-index: 10000;
         }
+
         .boot-retry {
           padding: 8px 18px;
-          border: 1px solid currentColor;
-          border-radius: 4px;
-          background: transparent;
           color: inherit;
           cursor: pointer;
+          background: transparent;
+          border: 1px solid currentcolor;
+          border-radius: 4px;
         }
+
         .boot-screen .boot-symbol {
           width: 64px;
           height: 64px;

@@ -119,14 +119,15 @@ const { t, locale, translationCh, translationEn } = useTranslationLang();
 <style lang="scss" scoped>
 .console-demo-badge {
   flex-shrink: 0;
-  margin: 0 12px;
   padding: 4px 8px;
+  margin: 0 12px;
   font-size: 11px;
   line-height: 1.4;
   color: var(--el-color-warning);
   border: 1px solid var(--el-color-warning);
   border-radius: 3px;
 }
+
 .navbar {
   width: 100%;
   height: 48px;

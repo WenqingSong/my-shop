@@ -120,8 +120,8 @@ defineExpose({ reload: load });
 
 .metric-item {
   padding: 20px;
-  border: 1px solid var(--el-border-color-light);
   background: var(--el-fill-color-lighter);
+  border: 1px solid var(--el-border-color-light);
   border-radius: 6px;
 }
 
@@ -150,10 +150,10 @@ defineExpose({ reload: load });
   margin-top: 8px;
   font-size: clamp(22px, 2vw, 32px);
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
   line-height: 1.2;
   color: var(--el-text-color-primary);
   overflow-wrap: anywhere;
-  font-variant-numeric: tabular-nums;
 }
 
 .metric-item--featured {

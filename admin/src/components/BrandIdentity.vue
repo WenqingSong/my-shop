@@ -32,18 +32,21 @@ withDefaults(defineProps<{ compact?: boolean }>(), { compact: false });
 <style scoped>
 .brand-identity {
   display: inline-flex;
-  align-items: center;
-  gap: 10px;
   flex-shrink: 0;
+  gap: 10px;
+  align-items: center;
 }
+
 .brand-identity__symbol {
   width: 38px;
   height: 38px;
 }
+
 .brand-identity__wordmark {
   width: 138px;
   height: auto;
 }
+
 :global(.dark .brand-identity) {
   filter: invert(1);
 }

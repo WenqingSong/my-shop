@@ -7,16 +7,17 @@
 <style scoped>
 .layout-footer {
   display: flex;
+  gap: 16px;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  margin: 0 28px;
   padding: 18px 0;
+  margin: 0 28px;
   font-size: 11px;
-  letter-spacing: 0.02em;
   color: var(--el-text-color-secondary);
+  letter-spacing: 0.02em;
   border-top: 1px solid var(--el-border-color);
 }
+
 .footer-divider {
   margin: 0 10px;
   color: var(--el-text-color-placeholder);

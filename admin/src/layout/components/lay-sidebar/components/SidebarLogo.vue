@@ -25,15 +25,17 @@ defineProps<{ collapse: boolean }>();
   overflow: hidden;
   border-bottom: 1px solid var(--el-border-color-lighter);
 }
+
 .sidebar-logo-link {
   display: flex;
   flex-direction: column;
+  gap: 8px;
   align-items: flex-start;
   justify-content: center;
-  gap: 8px;
   height: 100%;
   padding: 16px 22px;
 }
+
 .sidebar-product {
   display: flex;
   gap: 9px;
@@ -41,17 +43,19 @@ defineProps<{ collapse: boolean }>();
   padding-left: 4px;
   font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.02em;
   color: var(--el-text-color-primary);
+  letter-spacing: 0.02em;
 }
+
 .sidebar-product > span {
   padding-left: 9px;
-  border-left: 1px solid var(--el-border-color);
-  color: var(--el-text-color-secondary);
   font-weight: 400;
+  color: var(--el-text-color-secondary);
+  border-left: 1px solid var(--el-border-color);
 }
+
 .collapses .sidebar-logo-link {
-  padding: 12px;
   align-items: center;
+  padding: 12px;
 }
 </style>

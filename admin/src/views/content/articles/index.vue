@@ -222,8 +222,8 @@ onMounted(load);
   font-size: 14px;
   line-height: 1.8;
   color: var(--el-text-color-regular);
+  overflow-wrap: break-word;
   white-space: pre-wrap;
-  word-break: break-word;
   background: var(--el-fill-color-lighter);
   border-radius: 6px;
 }
