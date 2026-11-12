@@ -28,6 +28,10 @@ type IIam interface {
 	RevokeOtherSessions(ctx context.Context, userID int64, currentSid string) error
 	// RevokeAllSessions 撤销 userID 的全部会话（含当前）。
 	RevokeAllSessions(ctx context.Context, userID int64) error
+	// ListUser 返回后台用户分页列表（仅公开业务字段，按 id 降序）。
+	ListUser(ctx context.Context, req *v1.ListUserReq) (*v1.ListUserRes, error)
+	// GetUser 返回后台用户详情（仅公开业务字段）；目标不存在返回 USER_NOT_FOUND。
+	GetUser(ctx context.Context, req *v1.GetUserReq) (*v1.GetUserRes, error)
 	// GetUserStatus 查询目标普通用户的账号状态（后台域）；目标不存在返回 USER_NOT_FOUND。
 	GetUserStatus(ctx context.Context, targetUserID int64) (*v1.GetUserStatusRes, error)
 	// UpdateUserStatus 禁用/启用目标普通用户（后台域），operatorAdminID 为已认证管理员 id（来自 AdminPrincipal）。

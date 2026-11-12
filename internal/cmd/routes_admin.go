@@ -84,7 +84,11 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 			return permissionGroup
 		}
 
-		// 用户账号状态管理（查询/禁用/启用普通用户）。
+		// 用户管理（后台，只读持 user:read、写持 user:status）：
+		//   - 列表与详情只返回 id/username/status/created_at，不含任何认证材料；
+		//   - /admin/users/:id 与 /admin/users/:id/status 路径深度不同，不存在路由歧义。
+		require("user:read").GET("/admin/users", iamCtrl.ListUser)
+		require("user:read").GET("/admin/users/:id", iamCtrl.GetUser)
 		require("user:read").GET("/admin/users/:id/status", iamCtrl.GetUserStatus)
 		require("user:status").PUT("/admin/users/:id/status", iamCtrl.UpdateUserStatus)
 
@@ -102,6 +106,8 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 		require("role:delete").DELETE("/admin/roles/:id", adminCtrl.DeleteRole)
 		require("role:assign_permission").POST("/admin/roles/:id/permissions", adminCtrl.AssignRolePermission)
 		require("role:assign_permission").DELETE("/admin/roles/:id/permissions/:permission_id", adminCtrl.RemoveRolePermission)
+		// 角色已授权限查询：只读角色授权状态，挂 role:list（与"查看角色"同权限），不新增权限码。
+		require("role:list").GET("/admin/roles/:id/permissions", adminCtrl.ListRolePermission)
 
 		// 权限管理。
 		require("permission:create").POST("/admin/permissions", adminCtrl.CreatePermission)

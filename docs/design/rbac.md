@@ -50,7 +50,7 @@ product:create/update/on_shelf/off_shelf             （4）
 sku:create/update/delete                             （3）
 inventory:increase/deduct                            （2）
 admin:create/disable/delete/assign_role              （4）
-role:create/list/update/delete/assign_permission     （5）
+role:create/list/update/delete/assign_permission     （5，list=角色列表+角色已授权限查询）
 permission:create/list/update/delete                 （4）
 order:ship/list/view                                 （3，list=列表+统计、view=详情）
 refund:list/view/review/execute                      （4，list=列表、view=详情+审计、review=审核、execute=执行/关闭）
@@ -59,7 +59,7 @@ review:take_down                                     （1）
 banner:create/update/delete                          （3）
 recommend:create/update/delete/item                  （4）
 dashboard:view                                       （1，运营数据大屏）
-user:read / user:status                              （2，用户状态管理：查询 / 禁用·启用）
+user:read / user:status                              （2，用户管理：列表+详情+状态查询 / 禁用·启用）
 coupon:create/list/stop                              （3）
 distribution:referral_list / distribution:commission_list / distribution:settle （3，关系+分销用户汇总 / 佣金记录+佣金统计 / 人工结算（仅状态流转，不含资金转账））
 bargain:create/update/list/view                      （4，create=创建活动、update=编辑+启停、list=列表、view=详情）
@@ -90,6 +90,7 @@ member:list/view/create/update/delete                （5，会员等级维护�
 - `AdminAuth`（认证：验签→401、`type≠admin`→403、会话失效→401、`admins` 不存在/禁用→401）+ `RequirePermission(code)`（授权：`IsSuper` 放行、命中放行、未命中 403、DB 查询失败 fail-closed 500）。
 - 后台判定顺序：验签+exp → 401；`type≠admin` → 403；会话无效 → 401；`admins` 不存在/禁用 → 401；权限不足 → 403。
 - 无 `/admin/register`（公开注册禁止）；无 `/admin/admins` 列表（`/admin/me` 覆盖自身信息）。
+- `GET /admin/me`（仅 `AdminAuth`）返回 `permissions[]`：取自 `admins → admin_roles → role_permissions → permissions` 的实际授权码，去重、按 `code` 升序，与 `RequirePermission` 使用同一张表与同一条匹配链，不存在第二套判定逻辑；身份只来自 `AdminPrincipal.AdminID`，不接受前端传参查询他人权限。查询失败 fail-closed 返回 500，**不返回空集合或伪造的权限集合**（空集合语义仅为「该管理员经角色未获得任何权限」）。超级管理员的"全量权限"由 `is_super` 表达（中间件对超管直通），该字段仍只反映角色授权事实。
 - 超级管理员密码无 dev 默认值，经 `admin.super.password` / `ADMIN_SUPER_PASSWORD` 注入；不硬编码凭据。
 
 ## 6. 错误码域
@@ -112,7 +113,8 @@ member:list/view/create/update/delete                （5，会员等级维护�
 
 - 认证部分（JWT `type` 声明、`iam:admin:session:` 会话、`AdminAuth`/`AdminAuthSignatureOnly` 中间件、身份域隔离）见 `iam.md`。
 - 各业务模块的写接口经 `RequirePermission` 挂载对应权限 code（权威清单见 2.3 与 `internal/boot/seed.go`）；接口与权限的挂载关系见 `internal/cmd/routes_admin.go` 及各模块 Design。
-- 用户状态管理（后台，`AdminAuth` + `RequirePermission`）：`GET /admin/users/:id/status` 挂 `user:read`，`PUT /admin/users/:id/status` 挂 `user:status`；认证/撤销语义见 `iam.md`。
+- 用户管理（后台，`AdminAuth` + `RequirePermission`）：`GET /admin/users`、`GET /admin/users/:id`、`GET /admin/users/:id/status` 挂 `user:read`；`PUT /admin/users/:id/status` 挂 `user:status`。列表/详情只返回 `id/username/status/created_at`，不含密码哈希与任何令牌；认证/撤销语义见 `iam.md`。
+- 角色已授权限查询（后台，`AdminAuth` + `RequirePermission`）：`GET /admin/roles/:id/permissions` 挂 `role:list`（"查看角色"同一权限码，不新增权限码）；返回 `{items:[{id,code,name,description}]}`，角色不存在 404（2007），查询失败 500 且不伪装为空列表。授予/移除仍分别由 `POST`/`DELETE` 挂 `role:assign_permission`，语义不变。
 - 授权数据模型（4 表）经 golang-migrate baseline（`20261001000001`）建表，见 `migration.md`。
 
 ## 8. Deferred / 已知留白

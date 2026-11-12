@@ -35,6 +35,7 @@ groups:
       - AdminDeletePermissionRequest
       - AdminDeleteRoleRequest
       - AdminListPermissionRequest
+      - AdminListRolePermissionRequest
       - AdminListRoleRequest
       - AdminLoginRequest
       - AdminLogoutRequest
@@ -227,8 +228,10 @@ groups:
       - SpecUpdateValueRequest
       - UploadAdminTokenRequest
       - UploadFrontendTokenRequest
+      - UserGetUserRequest
       - UserGetUserStatusRequest
       - UserListSessionsRequest
+      - UserListUserRequest
       - UserLoginRequest
       - UserLogoutRequest
       - UserMeRequest

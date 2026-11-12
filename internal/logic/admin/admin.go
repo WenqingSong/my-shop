@@ -138,8 +138,12 @@ func (s *sAdmin) Login(ctx context.Context, req *v1.LoginReq) (*v1.LoginRes, err
 	}, nil
 }
 
-// Me 按已认证的 adminID 查询管理员，返回 id/username/is_super/所属角色名。
+// Me 按已认证的 adminID 查询管理员，返回 id/username/is_super/所属角色名/有效权限码。
 // 查询不到管理员时按 401 处理，不泄露存在性。
+//
+// 权限码与角色名分别查询：任一查询失败都直接返回错误（fail-closed），
+// 绝不把"查询失败"降级成空权限集合——前端据此渲染菜单与按钮，
+// 空集合会让管理员被误判为无权限，同样不能返回伪造的权限集合。
 func (s *sAdmin) Me(ctx context.Context, adminID int64) (*v1.MeRes, error) {
 	admin, err := s.findAdminByID(ctx, adminID)
 	if err != nil {
@@ -152,11 +156,16 @@ func (s *sAdmin) Me(ctx context.Context, adminID int64) (*v1.MeRes, error) {
 	if err != nil {
 		return nil, err
 	}
+	permissions, err := s.listPermissionCodes(ctx, adminID)
+	if err != nil {
+		return nil, err
+	}
 	return &v1.MeRes{
-		Id:       admin.ID,
-		Username: admin.Username,
-		IsSuper:  admin.IsSuper == superFlag,
-		Roles:    roles,
+		Id:          admin.ID,
+		Username:    admin.Username,
+		IsSuper:     admin.IsSuper == superFlag,
+		Roles:       roles,
+		Permissions: permissions,
 	}, nil
 }
 
@@ -381,6 +390,37 @@ func (s *sAdmin) DeleteRole(ctx context.Context, id int64) error {
 		}
 		return nil
 	})
+}
+
+// ListRolePermission 返回角色已关联的权限（按权限 id 升序）。
+//
+// 角色不存在返回 2007；查询失败返回 500，绝不返回空列表——
+// 空列表在语义上是"该角色没有任何权限"，与"查询失败"必须可区分。
+// 只读取 role_permissions → permissions，不改变授予/移除语义。
+func (s *sAdmin) ListRolePermission(ctx context.Context, roleID int64) (*v1.ListRolePermissionRes, error) {
+	role, err := s.findRoleByID(ctx, roleID)
+	if err != nil {
+		return nil, err
+	}
+	if role == nil {
+		return nil, codes.New(codes.CodeRoleNotFound)
+	}
+
+	var records []*permissionRecord
+	if err := g.DB().Model("permissions p").Ctx(ctx).
+		InnerJoin("role_permissions rp", "rp.permission_id = p.id").
+		Where("rp.role_id", roleID).
+		Fields("p.id", "p.code", "p.name", "p.description").
+		Order("p.id").
+		Scan(&records); err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("查询角色已授权限: %w", err))
+	}
+
+	items := make([]*v1.Permission, 0, len(records))
+	for _, r := range records {
+		items = append(items, toPermission(r))
+	}
+	return &v1.ListRolePermissionRes{Items: items}, nil
 }
 
 // AssignRolePermission 为角色分配权限（幂等）。
@@ -653,6 +693,38 @@ func (s *sAdmin) listRoleNames(ctx context.Context, adminID int64) ([]string, er
 		names = append(names, r.Name)
 	}
 	return names, nil
+}
+
+// listPermissionCodes 返回管理员经角色获得的有效权限码（去重，按 code 升序）。
+//
+// 查询链路与 middleware.RequirePermission 的 hasPermission 完全一致：
+// admin_roles → role_permissions → permissions，按 permissions.code 命中。
+// 因此这里返回的集合就是后端实际授权判定所依据的集合，不存在第二套判定逻辑：
+//   - 多角色权限自动合并（同一 code 被多个角色授予时只出现一次）；
+//   - 只返回 permissions 表中真实存在的 code，不推导、不补全、不映射角色名；
+//   - 超级管理员的"全量权限"由 is_super 表达（中间件对超管直通），
+//     本函数仍只返回角色授权事实，避免伪造一份"被授予全部权限"的数据。
+//
+// 查询失败必须向上返回错误（fail-closed），不能降级为空集合。
+func (s *sAdmin) listPermissionCodes(ctx context.Context, adminID int64) ([]string, error) {
+	var records []struct {
+		Code string `json:"code"`
+	}
+	if err := g.DB().Model("permissions p").Ctx(ctx).
+		InnerJoin("role_permissions rp", "rp.permission_id = p.id").
+		InnerJoin("admin_roles ar", "ar.role_id = rp.role_id").
+		Where("ar.admin_id", adminID).
+		Fields("p.code").
+		Group("p.code").
+		Order("p.code").
+		Scan(&records); err != nil {
+		return nil, codes.Wrap(codes.CodeInternalError, fmt.Errorf("查询管理员权限码: %w", err))
+	}
+	codes := make([]string, 0, len(records))
+	for _, r := range records {
+		codes = append(codes, r.Code)
+	}
+	return codes, nil
 }
 
 func toRole(r *roleRecord) *v1.Role {

@@ -48,11 +48,12 @@ func collectRoutes(t *testing.T) map[string]bool {
 	return got
 }
 
-// fullRouteTable 是 210 条常驻 JSON API 的完整清单
+// fullRouteTable 是 213 条常驻 JSON API 的完整清单
 // （B1-01 §3.1 冻结的 142 条，B1-02-04 补齐，B1-04-05 新增一级分销 8 条，
 // B1-04-01 新增用户资料 2 条与地区字典 3 条，B1-04-02 新增商品规格 6 条与组合生成 1 条，
 // B1-04-07 新增砍价前台 6 条/公开 2 条/后台 5 条，B1-04-08 新增会员前台 3 条/后台 5 条与佣金结算 1 条，
-// B1-04 集成新增订单算价 1 条，B1-04-06 新增拼团公开 3 条/前台 4 条/后台 8 条）。
+// B1-04 集成新增订单算价 1 条，B1-04-06 新增拼团公开 3 条/前台 4 条/后台 8 条，
+// PHASE2 R5 新增管理端查询 3 条：用户列表、用户详情、角色已授权限）。
 // 任何新增、删除或路径/方法变更都必须同步更新本清单与 openapi/。
 //
 // 不计入本清单的路由：
@@ -174,7 +175,9 @@ func fullRouteTable() []string {
 		"GET /admin/me",
 		"GET /admin/qiniu/upload/token",
 
-		// ---- 后台用户状态（2）----
+		// ---- 后台用户管理（4）----
+		"GET /admin/users",
+		"GET /admin/users/:id",
 		"GET /admin/users/:id/status",
 		"PUT /admin/users/:id/status",
 
@@ -185,13 +188,14 @@ func fullRouteTable() []string {
 		"POST /admin/admins/:id/roles",
 		"DELETE /admin/admins/:id/roles/:role_id",
 
-		// ---- 角色管理（6）----
+		// ---- 角色管理（7）----
 		"POST /admin/roles",
 		"GET /admin/roles",
 		"PUT /admin/roles/:id",
 		"DELETE /admin/roles/:id",
 		"POST /admin/roles/:id/permissions",
 		"DELETE /admin/roles/:id/permissions/:permission_id",
+		"GET /admin/roles/:id/permissions",
 
 		// ---- 权限管理（4）----
 		"POST /admin/permissions",
@@ -324,13 +328,13 @@ func fullRouteTable() []string {
 }
 
 // TestRouteTable 双向锁定最终路由表：
-// 期望的 210 条必须存在，且不允许出现任何未登记的额外路由。
+// 期望的 213 条必须存在，且不允许出现任何未登记的额外路由。
 func TestRouteTable(t *testing.T) {
 	got := collectRoutes(t)
 	want := fullRouteTable()
 
-	if len(want) != 210 {
-		t.Fatalf("期望路由清单为 210 条，实际 %d 条（清单本身写错了）", len(want))
+	if len(want) != 213 {
+		t.Fatalf("期望路由清单为 213 条，实际 %d 条（清单本身写错了）", len(want))
 	}
 
 	wantSet := make(map[string]bool, len(want))
@@ -401,8 +405,8 @@ func TestRouteTableMatchesContract(t *testing.T) {
 			t.Errorf("OpenAPI 中的 %q 不是实际注册路由（虚构接口）", route)
 		}
 	}
-	if len(contract) != 210 {
-		t.Errorf("OpenAPI 实际 API 数为 %d，期望 210", len(contract))
+	if len(contract) != 213 {
+		t.Errorf("OpenAPI 实际 API 数为 %d，期望 213", len(contract))
 	}
 }
 
@@ -499,10 +503,10 @@ func TestRouteCountByScope(t *testing.T) {
 			frontend++
 		}
 	}
-	if frontend != 98 || admin != 110 || healthCount != 2 {
-		t.Errorf("路由分布 frontend=%d admin=%d health=%d，期望 98/110/2", frontend, admin, healthCount)
+	if frontend != 98 || admin != 113 || healthCount != 2 {
+		t.Errorf("路由分布 frontend=%d admin=%d health=%d，期望 98/113/2", frontend, admin, healthCount)
 	}
-	if total := frontend + admin + healthCount; total != 210 {
-		t.Errorf("常驻路由总数为 %d，期望 210: %s", total, fmt.Sprint(got))
+	if total := frontend + admin + healthCount; total != 213 {
+		t.Errorf("常驻路由总数为 %d，期望 213: %s", total, fmt.Sprint(got))
 	}
 }

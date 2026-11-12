@@ -13,11 +13,11 @@
 
 | 指标 | 数值 |
 |---|---|
-| DTO 结构体总数 | 488 |
-| Request 结构体 | 210 |
-| Response 结构体 | 209 |
-| 业务实体结构体 | 69 |
-| 已登记 API | 210 |
+| DTO 结构体总数 | 495 |
+| Request 结构体 | 213 |
+| Response 结构体 | 212 |
+| 业务实体结构体 | 70 |
+| 已登记 API | 213 |
 | OperationId 唯一性 | 通过（生成期强制校验） |
 | 无法确认的字段 | 0（遇到未登记类型直接失败，不猜测） |
 
@@ -65,7 +65,7 @@
 | `AdminLoginRequest` | `admin.LoginReq` | Request | 2 | - | - | - | - |
 | `AdminLoginResponse` | `admin.LoginRes` | Response | 3 | - | - | - | - |
 | `AdminMeRequest` | `admin.MeReq` | Request | 0 | - | - | - | - |
-| `AdminMeResponse` | `admin.MeRes` | Response | 4 | - | - | - | - |
+| `AdminMeResponse` | `admin.MeRes` | Response | 5 | - | - | - | - |
 | `AdminLogoutRequest` | `admin.LogoutReq` | Request | 0 | - | - | - | - |
 | `AdminLogoutResponse` | `admin.LogoutRes` | Response | 0 | - | - | - | - |
 | `AdminCreateAdminRequest` | `admin.CreateAdminReq` | Request | 2 | - | - | - | - |
@@ -91,6 +91,8 @@
 | `AdminAssignRolePermissionResponse` | `admin.AssignRolePermissionRes` | Response | 0 | - | - | - | - |
 | `AdminRemoveRolePermissionRequest` | `admin.RemoveRolePermissionReq` | Request | 2 | - | - | - | - |
 | `AdminRemoveRolePermissionResponse` | `admin.RemoveRolePermissionRes` | Response | 0 | - | - | - | - |
+| `AdminListRolePermissionRequest` | `admin.ListRolePermissionReq` | Request | 1 | - | - | - | - |
+| `AdminListRolePermissionResponse` | `admin.ListRolePermissionRes` | Response | 1 | - | - | - | - |
 | `Permission` | `admin.Permission` | Entity | 4 | - | - | - | - |
 | `AdminCreatePermissionRequest` | `admin.CreatePermissionReq` | Request | 3 | - | - | - | - |
 | `AdminCreatePermissionResponse` | `admin.CreatePermissionRes` | Response | 1 | - | - | - | - |
@@ -351,6 +353,11 @@
 | `UserGetUserStatusResponse` | `iam.GetUserStatusRes` | Response | 2 | - | `status` | - | - |
 | `UserUpdateUserStatusRequest` | `iam.UpdateUserStatusReq` | Request | 3 | - | `status` | - | - |
 | `UserUpdateUserStatusResponse` | `iam.UpdateUserStatusRes` | Response | 0 | - | - | - | - |
+| `AdminUser` | `iam.AdminUser` | Entity | 4 | - | - | `created_at` | `created_at` |
+| `UserListUserRequest` | `iam.ListUserReq` | Request | 2 | - | - | - | `page`<br>`size` |
+| `UserListUserResponse` | `iam.ListUserRes` | Response | 4 | - | - | - | - |
+| `UserGetUserRequest` | `iam.GetUserReq` | Request | 1 | - | - | - | - |
+| `UserGetUserResponse` | `iam.GetUserRes` | Response | 1 | - | - | - | - |
 | `Inventory` | `inventory.Inventory` | Entity | 4 | - | - | `created_at`<br>`updated_at` | `created_at`<br>`updated_at` |
 | `InventoryLog` | `inventory.Log` | Entity | 9 | - | `change_type` | `created_at` | `operator_admin_id`<br>`created_at` |
 | `InventoryGetRequest` | `inventory.GetReq` | Request | 1 | - | - | - | - |
@@ -784,6 +791,7 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 | `GroupBuyAdminCreateRequest` | `end_time` | *gtime | request |
 | `GroupBuyAdminUpdateRequest` | `start_time` | *gtime | request |
 | `GroupBuyAdminUpdateRequest` | `end_time` | *gtime | request |
+| `AdminUser` | `created_at` | *gtime | response |
 | `Inventory` | `created_at` | *gtime | response |
 | `Inventory` | `updated_at` | *gtime | response |
 | `InventoryLog` | `created_at` | *gtime | response |
@@ -988,6 +996,9 @@ string 枚举直接声明 `enum`；整数枚举同时声明 `x-enum-labels` 给�
 | `GroupBuyAdminListTeamsRequest` | `size` |
 | `GroupBuyAdminListTeamsRequest` | `activity_id` |
 | `GroupBuyAdminListTeamsRequest` | `leader_user_id` |
+| `AdminUser` | `created_at` |
+| `UserListUserRequest` | `page` |
+| `UserListUserRequest` | `size` |
 | `Inventory` | `created_at` |
 | `Inventory` | `updated_at` |
 | `InventoryLog` | `operator_admin_id` |

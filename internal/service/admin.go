@@ -14,7 +14,8 @@ import (
 type IAdmin interface {
 	// Login 校验管理员凭据，写入 Redis 管理员会话并签发 type=admin 的 access token。
 	Login(ctx context.Context, req *v1.LoginReq) (*v1.LoginRes, error)
-	// Me 返回当前管理员 id/username/is_super/所属角色。
+	// Me 返回当前管理员 id/username/is_super/所属角色与角色授予的有效权限码。
+	// 权限码查询失败时返回错误（fail-closed），不返回空集合冒充"无权限"。
 	Me(ctx context.Context, adminID int64) (*v1.MeRes, error)
 	// Logout 撤销 sid 对应的管理员会话（幂等）。
 	Logout(ctx context.Context, sid string) (*v1.LogoutRes, error)
@@ -38,6 +39,8 @@ type IAdmin interface {
 	UpdateRole(ctx context.Context, req *v1.UpdateRoleReq) (*v1.UpdateRoleRes, error)
 	// DeleteRole 删除角色（事务级联删除关联行）。
 	DeleteRole(ctx context.Context, id int64) error
+	// ListRolePermission 返回角色已关联的权限（按权限 id 升序）；角色不存在返回 ROLE_NOT_FOUND。
+	ListRolePermission(ctx context.Context, roleID int64) (*v1.ListRolePermissionRes, error)
 	// AssignRolePermission 为角色分配权限。
 	AssignRolePermission(ctx context.Context, req *v1.AssignRolePermissionReq) error
 	// RemoveRolePermission 移除角色权限。

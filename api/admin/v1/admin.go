@@ -22,11 +22,16 @@ type MeReq struct {
 }
 
 // MeRes 获取当前登录管理员响应。
+// 身份只取自已认证的 AdminPrincipal，不接受前端传入管理员 id 查询他人信息。
 type MeRes struct {
 	Id       int64    `json:"id" dc:"管理员 id"`
 	Username string   `json:"username" dc:"管理员用户名"`
 	IsSuper  bool     `json:"is_super" dc:"是否超级管理员"`
 	Roles    []string `json:"roles" dc:"所属角色名列表"`
+	// Permissions 是当前管理员经角色获得的有效权限码集合（去重、按 code 升序）。
+	// 超级管理员的"有效权限"由 is_super 表达（与 RequirePermission 直通语义一致），
+	// 本字段只反映 admin_roles → role_permissions → permissions 的实际授权事实。
+	Permissions []string `json:"permissions" dc:"当前管理员经角色获得的有效权限码集合（去重、按 code 升序）"`
 }
 
 // LogoutReq 登出当前管理员请求。sid 来自当前 token，不接受客户端指定。
@@ -159,6 +164,17 @@ type RemoveRolePermissionReq struct {
 
 // RemoveRolePermissionRes 移除角色权限响应（无业务字段）。
 type RemoveRolePermissionRes struct{}
+
+// ListRolePermissionReq 查询角色已授权限请求。
+type ListRolePermissionReq struct {
+	g.Meta `path:"/admin/roles/:id/permissions" method:"get" tags:"角色" summary:"查询角色已授权限"`
+	Id     int64 `json:"id" in:"path" v:"required" dc:"角色 id"`
+}
+
+// ListRolePermissionRes 查询角色已授权限响应。
+type ListRolePermissionRes struct {
+	Items []*Permission `json:"items" dc:"角色已关联的权限（按权限 id 升序，无授权时为空数组）"`
+}
 
 // Permission 权限结构。
 type Permission struct {

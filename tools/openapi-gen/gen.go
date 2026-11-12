@@ -11,8 +11,10 @@ import (
 // 契约基线（B1-01 冻结的 HEAD）。
 const contractBaseline = "82243c0fbce614e03c4ff57dcc829b5f68fb08f2"
 
-// 常驻 API 的期望分布：B1-01 §3.1 的 142 条 + B1-04 各子任务新增 68 条 = 210 条。
-// 新增明细（逐项累加必须等于 68，B1-05-04 复核时已按真实路由表核对）：
+// 常驻 API 的期望分布：B1-01 §3.1 的 142 条 + B1-04 各子任务新增 68 条 = 210 条，
+// 再叠加 PHASE2 R5 管理端查询 3 条（后台：GET /admin/users、GET /admin/users/:id、
+// GET /admin/roles/:id/permissions）= 213 条。
+// 新增明细（逐项累加必须等于 71，已按真实路由表核对）：
 //
 //	B1-04-05 一级分销 8 条（前台 4、后台 4）
 //	B1-04-01 用户资料与地区字典 5 条（前台：/profile 2 条、/regions 3 条）
@@ -23,10 +25,11 @@ const contractBaseline = "82243c0fbce614e03c4ff57dcc829b5f68fb08f2"
 //	B1-04-07 砍价 13 条（公开 2、前台 6、后台 5）
 //	B1-04-08 会员 8 条（前台 3、后台 5）与佣金人工结算 1 条（后台）
 //	B1-04 集成 订单算价预览 1 条（前台）
+//	PHASE2 R5 管理端查询 3 条（后台）
 const (
-	expectedTotal    = 210
+	expectedTotal    = 213
 	expectedFrontend = 98
-	expectedAdmin    = 110
+	expectedAdmin    = 113
 	expectedHealth   = 2
 )
 

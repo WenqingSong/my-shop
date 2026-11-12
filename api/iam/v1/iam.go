@@ -1,6 +1,9 @@
 package v1
 
-import "github.com/gogf/gf/v2/frame/g"
+import (
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
+)
 
 // RegisterReq 用户注册请求。
 type RegisterReq struct {
@@ -131,3 +134,40 @@ type UpdateUserStatusReq struct {
 
 // UpdateUserStatusRes 禁用/启用用户响应（无业务字段，成功时 data 为 null）。
 type UpdateUserStatusRes struct{}
+
+// AdminUser 后台用户管理视图（仅公开业务字段）。
+// 刻意不含 password_hash、auth_epoch、refresh/access token 等认证材料，
+// 也不含未被管理端使用的资料类字段（nickname/phone/birthday）。
+type AdminUser struct {
+	Id        int64       `json:"id" dc:"用户 id"`
+	Username  string      `json:"username" dc:"用户名"`
+	Status    int         `json:"status" dc:"1 启用 / 0 禁用"`
+	CreatedAt *gtime.Time `json:"created_at" dc:"注册时间（数据库墙钟时间）"`
+}
+
+// ListUserReq 后台用户分页列表请求（后台域，AdminAuth + RequirePermission("user:read")）。
+type ListUserReq struct {
+	g.Meta `path:"/admin/users" method:"get" tags:"IAM" summary:"后台用户分页列表"`
+	Page   *int `json:"page" dc:"页码，默认 1；<1 或非整数返回 400"`
+	Size   *int `json:"size" dc:"每页数量，默认 20、上限 100；越界或非整数返回 400"`
+}
+
+// ListUserRes 后台用户分页列表响应。
+type ListUserRes struct {
+	Items []*AdminUser `json:"items" dc:"用户列表（按 id 降序，id 唯一故翻页稳定）"`
+	Total int          `json:"total" dc:"总记录数"`
+	Page  int          `json:"page" dc:"当前页码"`
+	Size  int          `json:"size" dc:"每页数量"`
+}
+
+// GetUserReq 后台用户详情请求（后台域，AdminAuth + RequirePermission("user:read")）。
+// 目标用户 id 来自 URL 路径，服务端不信任请求体身份。
+type GetUserReq struct {
+	g.Meta `path:"/admin/users/:id" method:"get" tags:"IAM" summary:"后台用户详情"`
+	Id     int64 `json:"id" in:"path" v:"required" dc:"目标用户 id"`
+}
+
+// GetUserRes 后台用户详情响应（仅公开业务字段）。
+type GetUserRes struct {
+	AdminUser
+}

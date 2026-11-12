@@ -6171,6 +6171,126 @@ paths:
           $ref: '#/components/responses/Forbidden'
         "500":
           $ref: '#/components/responses/InternalError'
+  /admin/users:
+    get:
+      tags:
+        - IAM
+      summary: 后台用户分页列表
+      description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`user:read`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+      operationId: userListUser
+      security:
+        - bearerAuth: []
+      x-auth: admin
+      x-permission: user:read
+      x-handler: iam.ListUser
+      x-source: routes_admin.go
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int
+          description: 页码，默认 1；<1 或非整数返回 400
+          x-pagination-mode: strict
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int
+          description: 每页数量，默认 20、上限 100；越界或非整数返回 400
+          x-pagination-mode: strict
+      x-pagination-mode: strict
+      x-pagination-contract: 严格行为：page/size 非正整数或越界返回 HTTP 400 + code 1001。
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/UserListUserResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "500":
+          $ref: '#/components/responses/InternalError'
+  /admin/users/{id}:
+    get:
+      tags:
+        - IAM
+      summary: 后台用户详情
+      description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`user:read`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+      operationId: userGetUser
+      security:
+        - bearerAuth: []
+      x-auth: admin
+      x-permission: user:read
+      x-handler: iam.GetUser
+      x-source: routes_admin.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 目标用户 id
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/UserGetUserResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 2015
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "500":
+          $ref: '#/components/responses/InternalError'
   /admin/users/{id}/status:
     get:
       tags:
@@ -6939,6 +7059,61 @@ paths:
             - 1003
             - 2007
             - 2009
+          scope: static-call-chain
+          note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "500":
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags:
+        - 角色
+      summary: 查询角色已授权限
+      description: 认证方式：管理员 JWT（AdminAuth）。校验签名、有效期、type=admin、Redis 管理员会话、admins.status=1；失败返回 401/1002（身份类型不符为 403/1003）。权限码：`role:list`；超级管理员（is_super=1）直接绕过该权限码校验，其余管理员按 roles→role_permissions→permissions 校验，未命中返回 403/1003。
+      operationId: adminListRolePermission
+      security:
+        - bearerAuth: []
+      x-auth: admin
+      x-permission: role:list
+      x-handler: admin.ListRolePermission
+      x-source: routes_admin.go
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            x-go-type: int64
+          description: 角色 id
+      x-pagination-mode: none
+      x-idempotency:
+        mode: none
+      responses:
+        "200":
+          description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AdminListRolePermissionResponse'
+        x-error-codes:
+          codes:
+            - 1000
+            - 1001
+            - 1002
+            - 1003
+            - 2007
           scope: static-call-chain
           note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
         "400":
@@ -13506,6 +13681,10 @@ components:
       $ref: ./components/schemas.yaml#/AdminRemoveRolePermissionRequest
     AdminRemoveRolePermissionResponse:
       $ref: ./components/schemas.yaml#/AdminRemoveRolePermissionResponse
+    AdminListRolePermissionRequest:
+      $ref: ./components/schemas.yaml#/AdminListRolePermissionRequest
+    AdminListRolePermissionResponse:
+      $ref: ./components/schemas.yaml#/AdminListRolePermissionResponse
     Permission:
       $ref: ./components/schemas.yaml#/Permission
     AdminCreatePermissionRequest:
@@ -14026,6 +14205,16 @@ components:
       $ref: ./components/schemas.yaml#/UserUpdateUserStatusRequest
     UserUpdateUserStatusResponse:
       $ref: ./components/schemas.yaml#/UserUpdateUserStatusResponse
+    AdminUser:
+      $ref: ./components/schemas.yaml#/AdminUser
+    UserListUserRequest:
+      $ref: ./components/schemas.yaml#/UserListUserRequest
+    UserListUserResponse:
+      $ref: ./components/schemas.yaml#/UserListUserResponse
+    UserGetUserRequest:
+      $ref: ./components/schemas.yaml#/UserGetUserRequest
+    UserGetUserResponse:
+      $ref: ./components/schemas.yaml#/UserGetUserResponse
     Inventory:
       $ref: ./components/schemas.yaml#/Inventory
     InventoryLog:
@@ -14441,9 +14630,9 @@ components:
       $ref: ./components/security.yaml#/bearerAuth
 x-contract-baseline: 82243c0fbce614e03c4ff57dcc829b5f68fb08f2
 x-api-count:
-  total: 210
+  total: 213
   frontend: 98
-  admin: 110
+  admin: 113
   health: 2
   conditional: 1
   static: 1

@@ -117,6 +117,11 @@ func (c *ControllerV1) DeleteRole(ctx context.Context, req *v1.DeleteRoleReq) (r
 	return nil, nil
 }
 
+// ListRolePermission 查询角色已授权限（经 RequirePermission("role:list")）。
+func (c *ControllerV1) ListRolePermission(ctx context.Context, req *v1.ListRolePermissionReq) (res *v1.ListRolePermissionRes, err error) {
+	return service.Admin().ListRolePermission(ctx, req.Id)
+}
+
 // AssignRolePermission 为角色分配权限。
 func (c *ControllerV1) AssignRolePermission(ctx context.Context, req *v1.AssignRolePermissionReq) (res *v1.AssignRolePermissionRes, err error) {
 	if err := service.Admin().AssignRolePermission(ctx, req); err != nil {

@@ -234,12 +234,13 @@ AdminMeRequest:
   additionalProperties: false
 AdminMeResponse:
   type: object
-  description: MeRes 获取当前登录管理员响应。
+  description: MeRes 获取当前登录管理员响应。 身份只取自已认证的 AdminPrincipal，不接受前端传入管理员 id 查询他人信息。
   required:
     - id
     - username
     - is_super
     - roles
+    - permissions
   properties:
     id:
       type: integer
@@ -257,6 +258,11 @@ AdminMeResponse:
       items:
         type: string
       description: 所属角色名列表
+    permissions:
+      type: array
+      items:
+        type: string
+      description: 当前管理员经角色获得的有效权限码集合（去重、按 code 升序）
 AdminLogoutRequest:
   type: object
   description: LogoutReq 登出当前管理员请求。sid 来自当前 token，不接受客户端指定。
@@ -547,6 +553,30 @@ AdminRemoveRolePermissionResponse:
   description: RemoveRolePermissionRes 移除角色权限响应（无业务字段）。
   properties: {}
   additionalProperties: false
+AdminListRolePermissionRequest:
+  type: object
+  description: ListRolePermissionReq 查询角色已授权限请求。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 角色 id
+AdminListRolePermissionResponse:
+  type: object
+  description: ListRolePermissionRes 查询角色已授权限响应。
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/Permission'}, {type: "null"}]
+      description: 角色已关联的权限（按权限 id 升序，无授权时为空数组）
 Permission:
   type: object
   description: Permission 权限结构。
@@ -5818,6 +5848,96 @@ UserUpdateUserStatusResponse:
   description: UpdateUserStatusRes 禁用/启用用户响应（无业务字段，成功时 data 为 null）。
   properties: {}
   additionalProperties: false
+AdminUser:
+  type: object
+  description: AdminUser 后台用户管理视图（仅公开业务字段）。 刻意不含 password_hash、auth_epoch、refresh/access token 等认证材料， 也不含未被管理端使用的资料类字段（nickname/phone/birthday）。
+  required:
+    - id
+    - username
+    - status
+    - created_at
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      description: 用户 id
+    username:
+      type: string
+      description: 用户名
+    status:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 1 启用 / 0 禁用
+    created_at:
+      type: [string, "null"]
+      x-go-type: gtime.Time
+      pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
+      example: "2026-11-10 11:27:26"
+      x-format: gtime-local
+      description: 注册时间（数据库墙钟时间）；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
+UserListUserRequest:
+  type: object
+  description: ListUserReq 后台用户分页列表请求（后台域，AdminAuth + RequirePermission("user:read")）。
+  properties:
+    page:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 页码，默认 1；<1 或非整数返回 400
+    size:
+      type: [integer, "null"]
+      format: int64
+      x-go-type: int
+      description: 每页数量，默认 20、上限 100；越界或非整数返回 400
+UserListUserResponse:
+  type: object
+  description: ListUserRes 后台用户分页列表响应。
+  required:
+    - items
+    - total
+    - page
+    - size
+  properties:
+    items:
+      type: array
+      items:
+        oneOf: [{$ref: '#/AdminUser'}, {type: "null"}]
+      description: 用户列表（按 id 降序，id 唯一故翻页稳定）
+    total:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 总记录数
+    page:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 当前页码
+    size:
+      type: integer
+      format: int64
+      x-go-type: int
+      description: 每页数量
+UserGetUserRequest:
+  type: object
+  description: GetUserReq 后台用户详情请求（后台域，AdminAuth + RequirePermission("user:read")）。 目标用户 id 来自 URL 路径，服务端不信任请求体身份。
+  required:
+    - id
+  properties:
+    id:
+      type: integer
+      format: int64
+      x-go-type: int64
+      x-in: path
+      x-go-validate: required
+      description: 目标用户 id
+UserGetUserResponse:
+  type: object
+  description: GetUserRes 后台用户详情响应（仅公开业务字段）。
+  allOf:
+    - $ref: '#/AdminUser'
 Inventory:
   type: object
   description: Inventory 库存结构，查询与写接口复用。
