@@ -12,7 +12,7 @@
 | 集成分支 | `feat/phase2-ecommerce-business` |
 | 原始集成基线 | `ddfd5ab77ced617ae0b0020c46a8220396b52145` |
 | 代码集成后 HEAD（三次合并后） | `73e3b8e92c2e538ba2368fb6d4b4c017193631ab` |
-| 最终 HEAD（含本报告） | 见本报告提交后的 `git rev-parse HEAD`（元数据回填提交仅修改本文件 SHA 占位） |
+| 报告提交 HEAD | `f7dbf8b2103ff6e62a78cd3416bd2a48cec2e7c1`（仅新增本报告；随后的元数据提交只回填本行，最终推送 SHA 见交付说明） |
 | 远端状态 | 合并前本地与 `origin/feat/phase2-ecommerce-business` 同为 `ddfd5ab`，合并前已 `git fetch --all --prune` |
 
 三个源分支实际 SHA 与交接记录 **完全一致**，且三者均精确以 `ddfd5ab` 为 merge-base（无额外提交、无未知提交混入）：
