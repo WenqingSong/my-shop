@@ -248,6 +248,7 @@ CNB CI（`.cnb.yml`）：
 | 对象存储 | `docs/design/storage.md` |
 | 会员等级与成长值 | `docs/design/member.md` |
 | 一级分销与佣金 | `docs/design/distribution.md` |
+| API 时间字段语义（时区 / 序列化格式） | `docs/design/api-time-semantics.md` |
 | 错误码 | `docs/design/error-codes.md` |
 | 数据库迁移（机制） | `docs/design/migration.md` |
 | 数据库迁移（运维 / K8s Job） | `docs/development/migrations.md` |

@@ -95,7 +95,7 @@
 | `reversed_amount` | INT UNSIGNED | 非空默认 0，已冲回金额（整单退款时等于 `commission_amount`） |
 | `reversed_at` | DATETIME | 可空，冲回时间 |
 | `refund_id` | BIGINT UNSIGNED | 可空，触发冲回的退款单 id（软引用 `refund_requests.id`）；`uk_refund_id` 唯一 |
-| `reversal_reason` | VARCHAR(32) | 非空默认 ''，冲回原因：`refund`/`cancel` 等 |
+| `reversal_reason` | VARCHAR(32) | 非空默认 ''，冲回原因：`refund`（当前唯一实现值） |
 | `created_at`/`updated_at` | DATETIME | 默认 `CURRENT_TIMESTAMP` |
 
 索引：`PRIMARY(id)`、`uk_order_id(order_id)` UNIQUE、`uk_refund_id(refund_id)` UNIQUE、

@@ -589,6 +589,150 @@ exit=0
 最终结论维持 **PARTIAL**：工程门禁与 CI 安全配置已修复，但 D1 运行时缺陷与真实历史数据迁移
 仍未解决，不满足 PASS 条件。
 
+## 10. B1-05-FINAL-FIX-02：最终工程决策执行
+
+> 本章为追加修订，不覆盖 §1~§9。§9.7 中"D1 仍存在"是当时的真实结论；
+> 本章记录 D1 修复后的新状态。
+
+### 10.1 D1：GoFrame 参数校验统一映射（已修复）
+
+#### 10.1.1 实现
+
+在统一错误映射层 `internal/codes/codes.go` 的 `FromError` 中识别 GoFrame 校验失败：
+
+```go
+if c.Code() == gcode.CodeValidationFailed.Code() { // 框架码 51
+    return CodeInvalidArgument // 业务码 1001 → HTTP 400
+}
+```
+
+约束遵守情况：
+
+- 只归一 `gvalid` 的确定语义（51），未把所有未知错误映射为 1001。
+- `gcode.CodeNil` 仍为 1000；普通错误仍为 1000；未知码仍由 `HTTPStatus` 返回 500。
+- 未修改第三方依赖，未逐个 Controller 打补丁。
+- 冲突检查：`codes.go` 码表中不存在 51（也不存在 50/53），无业务码冲突。
+
+#### 10.1.2 真实 HTTP 证据
+
+| 请求 | 修复前 | 修复后 |
+|---|---|---|
+| `POST /categories` `{}` | 500 + 51 + "内部错误" | **400 + 1001 + "参数错误"** |
+| `POST /categories` `{"name":""}` | 500 + 51 | **400 + 1001** |
+| `POST /admin/login` `{}`（第二个代表性 DTO） | 500 + 51 | **400 + 1001** |
+| `POST /categories` 同级重名（正常业务错误） | 409 + 3002 | **409 + 3002（不变）** |
+| 未知内部错误（单元测试） | 500 | **500（不变）** |
+
+回归测试：
+
+- `internal/codes/fromerror_test.go`：51 → 1001；普通错误 → 1000；未知码 HTTP 500。
+- `test/e2e/validation_error_mapping_test.go`：3 个 DTO 校验入口 + 1 个业务错误入口。
+
+契约同步：删除 28 条 operation 上已失效的 `x-known-issue: B1-02-D1`（及全局条目），
+生成器新增回归测试禁止该标记再次出现。
+
+### 10.2 O2：响应时间字段兼容性（文档化，不改 API）
+
+- 现有响应保持 `YYYY-MM-DD HH:MM:SS`，不含时区偏移，不改为 RFC3339。
+- 新增 `docs/design/api-time-semantics.md`，记录：时区来源（`dashboard.timezone`，
+  默认 `Asia/Shanghai`，MySQL 会话固定偏移，DST 时区启动即拒绝）、序列化格式、
+  客户端不得假定 UTC、API 不携带时区标识的已知限制、新 API 版本必须使用 RFC3339。
+- `docs/design/architecture.md` 增加索引；OpenAPI `info.description` 增加时间语义指引。
+- 未修改任何生产序列化代码，无破坏性变更。
+
+### 10.3 O3：清理无运行时依据的枚举声明
+
+三个字段的核实结果：
+
+| 字段 | 修复前契约 | 运行时实现 | 处理 |
+|---|---|---|---|
+| `MemberGrowthLog.change_type` | 无 `enum` 键，但描述列出 `admin_adjust` | 仅 `order_reward` / `refund_deduct` | 描述删除 `admin_adjust` |
+| `MemberGrowthLog.biz_type` | 无 `enum` 键，但描述列出 `manual` | 仅 `order` / `refund` | 描述删除 `manual` |
+| `DistributionCommission.reversal_reason` | 无 `enum` 键，但描述列出 `cancel` | 仅 `refund` | 描述删除 `cancel` |
+
+结论：生成物中原本不存在 `enum` 键（B1-05-04 已避免虚构 enum），实际不一致是 DTO 描述
+列举了未实现取值。本次从 DTO 事实源删除这些取值并重新生成，三个字段不再出现无运行时
+依据的枚举描述；`TestDeferredEnumValuesNotDocumented` 防止回归。
+字段类型、必填约束、可空性均未改变。
+
+### 10.4 O4：拼团重复参团语义（维持 9006）
+
+生产代码未修改，维持既有语义。真实 MySQL 并发测试
+`TestGroupBuyConcurrentDuplicateJoinSingleParticipant`（10 并发，同一用户、同一团、同一幂等键）：
+
+```text
+并发重复参团结果：成功回读=2，9006(订单幂等冲突)=8，25007(已参与)=0
+joined_count=2，participants=2，orders=2，库存仅扣减 2
+```
+
+- 未获得资格的请求全部为 **9006**（业务冲突，HTTP 409），不是幂等成功。
+- 无第二条参与记录/订单，未重复扣库存、未重复增加人数。
+- 既有"已参与者顺序重试回读团详情"的幂等快路径保持不变。
+- `docs/design/marketing.md` §2.9.1 固化上述语义；未引入第二套订单幂等机制。
+
+### 10.5 M1：真实历史业务数据迁移（继续 BLOCKED）
+
+- 地区字典 3938 条为真实数据验证，不等于完整历史业务数据迁移。
+- 商品/订单/用户/钱包/积分等真实导入仍缺少可信源文件，本次未执行、未伪造。
+- 恢复条件：Owner 提供可信 `shopping.sql` 或其他正式数据源，并在隔离源库/目标库重新执行
+  dry-run、import、行数/外键/映射核对与二次幂等。
+- 迁移功能与既有报告均保留，未为消除 BLOCKED 修改任何迁移结果。
+
+### 10.6 测试验证矩阵（真实退出码）
+
+| # | 命令 | 退出码 | 结果 | 备注 |
+|---:|---|---:|---|---|
+| 1 | `gofmt -l .` | 0 | PASS | 无输出 |
+| 2 | `go build ./...` | 0 | PASS | — |
+| 3 | `go vet ./...` | 0 | PASS | — |
+| 4 | `git diff --check` | 0 | PASS | — |
+| 5 | `make test-unit` | 0 | PASS | 30 组，27.7s |
+| 6 | `bash scripts/test-race.sh` | 0 | PASS | **188 项**，2m25.8s，0 SKIP，无 DATA RACE |
+| 7 | `bash scripts/test-migration.sh` | 0 | PASS | 119.0s |
+| 8 | `bash scripts/check-registry.sh` | 0 | PASS | — |
+| 9 | `bash scripts/contract-check.sh` | 0 | PASS | NOT RUN 0 |
+| 10 | `make test`（含 `go test -p 1 -count=1 ./...`） | 0 | PASS | 17m05.5s |
+| 11 | 定向：`go test ./internal/codes/` | 0 | PASS | 2 项 |
+| 12 | 定向：D1 E2E 4 个场景 | 0 | PASS | 400/1001 与 409/3002 |
+| 13 | 定向：拼团并发重复参团 | 0 | PASS | 8×9006，无重复副作用 |
+
+单元用例同口径统计（`scripts/test-unit.sh` 每组 `-count=1 -v`，顶层 `=== RUN` 不含 `/`）：
+
+| 指标 | B1-05-FINAL-FIX-01 基线 | 本次 HEAD |
+|---|---:|---:|
+| 执行组 / 包 | 29 | 30 |
+| 顶层 Test 函数 | 315 | **317** |
+| 子测试 | 254 | 254 |
+| SKIP | 0 | 0 |
+| FAIL | 0 | 0 |
+
+增加 2 项为 D1 错误映射单测；未删除、未缩小正则、未增加 SKIP。
+
+### 10.7 OpenAPI 统计变化
+
+| 指标 | 修改前 | 修改后 | 说明 |
+|---|---:|---:|---|
+| 常驻 API | 210 | **210** | 不变 |
+| Planned API | 4 | **4** | 不变 |
+| Schema | 490 | **490** | 不变 |
+| 唯一 operationId | 214 | **214** | 不变 |
+| 错误码码表 | 153 | **153** | 不变 |
+| 权限码 | 73 | **73** | 不变 |
+| `x-known-issue: B1-02-D1` operation | 28 | **0** | D1 已修复，契约删除失效声明 |
+| 未引用组件 | 228 | **228** | 不变 |
+
+生成物净变化：`-333` 行 D1 known-issue 块、3 处字段描述修正、1 处 `info.description` 增补。
+
+### 10.8 最终结论
+
+| 维度 | 结论 |
+|---|---|
+| 本次定向修复（D1/O2/O3/O4） | **PASS** |
+| B1-05 工程验收 | **PARTIAL**（M1 外部阻塞） |
+| 真实历史业务数据迁移 | **BLOCKED** |
+
+不将 B1-05 整体改为 PASS：真实历史业务数据迁移仍未验证，属外部数据源阻塞。
+
 ## 附录 A：本次修复记录（修改前 → 修改后）
 
 | 编号 | 原始问题 | 修改 | 修改前验证 | 修改后验证 |

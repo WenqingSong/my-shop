@@ -90,8 +90,8 @@ DB 用 `INT UNSIGNED` 保证非负，不引入 CHECK（与项目既有迁移约�
 | `change_amount` | BIGINT | 非空，带符号变动值：正=增加、负=扣减 |
 | `growth_before` | BIGINT UNSIGNED | 非空，变动前成长值 |
 | `growth_after` | BIGINT UNSIGNED | 非空，变动后成长值（必须 ≥ 0） |
-| `change_type` | VARCHAR(32) | 非空，语义类型：`order_reward`/`refund_deduct`/`admin_adjust` 等 |
-| `biz_type` | VARCHAR(32) | 非空，关联业务类型：`order`/`refund`/`manual` 等 |
+| `change_type` | VARCHAR(32) | 非空，语义类型：当前仅实现 `order_reward`/`refund_deduct`（`admin_adjust` 见 §2.5 未实现说明） |
+| `biz_type` | VARCHAR(32) | 非空，关联业务类型：当前仅实现 `order`/`refund` |
 | `biz_id` | BIGINT UNSIGNED | 可空，关联业务 id |
 | `idempotency_key` | VARCHAR(64) | 非空，幂等标识，`uk_idempotency` 全局唯一 |
 | `remark` | VARCHAR(255) | 非空默认 '' |
