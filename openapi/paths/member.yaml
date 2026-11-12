@@ -238,6 +238,10 @@
                 type: integer
                 format: int64
                 x-go-type: int
+                enum: [0, 1]
+                x-enum-labels:
+                  "0": 停用
+                  "1": 启用
                 description: 状态：1=启用、0=停用；缺省按 1 处理
     x-pagination-mode: none
     x-idempotency:
@@ -325,6 +329,10 @@
                 type: integer
                 format: int64
                 x-go-type: int
+                enum: [0, 1]
+                x-enum-labels:
+                  "0": 停用
+                  "1": 启用
                 description: 状态：1=启用、0=停用
     x-pagination-mode: none
     x-idempotency:

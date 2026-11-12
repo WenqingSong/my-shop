@@ -898,6 +898,7 @@ paths:
             format: int64
             x-go-type: int
           description: 页码，默认 1；<1 返回 400
+          x-pagination-mode: strict
         - name: size
           in: query
           required: false
@@ -906,6 +907,7 @@ paths:
             format: int64
             x-go-type: int
           description: 每页数量，默认 20、上限 100；越界返回 400
+          x-pagination-mode: strict
         - name: product_id
           in: query
           required: false
@@ -914,7 +916,8 @@ paths:
             format: int64
             x-go-type: int64
           description: 商品 id 精确筛选；<=0 返回 400
-      x-pagination-mode: none
+      x-pagination-mode: strict
+      x-pagination-contract: 严格行为：page/size 非正整数或越界返回 HTTP 400 + code 1001。
       x-idempotency:
         mode: none
       responses:
@@ -2663,6 +2666,10 @@ paths:
               properties:
                 source:
                   type: string
+                  enum: [cart, direct]
+                  x-enum-labels:
+                    cart: 购物车勾选计价
+                    direct: 单 SKU 直接购买计价
                   x-go-validate: required
                   description: 来源：cart/direct
                 address_id:
@@ -5134,6 +5141,7 @@ paths:
           required: false
           schema:
             type: string
+            enum: ["", pending, success, failed, expired]
           description: 按团状态过滤：pending/success/failed/expired；空表示全部
       x-pagination-mode: strict
       x-pagination-contract: 严格行为：page/size 非正整数或越界返回 HTTP 400 + code 1001。
@@ -5247,6 +5255,7 @@ paths:
             format: int64
             x-go-type: int
           description: 页码，默认 1；<1 返回 400
+          x-pagination-mode: strict
         - name: size
           in: query
           required: false
@@ -5255,7 +5264,9 @@ paths:
             format: int64
             x-go-type: int
           description: 每页数量，默认 20、上限 100；越界返回 400
-      x-pagination-mode: none
+          x-pagination-mode: strict
+      x-pagination-mode: strict
+      x-pagination-contract: 严格行为：page/size 非正整数或越界返回 HTTP 400 + code 1001。
       x-idempotency:
         mode: none
       responses:
@@ -5820,6 +5831,7 @@ paths:
             format: int64
             x-go-type: int
           description: 页码，默认 1；<1 返回 400
+          x-pagination-mode: strict
         - name: size
           in: query
           required: false
@@ -5828,13 +5840,16 @@ paths:
             format: int64
             x-go-type: int
           description: 每页数量，默认 20、上限 100；越界返回 400
+          x-pagination-mode: strict
         - name: tx_type
           in: query
           required: false
           schema:
             type: string
+            enum: ["", recharge, order_pay, order_refund]
           description: 按交易类型筛选：recharge/order_pay/order_refund；缺省为不过滤
-      x-pagination-mode: none
+      x-pagination-mode: strict
+      x-pagination-contract: 严格行为：page/size 非正整数或越界返回 HTTP 400 + code 1001。
       x-idempotency:
         mode: none
       responses:
@@ -5900,7 +5915,10 @@ paths:
                 - idempotency_key
       x-pagination-mode: none
       x-idempotency:
-        mode: none
+        mode: body
+        field: idempotency_key
+        required: true
+        header_supported: false
       x-known-issue:
         - id: B1-02-D1
           summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
@@ -9644,6 +9662,10 @@ paths:
                   description: 活动名
                 status:
                   type: [string, "null"]
+                  enum: [enabled, disabled, null]
+                  x-enum-labels:
+                    enabled: 启用
+                    disabled: 禁用
                   description: 状态：enabled/disabled
                 start_time:
                   type: [string, "null"]
@@ -11570,6 +11592,7 @@ paths:
           required: false
           schema:
             type: string
+            enum: ["", enabled, disabled]
           description: 状态过滤：enabled/disabled；空表示全部
         - name: product_id
           in: query
@@ -11821,6 +11844,10 @@ paths:
               properties:
                 status:
                   type: string
+                  enum: [enabled, disabled]
+                  x-enum-labels:
+                    enabled: 启用
+                    disabled: 停用
                   x-go-validate: required
                   description: 目标状态：enabled/disabled
               required:
@@ -11910,6 +11937,7 @@ paths:
           required: false
           schema:
             type: string
+            enum: ["", pending, success, failed, expired]
           description: 团状态过滤：pending/success/failed/expired；空表示全部
         - name: leader_user_id
           in: query
@@ -12210,6 +12238,10 @@ paths:
                   type: integer
                   format: int64
                   x-go-type: int
+                  enum: [0, 1]
+                  x-enum-labels:
+                    "0": 停用
+                    "1": 启用
                   description: 状态：1=启用、0=停用；缺省按 1 处理
       x-pagination-mode: none
       x-idempotency:
@@ -12297,6 +12329,10 @@ paths:
                   type: integer
                   format: int64
                   x-go-type: int
+                  enum: [0, 1]
+                  x-enum-labels:
+                    "0": 停用
+                    "1": 启用
                   description: 状态：1=启用、0=停用
       x-pagination-mode: none
       x-idempotency:
@@ -12475,11 +12511,16 @@ paths:
                   type: [integer, "null"]
                   format: int64
                   x-go-type: int
+                  enum: [0, 1, null]
+                  x-enum-labels:
+                    "0": 按区域规则计费
+                    "1": 无条件包邮
                   description: 1=无条件包邮；0 或缺省=按区域规则计费
                 free_threshold:
                   type: integer
                   format: int64
                   x-go-type: int64
+                  x-unit: cent
                   description: 满额免邮阈值（整数分，0=不启用）
                 remark:
                   type: string
@@ -12662,11 +12703,16 @@ paths:
                   type: [integer, "null"]
                   format: int64
                   x-go-type: int
+                  enum: [0, 1, null]
+                  x-enum-labels:
+                    "0": 按区域规则计费
+                    "1": 无条件包邮
                   description: 1=无条件包邮；0=按区域规则计费；缺省保持原值
                 free_threshold:
                   type: integer
                   format: int64
                   x-go-type: int64
+                  x-unit: cent
                   description: 满额免邮阈值（整数分，0=不启用）
                 remark:
                   type: string
@@ -12750,6 +12796,10 @@ paths:
                   type: [integer, "null"]
                   format: int64
                   x-go-type: int
+                  enum: [0, 1, null]
+                  x-enum-labels:
+                    "0": 停用
+                    "1": 启用
                   x-go-validate: required
                   description: 1=启用、0=停用
               required:
@@ -13042,6 +13092,7 @@ paths:
             format: int64
             x-go-type: int
           description: 页码，默认 1；<1 返回 400
+          x-pagination-mode: strict
         - name: size
           in: query
           required: false
@@ -13050,6 +13101,7 @@ paths:
             format: int64
             x-go-type: int
           description: 每页数量，默认 20、上限 100；越界返回 400
+          x-pagination-mode: strict
         - name: status
           in: query
           required: false
@@ -13057,6 +13109,7 @@ paths:
             type: integer
             format: int64
             x-go-type: int
+            enum: [0, 1]
           description: 状态筛选：1=启用、0=停用；省略=全部
         - name: product_id
           in: query
@@ -13066,7 +13119,8 @@ paths:
             format: int64
             x-go-type: int64
           description: 商品 id 精确筛选；<=0 返回 400
-      x-pagination-mode: none
+      x-pagination-mode: strict
+      x-pagination-contract: 严格行为：page/size 非正整数或越界返回 HTTP 400 + code 1001。
       x-idempotency:
         mode: none
       responses:
@@ -13295,6 +13349,10 @@ paths:
                   type: integer
                   format: int64
                   x-go-type: int
+                  enum: [0, 1]
+                  x-enum-labels:
+                    "0": 停用
+                    "1": 启用
                   description: 目标状态：1=启用、0=停用
       x-pagination-mode: none
       x-idempotency:

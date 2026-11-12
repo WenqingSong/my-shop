@@ -88,7 +88,7 @@ func fullRouteTable() []string {
 		"GET /articles/:id",
 		"GET /articles/:id/like/count",
 
-		// ---- 前台用户认证（68）----
+		// ---- 前台用户认证（75）----
 		"GET /me",
 		"GET /profile",
 		"PUT /profile",
@@ -168,7 +168,7 @@ func fullRouteTable() []string {
 		// ---- 前台仅验签登出（1）----
 		"POST /logout",
 
-		// ---- 后台公开 / 仅验签（2）----
+		// ---- 后台公开 / 仅验签（4）----
 		"POST /admin/login",
 		"POST /admin/logout",
 		"GET /admin/me",
@@ -204,7 +204,7 @@ func fullRouteTable() []string {
 		"PUT /categories/:id",
 		"DELETE /categories/:id",
 
-		// ---- 商品（8）----
+		// ---- 商品（6）----
 		"GET /admin/products",
 		"GET /admin/products/:id",
 		"POST /admin/products",

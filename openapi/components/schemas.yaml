@@ -1364,6 +1364,10 @@ BargainActivity:
       type: integer
       format: int64
       x-go-type: int
+      enum: [0, 1]
+      x-enum-labels:
+        "0": 停用
+        "1": 启用
       description: 1=启用、0=停用
     product_name:
       type: string
@@ -1431,6 +1435,12 @@ BargainInstance:
       description: 发起砍价的用户 id
     status:
       type: string
+      enum: [in_progress, success, failed, expired]
+      x-enum-labels:
+        in_progress: 进行中（DB 10）
+        success: 砍价成功（DB 20，终态）
+        failed: 砍价失败（DB 30，终态）
+        expired: 已过期（DB 40，终态）
       description: 状态：in_progress/success/failed/expired
     start_price:
       type: integer
@@ -1566,11 +1576,13 @@ BargainHelpRecord:
       type: integer
       format: int64
       x-go-type: int64
+      x-unit: cent
       description: 本次助力前价格（整数分）
     price_after:
       type: integer
       format: int64
       x-go-type: int64
+      x-unit: cent
       description: 本次助力后价格（整数分，≥ floor_price）
     created_at:
       type: [string, "null"]
@@ -1715,6 +1727,10 @@ BargainAdminStatusRequest:
       type: integer
       format: int64
       x-go-type: int
+      enum: [0, 1]
+      x-enum-labels:
+        "0": 停用
+        "1": 启用
       description: 目标状态：1=启用、0=停用
 BargainAdminStatusResponse:
   type: object
@@ -1739,6 +1755,10 @@ BargainAdminListRequest:
       type: [integer, "null"]
       format: int64
       x-go-type: int
+      enum: [0, 1, null]
+      x-enum-labels:
+        "0": 停用
+        "1": 启用
       description: 状态筛选：1=启用、0=停用；省略=全部
     product_id:
       type: [integer, "null"]
@@ -3978,6 +3998,10 @@ FlashSaleUpdateRequest:
       description: 活动名
     status:
       type: [string, "null"]
+      enum: [enabled, disabled, null]
+      x-enum-labels:
+        enabled: 启用
+        disabled: 禁用
       description: 状态：enabled/disabled
     start_time:
       type: [string, "null"]
@@ -4246,16 +4270,25 @@ FreightTemplate:
       type: integer
       format: int64
       x-go-type: int
+      enum: [0, 1]
+      x-enum-labels:
+        "0": 按区域规则计费
+        "1": 模板级无条件包邮
       description: 1=模板级无条件包邮（跳过区域规则）；0=按区域规则计费
     free_threshold:
       type: integer
       format: int64
       x-go-type: int64
+      x-unit: cent
       description: 满额免邮阈值（整数分，0=不启用）
     status:
       type: integer
       format: int64
       x-go-type: int
+      enum: [0, 1]
+      x-enum-labels:
+        "0": 停用
+        "1": 启用
       description: 1 启用 / 0 停用；停用模板不可用于计价
     remark:
       type: string
@@ -4313,6 +4346,7 @@ FreightRule:
       type: integer
       format: int64
       x-go-type: int64
+      x-unit: cent
       description: 首件费用（整数分）
     additional_quantity:
       type: integer
@@ -4323,11 +4357,13 @@ FreightRule:
       type: integer
       format: int64
       x-go-type: int64
+      x-unit: cent
       description: 续件费用（整数分）
     free_threshold:
       type: integer
       format: int64
       x-go-type: int64
+      x-unit: cent
       description: 该区域满额免邮阈值（整数分，0=继承模板）
     created_at:
       type: [string, "null"]
@@ -4370,6 +4406,7 @@ FreightRuleInput:
       type: integer
       format: int64
       x-go-type: int64
+      x-unit: cent
       description: 首件费用（整数分，>=0）
     additional_quantity:
       type: integer
@@ -4381,11 +4418,13 @@ FreightRuleInput:
       type: integer
       format: int64
       x-go-type: int64
+      x-unit: cent
       description: 续件费用（整数分，>=0）
     free_threshold:
       type: integer
       format: int64
       x-go-type: int64
+      x-unit: cent
       description: 该区域满额免邮阈值（整数分，0=继承模板）
 FreightAdminCreateRequest:
   type: object
@@ -4401,11 +4440,16 @@ FreightAdminCreateRequest:
       type: [integer, "null"]
       format: int64
       x-go-type: int
+      enum: [0, 1, null]
+      x-enum-labels:
+        "0": 按区域规则计费
+        "1": 无条件包邮
       description: 1=无条件包邮；0 或缺省=按区域规则计费
     free_threshold:
       type: integer
       format: int64
       x-go-type: int64
+      x-unit: cent
       description: 满额免邮阈值（整数分，0=不启用）
     remark:
       type: string
@@ -4479,11 +4523,16 @@ FreightAdminUpdateRequest:
       type: [integer, "null"]
       format: int64
       x-go-type: int
+      enum: [0, 1, null]
+      x-enum-labels:
+        "0": 按区域规则计费
+        "1": 无条件包邮
       description: 1=无条件包邮；0=按区域规则计费；缺省保持原值
     free_threshold:
       type: integer
       format: int64
       x-go-type: int64
+      x-unit: cent
       description: 满额免邮阈值（整数分，0=不启用）
     remark:
       type: string
@@ -4511,6 +4560,10 @@ FreightAdminUpdateStatusRequest:
       type: [integer, "null"]
       format: int64
       x-go-type: int
+      enum: [0, 1, null]
+      x-enum-labels:
+        "0": 停用
+        "1": 启用
       x-go-validate: required
       description: 1=启用、0=停用
 FreightAdminUpdateStatusResponse:
@@ -4643,6 +4696,10 @@ GroupBuyActivity:
       description: 活动结束时间；格式 YYYY-MM-DD HH:MM:SS，不含时区偏移（当前实现限制，非 RFC3339）
     status:
       type: string
+      enum: [enabled, disabled]
+      x-enum-labels:
+        enabled: 启用（DB 1）
+        disabled: 停用（DB 0）
       description: 状态：enabled/disabled
     created_at:
       type: [string, "null"]
@@ -4727,6 +4784,12 @@ GroupBuyTeam:
       description: 当前有效参与人数（含团长）
     status:
       type: string
+      enum: [pending, success, failed, expired]
+      x-enum-labels:
+        pending: 拼团中（DB 10）
+        success: 已成团（DB 20，终态）
+        failed: 已失败（DB 30，终态）
+        expired: 已过期（DB 40，终态）
       description: 状态：pending/success/failed/expired
     expire_at:
       type: [string, "null"]
@@ -4787,6 +4850,10 @@ GroupBuyParticipant:
       description: 参与用户名（实时只读摘要）
     status:
       type: string
+      enum: [active, quit]
+      x-enum-labels:
+        active: 有效（DB 10）
+        quit: 已退出（DB 20）
       description: 状态：active/quit
     created_at:
       type: [string, "null"]
@@ -5090,6 +5157,13 @@ GroupBuyMyListRequest:
       description: 每页数量，默认 20、上限 100；越界或非整数返回 400
     status:
       type: string
+      enum: ["", pending, success, failed, expired]
+      x-enum-labels:
+        "": 全部
+        pending: 拼团中
+        success: 已成团
+        failed: 已失败
+        expired: 已过期
       description: 按团状态过滤：pending/success/failed/expired；空表示全部
 GroupBuyMyListResponse:
   type: object
@@ -5260,6 +5334,10 @@ GroupBuyAdminStatusRequest:
       description: 拼团活动 id
     status:
       type: string
+      enum: [enabled, disabled]
+      x-enum-labels:
+        enabled: 启用
+        disabled: 停用
       x-go-validate: required
       description: 目标状态：enabled/disabled
 GroupBuyAdminStatusResponse:
@@ -5283,6 +5361,11 @@ GroupBuyAdminListRequest:
       description: 每页数量，默认 20、上限 100；越界或非整数返回 400
     status:
       type: string
+      enum: ["", enabled, disabled]
+      x-enum-labels:
+        "": 全部
+        enabled: 启用
+        disabled: 停用
       description: 状态过滤：enabled/disabled；空表示全部
     product_id:
       type: [integer, "null"]
@@ -5362,6 +5445,13 @@ GroupBuyAdminListTeamsRequest:
       description: 活动 id 精确过滤；<=0 返回 400
     status:
       type: string
+      enum: ["", pending, success, failed, expired]
+      x-enum-labels:
+        "": 全部
+        pending: 拼团中
+        success: 已成团
+        failed: 已失败
+        expired: 已过期
       description: 团状态过滤：pending/success/failed/expired；空表示全部
     leader_user_id:
       type: [integer, "null"]
@@ -5600,6 +5690,7 @@ UserSession:
       type: integer
       format: int64
       x-go-type: int64
+      x-unit: unix-second
       description: 登录时间（unix 秒）
     user_agent:
       type: string
@@ -6055,6 +6146,10 @@ MemberLevel:
       type: integer
       format: int64
       x-go-type: int
+      enum: [0, 1]
+      x-enum-labels:
+        "0": 停用
+        "1": 启用
       description: 状态：1=启用、0=停用
     created_at:
       type: [string, "null"]
@@ -6300,6 +6395,10 @@ MemberAdminCreateLevelRequest:
       type: integer
       format: int64
       x-go-type: int
+      enum: [0, 1]
+      x-enum-labels:
+        "0": 停用
+        "1": 启用
       description: 状态：1=启用、0=停用；缺省按 1 处理
 MemberAdminCreateLevelResponse:
   type: object
@@ -6341,6 +6440,10 @@ MemberAdminUpdateLevelRequest:
       type: integer
       format: int64
       x-go-type: int
+      enum: [0, 1]
+      x-enum-labels:
+        "0": 停用
+        "1": 启用
       description: 状态：1=启用、0=停用
 MemberAdminUpdateLevelResponse:
   type: object
@@ -6480,6 +6583,7 @@ Order:
       type: integer
       format: int64
       x-go-type: int64
+      x-unit: cent
       description: 运费（整数分，快照；未绑定运费模板的商品为 0）
     pay_type:
       type: string
@@ -6767,6 +6871,10 @@ OrderQuoteRequest:
   properties:
     source:
       type: string
+      enum: [cart, direct]
+      x-enum-labels:
+        cart: 购物车勾选计价
+        direct: 单 SKU 直接购买计价
       x-go-validate: required
       description: 来源：cart/direct
     address_id:
@@ -6864,21 +6972,25 @@ OrderQuoteResponse:
       type: integer
       format: int64
       x-go-type: int64
+      x-unit: cent
       description: 优惠券折扣（整数分）
     member_discount:
       type: integer
       format: int64
       x-go-type: int64
+      x-unit: cent
       description: 会员折扣（整数分）
     points_discount:
       type: integer
       format: int64
       x-go-type: int64
+      x-unit: cent
       description: 积分抵扣（整数分，当前恒 0）
     shipping_fee:
       type: integer
       format: int64
       x-go-type: int64
+      x-unit: cent
       description: 运费（整数分）
     payable_amount:
       type: integer
@@ -9369,6 +9481,7 @@ UploadTokenResponse:
       type: integer
       format: int64
       x-go-type: int64
+      x-unit: unix-second
       description: 凭证过期时间（unix 秒）
 WalletAccountRequest:
   type: object
@@ -9386,6 +9499,7 @@ WalletAccountResponse:
       type: integer
       format: int64
       x-go-type: int64
+      x-unit: cent
       description: 可用余额（整数分）
     updated_at:
       type: [string, "null"]
@@ -9416,9 +9530,18 @@ WalletTransaction:
       description: 流水 id
     tx_type:
       type: string
+      enum: [recharge, order_pay, order_refund]
+      x-enum-labels:
+        recharge: Mock 充值
+        order_pay: 余额支付订单
+        order_refund: 退款退回余额
       description: 交易类型：recharge/order_pay/order_refund
     direction:
       type: string
+      enum: [credit, debit]
+      x-enum-labels:
+        credit: 入账（DB 1）
+        debit: 出账（DB 2）
       description: 交易方向：credit=入账、debit=出账
     amount:
       type: integer
@@ -9430,14 +9553,21 @@ WalletTransaction:
       type: integer
       format: int64
       x-go-type: int64
+      x-unit: cent
       description: 交易前余额（整数分）
     balance_after:
       type: integer
       format: int64
       x-go-type: int64
+      x-unit: cent
       description: 交易后余额（整数分）
     biz_type:
       type: string
+      enum: [recharge, order, refund]
+      x-enum-labels:
+        recharge: 充值单
+        order: 订单
+        refund: 退款单
       description: 业务类型：recharge/order/refund
     biz_id:
       type: [integer, "null"]
@@ -9470,6 +9600,12 @@ WalletTransactionListRequest:
       description: 每页数量，默认 20、上限 100；越界返回 400
     tx_type:
       type: string
+      enum: ["", recharge, order_pay, order_refund]
+      x-enum-labels:
+        "": 不过滤
+        recharge: Mock 充值
+        order_pay: 余额支付订单
+        order_refund: 退款退回余额
       description: 按交易类型筛选：recharge/order_pay/order_refund；缺省为不过滤
 WalletTransactionListResponse:
   type: object
@@ -9546,6 +9682,12 @@ WalletRechargeOrder:
       description: 充值金额（整数分）
     status:
       type: string
+      enum: [pending, succeeded, cancelled, failed]
+      x-enum-labels:
+        pending: 待支付（DB 10）
+        succeeded: 支付成功（DB 20）
+        cancelled: 已取消（DB 30）
+        failed: 支付失败（DB 40）
       description: 状态：pending/succeeded/cancelled/failed
     pay_type:
       type: string

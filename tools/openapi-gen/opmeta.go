@@ -54,7 +54,8 @@ var opMetaByKey = map[string]*opMeta{
 	// B1-04 八分支集成：以下 5 条写接口同样带「非 path 的 required 字段」，
 	// 绑定阶段 gvalid 失败仍返回 500/51（未在本次集成中改变错误码映射）。
 	"POST /orders/quote":                      {KnownIssues: []*OMap{d1Issue()}},
-	"POST /wallet/recharges":                  {KnownIssues: []*OMap{d1Issue()}},
+	// 钱包充值带 body.idempotency_key（v:"required"），因此在 D1 之外还要按 D5 声明幂等键。
+	"POST /wallet/recharges":                  {KnownIssues: []*OMap{d1Issue()}, Idempotency: idemBody("idempotency_key", true)},
 	"POST /admin/freight-templates":           {KnownIssues: []*OMap{d1Issue()}},
 	"PUT /admin/freight-templates/:id":        {KnownIssues: []*OMap{d1Issue()}},
 	"PUT /admin/freight-templates/:id/status": {KnownIssues: []*OMap{d1Issue()}},
@@ -104,7 +105,6 @@ var opMetaByKey = map[string]*opMeta{
 
 	// ---- 分页：形态 A（静默归一）----
 	"GET /my/membership/growth-logs": {Pagination: "clamp"},
-	"GET /my/commissions":            {Pagination: "clamp"},
 
 	// ---- 分页：形态 B（严格校验）----
 	"GET /admin/orders":                     {Pagination: "strict"},
@@ -112,6 +112,12 @@ var opMetaByKey = map[string]*opMeta{
 	"GET /admin/distributions/referrals":    {Pagination: "strict"},
 	"GET /admin/distributions/distributors": {Pagination: "strict"},
 	"GET /admin/distributions/commissions":  {Pagination: "strict"},
+	// B1-04-04 钱包流水与 B1-04-07 砍价三个列表：DTO 均声明 page<1 / size 越界返回 400，
+	// 实现侧返回 CodeInvalidArgument（400/1001），属形态 B。
+	"GET /wallet/transactions":      {Pagination: "strict"},
+	"GET /bargain-activities":       {Pagination: "strict"},
+	"GET /admin/bargain-activities": {Pagination: "strict"},
+	"GET /my/bargain-instances":     {Pagination: "strict"},
 
 	// ---- 幂等：body 字段（现状，未支持 Header）----
 	"POST /orders": {

@@ -1,7 +1,7 @@
 package main
 
 // buildSuccessSchema 定义统一成功包装 Success<T>。
-// data 的具体类型由各 operation 的 allOf 覆盖，避免为 142 条接口重复定义包装结构。
+// data 的具体类型由各 operation 的 allOf 覆盖，避免为 210 条接口重复定义包装结构。
 func buildSuccessSchema() *OMap {
 	return NewOMap().
 		Set("type", "object").
