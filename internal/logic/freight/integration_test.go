@@ -17,24 +17,22 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/codes"
 	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
 	"cnb.cool/go-cloud-devops/my-shop/internal/service"
+	"cnb.cool/go-cloud-devops/my-shop/internal/testdb"
 )
-
-// integrationDBName 是唯一允许执行数据库集成测试的隔离库名。
-//
-// 这是硬性安全护栏：历史验证库 my_shop_b10304_verify 与生产/开发库一律拒绝，
-// 防止误连后执行 DELETE/CASCADE 等破坏性操作。
-const integrationDBName = "my_shop_b104_test"
 
 // setupIntegrationDB 连接隔离测试库并把 GoFrame 全局 DB 指向它。
 //
-// 未显式设置 DATABASE_DEFAULT_NAME=my_shop_b104_test 时跳过（而不是失败），
-// 保证无数据库环境下的 go test ./... 仍然可运行；跳过的用例必须在交付报告中记为 NOT RUN。
+// 这是硬性安全护栏（白名单统一为 internal/testdb）：历史验证库
+// my_shop_b10304_verify 与生产/开发库一律拒绝，防止误连后执行 DELETE/CASCADE。
+//
+// 未显式设置白名单内的隔离库时跳过（而不是失败），保证无数据库环境下的
+// go test ./... 仍然可运行；跳过的用例必须在交付报告中记为 NOT RUN。
 func setupIntegrationDB(t *testing.T) {
 	t.Helper()
 
 	name := os.Getenv("DATABASE_DEFAULT_NAME")
-	if name != integrationDBName {
-		t.Skipf("跳过数据库集成测试：DATABASE_DEFAULT_NAME=%q，要求隔离库 %q", name, integrationDBName)
+	if !testdb.IsAllowed(name) {
+		t.Skipf("跳过数据库集成测试：DATABASE_DEFAULT_NAME=%q，要求隔离库 %v", name, testdb.Allowed())
 	}
 
 	host := envOrDefault("DATABASE_DEFAULT_HOST", "127.0.0.1")
@@ -80,8 +78,8 @@ func setupIntegrationDB(t *testing.T) {
 	if err := db.QueryRowContext(ctx, "SELECT DATABASE()").Scan(&dbName); err != nil {
 		t.Fatalf("读取当前库名失败: %v", err)
 	}
-	if dbName != integrationDBName {
-		t.Fatalf("当前连接库为 %q，拒绝在非隔离库执行集成测试", dbName)
+	if !testdb.IsAllowed(dbName) {
+		t.Fatalf("当前连接库为 %q，拒绝在非隔离库执行集成测试（允许 %v）", dbName, testdb.Allowed())
 	}
 }
 

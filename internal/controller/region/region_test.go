@@ -22,11 +22,12 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
 	"cnb.cool/go-cloud-devops/my-shop/internal/regiondata"
+	"cnb.cool/go-cloud-devops/my-shop/internal/testdb"
 )
 
-// safeTestDBs 是允许执行测试的隔离测试库白名单（逐库显式列名，绝不落到 my_shop）；
+// safeTestDBs 是允许执行测试的隔离测试库白名单（统一来源：internal/testdb）；
 // 地区字典为只读数据，测试不 DELETE regions。
-var safeTestDBs = []string{"my_shop_b104_test", "my_shop_b104_integration"}
+var safeTestDBs = testdb.Allowed()
 
 // isSafeTestDB 判断库名是否属于本任务的隔离测试库。
 func isSafeTestDB(name string) bool {

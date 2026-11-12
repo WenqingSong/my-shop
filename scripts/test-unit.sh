@@ -160,4 +160,7 @@ run_unit_match "./internal/logic/freight/...（运费计算 / 区域规则匹配
 # B1-02：OpenAPI 契约生成器（纯内存，不启动服务）。
 run_unit "./tools/openapi-gen/...（OpenAPI 契约生成器）" ./tools/openapi-gen/...
 
+# B1-05-FINAL-FIX：测试库白名单与 CI 配置一致性（纯内存，不连接 DB）。
+run_unit "./internal/testdb/...（测试库白名单 / CI 配置一致性）" ./internal/testdb/...
+
 log_info "单元测试全部通过（共 ${UNIT_GROUPS} 组执行单元，均已实际运行，未使用缓存）"

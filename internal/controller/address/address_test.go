@@ -24,6 +24,7 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
 	"cnb.cool/go-cloud-devops/my-shop/internal/regiondata"
+	"cnb.cool/go-cloud-devops/my-shop/internal/testdb"
 )
 
 const (
@@ -109,18 +110,13 @@ func authHeader(token string) map[string]string {
 	return map[string]string{"Authorization": "Bearer " + token}
 }
 
-// safeTestDBs 是允许执行破坏性测试的隔离测试库白名单（逐库显式列名，绝不落到 my_shop）。
+// safeTestDBs 是允许执行破坏性测试的隔离测试库白名单（统一来源：internal/testdb）。
 // 测试会 DELETE users/addresses，必须在任何写操作前核实真实连接库名。
-var safeTestDBs = []string{"my_shop_b104_test", "my_shop_b104_integration"}
+var safeTestDBs = testdb.Allowed()
 
-// isSafeTestDB 判断库名是否属于本任务的隔离测试库。
+// isSafeTestDB 判断库名是否属于隔离测试库。
 func isSafeTestDB(name string) bool {
-	for _, s := range safeTestDBs {
-		if name == s {
-			return true
-		}
-	}
-	return false
+	return testdb.IsAllowed(name)
 }
 
 // requireIsolatedTestDB 第一道隔离检查：只允许显式指定的独立测试库。

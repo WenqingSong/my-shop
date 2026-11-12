@@ -27,11 +27,12 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
 	"cnb.cool/go-cloud-devops/my-shop/internal/service"
+	"cnb.cool/go-cloud-devops/my-shop/internal/testdb"
 )
 
-// safeTestDBs 是允许执行破坏性测试的隔离测试库白名单（逐库显式列名，绝不落到 my_shop）。
+// safeTestDBs 是允许执行破坏性测试的隔离测试库白名单（统一来源：internal/testdb）。
 // 测试会 DELETE users/addresses，必须在写操作前核实真实连接库名。
-var safeTestDBs = []string{"my_shop_b104_test", "my_shop_b104_integration"}
+var safeTestDBs = testdb.Allowed()
 
 // isSafeTestDB 判断库名是否属于本任务的隔离测试库。
 func isSafeTestDB(name string) bool {

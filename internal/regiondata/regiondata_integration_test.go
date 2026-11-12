@@ -25,17 +25,13 @@ import (
 
 	"cnb.cool/go-cloud-devops/my-shop/internal/boot"
 	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
+	"cnb.cool/go-cloud-devops/my-shop/internal/testdb"
 )
 
-var integrationSafeDBs = []string{"my_shop_b104_test", "my_shop_b104_integration"}
+var integrationSafeDBs = testdb.Allowed()
 
 func isIntegrationSafeDB(name string) bool {
-	for _, s := range integrationSafeDBs {
-		if name == s {
-			return true
-		}
-	}
-	return false
+	return testdb.IsAllowed(name)
 }
 
 func setupRegionDataDB(t *testing.T) context.Context {
