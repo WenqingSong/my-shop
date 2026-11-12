@@ -360,9 +360,14 @@ describe('下单成功页的优惠金额', () => {
     })
     await user.click(screen.getByRole('button', { name: '提交订单' }))
 
-    await waitFor(() => {
-      expect(screen.getByRole('heading', { name: '订单信息' })).toBeInTheDocument()
-    })
+    // 提交后需要等待路由跳转 + 订单详情渲染；全量测试并发执行时 1s 默认超时偏紧，
+    // 这里只放宽这条导航断言（不是全局超时），失败仍会真实暴露。
+    await waitFor(
+      () => {
+        expect(screen.getByRole('heading', { name: '订单信息' })).toBeInTheDocument()
+      },
+      { timeout: 5_000 },
+    )
 
     const summary = screen.getByRole('region', { name: '订单信息' })
     expect(summary).toHaveTextContent('未使用优惠券')

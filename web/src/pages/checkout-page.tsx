@@ -191,9 +191,11 @@ export function CheckoutPage() {
       { addressId: selectedAddress.id, couponId, signature },
       {
         onSuccess: (order) => {
-          // 试算结果不再具有时效性：成功下单后移除全部试算缓存。
-          queryClient.removeQueries({ queryKey: queryKeys.orders.quotes() })
           // replace：避免用户回退到结算页再次提交。
+          //
+          // 试算缓存的清理交给成功页（见 CheckoutSuccessPage）：此刻结算页仍在观察试算 query，
+          // `removeQueries` 会移除活跃 query，TanStack Query 立即重建并沿用失效的购物车状态
+          // 再发一次请求 → 产生空购物车 Quote（后端 400）。
           navigate(`/checkout/success?order_id=${String(order.id)}`, { replace: true })
         },
         onError: (error) => {

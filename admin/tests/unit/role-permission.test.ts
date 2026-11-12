@@ -8,6 +8,7 @@ import {
   assignRolePermission,
   createRole,
   deleteRole,
+  listRolePermissions,
   listRoles,
   removeRolePermission,
   updateRole
@@ -335,5 +336,42 @@ describe("角色与权限管理（后端真实接口）", () => {
     expect(PERMISSION.PERMISSION_CREATE).toBe("permission:create");
     expect(PERMISSION.PERMISSION_UPDATE).toBe("permission:update");
     expect(PERMISSION.PERMISSION_DELETE).toBe("permission:delete");
+  });
+});
+
+describe("角色已授权限查询（GET /admin/roles/:id/permissions）", () => {
+  beforeEach(() => {
+    resetMockDb();
+    login();
+  });
+
+  it("返回该角色真实关联的权限，按权限 id 升序", async () => {
+    const result = await listRolePermissions(501);
+
+    expect(result.items.map(item => item.id)).toEqual([1, 4]);
+    expect(Object.keys(result.items[0]).sort()).toEqual([
+      "code",
+      "description",
+      "id",
+      "name"
+    ]);
+  });
+
+  it("没有授权时返回空数组（区别于查询失败）", async () => {
+    const result = await listRolePermissions(502);
+
+    expect(result.items).toEqual([]);
+  });
+
+  it("授予/移除后回读得到最新集合", async () => {
+    await assignRolePermission(501, { permission_id: 7 });
+    await removeRolePermission(501, 1);
+
+    const result = await listRolePermissions(501);
+    expect(result.items.map(item => item.id)).toEqual([4, 7]);
+  });
+
+  it("角色不存在返回 2007（404），不会伪造空列表", async () => {
+    await expectBusinessCode(listRolePermissions(999999), 2007);
   });
 });

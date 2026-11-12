@@ -39,8 +39,10 @@ export interface ProvisionalAdminProfile {
   /** 角色名列表，例如 `["super_admin"]` */
   roles: string[];
   /**
-   * 后端当前**不返回**该字段。
-   * 保留为可选：将来若契约新增 `permissions[]`，无需改动调用方即可直接使用。
+   * 当前管理员的权限码集合（后端按角色合并、去重、升序）。
+   *
+   * 超级管理员也会返回该字段（通常为空数组），其特殊权限由 `is_super` 表达。
+   * 保留可选：缺省/`undefined` 时前端按 fail-closed 处理为空集合。
    */
   permissions?: string[];
 }

@@ -6,12 +6,15 @@
  * - `POST   /admin/roles`                            `role:create`
  * - `PUT    /admin/roles/:id`                        `role:update`
  * - `DELETE /admin/roles/:id`                        `role:delete`
+ * - `GET    /admin/roles/:id/permissions`            `role:list`（按权限 id 升序）
  * - `POST   /admin/roles/:id/permissions`            `role:assign_permission`
  * - `DELETE /admin/roles/:id/permissions/:permission_id` `role:assign_permission`
  *
- * 后端**没有**角色详情、角色已有权限查询、角色状态字段。
+ * 后端**没有**角色详情、角色状态字段；角色已授权限由 GET 接口返回真实集合，
+ * 查询失败返回 500、角色不存在返回 2007，**不会**用空列表冒充"无权限"。
  */
 import { http } from "@/utils/http";
+import type { PermissionDTO } from "../types/permission";
 import type {
   AssignRolePermissionPayload,
   CreateRolePayload,
@@ -50,6 +53,20 @@ export function deleteRole(id: number) {
   return http.request<null>("delete", `/admin/roles/${id}`, undefined, {
     silent: true
   });
+}
+
+/**
+ * 查询角色已授权限（按权限 id 升序）。
+ *
+ * 空数组 = 该角色确实没有任何权限；查询失败会抛错而不是返回空数组，
+ * 调用方必须区分这两种情况（不能把失败渲染成"无权限"）。
+ */
+export function listRolePermissions(roleId: number) {
+  return http.get<{ items: PermissionDTO[] }, undefined>(
+    `/admin/roles/${roleId}/permissions`,
+    undefined,
+    { silent: true }
+  );
 }
 
 /** 为角色授予权限（后端幂等，重复授予无副作用） */

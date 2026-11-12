@@ -9,7 +9,8 @@
  * 权限码一律来自后端，本文件**不生成**任何权限码；
  * `permissionDomain` 只是从真实 code 的前缀推导展示分组。
  */
-import type { UserStatusDTO } from "../types/user";
+import { formatServerDateTime } from "@/utils/datetime";
+import type { AdminUserDTO, UserStatusDTO } from "../types/user";
 import type { RoleDTO } from "../types/role";
 import type { PermissionDTO } from "../types/permission";
 
@@ -51,6 +52,34 @@ export function toUserStatusView(dto: UserStatusDTO): UserStatusView {
     status: dto.status,
     statusLabel: dto.status === 1 ? "启用" : "禁用",
     statusTagType: dto.status === 1 ? "success" : "info"
+  };
+}
+
+/**
+ * 后台用户视图（列表行与详情共用）。
+ *
+ * 字段全部来自后端白名单查询结果，不补充后端没有提供的资料字段。
+ */
+export interface UserListView {
+  id: number;
+  username: string;
+  status: 0 | 1;
+  statusLabel: string;
+  statusTagType: "success" | "info";
+  /** 注册时间（后端字符串原样格式化，空值为 `—`） */
+  createdText: string;
+}
+
+/** 后台用户 DTO → 视图 */
+export function toUserListView(dto: AdminUserDTO): UserListView {
+  const status = dto.status === 0 ? 0 : 1;
+  return {
+    id: dto.id,
+    username: dto.username,
+    status,
+    statusLabel: status === 1 ? "启用" : "禁用",
+    statusTagType: status === 1 ? "success" : "info",
+    createdText: formatServerDateTime(dto.created_at)
   };
 }
 

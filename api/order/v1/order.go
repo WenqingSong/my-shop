@@ -36,7 +36,7 @@ type Order struct {
 	OrderNo              string       `json:"order_no" dc:"全局唯一订单号"`
 	UserId               int64        `json:"user_id" dc:"归属用户 id"`
 	Status               string       `json:"status" dc:"状态：pending_payment/paid/shipped/received/completed/cancelled/refunded"`
-	TotalAmount          int64        `json:"total_amount" dc:"应付金额（整数分，快照 = original_amount - discount_amount - member_discount_amount）"`
+	TotalAmount          int64        `json:"total_amount" dc:"应付金额（整数分，快照 = original_amount - discount_amount - member_discount_amount + shipping_fee）"`
 	OriginalAmount       int64        `json:"original_amount" dc:"优惠前金额（整数分，快照 = Σ 订单项 price×quantity）"`
 	DiscountAmount       int64        `json:"discount_amount" dc:"优惠券优惠金额（整数分，快照，无券为 0）"`
 	MemberDiscountAmount int64        `json:"member_discount_amount" dc:"会员等级折扣金额（整数分，快照，无会员权益/无折扣为 0；不占用 discount_amount 的券语义）"`

@@ -1,5 +1,6 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2 } from 'lucide-react'
+import { useEffect } from 'react'
 import { Link, useSearchParams } from 'react-router'
 
 import { ApiError } from '@/api/client'
@@ -34,6 +35,15 @@ import {
  */
 export function CheckoutSuccessPage() {
   useDocumentTitle('订单提交成功 | SurgeCart 商城')
+
+  const queryClient = useQueryClient()
+
+  // 试算结果在下单成功后不再具有时效性。清理动作放在本页（结算页此时已卸载）：
+  // 若在结算页 onSuccess 里 removeQueries，被移除的正是结算页仍在观察的活跃 query，
+  // TanStack Query 会立即重建它并按已清空的购物车再发一次 Quote（后端 400）。
+  useEffect(() => {
+    queryClient.removeQueries({ queryKey: queryKeys.orders.quotes() })
+  }, [queryClient])
 
   const [searchParams] = useSearchParams()
   const rawOrderId = searchParams.get('order_id') ?? ''

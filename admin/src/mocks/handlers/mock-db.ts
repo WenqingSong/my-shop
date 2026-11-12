@@ -232,10 +232,15 @@ export interface MockArticle {
   updated_at: string;
 }
 
-/** A5：用户账号状态（users 表只有 id/status 这两个后台可见字段） */
+/**
+ * 后台用户视图（与 `GET /admin/users` / `GET /admin/users/:id` 的
+ * `AdminUser` 字段白名单一致：id / username / status / created_at）。
+ */
 export interface MockUser {
   id: number;
+  username: string;
   status: 0 | 1;
+  created_at: string;
 }
 
 /** A5：管理员（列表接口不存在，夹具仅用于写操作的目标校验） */
@@ -1233,9 +1238,24 @@ const A5_PERMISSION_SEED: Array<[string, string]> = [
 
 function seedUsers(): MockUser[] {
   return [
-    { id: 101, status: 1 },
-    { id: 102, status: 0 },
-    { id: 103, status: 1 }
+    {
+      id: 101,
+      username: "wave_user",
+      status: 1,
+      created_at: "2026-01-05 09:30:00"
+    },
+    {
+      id: 102,
+      username: "disabled_user",
+      status: 0,
+      created_at: "2026-02-11 14:05:00"
+    },
+    {
+      id: 103,
+      username: "new_user",
+      status: 1,
+      created_at: "2026-03-02 18:45:00"
+    }
   ];
 }
 

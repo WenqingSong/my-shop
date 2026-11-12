@@ -16,11 +16,11 @@ import RolePermissionDrawer from "./components/RolePermissionDrawer.vue";
  * 角色管理。
  *
  * 后端真实能力：列表 / 创建 / 更新（名称、描述）/ 删除，
- * 以及角色权限的授予/移除（写接口）。
+ * 角色已授权限查询，以及权限的授予/移除。
  *
  * 不提供：
  * - 角色状态启停（roles 表没有 status 字段）；
- * - 权限数量列（没有"角色-权限"读接口，无法计算真实数量）；
+ * - 权限数量列（角色数量较多时会形成 N+1 查询，列表不做聚合）；
  * - 内置角色保护（后端没有该概念）。
  */
 defineOptions({ name: "RoleManagement" });
@@ -128,7 +128,7 @@ onMounted(load);
       :closable="false"
       show-icon
       title="使用说明"
-      description="维护角色名称与说明，并执行权限授予或移除。暂不支持查询角色已拥有的权限和权限数量，请谨慎操作。"
+      description="维护角色名称与说明，并查看/调整角色已授予的权限。权限编辑会先读取服务端真实授权集合，保存后自动回读校验。"
     />
 
     <el-card shadow="never">

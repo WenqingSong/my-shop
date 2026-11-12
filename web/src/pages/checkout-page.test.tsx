@@ -305,6 +305,7 @@ describe('结算页', () => {
       expect(screen.getByRole('button', { name: '提交订单' })).toBeEnabled()
     })
 
+    const quotesBeforeSubmit = getMockQuoteRequestCount()
     await user.click(screen.getByRole('button', { name: '提交订单' }))
 
     await waitFor(() => {
@@ -338,6 +339,9 @@ describe('结算页', () => {
       expect(cart.items[0]?.sku_id).toBe(mockCartSkuId(3, 0))
     })
     expect(await screen.findByRole('link', { name: '购物车，1 件商品' })).toBeInTheDocument()
+
+    // 下单成功后购物车被服务端清空；结算页不得再发起空购物车试算（Wave 1 P3 回归）。
+    expect(getMockQuoteRequestCount()).toBe(quotesBeforeSubmit)
   })
 
   it('提交中禁用按钮，连续点击只发送一次请求', async () => {

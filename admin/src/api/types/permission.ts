@@ -5,7 +5,8 @@
  * - **没有**"所属业务域"字段，前端展示的 domain 由真实 `code` 的前缀推导；
  * - **没有**权限树 / 菜单数据；
  * - `GET /admin/permissions` 返回的是**系统全部权限定义**，
- *   不是"当前管理员的有效权限"，也不是"某个角色拥有的权限"。
+ *   不是"当前管理员的有效权限"；某个角色已授予的权限需调用
+ *   `GET /admin/roles/:id/permissions`（结构与本 DTO 相同）。
  */
 export interface PermissionDTO {
   id: number;

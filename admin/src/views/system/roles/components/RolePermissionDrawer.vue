@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { ElMessageBox } from "element-plus";
 import { message } from "@/utils/message";
 import { resolveErrorMessage } from "@/utils/error-message";
 import { listPermissions } from "@/api/modules/permission";
-import { assignRolePermission, removeRolePermission } from "@/api/modules/role";
+import {
+  assignRolePermission,
+  listRolePermissions,
+  removeRolePermission
+} from "@/api/modules/role";
 import type { RoleDTO } from "@/api/types/role";
 import {
   filterPermissions,
@@ -15,15 +18,16 @@ import {
 import { refreshAccess } from "@/composables/useAccessRefresh";
 
 /**
- * 角色权限分配抽屉。
+ * 角色权限抽屉（读取 + 编辑）。
  *
  * 后端真实能力：
+ * - `GET    /admin/roles/:id/permissions`              `role:list`（按权限 id 升序）
+ * - `GET    /admin/permissions`                        `permission:list`（全部定义）
  * - `POST   /admin/roles/:id/permissions`              `role:assign_permission`
  * - `DELETE /admin/roles/:id/permissions/:permission_id` `role:assign_permission`
- * - `GET    /admin/permissions`                        `permission:list`
  *
- * **没有**"查询角色已有权限"接口，因此这里不显示勾选状态：
- * 每个权限只提供"授予/移除"两个幂等写操作，避免用前端状态伪装后端事实。
+ * 读取失败（网络/500/403）与"角色确实没有权限"必须区分：
+ * 前者展示错误并禁用保存，后者展示空勾选但允许继续授权。
  */
 const props = defineProps<{
   modelValue: boolean;
@@ -41,12 +45,18 @@ const visible = computed({
   set: value => emit("update:modelValue", value)
 });
 
+/** 全部权限定义 */
 const views = ref<PermissionView[]>([]);
+/** 服务端当前已授权限 id（保存/重置的基线） */
+const savedIds = ref<number[]>([]);
+/** 界面勾选状态（保存时与 savedIds 求差集） */
+const selectedIds = ref<number[]>([]);
+
 const loading = ref(false);
+const saving = ref(false);
 const error = ref("");
 const keyword = ref("");
 const domain = ref("");
-const pendingId = ref<number | null>(null);
 
 const domainOptions = computed(() =>
   groupPermissionsByDomain(views.value).map(group => ({
@@ -63,24 +73,47 @@ const groups = computed(() =>
 
 const total = computed(() => views.value.length);
 
+/** 本次保存需要新增的权限 */
+const added = computed(() =>
+  selectedIds.value.filter(id => !savedIds.value.includes(id))
+);
+/** 本次保存需要移除的权限 */
+const removed = computed(() =>
+  savedIds.value.filter(id => !selectedIds.value.includes(id))
+);
+const dirty = computed(
+  () => added.value.length > 0 || removed.value.length > 0
+);
+
 async function load() {
-  if (!props.canList) return;
+  if (!props.role || !props.canList) return;
+
+  const roleId = props.role.id;
   loading.value = true;
   error.value = "";
   try {
-    const result = await listPermissions();
-    views.value = (result.items ?? []).map(toPermissionView);
+    // 两份数据必须同时成功：只拿到一半会把"读取失败"渲染成"没有权限"。
+    const [definitions, assigned] = await Promise.all([
+      listPermissions(),
+      listRolePermissions(roleId)
+    ]);
+    views.value = (definitions.items ?? []).map(toPermissionView);
+    const ids = (assigned.items ?? []).map(item => item.id);
+    savedIds.value = ids;
+    selectedIds.value = [...ids];
   } catch (cause) {
     views.value = [];
-    error.value = resolveErrorMessage(cause, "权限列表加载失败");
+    savedIds.value = [];
+    selectedIds.value = [];
+    error.value = resolveErrorMessage(cause, "角色权限加载失败");
   } finally {
     loading.value = false;
   }
 }
 
 watch(
-  () => props.modelValue,
-  isOpen => {
+  () => [props.modelValue, props.role?.id] as const,
+  ([isOpen]) => {
     if (!isOpen) return;
     keyword.value = "";
     domain.value = "";
@@ -88,49 +121,56 @@ watch(
   }
 );
 
-async function grant(permission: PermissionView) {
-  if (!props.role || pendingId.value !== null) return;
-  pendingId.value = permission.id;
-  try {
-    await assignRolePermission(props.role.id, {
-      permission_id: permission.id
-    });
-    message(`已授予 ${permission.code}（后端幂等）`, { type: "success" });
-    await refreshAccess();
-  } catch (cause) {
-    message(resolveErrorMessage(cause, "授予权限失败"), { type: "error" });
-  } finally {
-    pendingId.value = null;
-  }
+function resetSelection() {
+  selectedIds.value = [...savedIds.value];
 }
 
-async function revoke(permission: PermissionView) {
-  if (!props.role || pendingId.value !== null) return;
+async function save() {
+  const role = props.role;
+  if (!role || !props.canAssign || saving.value || !dirty.value) return;
 
+  const addedIds = [...added.value];
+  const removedIds = [...removed.value];
+  const failures: string[] = [];
+
+  saving.value = true;
   try {
-    await ElMessageBox.confirm(
-      `确认从角色「${props.role.name}」移除权限 ${permission.code}？` +
-        "后端对不存在的关联同样返回成功，且页面无法回显移除前的状态。",
-      "移除权限",
-      {
-        type: "warning",
-        confirmButtonText: "移除",
-        cancelButtonText: "取消"
+    for (const permissionId of addedIds) {
+      try {
+        await assignRolePermission(role.id, { permission_id: permissionId });
+      } catch (cause) {
+        failures.push(
+          resolveErrorMessage(cause, `授予权限 ${permissionId} 失败`)
+        );
       }
-    );
-  } catch {
-    return;
-  }
+    }
 
-  pendingId.value = permission.id;
-  try {
-    await removeRolePermission(props.role.id, permission.id);
-    message(`已移除 ${permission.code}（后端幂等）`, { type: "success" });
+    for (const permissionId of removedIds) {
+      try {
+        await removeRolePermission(role.id, permissionId);
+      } catch (cause) {
+        failures.push(
+          resolveErrorMessage(cause, `移除权限 ${permissionId} 失败`)
+        );
+      }
+    }
+
+    // 无论成功与否都以服务端为准回读：避免界面停留在"看起来保存成功"的本地状态。
+    await load();
     await refreshAccess();
-  } catch (cause) {
-    message(resolveErrorMessage(cause, "移除权限失败"), { type: "error" });
+
+    if (failures.length === 0) {
+      message(
+        `已保存角色权限（新增 ${addedIds.length} 项、移除 ${removedIds.length} 项）`,
+        { type: "success" }
+      );
+    } else {
+      message(`部分权限变更失败（${failures.length} 项）：${failures[0]}`, {
+        type: "error"
+      });
+    }
   } finally {
-    pendingId.value = null;
+    saving.value = false;
   }
 }
 </script>
@@ -139,15 +179,15 @@ async function revoke(permission: PermissionView) {
   <el-drawer
     v-model="visible"
     :title="`角色权限 · ${role?.name ?? ''}`"
-    size="560px"
+    size="600px"
   >
     <el-alert
       class="block-alert"
       type="info"
       :closable="false"
       show-icon
-      title="使用说明"
-      description="当前无法读取角色已拥有的权限。此处选择的是本次要授予或移除的权限，不表示当前授权状态；提交后请以处理结果为准。"
+      title="权限来源说明"
+      description="勾选状态来自 GET /admin/roles/:id/permissions 返回的真实授权集合；保存时只提交新增与移除的差异，保存后会重新读取服务端数据。授予/移除接口本身是幂等的。"
     />
 
     <el-alert
@@ -209,62 +249,80 @@ async function revoke(permission: PermissionView) {
           description="没有匹配的权限"
         />
 
-        <el-collapse v-else>
-          <el-collapse-item
-            v-for="group in groups"
-            :key="group.domain"
-            :name="group.domain"
-          >
-            <template #title>
-              <span class="domain-title">
-                {{ group.domainLabel }}
-                <el-tag size="small" type="info">{{
-                  group.items.length
-                }}</el-tag>
-              </span>
-            </template>
-
-            <div
-              v-for="permission in group.items"
-              :key="permission.id"
-              class="permission-row"
+        <el-checkbox-group
+          v-else
+          v-model="selectedIds"
+          :disabled="!canAssign || saving"
+        >
+          <el-collapse>
+            <el-collapse-item
+              v-for="group in groups"
+              :key="group.domain"
+              :name="group.domain"
             >
-              <div class="permission-meta">
-                <div class="permission-name">
-                  {{ permission.name }}
-                  <el-tag size="small">{{ permission.code }}</el-tag>
-                </div>
-                <div class="permission-desc">
-                  {{ permission.description || "无描述" }}
-                </div>
-              </div>
-              <div class="permission-actions">
-                <el-button
-                  link
-                  type="primary"
-                  :disabled="!canAssign || pendingId !== null"
-                  :loading="pendingId === permission.id"
-                  @click="grant(permission)"
-                  ><template #loading><BrandLoadingIcon /></template>
-                  授予
-                </el-button>
-                <el-button
-                  link
-                  type="danger"
-                  :disabled="!canAssign || pendingId !== null"
-                  @click="revoke(permission)"
+              <template #title>
+                <span class="domain-title">
+                  {{ group.domainLabel }}
+                  <el-tag size="small" type="info">{{
+                    group.items.length
+                  }}</el-tag>
+                </span>
+              </template>
+
+              <div
+                v-for="permission in group.items"
+                :key="permission.id"
+                class="permission-row"
+              >
+                <el-checkbox
+                  :value="permission.id"
+                  class="permission-check"
+                  :title="permission.code"
                 >
-                  移除
-                </el-button>
+                  <div class="permission-meta">
+                    <div class="permission-name">
+                      {{ permission.name }}
+                      <el-tag size="small">{{ permission.code }}</el-tag>
+                    </div>
+                    <div class="permission-desc">
+                      {{ permission.description || "无描述" }}
+                    </div>
+                  </div>
+                </el-checkbox>
               </div>
-            </div>
-          </el-collapse-item>
-        </el-collapse>
+            </el-collapse-item>
+          </el-collapse>
+        </el-checkbox-group>
       </div>
 
       <p v-if="!canAssign" class="hint">
-        当前账号没有 role:assign_permission 权限，仅可查看权限定义。
+        当前账号没有 role:assign_permission 权限，仅可查看角色的已授权限。
       </p>
+    </template>
+
+    <template #footer>
+      <div class="drawer-footer">
+        <span class="footer-summary">
+          已选 {{ selectedIds.length }} / 共 {{ total }} 项
+          <template v-if="dirty">
+            （待新增 {{ added.length }}，待移除 {{ removed.length }}）
+          </template>
+        </span>
+        <div class="footer-actions">
+          <el-button :disabled="!dirty || saving" @click="resetSelection">
+            重置
+          </el-button>
+          <el-button
+            type="primary"
+            :loading="saving"
+            :disabled="!canAssign || !dirty || Boolean(error)"
+            @click="save"
+          >
+            <template #loading><BrandLoadingIcon /></template>
+            保存变更
+          </el-button>
+        </div>
+      </div>
     </template>
   </el-drawer>
 </template>
@@ -294,12 +352,25 @@ async function revoke(permission: PermissionView) {
 }
 
 .permission-row {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  justify-content: space-between;
   padding: 8px 0;
   border-bottom: 1px dashed var(--el-border-color-lighter);
+}
+
+.permission-check {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  height: auto;
+
+  :deep(.el-checkbox__input) {
+    margin-top: 2px;
+  }
+
+  :deep(.el-checkbox__label) {
+    flex: 1;
+    min-width: 0;
+    white-space: normal;
+  }
 }
 
 .permission-meta {
@@ -320,15 +391,27 @@ async function revoke(permission: PermissionView) {
   color: var(--el-text-color-secondary);
 }
 
-.permission-actions {
-  display: flex;
-  flex-shrink: 0;
-  gap: 4px;
-}
-
 .hint {
   margin-top: 12px;
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+
+.drawer-footer {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.footer-summary {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.footer-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
 }
 </style>
