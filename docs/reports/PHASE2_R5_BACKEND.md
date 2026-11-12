@@ -281,16 +281,16 @@ $ go vet ./...
 ## 13. Git 分支和最终 SHA
 
 - 开发分支：`feat/p2-r5-backend`（从 `ddfd5ab77ced617ae0b0020c46a8220396b52145` 创建）
-- 实现提交 SHA：`__IMPL_SHA__`
-- 分支最终 HEAD：`__FINAL_SHA__`
+- 实现提交 SHA：`261229cda75bdc7b974f8f02c58c34ba3f2f6088`
+- 分支 tip：实现提交 + 本报告的元数据回填提交（`git rev-parse feat/p2-r5-backend` 复核；回填提交只改本文件的 SHA/推送/工作区三项占位，不含任何代码、契约或文档事实变更）
 
 ## 14. Push 状态
 
-`__PUSH_STATUS__`
+已普通 push（非 force）：`feat/p2-r5-backend` 推送到 `origin` 并建立跟踪；推送后 `git rev-parse HEAD` 与 `git rev-parse origin/feat/p2-r5-backend` 一致（实现提交 `261229cda75b…`）。
 
 ## 15. 工作区状态
 
-`__WORKTREE_STATUS__`
+实现提交后 `git status --porcelain` 为空（clean）；本次验证用的临时本地改动（`internal/cmd/cmd.go` 七牛启动校验降级）已 `git checkout --` 还原，未进入任何提交。
 
 ## 16. 本次明确没有实现的缺口
 
