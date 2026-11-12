@@ -4,7 +4,7 @@
  * 后端真实字段只有 `id / name / description`：
  * - **没有** status 字段（角色没有启用/停用语义）；
  * - **没有**角色详情接口，列表只返回上述三个字段；
- * - **没有**"查询角色已有权限"接口，只有授予/移除权限的写接口；
+ * - 角色已授权限由 `GET /admin/roles/:id/permissions` 返回（`role:list`）；
  * - **没有**系统内置角色的特殊保护（roles 表为空，也没有 seed 角色）。
  */
 export interface RoleDTO {

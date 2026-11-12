@@ -1,15 +1,15 @@
 /**
  * 前端权限判断（RBAC 适配层）。
  *
- * 事实来源（A5 复核后的真实后端能力）：
- * - `GET /admin/me` 返回 `{ id, username, is_super, roles }`，**不返回** `permissions[]`；
- * - 后端**没有**"查询当前管理员有效权限"接口；
- * - 后端**没有**"查询角色已有权限"接口（只有授予/移除权限的写接口）。
+ * 事实来源（R5 + Wave 1 集成后的真实后端能力）：
+ * - `GET /admin/me` 返回 `{ id, username, is_super, roles, permissions }`；
+ *   `permissions[]` 是该管理员全部角色的权限码合并去重后的升序集合；
+ * - `GET /admin/roles/:id/permissions` 返回指定角色已授予的权限（`role:list`）。
  *
- * 因此 A5 的授权优先级是：
+ * 授权优先级：
  * 1. `is_super === true` → 视为拥有全部权限（仅影响界面展示）；
- * 2. 后端下发了 `permissions[]`（当前未实现，保留兼容）→ 以其为准；
- * 3. 以上都不具备 → **fail-closed**，非超级管理员的有效权限集合为空。
+ * 2. 后端下发了 `permissions[]`（数组，可能为空）→ 以其为准；
+ * 3. 后端未下发该字段（`null`/`undefined`）→ **fail-closed**，有效权限集合为空。
  *
  * 明确禁止：把角色名当作权限集合。角色名只用于展示（`/admin/me` 的 `roles`），
  * 不参与授权计算。

@@ -6680,7 +6680,7 @@ Order:
       format: int64
       x-go-type: int64
       x-unit: cent
-      description: 应付金额（整数分，快照 = original_amount - discount_amount - member_discount_amount）
+      description: 应付金额（整数分，快照 = original_amount - discount_amount - member_discount_amount + shipping_fee）
     original_amount:
       type: integer
       format: int64

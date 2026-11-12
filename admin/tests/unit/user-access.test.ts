@@ -4,9 +4,15 @@ import { server } from "../setup";
 import { resetMockDb } from "@/mocks/handlers/mock-db";
 import { MOCK_ACCESS_TOKEN } from "@/mocks/handlers/admin";
 import { clearAccessToken, setAccessToken } from "@/utils/auth";
-import { getUserStatus, updateUserStatus } from "@/api/modules/user";
+import {
+  getUser,
+  getUserStatus,
+  listUsers,
+  updateUserStatus
+} from "@/api/modules/user";
 import {
   parsePositiveId,
+  toUserListView,
   toUserStatusView,
   validateUserStatusReason
 } from "@/api/adapters/access-adapter";
@@ -134,5 +140,75 @@ describe("用户账号状态管理（后端真实接口）", () => {
     expect(validateUserStatusReason("   ")).toBe("请输入变更原因");
     expect(validateUserStatusReason("a".repeat(256))).toContain("255");
     expect(validateUserStatusReason("正常")).toBeNull();
+  });
+});
+
+describe("后台用户列表与详情（GET /admin/users）", () => {
+  beforeEach(() => {
+    resetMockDb();
+    login();
+  });
+
+  it("列表使用服务端分页，按 id 降序且只返回白名单字段", async () => {
+    const result = await listUsers({ page: 1, size: 2 });
+
+    expect(result.total).toBe(3);
+    expect(result.page).toBe(1);
+    expect(result.size).toBe(2);
+    expect(result.items.map(item => item.id)).toEqual([103, 102]);
+    // 后端 AdminUser 白名单：不含 password_hash/auth_epoch 等认证材料
+    expect(Object.keys(result.items[0]).sort()).toEqual([
+      "created_at",
+      "id",
+      "status",
+      "username"
+    ]);
+  });
+
+  it("默认分页为 page=1 / size=20", async () => {
+    const result = await listUsers();
+
+    expect(result.page).toBe(1);
+    expect(result.size).toBe(20);
+    expect(result.items).toHaveLength(3);
+  });
+
+  it("非法分页参数返回 1001（后端 400）", async () => {
+    await expectBusinessCode(listUsers({ page: 0 }), 1001);
+    await expectBusinessCode(listUsers({ page: 1, size: 0 }), 1001);
+    await expectBusinessCode(listUsers({ page: 1, size: 101 }), 1001);
+  });
+
+  it("详情返回真实字段并转换为视图", async () => {
+    const dto = await getUser(102);
+    const view = toUserListView(dto);
+
+    expect(dto).toEqual({
+      id: 102,
+      username: "disabled_user",
+      status: 0,
+      created_at: "2026-02-11 14:05:00"
+    });
+    expect(view.statusLabel).toBe("禁用");
+    expect(view.statusTagType).toBe("info");
+    expect(view.createdText).toBe("2026-02-11 14:05:00");
+  });
+
+  it("详情目标不存在返回 2015（404）", async () => {
+    await expectBusinessCode(getUser(999999), 2015);
+  });
+
+  it("详情不泄露后端未提供的资料字段", async () => {
+    const dto = await getUser(101);
+
+    expect(Object.keys(dto).sort()).toEqual([
+      "created_at",
+      "id",
+      "status",
+      "username"
+    ]);
+    expect(JSON.stringify(dto)).not.toMatch(
+      /password|auth_epoch|phone|nickname/
+    );
   });
 });

@@ -10,9 +10,10 @@ import { fail, isAuthorized, ok, unauthorized } from "./shared";
  * - `internal/logic/admin/admin.go` 的业务规则（保护超级管理员/禁止操作自身/幂等）；
  * - `internal/logic/iam/user_status.go`（reason 必填、状态幂等）。
  *
- * **仅用于本地演示与单元测试**，不是生产数据，也不代表后端已有列表接口：
- * 后端没有 `GET /admin/users`、`GET /admin/admins` 等列表 API，
- * 这里也**不会**提供这些 mock 路由。
+ * **仅用于本地演示与单元测试**，不是生产数据；路由与字段集合同步自当前后端：
+ * - `GET /admin/users`、`GET /admin/users/:id`（`user:read`，字段白名单）；
+ * - `GET /admin/roles/:id/permissions`（`role:list`）；
+ * - 管理员列表 `GET /admin/admins` 后端仍不存在，因此这里也不提供。
  */
 
 /** Mock 中的"当前登录管理员"（与 `MOCK_ADMIN_PROFILE.id` 一致） */
@@ -47,7 +48,69 @@ function checkTargetAdmin(id: number) {
   return null;
 }
 
+/** 后端 `adminUserPageParams`：page ≥ 1、1 ≤ size ≤ 100，越界/非整数返回 400 */
+function parseUserPageParams(url: URL) {
+  const pageRaw = url.searchParams.get("page");
+  const sizeRaw = url.searchParams.get("size");
+  const page = pageRaw === null ? 1 : Number(pageRaw);
+  const size = sizeRaw === null ? 20 : Number(sizeRaw);
+
+  if (!Number.isInteger(page) || page < 1) {
+    return { error: fail(1001, "参数错误", 400) } as const;
+  }
+  if (!Number.isInteger(size) || size < 1 || size > 100) {
+    return { error: fail(1001, "参数错误", 400) } as const;
+  }
+  return { page, size } as const;
+}
+
+/** 后台用户公开字段（白名单，与后端 AdminUser 一致） */
+function toAdminUser(user: {
+  id: number;
+  username: string;
+  status: 0 | 1;
+  created_at: string;
+}) {
+  return {
+    id: user.id,
+    username: user.username,
+    status: user.status,
+    created_at: user.created_at
+  };
+}
+
 export const accessHandlers = [
+  /** GET /admin/users（分页，id 降序） */
+  http.get("*/api/admin/users", ({ request }) => {
+    if (!isAuthorized(request)) return unauthorized();
+
+    const params = parseUserPageParams(new URL(request.url));
+    if ("error" in params) return params.error;
+
+    const sorted = [...mockDb.users].sort((a, b) => b.id - a.id);
+    const start = (params.page - 1) * params.size;
+    const items = sorted
+      .slice(start, start + params.size)
+      .map(user => toAdminUser(user));
+
+    return ok({
+      items,
+      total: sorted.length,
+      page: params.page,
+      size: params.size
+    });
+  }),
+
+  /** GET /admin/users/:id */
+  http.get("*/api/admin/users/:id", ({ request, params }) => {
+    if (!isAuthorized(request)) return unauthorized();
+
+    const id = Number(params.id);
+    const user = mockDb.users.find(item => item.id === id);
+    if (!user) return fail(2015, "用户不存在", 404);
+    return ok(toAdminUser(user));
+  }),
+
   /** GET /admin/users/:id/status */
   http.get("*/api/admin/users/:id/status", ({ request, params }) => {
     if (!isAuthorized(request)) return unauthorized();
@@ -250,6 +313,27 @@ export const accessHandlers = [
       if (key.startsWith(`${id}:`)) mockDb.rolePermissions.delete(key);
     }
     return ok(null);
+  }),
+
+  /** GET /admin/roles/:id/permissions（已授权限，按权限 id 升序） */
+  http.get("*/api/admin/roles/:id/permissions", ({ request, params }) => {
+    if (!isAuthorized(request)) return unauthorized();
+
+    const roleId = Number(params.id);
+    if (!mockDb.roles.some(role => role.id === roleId)) {
+      return fail(2007, "角色不存在", 404);
+    }
+
+    const grantedIds = [...mockDb.rolePermissions]
+      .filter(key => key.startsWith(`${roleId}:`))
+      .map(key => Number(key.split(":")[1]));
+
+    const items = mockDb.permissions
+      .filter(permission => grantedIds.includes(permission.id))
+      .sort((a, b) => a.id - b.id)
+      .map(permission => ({ ...permission }));
+
+    return ok({ items });
   }),
 
   /** POST /admin/roles/:id/permissions */

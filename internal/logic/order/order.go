@@ -203,6 +203,18 @@ func (s *sOrder) Create(ctx context.Context, userID int64, req *v1.CreateReq) (*
 
 	lines, err := s.buildLines(ctx, source, userID, req)
 	if err != nil {
+		// 购物车下单成功后，服务端会在同一事务内删除已购条目：用同一幂等键重放时
+		// buildLines 只能得到 9004，无法再重算 request_hash。按 INV-002（同键同内容
+		// 返回既有订单），这里回读既有订单，避免把已成功的下单误报为"购物车无勾选商品"。
+		if source == v1.SourceCart && codes.FromError(err) == codes.CodeOrderCartEmpty {
+			replay, replayErr := s.replayConsumedCartOrder(ctx, userID, idempotencyKey, req)
+			if replayErr != nil {
+				return nil, replayErr
+			}
+			if replay != nil {
+				return replay, nil
+			}
+		}
 		return nil, err
 	}
 
@@ -782,6 +794,44 @@ func insertStatusLogInTx(ctx context.Context, tx gdb.TX, orderID int64, from, to
 }
 
 // handleIdempotency 读回既有订单：同请求指纹返回既有订单（幂等成功），否则 9006。
+// replayConsumedCartOrder 处理「购物车来源下单成功后再用同一幂等键重放」的场景。
+//
+// 幂等键命中且请求的地址/优惠券与既有订单一致 → 返回既有订单（不重复下单）；
+// 键不存在 → 返回 (nil, nil)，调用方保留原本的 9004；
+// 键存在但地址/券不同 → 9006（同键不同内容）。
+//
+// 说明：购物车行项目已被下单事务删除，无法重算完整 request_hash，
+// 因此这里用订单快照中的 address_id / user_coupon_id 做一致性校验。
+func (s *sOrder) replayConsumedCartOrder(
+	ctx context.Context, userID int64, key string, req *v1.CreateReq,
+) (*v1.CreateRes, error) {
+	row, err := s.findByIdempotencyKey(ctx, userID, key)
+	if err != nil {
+		return nil, err
+	}
+	if row == nil {
+		return nil, nil
+	}
+
+	storedAddressID := int64(0)
+	if row.AddressId != nil {
+		storedAddressID = *row.AddressId
+	}
+	storedCouponID := int64(0)
+	if row.UserCouponId != nil {
+		storedCouponID = *row.UserCouponId
+	}
+	if storedAddressID != req.AddressId || storedCouponID != req.CouponId {
+		return nil, codes.New(codes.CodeOrderIdempotencyConflict)
+	}
+
+	o, err := s.toOrder(ctx, row)
+	if err != nil {
+		return nil, err
+	}
+	return &v1.CreateRes{Order: *o}, nil
+}
+
 func (s *sOrder) handleIdempotency(ctx context.Context, userID int64, key, hash string) (*v1.CreateRes, error) {
 	row, err := s.findByIdempotencyKey(ctx, userID, key)
 	if err != nil {
