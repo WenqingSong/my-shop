@@ -733,6 +733,18 @@ joined_count=2，participants=2，orders=2，库存仅扣减 2
 
 不将 B1-05 整体改为 PASS：真实历史业务数据迁移仍未验证，属外部数据源阻塞。
 
+### 10.9 本次提交
+
+| 项 | 值 |
+|---|---|
+| 分支 | `feat/p2-backend` |
+| 修订前基线 | `f0b5ccbbfde8013f3b4e25e201f412902f9a1325` |
+| 代码 / 契约 / 测试提交 | `353abc2`（`fix(api): normalize GoFrame validation errors to 400/1001`） |
+| 文档 / 报告提交 | 本提交，见 `git log -1` |
+| Push | **未执行** |
+| Merge main/develop | **未执行** |
+| 工作区 | 提交后干净 |
+
 ## 附录 A：本次修复记录（修改前 → 修改后）
 
 | 编号 | 原始问题 | 修改 | 修改前验证 | 修改后验证 |
