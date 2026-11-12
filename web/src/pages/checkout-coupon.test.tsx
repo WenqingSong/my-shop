@@ -8,8 +8,11 @@ import { mockCartSkuId, seedMockCartItem } from '@/mocks/data/cart'
 import { expireMockCoupon, seedMockCoupon } from '@/mocks/data/coupons'
 import {
   getMockOrderCreatePayloads,
+  getMockQuotePayloads,
+  getMockQuoteRequestCount,
   setMockOrderErrorOnce,
   setMockOrderRequestDelay,
+  setMockQuoteErrorOnce,
 } from '@/mocks/data/orders'
 import { server } from '@/mocks/server'
 import { signInAsDemo } from '@/test/auth'
@@ -53,7 +56,9 @@ describe('结算页优惠券选择', () => {
     const section = await openCheckout()
 
     expect(await within(section).findByText('满 100 减 50 券')).toBeInTheDocument()
-    expect(within(section).getByText(/优惠券适用性及最终优惠金额以服务端下单校验结果为准/)).toBeInTheDocument()
+    expect(
+      within(section).getByText(/优惠券适用性以服务端试算与下单校验结果为准/),
+    ).toBeInTheDocument()
     expect(within(section).getByRole('radio', { name: /不使用优惠券/ })).toBeChecked()
     expect(within(section).getByRole('radio', { name: /满 100 减 50 券/ })).not.toBeChecked()
   })
@@ -103,10 +108,15 @@ describe('结算页优惠券选择', () => {
     await user.click(await within(section).findByRole('radio', { name: /下单用券/ }))
     expect(within(section).getByRole('radio', { name: /下单用券/ })).toBeChecked()
 
-    // 摘要区展示预估优惠与预估应付（明确标注为预估）。
+    // 摘要区展示服务端试算的优惠券优惠与应付金额。
     const amountPanel = screen.getByRole('complementary', { name: '订单金额' })
-    expect(amountPanel).toHaveTextContent('优惠（预估）')
+    await waitFor(() => {
+      expect(amountPanel).toHaveTextContent('优惠券优惠')
+    })
     expect(amountPanel).toHaveTextContent('¥500.00')
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '提交订单' })).toBeEnabled()
+    })
 
     await user.click(screen.getByRole('button', { name: '提交订单' }))
 
@@ -137,11 +147,17 @@ describe('结算页优惠券选择', () => {
     // 第一次：选券 A 提交，服务端返回 500，停留在结算页。
     setMockOrderErrorOnce({ status: 500, code: 1000, message: '服务器内部错误' })
     await user.click(await within(section).findByRole('radio', { name: /券 A/ }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '提交订单' })).toBeEnabled()
+    })
     await user.click(screen.getByRole('button', { name: '提交订单' }))
     expect(await screen.findByRole('alert')).toBeInTheDocument()
 
-    // 第二次：换成券 B 提交成功。
+    // 第二次：换成券 B，等新试算完成后提交成功。
     await user.click(within(section).getByRole('radio', { name: /券 B/ }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '提交订单' })).toBeEnabled()
+    })
     await user.click(screen.getByRole('button', { name: '提交订单' }))
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: '订单信息' })).toBeInTheDocument()
@@ -164,10 +180,16 @@ describe('结算页优惠券选择', () => {
 
     setMockOrderErrorOnce({ status: 500, code: 1000, message: '服务器内部错误' })
     await user.click(await within(section).findByRole('radio', { name: /可取消的券/ }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '提交订单' })).toBeEnabled()
+    })
     await user.click(screen.getByRole('button', { name: '提交订单' }))
     expect(await screen.findByRole('alert')).toBeInTheDocument()
 
     await user.click(within(section).getByRole('radio', { name: /不使用优惠券/ }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '提交订单' })).toBeEnabled()
+    })
     await user.click(screen.getByRole('button', { name: '提交订单' }))
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: '订单信息' })).toBeInTheDocument()
@@ -194,6 +216,9 @@ describe('结算页优惠券选择', () => {
       ),
     )
 
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '提交订单' })).toBeEnabled()
+    })
     await user.click(screen.getByRole('button', { name: '提交订单' }))
 
     expect(
@@ -217,6 +242,9 @@ describe('结算页优惠券选择', () => {
     ).toBeInTheDocument()
     expect(within(section).queryByRole('radio')).not.toBeInTheDocument()
 
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '提交订单' })).toBeEnabled()
+    })
     await user.click(screen.getByRole('button', { name: '提交订单' }))
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: '订单信息' })).toBeInTheDocument()
@@ -236,6 +264,7 @@ describe('结算页优惠券选择', () => {
     setMockOrderRequestDelay(120)
 
     const submit = screen.getByRole('button', { name: '提交订单' })
+    await waitFor(() => expect(submit).toBeEnabled())
     await user.click(submit)
     await waitFor(() => {
       expect(screen.getByRole('button', { name: '提交订单' })).toBeDisabled()
@@ -247,6 +276,76 @@ describe('结算页优惠券选择', () => {
     })
     expect(getMockOrderCreatePayloads()).toHaveLength(1)
   })
+
+  it('选择与取消优惠券都会重新试算并更新服务端优惠金额', async () => {
+    const user = userEvent.setup()
+    await signInAsDemo()
+    seedCheckout()
+    const coupon = seedMockCoupon(DEMO_USER_ID, {
+      name: '试算用券',
+      threshold_amount: 0,
+      discount_amount: 50_000,
+    })
+
+    const section = await openCheckout()
+    const amountPanel = screen.getByRole('complementary', { name: '订单金额' })
+    await within(amountPanel).findByText('商品原价')
+    const initialRequests = getMockQuoteRequestCount()
+
+    await user.click(await within(section).findByRole('radio', { name: /试算用券/ }))
+
+    await waitFor(() => {
+      expect(getMockQuoteRequestCount()).toBe(initialRequests + 1)
+    })
+    expect(getMockQuotePayloads().at(-1)).toMatchObject({ coupon_id: coupon.id })
+    await waitFor(() => {
+      expect(amountPanel).toHaveTextContent('¥3,799.00')
+    })
+
+    await user.click(within(section).getByRole('radio', { name: /不使用优惠券/ }))
+
+    await waitFor(() => {
+      expect(getMockQuoteRequestCount()).toBe(initialRequests + 2)
+    })
+    expect(getMockQuotePayloads().at(-1)?.coupon_id).toBeUndefined()
+    await waitFor(() => {
+      expect(amountPanel).toHaveTextContent('¥4,299.00')
+    })
+  })
+
+  it('试算拒绝优惠券时展示错误，可取消用券重新试算', async () => {
+    const user = userEvent.setup()
+    await signInAsDemo()
+    seedCheckout()
+    seedMockCoupon(DEMO_USER_ID, {
+      name: '试算被拒的券',
+      threshold_amount: 0,
+      discount_amount: 10_000,
+    })
+
+    const section = await openCheckout()
+    const amountPanel = screen.getByRole('complementary', { name: '订单金额' })
+    await within(amountPanel).findByText('商品原价')
+
+    setMockQuoteErrorOnce({ status: 409, code: 19007, message: '优惠券不可用' })
+    await user.click(await within(section).findByRole('radio', { name: /试算被拒的券/ }))
+
+    const alert = await within(amountPanel).findByRole('alert')
+    expect(alert).toHaveTextContent('所选优惠券当前不可用')
+    expect(within(amountPanel).getByText('待服务端试算')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '提交订单' })).toBeDisabled()
+
+    await user.click(
+      within(amountPanel).getByRole('button', { name: '不使用优惠券并重试' }),
+    )
+
+    await waitFor(() => {
+      expect(within(section).getByRole('radio', { name: /不使用优惠券/ })).toBeChecked()
+    })
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '提交订单' })).toBeEnabled()
+    })
+  })
 })
 
 describe('下单成功页的优惠金额', () => {
@@ -256,6 +355,9 @@ describe('下单成功页的优惠金额', () => {
     seedCheckout()
 
     await openCheckout()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '提交订单' })).toBeEnabled()
+    })
     await user.click(screen.getByRole('button', { name: '提交订单' }))
 
     await waitFor(() => {

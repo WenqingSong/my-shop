@@ -13,8 +13,9 @@ export interface CartSummaryPanelProps {
  *
  * 这里的「商品合计（预估）」= 已勾选且可购买条目的（当前单价 × 数量）之和，
  * 仅用于购物车展示：
- * - 不含运费、优惠券、活动价与库存最终裁决；
- * - 不是订单试算结果：后端没有独立试算接口，最终应付金额只在创建订单事务中计算；
+ * - 不含运费、优惠券、会员优惠与库存最终裁决；
+ * - 不是订单试算结果：服务端试算只在结算页 `POST /orders/quote` 进行，
+ *   最终应付金额以 `POST /orders` 返回的订单快照为准；
  * - 存在不可购买商品时不提供结算入口（后端会 9003 拒绝），避免必然失败的提交。
  */
 export function CartSummaryPanel({ summary }: CartSummaryPanelProps) {
@@ -42,7 +43,7 @@ export function CartSummaryPanel({ summary }: CartSummaryPanelProps) {
       </dl>
 
       <p className="mt-3 text-xs leading-5 text-muted-foreground">
-        运费与优惠暂未接入；最终应付金额以提交订单后服务端返回为准，购物车金额仅供预览。
+        运费与优惠在结算页由服务端试算；最终应付金额以提交订单后服务端返回为准，购物车金额仅供预览。
       </p>
 
       {blocked ? (

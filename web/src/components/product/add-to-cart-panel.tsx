@@ -13,6 +13,8 @@ import { describeCartError } from '@/pages/cart-errors'
 export interface AddToCartPanelProps {
   product: ProductDetail
   selectedSku: Sku | null
+  /** 当前规格库存；null 表示后端没有提供该 SKU 的库存数据（未知，不是 0）。 */
+  stock: number | null
 }
 
 /**
@@ -22,20 +24,37 @@ export interface AddToCartPanelProps {
  * - POST /cart/items { sku_id, quantity }（api/cart/v1/cart.go AddReq）；
  * - 后端强制 sku_id 必填（缺失/≤0 → 400/1001），因此前端先做「必须选择规格」校验，
  *   不发送只有商品 id 的请求；
- * - 商品没有可用 SKU（product.skus 为空）时不提供加购操作。
+ * - 商品没有可用 SKU（product.skus 为空）时不提供加购操作；
+ * - 库存来自商品详情 productValue（按 sku_id），只有明确为 0 时才禁止加购；
+ *   库存未知时不虚构数量，也不假装无货，仅提示以下单校验为准。
  *
  * 未登录：按钮直接引导登录并携带当前商品详情地址，登录后回到本页。
  */
-export function AddToCartPanel({ product, selectedSku }: AddToCartPanelProps) {
+export function AddToCartPanel({ product, selectedSku, stock }: AddToCartPanelProps) {
   const { status, refetch } = useAuthStatus()
   const location = useLocation()
   const navigate = useNavigate()
   const addToCart = useAddToCart()
   const [quantity, setQuantity] = useState(1)
   const [skuError, setSkuError] = useState<string | null>(null)
+  // 最近一次成功加购的 SKU：切换规格后旧成功提示不再展示。
+  const [lastAddedSkuId, setLastAddedSkuId] = useState<number | null>(null)
 
   const hasSkus = product.skus.length > 0
+  const currentSkuId = selectedSku?.id ?? null
   const addedQuantity = addToCart.data?.quantity ?? null
+  const outOfStock = stock !== null && stock <= 0
+  const maxQuantity =
+    stock !== null && stock > 0 ? Math.min(stock, CART_QUANTITY_MAX) : CART_QUANTITY_MAX
+
+  // 切换规格时重置数量与校验提示（渲染期调整 state，避免额外 effect）。
+  const [syncedSkuId, setSyncedSkuId] = useState<number | null>(currentSkuId)
+
+  if (currentSkuId !== syncedSkuId) {
+    setSyncedSkuId(currentSkuId)
+    setQuantity(1)
+    setSkuError(null)
+  }
 
   const handleAdd = () => {
     if (!selectedSku) {
@@ -43,11 +62,17 @@ export function AddToCartPanel({ product, selectedSku }: AddToCartPanelProps) {
       return
     }
 
+    if (outOfStock) {
+      return
+    }
+
+    const sku = selectedSku
     setSkuError(null)
     addToCart.mutate(
-      { skuId: selectedSku.id, quantity },
+      { skuId: sku.id, quantity },
       {
         onSuccess: () => {
+          setLastAddedSkuId(sku.id)
           setQuantity(1)
         },
       },
@@ -89,8 +114,8 @@ export function AddToCartPanel({ product, selectedSku }: AddToCartPanelProps) {
           <span className="text-sm text-muted-foreground">数量</span>
           <QuantityStepper
             value={quantity}
-            max={CART_QUANTITY_MAX}
-            disabled={!hasSkus || status === 'loading' || addToCart.isPending}
+            max={maxQuantity}
+            disabled={!hasSkus || outOfStock || status === 'loading' || addToCart.isPending}
             label={product.name}
             onChange={setQuantity}
           />
@@ -100,8 +125,10 @@ export function AddToCartPanel({ product, selectedSku }: AddToCartPanelProps) {
           size="lg"
           onClick={handleAdd}
           isLoading={addToCart.isPending}
-          disabled={!hasSkus || status === 'loading'}
-          aria-describedby={hasSkus ? undefined : 'cart-sku-unavailable'}
+          disabled={!hasSkus || outOfStock || status === 'loading'}
+          aria-describedby={
+            !hasSkus ? 'cart-sku-unavailable' : outOfStock ? 'cart-stock-unavailable' : undefined
+          }
         >
           <ShoppingCart aria-hidden="true" />
           加入购物车
@@ -111,6 +138,18 @@ export function AddToCartPanel({ product, selectedSku }: AddToCartPanelProps) {
       {!hasSkus ? (
         <p id="cart-sku-unavailable" className="text-xs leading-5 text-warning">
           该商品暂未配置可售规格，无法加入购物车。
+        </p>
+      ) : null}
+
+      {outOfStock ? (
+        <p id="cart-stock-unavailable" className="text-xs leading-5 text-warning">
+          当前规格暂无库存，暂时无法加入购物车。
+        </p>
+      ) : null}
+
+      {hasSkus && selectedSku && stock === null ? (
+        <p className="text-xs leading-5 text-muted-foreground">
+          该规格暂时没有可用的库存数据，是否可购买以服务端下单校验为准。
         </p>
       ) : null}
 
@@ -132,7 +171,7 @@ export function AddToCartPanel({ product, selectedSku }: AddToCartPanelProps) {
         </p>
       ) : null}
 
-      {addToCart.isSuccess ? (
+      {addToCart.isSuccess && lastAddedSkuId === currentSkuId ? (
         <div
           role="status"
           className="flex flex-wrap items-center gap-2 rounded-lg border border-success/20 bg-success-soft px-4 py-3 text-sm text-success"

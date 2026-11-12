@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { ChevronRight, PackageCheck, Truck } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router'
 
 import { fetchCategoryTree } from '@/api/categories'
@@ -20,6 +20,14 @@ import { SkuSelector } from '@/components/product/sku-selector'
 import { Button } from '@/components/ui/button'
 import { useDocumentTitle } from '@/hooks/use-document-title'
 import { findCategoryById } from '@/utils/category-tree'
+import {
+  buildSkuStockMap,
+  describeSkuSpec,
+  describeSkuStock,
+  getSkuStock,
+  hasOriginalPrice,
+  skuImageUrl,
+} from '@/utils/sku'
 
 function DetailSkeleton() {
   return (
@@ -65,6 +73,10 @@ function ProductDetailContent({
   const [selectedSkuId, setSelectedSkuId] = useState<number | null>(null)
   const selectedSku: Sku | null = product.skus.find((sku) => sku.id === selectedSkuId) ?? null
   const currentPrice = selectedSku?.price ?? product.price
+  // 库存只在 productValue 中按 sku_id 提供；无规格商品 productValue 为空 → 库存未知。
+  const stockMap = useMemo(() => buildSkuStockMap(product.productValue), [product.productValue])
+  const selectedStock = selectedSku ? getSkuStock(stockMap, selectedSku.id) : null
+  const selectedImage = skuImageUrl(selectedSku)
 
   return (
     <>
@@ -89,7 +101,13 @@ function ProductDetailContent({
       </nav>
 
       <div className="mt-5 grid gap-8 lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)] lg:gap-12">
-        <ProductGallery name={product.name} mainImage={product.main_image} images={product.images} />
+        {/* SKU 切换时用 key 重置图册：有规格图则优先展示规格图，否则回退商品主图。 */}
+        <ProductGallery
+          key={selectedSku?.id ?? 'product'}
+          name={product.name}
+          mainImage={selectedImage !== '' ? selectedImage : product.main_image}
+          images={product.images}
+        />
 
         <div className="min-w-0">
           <p className="text-sm text-muted-foreground">
@@ -114,9 +132,16 @@ function ProductDetailContent({
             <p className="text-xs text-muted-foreground">
               {selectedSku ? '当前价格' : '商品起售价'}
             </p>
-            <PriceDisplay value={currentPrice} size="lg" className="mt-1" />
+            <div className="mt-1 flex flex-wrap items-baseline gap-2">
+              <PriceDisplay value={currentPrice} size="lg" />
+              {selectedSku && hasOriginalPrice(selectedSku.price, selectedSku.original_price) ? (
+                <span className="text-sm text-muted-foreground line-through">
+                  <PriceDisplay value={selectedSku.original_price} size="sm" tone="neutral" />
+                </span>
+              ) : null}
+            </div>
             <p className="mt-2 text-xs text-muted-foreground" aria-live="polite">
-              {selectedSku ? `已选规格：${selectedSku.name}` : '请选择商品规格'}
+              {selectedSku ? `已选规格：${describeSkuSpec(selectedSku)}` : '请选择商品规格'}
             </p>
           </div>
 
@@ -127,8 +152,10 @@ function ProductDetailContent({
             <div className="mt-3">
               <SkuSelector
                 skus={product.skus}
+                attr={product.attr}
+                productValue={product.productValue}
                 selectedSkuId={selectedSkuId}
-                onSelect={(sku) => setSelectedSkuId(sku.id)}
+                onSelect={(sku) => setSelectedSkuId(sku?.id ?? null)}
               />
             </div>
           </section>
@@ -137,8 +164,8 @@ function ProductDetailContent({
             <PackageCheck className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
             <div className="min-w-0">
               <p className="text-sm font-medium text-foreground">库存状态</p>
-              <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
-                当前版本未提供公开库存查询接口，库存以下单时校验为准。
+              <p className="mt-0.5 text-xs leading-5 text-muted-foreground" aria-live="polite">
+                {selectedSku ? describeSkuStock(selectedStock) : '选择规格后可查看该规格的库存信息。'}
               </p>
             </div>
           </div>
@@ -151,13 +178,13 @@ function ProductDetailContent({
             <h2 id="add-to-cart-heading" className="sr-only">
               加入购物车
             </h2>
-            <AddToCartPanel product={product} selectedSku={selectedSku} />
+            <AddToCartPanel product={product} selectedSku={selectedSku} stock={selectedStock} />
           </section>
 
           <ul className="mt-6 space-y-2 border-t border-border pt-4 text-xs leading-5 text-muted-foreground">
             <li className="flex items-center gap-2">
               <Truck className="size-3.5 shrink-0" aria-hidden="true" />
-              配送与运费信息将在下单能力开放后展示。
+              运费由服务端按商品运费模板与收货地址计算，结算页会展示试算结果。
             </li>
             <li className="flex items-center gap-2">
               <PackageCheck className="size-3.5 shrink-0" aria-hidden="true" />

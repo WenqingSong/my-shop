@@ -68,6 +68,53 @@ export function describeOrderError(error: unknown): string {
   return error.message || '下单失败，请稍后重试'
 }
 
+/**
+ * 试算错误文案（POST /orders/quote）。
+ *
+ * 试算是只读预览：失败时页面只能展示错误 + 重试入口，不能退回客户端金额计算。
+ * 错误码来源：internal/codes/codes.go（地址 7001、购物车 9004、SKU 9003、
+ * 优惠券 19003/19007、运费 21008/21009、计价 21010/21011）。
+ */
+export function describeQuoteError(error: unknown): string {
+  if (!(error instanceof ApiError)) {
+    return '金额试算失败，请稍后重试'
+  }
+
+  if (error.code === '7001') {
+    return '收货地址不存在或不属于当前账号，请重新选择地址后重试'
+  }
+
+  if (error.code === '9004') {
+    return '购物车中没有有效的勾选商品，请返回购物车重新勾选'
+  }
+
+  if (error.code === '9003' || error.code === '5001') {
+    return '部分商品已下架或规格已停售，请返回购物车调整后重试'
+  }
+
+  if (error.code === '19003' || error.code === '19007') {
+    return '所选优惠券当前不可用（可能已被占用、超出有效期或未达到门槛），请更换或取消选择后重试'
+  }
+
+  if (error.code === '21008' || error.code === '21009') {
+    return '该收货地址暂时无法计算运费，请更换地址后重试'
+  }
+
+  if (error.code === '21011') {
+    return '优惠金额超过可优惠金额，请取消优惠券后重试'
+  }
+
+  if (error.code === '1002' || error.status === 401) {
+    return '登录状态已失效，请重新登录'
+  }
+
+  if (error.kind === 'timeout' || error.kind === 'network') {
+    return '网络异常，暂时无法获取服务端试算金额，请重试'
+  }
+
+  return error.message || '金额试算失败，请稍后重试'
+}
+
 /** 是否为「结果未知」类错误（超时/网络异常），用于提示重试语义。 */
 export function isUnknownResultError(error: unknown): boolean {
   return error instanceof ApiError && (error.kind === 'timeout' || error.kind === 'network')

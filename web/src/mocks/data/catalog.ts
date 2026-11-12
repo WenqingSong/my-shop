@@ -1,4 +1,14 @@
-import type { BannerItem, Category, Product, ProductDetail, ReviewItem, Sku } from '@/api/types'
+import type {
+  BannerItem,
+  Category,
+  Product,
+  ProductDetail,
+  ReviewItem,
+  Sku,
+  SkuAttr,
+  SkuProductValue,
+  SkuSpecValue,
+} from '@/api/types'
 
 /**
  * Mock 数据（仅用于 Vitest / Playwright，不代表真实后端数据）。
@@ -181,6 +191,7 @@ export const mockProducts: Product[] = seeds.map((seed, index) => {
     main_image: imageFor(seed.id),
     detail: seed.detail,
     status: 'on_shelf',
+    freight_template_id: null,
     view_count: 120 + seed.id * 7,
     images: [imageFor(seed.id), imageFor(seed.id + 1)],
     created_at: createdAt,
@@ -190,17 +201,141 @@ export const mockProducts: Product[] = seeds.map((seed, index) => {
 
 const SKU_NAMES = ['标准款', '升级款'] as const
 
+interface MockSpecSeed {
+  attr: SkuAttr[]
+  combos: {
+    values: string[]
+    skuName: string
+    price: number
+    originalPrice: number
+    stock: number
+    imageUrl?: string
+  }[]
+}
+
+/**
+ * 带规格组的商品（与后端 productValue 结构一致）：
+ * - attr 顺序即 productValue 组合键顺序；
+ * - stock 只在 productValue 中提供，skus[] 不含 stock；
+ * - 黑色 L 故意设为 0 库存，用于验证「无货」展示。
+ */
+const MOCK_SPEC_SEEDS: Record<number, MockSpecSeed> = {
+  11: {
+    attr: [
+      { attrName: '颜色', attrValueArr: ['黑色', '白色'] },
+      { attrName: '尺码', attrValueArr: ['M', 'L'] },
+    ],
+    combos: [
+      {
+        values: ['黑色', 'M'],
+        skuName: '黑色 M',
+        price: 16_900,
+        originalPrice: 19_900,
+        stock: 5,
+        imageUrl: '/mock/product-1.svg',
+      },
+      { values: ['黑色', 'L'], skuName: '黑色 L', price: 16_900, originalPrice: 19_900, stock: 0 },
+      {
+        values: ['白色', 'M'],
+        skuName: '白色 M',
+        price: 17_900,
+        originalPrice: 19_900,
+        stock: 12,
+        imageUrl: '/mock/product-3.svg',
+      },
+      { values: ['白色', 'L'], skuName: '白色 L', price: 17_900, originalPrice: 19_900, stock: 8 },
+    ],
+  },
+}
+
+function specValuesFor(seed: MockSpecSeed, values: string[]): SkuSpecValue[] {
+  return values.map((value, index) => {
+    const group = seed.attr[index]
+
+    return {
+      spec_id: index + 1,
+      spec_name: group?.attrName ?? '',
+      spec_value_id: index + 1,
+      value,
+      sort: index,
+    }
+  })
+}
+
 /** SKU id 使用 product.id * 10 + 序号，保证同一 Mock 会话内稳定。 */
 export function mockSkusFor(product: Product): Sku[] {
+  const spec = MOCK_SPEC_SEEDS[product.id]
+
+  if (spec) {
+    return spec.combos.map((combo, index) => ({
+      id: product.id * 10 + index + 1,
+      sku_code: `SKU${String(product.id).padStart(2, '0')}${String(index + 1).padStart(2, '0')}`,
+      product_id: product.id,
+      name: combo.skuName,
+      image_url: combo.imageUrl ?? '',
+      price: combo.price,
+      original_price: combo.originalPrice,
+      status: 'enabled',
+      spec_key: `mock-spec-${String(product.id)}-${String(index + 1)}`,
+      spec_values: specValuesFor(spec, combo.values),
+      created_at: product.created_at,
+      updated_at: product.updated_at,
+    }))
+  }
+
   return SKU_NAMES.map((name, index) => ({
     id: product.id * 10 + index + 1,
+    sku_code: `SKU${String(product.id).padStart(2, '0')}${String(index + 1).padStart(2, '0')}`,
     product_id: product.id,
     name,
+    image_url: '',
     price: product.price + index * 5000,
+    original_price: product.price + index * 5000,
     status: 'enabled',
+    spec_key: '',
+    spec_values: [],
     created_at: product.created_at,
     updated_at: product.updated_at,
   }))
+}
+
+/**
+ * 规格组合映射（无规格商品返回空数组与空对象，与 Go 后端 buildSkuSelector 一致）。
+ * 注意：无规格商品因此没有库存数据，前端必须表现为「库存未知」。
+ */
+export function mockSkuSelectorFor(product: Product): {
+  attr: SkuAttr[]
+  productValue: Record<string, SkuProductValue>
+} {
+  const spec = MOCK_SPEC_SEEDS[product.id]
+
+  if (!spec) {
+    return { attr: [], productValue: {} }
+  }
+
+  const skus = mockSkusFor(product)
+  const productValue: Record<string, SkuProductValue> = {}
+
+  for (const combo of spec.combos) {
+    const sku = skus.find((item) => item.name === combo.skuName)
+
+    if (!sku) {
+      continue
+    }
+
+    productValue[combo.values.join(',')] = {
+      unique: sku.sku_code,
+      sku: combo.values.join(','),
+      sku_id: sku.id,
+      sku_name: sku.name,
+      price: combo.price,
+      original_price: combo.originalPrice,
+      stock: combo.stock,
+      image: combo.imageUrl ?? '',
+    }
+  }
+
+  return { attr: spec.attr, productValue }
 }
 
 export function findMockProduct(productId: number): Product | undefined {
@@ -209,7 +344,14 @@ export function findMockProduct(productId: number): Product | undefined {
 
 export function mockProductDetail(productId: number): ProductDetail | undefined {
   const product = findMockProduct(productId)
-  return product ? { ...product, skus: mockSkusFor(product) } : undefined
+
+  if (!product) {
+    return undefined
+  }
+
+  const { attr, productValue } = mockSkuSelectorFor(product)
+
+  return { ...product, skus: mockSkusFor(product), attr, productValue }
 }
 
 export const mockBanners: BannerItem[] = [

@@ -14,11 +14,14 @@ function makeItem(overrides: Partial<OrderItem> = {}): OrderItem {
   return {
     id: 21,
     sku_id: 9,
+    sku_code: 'SKU-TEST-0009',
     product_id: 3,
     sku_name: '标准款',
+    spec_text: '黑色,M',
     product_name: '云裳 通勤托特包',
     product_main_image: '',
     price: 45_900,
+    original_price: 49_900,
     quantity: 2,
     ...overrides,
   }
@@ -51,20 +54,24 @@ describe('订单详情', () => {
     expect(screen.getByText(order.order_no)).toBeInTheDocument()
     expect(screen.getByText('已发货')).toBeInTheDocument()
 
-    // 商品明细
+    // 商品明细：规格使用 spec_text 快照，并展示 SKU 编码与原价
     expect(screen.getByText('云裳 通勤托特包')).toBeInTheDocument()
-    expect(screen.getByText('规格：标准款')).toBeInTheDocument()
+    expect(screen.getByText('规格：黑色,M')).toBeInTheDocument()
+    expect(screen.getByText('SKU 编码：SKU-TEST-0009')).toBeInTheDocument()
     expect(screen.getByText('数量：2')).toBeInTheDocument()
 
     const itemsSection = screen.getByRole('region', { name: '商品明细' })
     expect(itemsSection).toHaveTextContent('¥459.00')
+    expect(itemsSection).toHaveTextContent('¥499.00')
 
-    // 金额三项全部来自后端快照，前端不做运算
+    // 金额全部来自后端快照，前端不做运算；discount_amount 仅表示优惠券优惠。
     const amountSection = screen.getByRole('region', { name: '金额' })
     expect(amountSection).toHaveTextContent('商品总金额')
     expect(amountSection).toHaveTextContent('¥968.00')
-    expect(amountSection).toHaveTextContent('优惠金额')
+    expect(amountSection).toHaveTextContent('优惠券优惠')
     expect(amountSection).toHaveTextContent('¥80.00')
+    expect(amountSection).toHaveTextContent('会员优惠')
+    expect(amountSection).toHaveTextContent('运费')
     expect(amountSection).toHaveTextContent('应付金额')
     expect(amountSection).toHaveTextContent('¥888.00')
 
@@ -81,6 +88,35 @@ describe('订单详情', () => {
     expect(timeSection).toHaveTextContent('发货时间')
     expect(timeSection).not.toHaveTextContent('收货时间')
     expect(timeSection).not.toHaveTextContent('退款时间')
+  })
+
+  it('分别展示优惠券、会员优惠、运费与支付方式快照', async () => {
+    await signInAsDemo()
+    const order = seedMockOrder(DEMO_USER_ID, {
+      status: 'paid',
+      original_amount: 100_000,
+      discount_amount: 10_000,
+      member_discount_amount: 5_000,
+      shipping_fee: 800,
+      total_amount: 85_800,
+      pay_type: 'mock',
+      items: [makeItem({ price: 45_900, original_price: 45_900 })],
+    })
+
+    renderApp(`/account/orders/${String(order.id)}`)
+
+    const amountSection = await screen.findByRole('region', { name: '金额' })
+    expect(amountSection).toHaveTextContent('商品总金额')
+    expect(amountSection).toHaveTextContent('¥1,000.00')
+    expect(amountSection).toHaveTextContent('优惠券优惠')
+    expect(amountSection).toHaveTextContent('¥100.00')
+    expect(amountSection).toHaveTextContent('会员优惠')
+    expect(amountSection).toHaveTextContent('¥50.00')
+    expect(amountSection).toHaveTextContent('运费')
+    expect(amountSection).toHaveTextContent('¥8.00')
+    expect(amountSection).toHaveTextContent('应付金额')
+    expect(amountSection).toHaveTextContent('¥858.00')
+    expect(amountSection).toHaveTextContent('支付方式：Mock 支付')
   })
 
   it('收货信息使用订单快照，不受地址簿影响', async () => {

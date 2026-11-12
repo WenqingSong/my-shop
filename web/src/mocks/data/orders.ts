@@ -1,5 +1,11 @@
 import type { Address } from '@/api/types'
-import type { Order, OrderItem, OrderStatus } from '@/api/orders'
+import type {
+  Order,
+  OrderItem,
+  OrderQuote,
+  OrderQuoteItem,
+  OrderStatus,
+} from '@/api/orders'
 import { listMockAddresses } from '@/mocks/data/addresses'
 import { listMockCart, removeMockCartItemsBySkuIds } from '@/mocks/data/cart'
 import { mockProducts, mockSkusFor } from '@/mocks/data/catalog'
@@ -16,16 +22,21 @@ import {
  *
  * 行为对齐 internal/logic/order/order.go：
  * - source=cart：读取本人**全部已勾选**购物车条目，服务端按 mock 目录价格重新定价；
- * - 金额由 mock 服务端计算：original = Σ price×qty，discount=0，total=original；
+ * - 金额由 mock 服务端按六槽位计算（与 pricing.Quote 同公式）：
+ *   original − 券 − 会员 − 积分(恒 0) + 运费 = payable；
  * - 地址必须属于当前用户（否则 7001）；
  * - 幂等：user_id + idempotency_key 唯一；同键同内容返回既有订单，同键不同内容 9006；
  * - 成功后删除已购（已勾选）购物车条目，未勾选条目保留；
- * - 无勾选条目 → 9004。
+ * - 无勾选条目 → 9004；
+ * - `POST /orders/quote` 只读：不校验库存、不锁定券、不写订单、不清理购物车。
  *
  * 仅 Mock 提供的测试钩子（真实后端不存在）：
  * - setMockOrderRequestDelay：延迟响应，用于验证「提交中」与防重复点击；
  * - setMockOrderErrorOnce：下一次创建强制返回指定业务错误（构造库存不足/不可购买等）；
- * - getMockOrderCreateRequestCount / getMockOrderCreatePayloads：断言请求次数与幂等键。
+ * - setMockQuoteErrorOnce：下一次试算强制返回指定业务错误；
+ * - setMockPricingBaseline：模拟会员折扣率与运费（真实值来自会员等级与运费模板）；
+ * - getMockOrderCreateRequestCount / getMockOrderCreatePayloads：断言请求次数与幂等键；
+ * - getMockQuoteRequestCount / getMockQuotePayloads：断言试算请求次数与入参。
  */
 
 interface MockOrderRecord extends Order {
@@ -34,12 +45,25 @@ interface MockOrderRecord extends Order {
 
 interface MockSkuInfo {
   skuId: number
+  skuCode: string
   productId: number
   skuName: string
+  specText: string
   productName: string
   mainImage: string
+  imageUrl: string
   price: number
+  originalPrice: number
   available: boolean
+}
+
+interface MockAmounts {
+  originalAmount: number
+  couponDiscount: number
+  memberDiscount: number
+  pointsDiscount: number
+  shippingFee: number
+  payableAmount: number
 }
 
 let orders: MockOrderRecord[] = []
@@ -48,11 +72,20 @@ let sequence = 0
 let requestDelayMs = 0
 /** 订单操作（支付/取消/收货）的响应延迟，用于验证「请求中」与防重复点击。 */
 let actionDelayMs = 0
+/** 试算响应延迟，用于验证「试算中不展示旧金额」。 */
+let quoteDelayMs = 0
 let forcedError: { status: number; code: number; message: string } | null = null
+let forcedQuoteError: { status: number; code: number; message: string } | null = null
+/** 会员折扣率（万分比）：10000 = 不打折，默认无会员权益。 */
+let memberDiscountRateBp = 10_000
+/** Mock 运费（整数分）：真实值由运费模板与地区决定。 */
+let shippingFee = 0
 let createRequestCount = 0
 let createPayloads: Record<string, unknown>[] = []
 /** 订单操作（支付/取消/收货）请求计数，用于断言「重复点击只发一次请求」。 */
 let actionRequestCount = 0
+let quoteRequestCount = 0
+let quotePayloads: Record<string, unknown>[] = []
 
 function nowText(): string {
   return new Date().toISOString().slice(0, 19).replace('T', ' ')
@@ -72,17 +105,57 @@ function resolveSku(skuId: number): MockSkuInfo | undefined {
     if (sku) {
       return {
         skuId,
+        skuCode: sku.sku_code,
         productId: product.id,
         skuName: sku.name,
+        specText: sku.spec_values
+          .map((value) => value.value)
+          .filter((value) => value !== '')
+          .join(','),
         productName: product.name,
         mainImage: product.main_image,
+        imageUrl: sku.image_url,
         price: sku.price,
+        originalPrice: sku.original_price,
         available: product.status === 'on_shelf' && sku.status === 'enabled',
       }
     }
   }
 
   return undefined
+}
+
+/** 按 sku_code 定位 SKU（direct 试算优先使用 sku_code）。 */
+function resolveSkuByCode(skuCode: string): MockSkuInfo | undefined {
+  for (const product of mockProducts) {
+    const sku = mockSkusFor(product).find((item) => item.sku_code === skuCode)
+
+    if (sku) {
+      return resolveSku(sku.id)
+    }
+  }
+
+  return undefined
+}
+
+/**
+ * 会员折扣（对齐 internal/logic/order/order.go resolveMemberDiscount）：
+ * `floor(original × (10000 - rate_bp) / 10000)`，并夹紧到 `original - couponDiscount`。
+ * 无等级权益（rate_bp = 10000）时为 0。
+ */
+function mockMemberDiscount(originalAmount: number, couponDiscount: number): number {
+  if (originalAmount <= 0 || memberDiscountRateBp <= 0 || memberDiscountRateBp >= 10_000) {
+    return 0
+  }
+
+  const remaining = originalAmount - couponDiscount
+
+  if (remaining <= 0) {
+    return 0
+  }
+
+  const raw = Math.floor((originalAmount * (10_000 - memberDiscountRateBp)) / 10_000)
+  return Math.max(0, Math.min(raw, remaining))
 }
 
 /**
@@ -108,10 +181,16 @@ export function resetMockOrders(): void {
   sequence = 0
   requestDelayMs = 0
   actionDelayMs = 0
+  quoteDelayMs = 0
   forcedError = null
+  forcedQuoteError = null
+  memberDiscountRateBp = 10_000
+  shippingFee = 0
   createRequestCount = 0
   createPayloads = []
   actionRequestCount = 0
+  quoteRequestCount = 0
+  quotePayloads = []
 }
 
 export function setMockOrderRequestDelay(ms: number): void {
@@ -131,6 +210,15 @@ export function getMockOrderActionDelay(): number {
   return actionDelayMs
 }
 
+/** 测试专用：设置试算响应延迟（验证试算中不展示旧金额）。 */
+export function setMockQuoteRequestDelay(ms: number): void {
+  quoteDelayMs = ms
+}
+
+export function getMockQuoteRequestDelay(): number {
+  return quoteDelayMs
+}
+
 /** 已发生的订单操作请求数（支付/取消/收货合计）。 */
 export function getMockOrderActionRequestCount(): number {
   return actionRequestCount
@@ -141,12 +229,47 @@ export function setMockOrderErrorOnce(error: { status: number; code: number; mes
   forcedError = error
 }
 
+/** 测试专用：下一次试算强制失败。 */
+export function setMockQuoteErrorOnce(error: {
+  status: number
+  code: number
+  message: string
+}): void {
+  forcedQuoteError = error
+}
+
+/**
+ * 测试专用：模拟会员折扣率与整单运费。
+ * 真实后端分别由会员等级权益与运费模板/地区规则产生，Mock 无法完整建模。
+ */
+export function setMockPricingBaseline(input: {
+  memberDiscountRateBp?: number
+  shippingFee?: number
+}): void {
+  if (input.memberDiscountRateBp !== undefined) {
+    memberDiscountRateBp = input.memberDiscountRateBp
+  }
+
+  if (input.shippingFee !== undefined) {
+    shippingFee = input.shippingFee
+  }
+}
+
 export function getMockOrderCreateRequestCount(): number {
   return createRequestCount
 }
 
 export function getMockOrderCreatePayloads(): Record<string, unknown>[] {
   return [...createPayloads]
+}
+
+/** 试算请求次数（用于断言「不选地址不发请求」等）。 */
+export function getMockQuoteRequestCount(): number {
+  return quoteRequestCount
+}
+
+export function getMockQuotePayloads(): Record<string, unknown>[] {
+  return [...quotePayloads]
 }
 
 export interface MockCreateOrderInput {
@@ -157,9 +280,91 @@ export interface MockCreateOrderInput {
   coupon_id?: unknown
 }
 
+export interface MockQuoteInput {
+  source?: unknown
+  address_id?: unknown
+  sku_code?: unknown
+  sku_id?: unknown
+  quantity?: unknown
+  coupon_id?: unknown
+}
+
 type MockOrderResult =
   | { ok: true; order: Order }
   | { ok: false; status: number; code: number; message: string }
+
+type MockQuoteResult =
+  | { ok: true; quote: OrderQuote }
+  | { ok: false; status: number; code: number; message: string }
+
+type MockFailure = { ok: false; status: number; code: number; message: string }
+
+/** 读取本人已勾选购物车条目并按 Mock 目录重新定价（与后端 buildLines 同口径）。 */
+function resolveSelectedLines(
+  userId: number,
+): { ok: true; lines: { sku: MockSkuInfo; quantity: number }[] } | MockFailure {
+  const selected = listMockCart(userId).filter((item) => item.selected)
+
+  if (selected.length === 0) {
+    return { ok: false, status: 400, code: 9004, message: '购物车无勾选商品' }
+  }
+
+  const lines: { sku: MockSkuInfo; quantity: number }[] = []
+
+  for (const item of selected) {
+    const sku = resolveSku(item.sku_id)
+
+    if (!sku || !sku.available) {
+      return { ok: false, status: 409, code: 9003, message: '商品不可购买' }
+    }
+
+    lines.push({ sku, quantity: item.quantity })
+  }
+
+  return { ok: true, lines }
+}
+
+/** 六槽位金额（与 internal/logic/pricing 同公式，积分恒 0）。 */
+function computeMockAmounts(
+  userId: number,
+  lines: readonly { sku: MockSkuInfo; quantity: number }[],
+  couponId: number,
+): { ok: true; amounts: MockAmounts } | MockFailure {
+  const originalAmount = lines.reduce(
+    (total, line) => total + line.sku.price * line.quantity,
+    0,
+  )
+
+  // 用券校验与优惠计算（对齐后端 GetDiscount：归属/有效期/门槛）。
+  let couponDiscount = 0
+
+  if (couponId > 0) {
+    const evaluated = evaluateMockCoupon(userId, couponId, originalAmount)
+
+    if (!evaluated.ok) {
+      return evaluated
+    }
+
+    couponDiscount = evaluated.discountAmount
+  }
+
+  const memberDiscount = mockMemberDiscount(originalAmount, couponDiscount)
+  const pointsDiscount = 0
+  const payableAmount =
+    originalAmount - couponDiscount - memberDiscount - pointsDiscount + shippingFee
+
+  return {
+    ok: true,
+    amounts: {
+      originalAmount,
+      couponDiscount,
+      memberDiscount,
+      pointsDiscount,
+      shippingFee,
+      payableAmount,
+    },
+  }
+}
 
 export function createMockOrder(userId: number, input: MockCreateOrderInput): MockOrderResult {
   createRequestCount += 1
@@ -189,23 +394,13 @@ export function createMockOrder(userId: number, input: MockCreateOrderInput): Mo
     return { ok: false, status: 400, code: 1001, message: '参数错误' }
   }
 
-  const selected = listMockCart(userId).filter((item) => item.selected)
+  const linesResult = resolveSelectedLines(userId)
 
-  if (selected.length === 0) {
-    return { ok: false, status: 400, code: 9004, message: '购物车无勾选商品' }
+  if (!linesResult.ok) {
+    return linesResult
   }
 
-  const resolved: { sku: MockSkuInfo; quantity: number }[] = []
-
-  for (const item of selected) {
-    const sku = resolveSku(item.sku_id)
-
-    if (!sku || !sku.available) {
-      return { ok: false, status: 409, code: 9003, message: '商品不可购买' }
-    }
-
-    resolved.push({ sku, quantity: item.quantity })
-  }
+  const resolved = linesResult.lines
 
   const address: Address | undefined = listMockAddresses(userId).find(
     (item) => item.id === addressId,
@@ -215,23 +410,13 @@ export function createMockOrder(userId: number, input: MockCreateOrderInput): Mo
     return { ok: false, status: 404, code: 7001, message: '地址不存在' }
   }
 
-  const originalAmount = resolved.reduce(
-    (total, line) => total + line.sku.price * line.quantity,
-    0,
-  )
+  const amountsResult = computeMockAmounts(userId, resolved, couponId)
 
-  // 用券校验与优惠计算（对齐后端 GetDiscount：归属/有效期/门槛；状态由预占闸门判定）。
-  let discountAmount = 0
-
-  if (couponId > 0) {
-    const evaluated = evaluateMockCoupon(userId, couponId, originalAmount)
-
-    if (!evaluated.ok) {
-      return evaluated
-    }
-
-    discountAmount = evaluated.discountAmount
+  if (!amountsResult.ok) {
+    return amountsResult
   }
+
+  const amounts = amountsResult.amounts
 
   const hash = requestHash(
     addressId,
@@ -270,11 +455,14 @@ export function createMockOrder(userId: number, input: MockCreateOrderInput): Mo
   const items: OrderItem[] = resolved.map((line, index) => ({
     id: sequence * 100 + index + 1,
     sku_id: line.sku.skuId,
+    sku_code: line.sku.skuCode,
     product_id: line.sku.productId,
     sku_name: line.sku.skuName,
+    spec_text: line.sku.specText,
     product_name: line.sku.productName,
     product_main_image: line.sku.mainImage,
     price: line.sku.price,
+    original_price: line.sku.originalPrice,
     quantity: line.quantity,
   }))
 
@@ -286,9 +474,12 @@ export function createMockOrder(userId: number, input: MockCreateOrderInput): Mo
     order_no: orderNo,
     user_id: userId,
     status: 'pending_payment',
-    total_amount: originalAmount - discountAmount,
-    original_amount: originalAmount,
-    discount_amount: discountAmount,
+    total_amount: amounts.payableAmount,
+    original_amount: amounts.originalAmount,
+    discount_amount: amounts.couponDiscount,
+    member_discount_amount: amounts.memberDiscount,
+    shipping_fee: amounts.shippingFee,
+    pay_type: '',
     user_coupon_id: couponId > 0 ? couponId : null,
     idempotency_key: idempotencyKey,
     request_hash: hash,
@@ -329,6 +520,110 @@ export function createMockOrder(userId: number, input: MockCreateOrderInput): Mo
   return { ok: true, order }
 }
 
+/**
+ * 订单试算（对齐 internal/logic/order/order.go Quote）：
+ * - 只读：不写订单、不扣库存、不锁定券、不清理购物车；
+ * - 校验来源/地址归属/购物车勾选/券可用性（只读）；
+ * - items 使用服务端（Mock 目录）权威价格。
+ */
+export function quoteMockOrder(userId: number, input: MockQuoteInput): MockQuoteResult {
+  quoteRequestCount += 1
+  quotePayloads = [...quotePayloads, { ...input }]
+
+  if (forcedQuoteError) {
+    const error = forcedQuoteError
+    forcedQuoteError = null
+    return { ok: false, ...error }
+  }
+
+  const source = input.source
+
+  if (source !== 'cart' && source !== 'direct') {
+    return { ok: false, status: 400, code: 1001, message: '参数错误' }
+  }
+
+  const addressId = Number(input.address_id)
+  const couponId = input.coupon_id === undefined ? 0 : Number(input.coupon_id)
+
+  if (!Number.isSafeInteger(addressId) || addressId <= 0) {
+    return { ok: false, status: 400, code: 1001, message: '参数错误' }
+  }
+
+  if (!Number.isSafeInteger(couponId) || couponId < 0) {
+    return { ok: false, status: 400, code: 1001, message: '参数错误' }
+  }
+
+  const address = listMockAddresses(userId).find((item) => item.id === addressId)
+
+  if (!address) {
+    return { ok: false, status: 404, code: 7001, message: '地址不存在' }
+  }
+
+  let lines: { sku: MockSkuInfo; quantity: number }[]
+
+  if (source === 'direct') {
+    const skuCode = typeof input.sku_code === 'string' ? input.sku_code.trim() : ''
+    const skuId = Number(input.sku_id ?? 0)
+    const quantity = Number(input.quantity)
+
+    if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 999) {
+      return { ok: false, status: 400, code: 1001, message: '参数错误' }
+    }
+
+    const sku =
+      skuCode !== ''
+        ? resolveSkuByCode(skuCode)
+        : Number.isSafeInteger(skuId) && skuId > 0
+          ? resolveSku(skuId)
+          : undefined
+
+    if (!sku || !sku.available) {
+      return { ok: false, status: 409, code: 9003, message: '商品不可购买' }
+    }
+
+    lines = [{ sku, quantity }]
+  } else {
+    const linesResult = resolveSelectedLines(userId)
+
+    if (!linesResult.ok) {
+      return linesResult
+    }
+
+    lines = linesResult.lines
+  }
+
+  const amountsResult = computeMockAmounts(userId, lines, couponId)
+
+  if (!amountsResult.ok) {
+    return amountsResult
+  }
+
+  const { amounts } = amountsResult
+  const items: OrderQuoteItem[] = lines.map((line) => ({
+    sku_id: line.sku.skuId,
+    sku_code: line.sku.skuCode,
+    product_id: line.sku.productId,
+    name: line.sku.skuName,
+    spec_text: line.sku.specText,
+    price: line.sku.price,
+    quantity: line.quantity,
+    amount: line.sku.price * line.quantity,
+  }))
+
+  return {
+    ok: true,
+    quote: {
+      original_amount: amounts.originalAmount,
+      coupon_discount: amounts.couponDiscount,
+      member_discount: amounts.memberDiscount,
+      points_discount: amounts.pointsDiscount,
+      shipping_fee: amounts.shippingFee,
+      payable_amount: amounts.payableAmount,
+      items,
+    },
+  }
+}
+
 export function getMockOrder(userId: number, orderId: number): Order | undefined {
   return orders.find((order) => order.user_id === userId && order.id === orderId)
 }
@@ -350,6 +645,9 @@ export interface MockSeedOrderInput {
   expire_at?: string | null
   original_amount?: number
   discount_amount?: number
+  member_discount_amount?: number
+  shipping_fee?: number
+  pay_type?: Order['pay_type']
   total_amount?: number
   items?: OrderItem[]
   recipient_name?: string
@@ -370,11 +668,14 @@ export interface MockSeedOrderInput {
 
 const DEFAULT_SEED_ITEM: Omit<OrderItem, 'id'> = {
   sku_id: 9_001,
+  sku_code: 'SKU-SEED-0001',
   product_id: 9_001,
   sku_name: '默认规格',
+  spec_text: '',
   product_name: '测试商品',
   product_main_image: '',
   price: 1_000,
+  original_price: 1_000,
   quantity: 1,
 }
 
@@ -393,15 +694,21 @@ export function seedMockOrder(userId: number, input: MockSeedOrderInput = {}): O
   const originalAmount =
     input.original_amount ?? items.reduce((total, item) => total + item.price * item.quantity, 0)
   const discountAmount = input.discount_amount ?? 0
+  const memberDiscountAmount = input.member_discount_amount ?? 0
+  const fee = input.shipping_fee ?? 0
 
   const order: MockOrderRecord = {
     id: sequence,
     order_no: `${String(Date.now())}${Math.random().toString(16).slice(2, 14).padEnd(12, '0')}`,
     user_id: userId,
     status: input.status ?? 'pending_payment',
-    total_amount: input.total_amount ?? originalAmount - discountAmount,
+    total_amount:
+      input.total_amount ?? originalAmount - discountAmount - memberDiscountAmount + fee,
     original_amount: originalAmount,
     discount_amount: discountAmount,
+    member_discount_amount: memberDiscountAmount,
+    shipping_fee: fee,
+    pay_type: input.pay_type ?? '',
     user_coupon_id: input.user_coupon_id ?? null,
     idempotency_key: `seed-${String(sequence)}`,
     request_hash: `seed-${String(sequence)}`,
@@ -486,7 +793,14 @@ export function payMockOrder(userId: number, orderId: number): MockOrderActionRe
 
   return {
     ok: true,
-    order: replaceOrder({ ...record, status: 'paid', paid_at: nowText(), updated_at: nowText() }),
+    order: replaceOrder({
+      ...record,
+      status: 'paid',
+      // 与真实后端一致：pay_type 缺省按 mock 落库（余额支付为 balance）。
+      pay_type: 'mock',
+      paid_at: nowText(),
+      updated_at: nowText(),
+    }),
   }
 }
 

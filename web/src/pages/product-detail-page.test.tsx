@@ -85,6 +85,100 @@ describe('商品详情页', () => {
     expect(cart.items[0]).toMatchObject({ sku_id: 11, quantity: 2 })
   })
 
+  it('无规格商品没有库存数据时明确展示库存未知，而不是 0 库存', async () => {
+    const user = userEvent.setup()
+    await signInAsDemo()
+    renderApp('/products/1')
+
+    await screen.findByRole('heading', { level: 1, name: PRODUCT_NAME })
+    expect(screen.getByText('选择规格后可查看该规格的库存信息。')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /标准款/ }))
+
+    expect(
+      screen.getByText('该规格暂无可用的库存数据，库存以下单时服务端校验为准'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('该规格当前无货')).not.toBeInTheDocument()
+    expect(screen.getByText(/该规格暂时没有可用的库存数据/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '加入购物车' })).toBeEnabled()
+  })
+
+  it('按规格组选择组合，映射真实 SKU、价格、划线价与库存', async () => {
+    const user = userEvent.setup()
+    await signInAsDemo()
+    renderApp('/products/11')
+
+    await screen.findByRole('heading', { level: 1, name: '简行 男士纯棉衬衫' })
+
+    expect(screen.getByRole('group', { name: '商品规格' })).toBeInTheDocument()
+    expect(screen.getByText('颜色')).toBeInTheDocument()
+    expect(screen.getByText('尺码')).toBeInTheDocument()
+
+    // 只选部分规格时不产生 SKU 选择，也不显示猜测的价格。
+    await user.click(screen.getByRole('button', { name: '黑色' }))
+    expect(screen.getByText('请选择商品规格')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'M' }))
+
+    expect(screen.getByText('已选规格：黑色,M')).toBeInTheDocument()
+    expect(screen.getByText('当前规格库存 5 件')).toBeInTheDocument()
+
+    const pricePanel = screen.getByText('当前价格').closest('div') as HTMLElement
+    expect(within(pricePanel).getByText('169')).toBeInTheDocument()
+    // 划线价：原价 199.00
+    expect(within(pricePanel).getByText('199')).toBeInTheDocument()
+
+    // SKU 图优先于商品主图（商品主图为 product-2，黑色 M 的规格图为 product-1）。
+    const hero = screen.getByRole('img', { name: '简行 男士纯棉衬衫' }) as HTMLImageElement
+    expect(hero.src).toContain('/mock/product-1.svg')
+
+    // 同一规格组的另一个值：该组合库存为 0。
+    await user.click(screen.getByRole('button', { name: 'L' }))
+
+    expect(await screen.findByText('该规格当前无货')).toBeInTheDocument()
+    expect(screen.getByText('当前规格暂无库存，暂时无法加入购物车。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '加入购物车' })).toBeDisabled()
+
+    // 换回有货组合可恢复加购。
+    await user.click(screen.getByRole('button', { name: '白色' }))
+    await user.click(screen.getByRole('button', { name: 'M' }))
+
+    expect(await screen.findByText('当前规格库存 12 件')).toBeInTheDocument()
+    expect(screen.getByText('已选规格：白色,M')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '加入购物车' })).toBeEnabled()
+  })
+
+  it('规格组合未命中 productValue 时明确提示不可售', async () => {
+    const user = userEvent.setup()
+    const detail = mockProductDetail(11)
+
+    if (!detail) {
+      throw new Error('Mock 商品 11 不存在')
+    }
+
+    const partialProductValue = { ...detail.productValue }
+    delete partialProductValue['白色,L']
+
+    server.use(
+      http.get('/api/products/11', () =>
+        HttpResponse.json({
+          code: 0,
+          message: 'OK',
+          data: { ...detail, productValue: partialProductValue },
+        }),
+      ),
+    )
+
+    renderApp('/products/11')
+
+    await screen.findByRole('heading', { level: 1, name: '简行 男士纯棉衬衫' })
+    await user.click(screen.getByRole('button', { name: '白色' }))
+    await user.click(screen.getByRole('button', { name: 'L' }))
+
+    expect(await screen.findByText('该规格组合暂不可售，请更换规格。')).toBeInTheDocument()
+    expect(screen.getByText('请选择商品规格')).toBeInTheDocument()
+  })
+
   it('商品没有可用 SKU 时不能加入购物车', async () => {
     const detail = mockProductDetail(1)
 

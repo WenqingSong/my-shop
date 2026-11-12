@@ -81,19 +81,22 @@ test.describe('优惠券中心', () => {
 
     const couponSection = page.getByRole('region', { name: '优惠券' })
     await expect(couponSection).toBeVisible()
-    await expect(couponSection).toContainText('优惠券适用性及最终优惠金额以服务端下单校验结果为准')
+    await expect(couponSection).toContainText('优惠券适用性以服务端试算与下单校验结果为准')
     await expect(couponSection).toContainText('暂无优惠券')
 
     const amountPanel = page.getByRole('complementary', { name: '订单金额' })
-    await expect(amountPanel).toContainText('未使用优惠券')
+    await expect(amountPanel).toContainText('优惠券优惠')
+    await expect(amountPanel).toContainText('应付金额')
 
     await page.getByRole('button', { name: '提交订单' }).click()
     await expect(page).toHaveURL(/\/checkout\/success\?order_id=\d+$/)
 
     const info = page.getByRole('region', { name: '订单信息' })
     await expect(info).toContainText('商品总额')
-    await expect(info).toContainText('优惠金额')
+    await expect(info).toContainText('优惠券优惠')
     await expect(info).toContainText('未使用优惠券')
+    await expect(info).toContainText('会员优惠')
+    await expect(info).toContainText('运费')
     await expect(info).toContainText('应付金额')
   })
 

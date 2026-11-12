@@ -1,4 +1,4 @@
-import type { Order, OrderStatus } from '@/api/orders'
+import type { Order, OrderItem, OrderStatus } from '@/api/orders'
 
 /**
  * 订单展示工具。
@@ -6,7 +6,8 @@ import type { Order, OrderStatus } from '@/api/orders'
  * 事实来源（逐项对齐后端源码，未做任何推断扩展）：
  * - 状态枚举：api/order/v1/order.go 的 Status* 常量（7 态）；
  * - 取消原因：api/order/v1/order.go 的 CancelReason* 常量（1=用户、2=超时）；
- * - 金额：orders 表三列快照 original_amount / discount_amount / total_amount；
+ * - 金额：orders 表快照 original_amount / discount_amount / member_discount_amount /
+ *   shipping_fee / total_amount（discount_amount 只表示优惠券优惠）；
  * - 时间字段：created_at / paid_at / shipped_at / received_at / completed_at /
  *   cancelled_at / refunded_at，未发生的为 null。
  *
@@ -188,6 +189,32 @@ export function formatOrderAddress(order: Order): string {
 /** 订单商品总件数（仅用于展示，不参与金额计算）。 */
 export function orderTotalQuantity(order: Order): number {
   return order.items.reduce((total, item) => total + item.quantity, 0)
+}
+
+/**
+ * 订单项规格展示：优先使用下单时快照的 `spec_text`（如「黑色,M」），
+ * 无规格时回退到 `sku_name`（后端 spec_text 为空串）。
+ */
+export function orderItemSpecText(item: OrderItem): string {
+  const specText = item.spec_text.trim()
+  return specText !== '' ? specText : item.sku_name
+}
+
+/** 订单项是否展示划线价：原价快照必须大于成交价。 */
+export function hasOrderItemOriginalPrice(item: OrderItem): boolean {
+  return item.original_price > item.price
+}
+
+/** 支付方式文案（`pay_type` 未支付时为空串）。 */
+export function describePayType(payType: string): string {
+  switch (payType) {
+    case 'mock':
+      return 'Mock 支付'
+    case 'balance':
+      return '钱包余额支付'
+    default:
+      return '未支付'
+  }
 }
 
 /**

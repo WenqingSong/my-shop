@@ -8,9 +8,12 @@ import {
   describeCancelReason,
   describeOrderStatus,
   describeOrderStatusTone,
+  describePayType,
   filterOrdersByGroup,
   formatOrderAddress,
   formatOrderTime,
+  hasOrderItemOriginalPrice,
+  orderItemSpecText,
   orderTotalQuantity,
 } from '@/utils/orders'
 
@@ -33,6 +36,9 @@ function makeOrder(overrides: Partial<Order> = {}): Order {
     total_amount: 1_998,
     original_amount: 1_998,
     discount_amount: 0,
+    member_discount_amount: 0,
+    shipping_fee: 0,
+    pay_type: '',
     user_coupon_id: null,
     idempotency_key: 'key-1',
     recipient_name: '张三',
@@ -56,11 +62,14 @@ function makeOrder(overrides: Partial<Order> = {}): Order {
       {
         id: 1,
         sku_id: 9,
+        sku_code: 'SKU-TEST-0009',
         product_id: 3,
         sku_name: '默认规格',
+        spec_text: '',
         product_name: '测试商品',
         product_main_image: '',
         price: 999,
+        original_price: 999,
         quantity: 2,
       },
     ],
@@ -233,27 +242,53 @@ describe('订单展示格式化', () => {
         {
           id: 1,
           sku_id: 1,
+          sku_code: 'SKU-A',
           product_id: 1,
           sku_name: 'A',
+          spec_text: '',
           product_name: 'A',
           product_main_image: '',
           price: 100,
+          original_price: 100,
           quantity: 2,
         },
         {
           id: 2,
           sku_id: 2,
+          sku_code: 'SKU-B',
           product_id: 2,
           sku_name: 'B',
+          spec_text: '',
           product_name: 'B',
           product_main_image: '',
           price: 200,
+          original_price: 200,
           quantity: 3,
         },
       ],
     })
 
     expect(orderTotalQuantity(order)).toBe(5)
+  })
+
+  it('订单项规格优先使用 spec_text，无规格时回退 sku_name', () => {
+    const item = makeOrder().items[0]!
+
+    expect(orderItemSpecText(item)).toBe('默认规格')
+    expect(orderItemSpecText({ ...item, spec_text: '黑色,M' })).toBe('黑色,M')
+  })
+
+  it('原价快照大于成交价时才展示划线价', () => {
+    expect(hasOrderItemOriginalPrice(makeOrder().items[0]!)).toBe(false)
+    expect(
+      hasOrderItemOriginalPrice({ ...makeOrder().items[0]!, original_price: 1_299 }),
+    ).toBe(true)
+  })
+
+  it('支付方式文案与后端 pay_type 枚举一致', () => {
+    expect(describePayType('')).toBe('未支付')
+    expect(describePayType('mock')).toBe('Mock 支付')
+    expect(describePayType('balance')).toBe('钱包余额支付')
   })
 
   it('时间为 null 时展示占位符，不伪造时间', () => {
