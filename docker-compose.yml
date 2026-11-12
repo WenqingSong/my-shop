@@ -185,7 +185,9 @@ services:
 
   nginx:
     build:
-      context: ./nginx
+      # 上下文为仓库根：多阶段构建需要 web/ 与 admin/ 源码，产物在镜像内生成。
+      context: .
+      dockerfile: nginx/Dockerfile
     image: my-shop-nginx:local
     container_name: my-shop-nginx
     restart: unless-stopped

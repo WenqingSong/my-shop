@@ -330,8 +330,8 @@ function inventoryText(skuId: number) {
 
 .detail-actions {
   display: flex;
-  gap: 8px;
   flex-shrink: 0;
+  gap: 8px;
 }
 
 .detail-descriptions {

@@ -23,8 +23,9 @@ onBeforeUnmount(() => player?.cancel());
   flex-shrink: 0;
   width: 24px;
   height: 24px;
-  color: currentColor;
+  color: currentcolor;
 }
+
 .brand-loading-icon :deep(svg) {
   display: block;
   width: 100%;

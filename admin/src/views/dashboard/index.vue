@@ -89,18 +89,20 @@ async function refreshAll() {
   margin-bottom: 12px;
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.12em;
   color: var(--el-text-color-secondary);
+  letter-spacing: 0.12em;
 }
+
 .dashboard-refresh {
   display: flex;
   flex-wrap: wrap;
+  gap: 12px;
   align-items: center;
   justify-content: flex-end;
-  gap: 12px;
   font-size: 11px;
   color: var(--el-text-color-secondary);
 }
+
 .dashboard {
   display: flex;
   flex-direction: column;

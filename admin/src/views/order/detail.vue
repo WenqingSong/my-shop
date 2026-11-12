@@ -319,9 +319,9 @@ onMounted(load);
 
 .page-header {
   display: flex;
+  gap: 16px;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
 }
 
 .page-title {
@@ -349,9 +349,9 @@ onMounted(load);
 
 .summary {
   display: flex;
+  gap: 16px;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
 }
 
 .summary__label {

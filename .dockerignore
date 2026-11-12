@@ -21,9 +21,14 @@ coverage.out
 # 本地文件存储运行数据（banner 占位图等，容器内由 app_storage 卷承载）
 storage/
 
-# 前端工程（不进后端镜像）
+# 历史前端工程（不进镜像）
 frotend_manage/
 frotend_web/
+
+# 前端依赖与本地构建产物：nginx 镜像内重新安装并构建，宿主机产物不进入上下文
+**/node_modules/
+web/dist/
+admin/dist/
 
 # 版本控制与 IDE
 .git/
@@ -43,8 +48,7 @@ docs/
 # 容器专项测试的运行时产物（证书、编译出的 mock 二进制）
 test/container/.artifacts/
 
-# 与镜像构建无关的编排/流水线文件
-nginx/
+# 与镜像构建无关的编排/流水线文件（nginx/ 需保留：nginx 镜像以仓库根为构建上下文）
 prometheus/
 docker-compose*.yml
 .cnb.yml
