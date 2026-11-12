@@ -369,6 +369,226 @@ DDL 前以实际连接库名做 fail-closed 校验。
 
 ---
 
+## 9. B1-05-FINAL-FIX 证据补齐
+
+> 本章为 B1-05-FINAL 的增补，不推翻 §1~§8 的既有结论。最终结论仍为 **PARTIAL**。
+
+### 9.1 CI 数据库安全一致性审计
+
+#### 9.1.1 实际配置
+
+| 层 | 位置 | 实际值 |
+|---|---|---|
+| CI 依赖启动 | `.cnb.yml`（pr-check / main-ci 的 `start-dependencies`） | `MYSQL_DATABASE=my_shop_ci_test` |
+| CI 测试执行 | `.cnb.yml`（`test` stage） | `DATABASE_DEFAULT_NAME=my_shop_ci_test` |
+| Shell 守卫 | `scripts/lib.sh` `assert_isolated_test_db` | 要求显式设置且以 `_test` / `_race` 结尾 |
+| Go 守卫 | `internal/testdb`（本次新增，统一来源） | 逐库显式白名单 |
+
+#### 9.1.2 修复前的不一致（已确认）
+
+- CI 使用 `my_shop_ci_test`，Shell 层允许（`_test` 后缀）。
+- Go 层有 4 处硬编码白名单，仅允许 `my_shop_b104_test` / `my_shop_b104_integration`：
+  `internal/controller/address/address_test.go`、`internal/controller/region/region_test.go`、
+  `internal/controller/profile/profile_test.go`、`internal/regiondata/regiondata_integration_test.go`。
+- 后果：`make test` 在 CI 中会在 `address` / `region` / `profile` 三个包直接 `Fatal`；
+  `regiondata` 与 `freight` 则静默 `Skip`（更隐蔽）。
+- 结论：**修复前 CI 的 `make test` 无法通过，且 freight/regiondata 集成用例不会真实执行。**
+
+#### 9.1.3 修复方式
+
+新增 `internal/testdb` 作为唯一白名单来源（逐库显式列名，**不是**任意 `_test` 前缀）：
+
+```go
+var allowed = []string{
+    "my_shop_b104_test",
+    "my_shop_b104_integration",
+    "my_shop_ci_test",
+}
+```
+
+5 个测试文件改为调用 `testdb.IsAllowed` / `testdb.Allowed()`；安全守卫本身未取消、未放宽。
+`internal/testdb/testdb_test.go` 增加两类回归：
+
+1. `TestIsAllowed`：CI 库放行；`my_shop`、`my_shop_staging`、空值、`my_shop_random_test`、
+   `my_shop_ci_test_evil` 全部拒绝。
+2. `TestCIConfiguredDatabasesAreAllowed`：解析 `.cnb.yml` 中所有
+   `MYSQL_DATABASE` / `DATABASE_DEFAULT_NAME`，要求均在白名单内，防止再次漂移。
+
+#### 9.1.4 验证矩阵（真实执行）
+
+| 场景 | 预期 | Shell 层实测 | Go 层实测 |
+|---|---|---|---|
+| `my_shop` | 拒绝 | 退出码 1：`拒绝在共享/历史数据库 my_shop` | `IsAllowed=false`（单测） |
+| 未配置 | 拒绝 | 退出码 1：`必须显式设置 DATABASE_DEFAULT_NAME` | `IsAllowed("")=false` |
+| `my_shop_ci_test` | 允许 | 通过守卫 | region/address/profile/regiondata/freight 定向用例全部退出码 0 |
+| 不符合命名规则（`my_shop_foo`） | 拒绝 | 退出码 1：`必须以 _test 或 _race 结尾` | `IsAllowed("my_shop_random_test")=false` |
+
+Migration 是否使用同一隔离库：**是**。真实执行日志：
+
+```text
+$ DATABASE_DEFAULT_NAME=my_shop_ci_test bash scripts/test-migration.sh
+[INFO] migration 目标：127.0.0.1:13307/my_shop_ci_test
+[INFO] migration 执行完成，dirty=false
+ok  cnb.cool/go-cloud-devops/my-shop/internal/migrations  119.559s
+exit=0
+```
+
+> 说明：本次未在真实 CI runner 上执行流水线，而是以 `.cnb.yml` 的同等环境变量在本地复现。
+> CI 端到端结果仍属 NOT RUN，不能标记为 PASS。
+
+### 9.2 `make test` 实际执行组成
+
+`make -n test` 仅输出 `bash scripts/test.sh`，真实组成需读取 `scripts/test.sh`。
+
+| 门禁 | 是否包含 | 实际命令 | 条件跳过 |
+|---|---|---|---|
+| Build | **否** | — | `make test` 不调用 `go build`；构建由 `make build` 独立承担 |
+| Vet | 是 | `go vet ./...` | 无 |
+| Unit | 是 | `scripts/test-unit.sh`（29 组） | 无 |
+| Integration | 是 | `go test -p 1 -count=1 ./...` | 需 MySQL/Redis，缺失即失败 |
+| Migration | 是 | `scripts/test-migration.sh` | 需 MySQL |
+| Race | **否** | — | 独立 CI stage `make test-race` |
+| E2E | 是（间接） | 包含在 `./test/e2e` 的 `go test ./...` 中 | 无独立入口 |
+| OpenAPI 契约 | **否** | — | 独立 CI stage `bash scripts/contract-check.sh` |
+| Registry | 是 | `scripts/check-registry.sh` | 无 |
+| lib 语义 | 是 | `scripts/test-lib.sh` | 无 |
+| Prometheus | 是 | `scripts/test-prometheus.sh` | 缺 `promtool` 时仅跳过 recording rules 语法，静态断言仍执行 |
+| 容器化 | 是 | `scripts/test-container.sh` | 无 |
+| K8s 清单 | 是 | `scripts/test-k8s-manifest.sh` | 需 `kubectl kustomize`；无集群时跳过 server-side dry-run |
+| 发布脚本 | 是 | `scripts/test-deploy-k8s.sh` | 使用 fake kubectl，无真实集群 |
+| K8s 基础设施 | 是 | `scripts/test-k8s-infra.sh` | 无集群时跳过 server-side dry-run |
+| 集群脚本 | 是 | `scripts/test-k8s-cluster.sh` | 使用 fake kind/kubectl |
+| Nginx | 是 | `scripts/test-nginx.sh` | 无 |
+
+真实执行日志（`make test`，退出码 0，17m00s）中的条件分支：
+
+```text
+[WARN] 未找到 promtool 或 prometheus 镜像，跳过 recording rules 语法校验（静态断言仍执行）
+[WARN] 未安装 kubeconform，跳过 API Schema 校验（NOT_VERIFIED）
+[WARN] 无可用集群：跳过 server-side dry-run 与真实部署验证（NOT_VERIFIED）
+```
+
+未包含且本次未执行：`test-race`、`contract-check`、`test-kafka-e2e`、`test-storage`、
+`test-serve-lifecycle`、真实 Kubernetes 集群验证、真实第三方支付。
+
+### 9.3 单元测试数量同口径对比
+
+统计方法（两侧完全相同）：
+
+1. 从 `scripts/test-unit.sh` 解析全部 `run_unit` / `run_unit_match` 执行组（含
+   `FLASH_SALE_UNIT_TESTS` 变量展开，分支自带前导 `|`，直接拼接而非再次用 `|` 连接）。
+2. 对每组执行 `go test -count=1 -v [-run <同一正则>] <同一包>`。
+3. 顶层用例只统计 `=== RUN   TestXxx`（名称不含 `/`）；子测试统计含 `/` 的 RUN 行；两者分开。
+4. 基线源码通过 `git archive d1fa065` 导出到临时目录，未切换分支、未改动工作区。
+
+| 指标 | B1-05-01 基线 `d1fa065` | 当前 HEAD | 差异 |
+|---|---:|---:|---|
+| 执行组 / 测试包 | 28 | 29 | +1（新增 `internal/testdb`） |
+| 顶层 Test 函数 | **313** | **315** | +2（白名单与 CI 一致性回归） |
+| 子测试 | 254 | 254 | 0 |
+| PASS（顶层） | 313 | 315 | +2 |
+| SKIP | 0 | 0 | 0 |
+| FAIL | 0 | 0 | 0 |
+
+结论：
+
+- 历史基线 313 **已精确复现**，此前"统计口径不可复现"的 P3 结论由本条更正。
+- 当前 HEAD 未发生任何用例缩减；增加 2 项为本任务新增的安全回归。
+- 统计不包含集成测试包（`internal/migrations` 等仅统计脚本登记的纯内存 `-run` 子集），
+  也不包含 `t.Run` 子测试。
+
+### 9.4 D1 运行时缺陷复现
+
+使用现有 E2E 基础设施（真实路由 + 真实 MySQL/Redis + 进程内 HTTP server）构造最小非法请求。
+临时取证用例运行后已删除，未提交（避免把缺陷行为固化为断言）。
+
+| 项目 | 实际结果 |
+|---|---|
+| API 路径 | `POST /categories`（后台创建分类） |
+| 请求参数 | `{}`（缺少必填 `name`）；补充验证 `{"name": ""}` |
+| 预期行为 | `HTTP 400 + code 1001`（参数校验失败） |
+| 实际 HTTP 状态 | **500** |
+| 实际错误码 | **51** |
+| 错误信息 | `内部错误` |
+| 错误产生位置 | GoFrame `ghttp` 请求参数校验（`gvalid`）返回 `gcode.CodeValidationFailed`，其值为 51（`github.com/gogf/gf/v2@v2.10.3/errors/gcode/gcode.go:32`） |
+| 最终映射位置 | `internal/middleware/response.go:31-37` → `internal/codes/codes.go:444-453`（`FromError` 原样返回 51）→ `codes.go:417-422`（未知码 → 500）→ `codes.go:425-430`（未知码 → "内部错误"） |
+
+原始输出：
+
+```text
+=== RUN   TestD1ReproMissingRequiredField
+    d1_repro_tmp_test.go:13: D1_REPRO status=500 code=51 message="内部错误"
+    d1_repro_tmp_test.go:16: D1_REPRO_EMPTY status=500 code=51 message="内部错误"
+--- PASS: TestD1ReproMissingRequiredField (0.76s)
+```
+
+调用链定位：
+
+| 环节 | 位置 |
+|---|---|
+| 路由注册 | `internal/cmd/routes_admin.go:113`（`require("category:create").POST("/categories", ...)`） |
+| DTO 必填标签 | `api/categories/v1/categories.go:45`（`Name string \`v:"required"\``） |
+| Controller | `internal/controller/categories/categories.go:29` |
+| 影响范围 | OpenAPI 中 28 条 operation 以 `x-known-issue: B1-02-D1` 如实记录 |
+
+结论：**DEFECT CONFIRMED（可稳定复现）**。本次仅复现，不修复。归一为 `400 + 1001`
+属全局错误语义变更，仍待 Owner 决策。
+
+### 9.5 历史数据迁移状态归档
+
+| 项 | 结论 |
+|---|---|
+| B1-05-02 报告 | 明确记录真实历史数据核对 BLOCKED，未伪造行数 |
+| B1-04-FIX-02 报告 | 记录 Owner 曾提供 `/root/projects/my-shop/tmp/shopping.sql`，并仅提取 `system_city` |
+| `internal/regiondata/regions_v1.tsv` | **存在**（105,346 字节，`go:embed`，含来源与 SHA-256 注释） |
+| 地区字典恢复 | **已真实验证**：3938 行（34 省 / 369 市 / 3535 区县），`TestDatasetIntegrity` 与导入幂等测试通过 |
+| 完整历史业务数据迁移 | **BLOCKED**：商品/分类/SKU/库存/用户/地址/订单/优惠券/钱包/积分/评价/收藏/`legacy_id_map` 均未在本次真实导入 |
+
+原始文件 SHA-256 `568da34e4cd084e497450e07e75709966b67153daa99e68ae14e291a01cc23c2`
+仅为历史记录（来自 B1-04-FIX-02 与 `regions_v1.tsv` 头注释），**本次未重新校验原始文件**，
+因为文件不存在。本次未再进行全盘扫描。
+
+归档结论：真实历史业务数据迁移为**外部 BLOCKED**，阻塞原因是可信数据源缺失，
+不是迁移工具实现缺陷。等待 Owner 重新提供数据源后方可恢复验证。
+
+### 9.6 本次修订与 Git
+
+| 项 | 值 |
+|---|---|
+| 分支 | `feat/p2-backend` |
+| 修订前 HEAD | `2ec9d8f6614c4fb8f341c0fe4b2dc9188d33e4e7` |
+| 本次修订提交 | 见 `git log -1`（`docs(b1-05): supplement final acceptance evidence`） |
+| Push | 未执行 |
+| Merge main/develop | 未执行 |
+
+修改文件：
+
+| 文件 | 原因 |
+|---|---|
+| `internal/testdb/testdb.go` | 新增统一测试库白名单（消除 4 处硬编码漂移） |
+| `internal/testdb/testdb_test.go` | 新增安全边界与 CI 配置一致性回归 |
+| `internal/controller/address/address_test.go` | 改用统一白名单 |
+| `internal/controller/region/region_test.go` | 改用统一白名单 |
+| `internal/controller/profile/profile_test.go` | 改用统一白名单 |
+| `internal/regiondata/regiondata_integration_test.go` | 改用统一白名单（避免 CI 静默 Skip） |
+| `internal/logic/freight/integration_test.go` | 改用统一白名单（避免 CI 静默 Skip） |
+| `scripts/test-unit.sh` | 登记 `internal/testdb` 纯内存测试（28 → 29 组） |
+| `tools/openapi-gen/gen.go`、`metadata.go`、`opmeta.go` | `gofmt` 格式修复（B1-05-04 合并后遗留，无逻辑变更） |
+| `docs/phase2/B1-05_FINAL_REPORT.md` | 本章证据补齐 |
+
+### 9.7 问题清单变更
+
+| 编号 | 变更 | 级别 | 状态 |
+|---|---|---|---|
+| FIX-1 | CI `my_shop_ci_test` 与 Go 白名单不一致，CI `make test` 必然失败，freight/regiondata 静默 Skip | P1（工程安全） | **已修复**（统一白名单 + 回归测试） |
+| FIX-2 | B1-05-04 合并后 3 个 `tools/openapi-gen` 文件未通过 `gofmt` | P3 | **已修复** |
+| FIX-3 | 此前"313 统计口径不可复现" | P3 | **已更正**：同口径下基线精确复现 313 |
+| P1-1 | D1 `500 + 51` | P1 | **仍存在**（已稳定复现，待 Owner 决策） |
+| P1-2 | 历史真实业务数据迁移 | BLOCKED | **仍阻塞**（数据源缺失） |
+
+最终结论维持 **PARTIAL**：工程门禁与 CI 安全配置已修复，但 D1 运行时缺陷与真实历史数据迁移
+仍未解决，不满足 PASS 条件。
+
 ## 附录 A：本次修复记录（修改前 → 修改后）
 
 | 编号 | 原始问题 | 修改 | 修改前验证 | 修改后验证 |
