@@ -4,7 +4,7 @@
 - 分支：`feat/p2-r2-react-core`
 - Worktree：`/root/projects/my-shop-worktrees/r2-react-core`
 - 集成分支基线：`feat/phase2-ecommerce-business` @ `ddfd5ab77ced617ae0b0020c46a8220396b52145`
-- 交付提交：`（提交后回填）`
+- 交付提交：`e96dd9ae31d2031c3e303d03ac2da887f2c9f552`
 - 报告范围：仅 `web/**`、本报告与 `.agent/tasks/dev/R2-react-core.md`
 
 > 本文所有后端事实均以当前集成分支中的 Go 源码为准：
@@ -274,14 +274,16 @@ shipping_fee          = shipping_fee
 - 分支：`feat/p2-r2-react-core`
 - Worktree：`/root/projects/my-shop-worktrees/r2-react-core`
 - 基线：`ddfd5ab77ced617ae0b0020c46a8220396b52145`
-- 交付提交：`（提交后回填）`
+- 交付提交（代码/测试/文档）：`e96dd9ae31d2031c3e303d03ac2da887f2c9f552`
 - 说明：本报告的 SHA 回填提交是紧随其后的元数据提交；分支最终 HEAD 以
   `git rev-parse HEAD` 与远端分支为准。
 
 ## 10. Push 状态
 
 - 远端分支：`origin/feat/p2-r2-react-core`
-- 状态：`（push 后回填并校验 remote HEAD 与本地 HEAD 一致）`
+- 已推送，且已校验远端 HEAD 与本地交付提交一致：
+  `e96dd9ae31d2031c3e303d03ac2da887f2c9f552`
+- SHA 回填元数据提交随后推送（只修改本报告第 9/10 节）。
 - 未 force push，未 rebase，未合并其他分支。
 
 ## 11. 工作区状态
