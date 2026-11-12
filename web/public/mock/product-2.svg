@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" role="img" aria-label="模拟商品图">
+  <rect width="600" height="600" fill="#f5f7fa"/>
+  <rect x="120" y="150" width="360" height="300" rx="24" fill="#d5dae2"/>
+  <rect x="160" y="190" width="280" height="120" rx="12" fill="#ffffff"/>
+  <circle cx="300" cy="380" r="36" fill="#9aa3b2"/>
+</svg>
