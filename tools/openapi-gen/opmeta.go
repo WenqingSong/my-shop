@@ -9,16 +9,6 @@ type opMeta struct {
 	Description string
 }
 
-// D1 缺陷的固定描述：所有带非 path required 字段的写接口的实际行为。
-func d1Issue() *OMap {
-	return NewOMap().
-		Set("id", "B1-02-D1").
-		Set("summary", "DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001").
-		Set("actual_http_status", 500).
-		Set("actual_business_code", 51).
-		Set("remediation", "需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射")
-}
-
 func idemBody(field string, required bool) *OMap {
 	return NewOMap().
 		Set("mode", "body").
@@ -31,52 +21,25 @@ func idemBody(field string, required bool) *OMap {
 // 未登记的接口使用默认值：Pagination=none、NullData=false、无幂等。
 // 同一接口的多项事实必须写在同一条记录里（Go map 字面量不允许重复键）。
 var opMetaByKey = map[string]*opMeta{
-	// ---- D1：gvalid 500/51 实际行为 ----
-	// B1-01 §15.1 与 D1.2 表列为 13 条；B1-02-review-fix R1 复核全部 DTO 的 v:"required"
-	// 字段位置后确认第 14 条 POST /admin/roles/:id/permissions（body.permission_id 必填）
-	// 同样会在绑定阶段触发 gvalid → 51 → 500，契约按实际行为补标（不改生产代码）。
-	"POST /admin/login":                    {KnownIssues: []*OMap{d1Issue()}},
-	"POST /admin/admins":                   {KnownIssues: []*OMap{d1Issue()}},
-	"PUT /admin/admins/:id/status":         {KnownIssues: []*OMap{d1Issue()}},
-	"POST /admin/admins/:id/roles":         {KnownIssues: []*OMap{d1Issue()}, NullData: true},
-	"POST /admin/roles":                    {KnownIssues: []*OMap{d1Issue()}},
-	"POST /admin/permissions":              {KnownIssues: []*OMap{d1Issue()}},
-	"PUT /admin/users/:id/status":          {KnownIssues: []*OMap{d1Issue()}},
-	"POST /categories":                     {KnownIssues: []*OMap{d1Issue()}},
-	"POST /admin/skus":                     {KnownIssues: []*OMap{d1Issue()}},
-	"POST /admin/product-specs":            {KnownIssues: []*OMap{d1Issue()}},
-	"POST /admin/product-specs/:id/values": {KnownIssues: []*OMap{d1Issue()}},
-	"POST /admin/refunds/:id/review":       {KnownIssues: []*OMap{d1Issue()}},
-	"POST /admin/refunds/:id/execute":      {KnownIssues: []*OMap{d1Issue()}},
-	"POST /admin/refunds/:id/close":        {KnownIssues: []*OMap{d1Issue()}},
-	"POST /admin/roles/:id/permissions":    {KnownIssues: []*OMap{d1Issue()}, NullData: true},
-	"POST /distribution/referral":          {KnownIssues: []*OMap{d1Issue()}},
+	"POST /admin/admins/:id/roles":      {NullData: true},
+	"POST /admin/roles/:id/permissions": {NullData: true},
 	// B1-04 八分支集成：以下 5 条写接口同样带「非 path 的 required 字段」，
 	// 绑定阶段 gvalid 失败仍返回 500/51（未在本次集成中改变错误码映射）。
-	"POST /orders/quote": {KnownIssues: []*OMap{d1Issue()}},
 	// 钱包充值带 body.idempotency_key（v:"required"），因此在 D1 之外还要按 D5 声明幂等键。
-	"POST /wallet/recharges":                  {KnownIssues: []*OMap{d1Issue()}, Idempotency: idemBody("idempotency_key", true)},
-	"POST /admin/freight-templates":           {KnownIssues: []*OMap{d1Issue()}},
-	"PUT /admin/freight-templates/:id":        {KnownIssues: []*OMap{d1Issue()}},
-	"PUT /admin/freight-templates/:id/status": {KnownIssues: []*OMap{d1Issue()}},
+	"POST /wallet/recharges": {Idempotency: idemBody("idempotency_key", true)},
 
 	// ---- B1-04-06 拼团：写接口带 required body 字段（D1 同上）+ 严格分页 ----
 	"POST /group-buys/:id/teams": {
-		KnownIssues: []*OMap{d1Issue()},
 		Idempotency: idemBody("idempotency_key", true),
 	},
 	"POST /group-buy-teams/:id/join": {
-		KnownIssues: []*OMap{d1Issue()},
 		Idempotency: idemBody("idempotency_key", true),
 	},
-	"POST /admin/group-buys":            {KnownIssues: []*OMap{d1Issue()}},
-	"PUT /admin/group-buys/:id":         {KnownIssues: []*OMap{d1Issue()}},
-	"POST /admin/group-buys/:id/status": {KnownIssues: []*OMap{d1Issue()}},
-	"GET /group-buys":                   {Pagination: "strict"},
-	"GET /group-buys/:id/teams":         {Pagination: "strict"},
-	"GET /my/group-buys":                {Pagination: "strict"},
-	"GET /admin/group-buys":             {Pagination: "strict"},
-	"GET /admin/group-buy-teams":        {Pagination: "strict"},
+	"GET /group-buys":            {Pagination: "strict"},
+	"GET /group-buys/:id/teams":  {Pagination: "strict"},
+	"GET /my/group-buys":         {Pagination: "strict"},
+	"GET /admin/group-buys":      {Pagination: "strict"},
+	"GET /admin/group-buy-teams": {Pagination: "strict"},
 
 	// ---- data 为 null 的成功响应（controller 显式 return nil, nil）----
 	"POST /logout":                                       {NullData: true},
@@ -121,7 +84,6 @@ var opMetaByKey = map[string]*opMeta{
 
 	// ---- 幂等：body 字段（现状，未支持 Header）----
 	"POST /orders": {
-		KnownIssues: []*OMap{d1Issue()},
 		Idempotency: idemBody("idempotency_key", true),
 	},
 	"POST /flash-sales/:id/orders": {

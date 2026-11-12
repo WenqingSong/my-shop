@@ -258,20 +258,28 @@ func TestGroupBuyConcurrentDuplicateJoinSingleParticipant(t *testing.T) {
 		})
 		errs[i] = e
 	})
+	// 并发重复参团的确定语义（B1-05-FINAL-FIX-02 / O4）：
+	//   - 只允许 1 个请求真正获得参与资格（下面的参与记录/订单/人数/库存断言证明）；
+	//   - 未获得资格的请求只能是业务冲突，绝不幂等成功创建第二份数据：
+	//       9006：并发窗口内复用同一幂等键下单，撞 uk_user_idempotency，事务整体回滚；
+	//       25007：撞 uk_team_user，事务整体回滚；
+	//       nil：进入「已参与」快路径，仅回读既有团详情，不产生任何写入。
+	// 返回码分布会打印到测试日志，作为运行时证据。
+	codeCount := map[codes.Code]int{}
+	successCount := 0
 	for i, err := range errs {
-		// 三种正常结果，均不产生第二次参与：
-		//   1) nil：命中「已参与」幂等快路径，返回既有团详情；
-		//   2) 25007：并发撞 uk_team_user，整体回滚；
-		//   3) 9006：并发窗口内第二次下单复用同一幂等键，撞 uk_user_idempotency 后整体回滚。
-		// 第 3 种是并发重复提交的已知表现（非幂等成功，但副作用为零），记录在测试报告。
 		if err == nil {
+			successCount++
 			continue
 		}
-		if code := codes.FromError(err); code != codes.CodeGroupBuyAlreadyJoined &&
-			code != codes.CodeOrderIdempotencyConflict {
+		code := codes.FromError(err)
+		codeCount[code]++
+		if code != codes.CodeGroupBuyAlreadyJoined && code != codes.CodeOrderIdempotencyConflict {
 			t.Fatalf("第 %d 个重复参团请求非预期错误码 %d: %v", i, code, err)
 		}
 	}
+	t.Logf("并发重复参团结果：成功回读=%d，9006(订单幂等冲突)=%d，25007(已参与)=%d",
+		successCount, codeCount[codes.CodeOrderIdempotencyConflict], codeCount[codes.CodeGroupBuyAlreadyJoined])
 
 	state := loadTeamState(t, teamID)
 	if state.JoinedCount != 2 {

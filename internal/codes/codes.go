@@ -441,6 +441,14 @@ func Wrap(code Code, err error) error {
 }
 
 // FromError 从 error 链中提取业务错误码；未识别时返回内部错误码。
+//
+// 特殊处理：GoFrame 参数校验（gvalid）失败时返回框架码 51
+// （gcode.CodeValidationFailed），它不是项目的业务错误码，若原样透传会被
+// HTTPStatus 当作未知码映射为 500。这里在统一错误层归一为业务码 1001
+// （参数校验失败 → 400），不逐个 Controller 打补丁。
+//
+// 仅归一「参数校验」这一确定的框架语义，其余未知错误码仍按原值返回并由
+// HTTPStatus 兜底为 500，避免把真正的内部错误误报为客户端参数错误。
 func FromError(err error) Code {
 	if err == nil {
 		return CodeOK
@@ -448,6 +456,9 @@ func FromError(err error) Code {
 	c := gerror.Code(err)
 	if c == gcode.CodeNil {
 		return CodeInternalError
+	}
+	if c.Code() == gcode.CodeValidationFailed.Code() {
+		return CodeInvalidArgument
 	}
 	return Code(c.Code())
 }

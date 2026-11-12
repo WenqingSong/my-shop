@@ -35,7 +35,7 @@ type Commission struct {
 	ReversedAmount    int64       `json:"reversed_amount" dc:"已冲回金额（整数分；整单退款时等于 commission_amount）"`
 	ReversedAt        *gtime.Time `json:"reversed_at" dc:"冲回时间（可空）"`
 	RefundId          *int64      `json:"refund_id" dc:"触发冲回的退款单 id（可空，唯一索引）"`
-	ReversalReason    string      `json:"reversal_reason" dc:"冲回原因：refund/cancel，未冲回为空串"`
+	ReversalReason    string      `json:"reversal_reason" dc:"冲回原因：refund（当前唯一实现值），未冲回为空串"`
 	CreatedAt         *gtime.Time `json:"created_at" dc:"创建时间"`
 	UpdatedAt         *gtime.Time `json:"updated_at" dc:"更新时间"`
 }

@@ -3102,7 +3102,7 @@ DistributionCommission:
       description: 触发冲回的退款单 id（可空，唯一索引）
     reversal_reason:
       type: string
-      description: 冲回原因：refund/cancel，未冲回为空串
+      description: 冲回原因：refund（当前唯一实现值），未冲回为空串
     created_at:
       type: [string, "null"]
       x-go-type: gtime.Time
@@ -6265,15 +6265,15 @@ MemberGrowthLog:
       description: 变动后成长值（恒 ≥ 0）
     change_type:
       type: string
-      description: 语义类型：order_reward/refund_deduct/admin_adjust
+      description: 语义类型：order_reward/refund_deduct（当前仅实现这两种）
     biz_type:
       type: string
-      description: 关联业务类型：order/refund/manual
+      description: 关联业务类型：order/refund（当前仅实现这两种）
     biz_id:
       type: [integer, "null"]
       format: int64
       x-go-type: int64
-      description: 关联业务 id（订单 id 或退款单 id）；手动调整时为 null
+      description: 关联业务 id（订单 id 或退款单 id）
     remark:
       type: string
       description: 备注

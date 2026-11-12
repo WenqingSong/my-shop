@@ -452,6 +452,8 @@ func buildMainDocument(
 		Set("version", "1.0.0").
 		Set("description", "SurgeCart 商城后端 HTTP JSON API 契约。"+
 			"统一响应包装为 {code,message,data}；成功 code=0，失败 code 见 components/error-codes.yaml。"+
+			"参数校验失败统一返回 HTTP 400 + code 1001。"+
+			"响应时间字段为不携带时区偏移的墙钟时间（YYYY-MM-DD HH:MM:SS），语义见 docs/design/api-time-semantics.md。"+
 			"本文档描述的是当前代码的实际行为，目标规范与现状的差异通过 x-known-issue / x-* 扩展字段标注。").
 		Set("contact", NewOMap().Set("name", "SurgeCart Backend")))
 
@@ -633,28 +635,9 @@ func buildPlannedIndex() []any {
 	return out
 }
 
-// d1AffectedCount 统计带 D1 已知问题的 operation 数量（避免文档里的条数与代码脱节）。
-func d1AffectedCount() int {
-	n := 0
-	for _, m := range opMetaByKey {
-		for _, i := range m.KnownIssues {
-			if v, _ := i.Get("id"); v == "B1-02-D1" {
-				n++
-				break
-			}
-		}
-	}
-	return n
-}
-
 // buildGlobalKnownIssues 汇总跨接口的契约已知问题。
 func buildGlobalKnownIssues() []any {
 	return []any{
-		NewOMap().
-			Set("id", "B1-02-D1").
-			Set("summary", "DTO gvalid 校验失败返回 HTTP 500 + code 51，与目标规范 400 + 1001 不一致").
-			Set("affected", fmt.Sprintf("%d 条带 v:\"required\" 的写接口，见各 operation 的 x-known-issue", d1AffectedCount())).
-			Set("remediation", "需单独立项修复错误码映射；B1-02 仅在契约层标注"),
 		NewOMap().
 			Set("id", "B1-01-H15.4").
 			Set("summary", "分页三种形态并存：clamp（静默归一）/ strict（越界 400）/ none（无分页）").

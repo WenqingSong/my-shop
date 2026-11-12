@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -239,9 +240,11 @@ func TestPathViewsOnRepo(t *testing.T) {
 	}
 }
 
-// ---- R1：D1 已知问题集合与 DTO required 字段一一对应 ----
+// ---- R1：D1 已修复，契约不得再声明 500/51 ----
 
-func TestD1KnownIssuesCoverAllRequiredFields(t *testing.T) {
+// TestD1KnownIssueRemovedFromContract 锁定 D1 修复后的契约一致性：
+// 运行时已归一为 400 + 1001，生成器元数据与生成物都不得再残留 B1-02-D1。
+func TestD1KnownIssueRemovedFromContract(t *testing.T) {
 	root := repoRoot(t)
 	routes, err := parseRouteFiles(root)
 	if err != nil {
@@ -264,43 +267,35 @@ func TestD1KnownIssuesCoverAllRequiredFields(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// GoFrame 在 controller 执行前完成请求绑定与 gvalid 校验，
-	// 因此任何「非 path 的 required 字段」缺失都会落进 code 51 → HTTP 500。
-	affected := map[string]bool{}
+	// 解析器仍需能找到 required 字段，否则本测试失去意义。
+	affected := 0
 	for _, a := range apis {
 		for _, f := range a.Req.Fields {
 			if f.Embedded || !f.Required() || f.In == "path" {
 				continue
 			}
-			affected[a.Key()] = true
+			affected++
 			break
 		}
 	}
+	if affected == 0 {
+		t.Fatal("未解析到任何 required 字段，解析器可能失效")
+	}
 
-	marked := map[string]bool{}
 	for key, m := range opMetaByKey {
 		for _, i := range m.KnownIssues {
 			if v, _ := i.Get("id"); v == "B1-02-D1" {
-				marked[key] = true
+				t.Errorf("%s 仍登记已修复的 B1-02-D1 known-issue", key)
 			}
 		}
 	}
 
-	for key := range affected {
-		if !marked[key] {
-			t.Errorf("%s 存在非 path 的 required 字段，但契约未标注 B1-02-D1", key)
-		}
+	generated, err := os.ReadFile(filepath.Join(root, "openapi", "surgecart.openapi.yaml"))
+	if err != nil {
+		t.Fatalf("读取生成物: %v", err)
 	}
-	for key := range marked {
-		if !affected[key] {
-			t.Errorf("%s 标注了 B1-02-D1，但 DTO 中不存在非 path 的 required 字段", key)
-		}
-	}
-	if d1AffectedCount() != len(affected) {
-		t.Errorf("d1AffectedCount=%d，实际受影响接口=%d", d1AffectedCount(), len(affected))
-	}
-	if len(affected) == 0 {
-		t.Fatal("未解析到任何 required 字段，解析器可能失效")
+	if strings.Contains(string(generated), "B1-02-D1") {
+		t.Error("生成的 OpenAPI 仍包含已修复的 B1-02-D1")
 	}
 }
 
@@ -430,5 +425,22 @@ func TestCrossPackageSupplementsAppearInContract(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("未校验任何补充错误码")
+	}
+}
+
+// ---- O3：无运行时实现的枚举取值不得出现在契约中 ----
+
+// TestDeferredEnumValuesNotDocumented 锁定 O3：
+// MemberGrowthLog.change_type/biz_type 与 DistributionCommission.reversal_reason
+// 没有运行时枚举校验，契约不得再描述未实现的取值。
+func TestDeferredEnumValuesNotDocumented(t *testing.T) {
+	generated, err := os.ReadFile(filepath.Join(repoRoot(t), "openapi", "components", "schemas.yaml"))
+	if err != nil {
+		t.Fatalf("读取 schemas.yaml: %v", err)
+	}
+	for _, stale := range []string{"admin_adjust", "order/refund/manual", "refund/cancel"} {
+		if strings.Contains(string(generated), stale) {
+			t.Errorf("契约仍包含无运行时实现的取值 %q", stale)
+		}
 	}
 }

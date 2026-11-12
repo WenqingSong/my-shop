@@ -73,12 +73,6 @@
       field: idempotency_key
       required: true
       header_supported: false
-    x-known-issue:
-      - id: B1-02-D1
-        summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-        actual_http_status: 500
-        actual_business_code: 51
-        remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
     responses:
       "200":
         description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
@@ -225,12 +219,6 @@
     x-pagination-mode: none
     x-idempotency:
       mode: none
-    x-known-issue:
-      - id: B1-02-D1
-        summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-        actual_http_status: 500
-        actual_business_code: 51
-        remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
     responses:
       "200":
         description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。

@@ -7,7 +7,7 @@ jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: SurgeCart API
   version: 1.0.0
-  description: SurgeCart 商城后端 HTTP JSON API 契约。统一响应包装为 {code,message,data}；成功 code=0，失败 code 见 components/error-codes.yaml。本文档描述的是当前代码的实际行为，目标规范与现状的差异通过 x-known-issue / x-* 扩展字段标注。
+  description: SurgeCart 商城后端 HTTP JSON API 契约。统一响应包装为 {code,message,data}；成功 code=0，失败 code 见 components/error-codes.yaml。参数校验失败统一返回 HTTP 400 + code 1001。响应时间字段为不携带时区偏移的墙钟时间（YYYY-MM-DD HH:MM:SS），语义见 docs/design/api-time-semantics.md。本文档描述的是当前代码的实际行为，目标规范与现状的差异通过 x-known-issue / x-* 扩展字段标注。
   contact:
     name: SurgeCart Backend
 servers:
@@ -321,12 +321,6 @@ paths:
       x-pagination-mode: none
       x-idempotency:
         mode: none
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
@@ -1207,12 +1201,6 @@ paths:
         field: idempotency_key
         required: true
         header_supported: false
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
@@ -2550,12 +2538,6 @@ paths:
         field: idempotency_key
         required: true
         header_supported: false
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
@@ -2702,12 +2684,6 @@ paths:
       x-pagination-mode: none
       x-idempotency:
         mode: none
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
@@ -4743,12 +4719,6 @@ paths:
       x-pagination-mode: none
       x-idempotency:
         mode: none
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
@@ -5007,12 +4977,6 @@ paths:
         field: idempotency_key
         required: true
         header_supported: false
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
@@ -5919,12 +5883,6 @@ paths:
         field: idempotency_key
         required: true
         header_supported: false
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
@@ -6041,12 +5999,6 @@ paths:
       x-pagination-mode: none
       x-idempotency:
         mode: none
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
@@ -6323,12 +6275,6 @@ paths:
       x-pagination-mode: none
       x-idempotency:
         mode: none
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
@@ -6394,12 +6340,6 @@ paths:
       x-pagination-mode: none
       x-idempotency:
         mode: none
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
@@ -6475,12 +6415,6 @@ paths:
       x-pagination-mode: none
       x-idempotency:
         mode: none
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
@@ -6612,12 +6546,6 @@ paths:
       x-pagination-mode: none
       x-idempotency:
         mode: none
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。handler 显式返回 nil，data 为 null（不是空对象 {}）。
@@ -6750,12 +6678,6 @@ paths:
       x-pagination-mode: none
       x-idempotency:
         mode: none
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
@@ -6997,12 +6919,6 @@ paths:
       x-pagination-mode: none
       x-idempotency:
         mode: none
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。handler 显式返回 nil，data 为 null（不是空对象 {}）。
@@ -7133,12 +7049,6 @@ paths:
       x-pagination-mode: none
       x-idempotency:
         mode: none
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
@@ -7844,12 +7754,6 @@ paths:
       x-pagination-mode: none
       x-idempotency:
         mode: none
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
@@ -8060,12 +7964,6 @@ paths:
       x-pagination-mode: none
       x-idempotency:
         mode: none
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
@@ -8288,12 +8186,6 @@ paths:
       x-pagination-mode: none
       x-idempotency:
         mode: none
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
@@ -9348,12 +9240,6 @@ paths:
       x-pagination-mode: none
       x-idempotency:
         mode: none
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
@@ -9435,12 +9321,6 @@ paths:
       x-pagination-mode: none
       x-idempotency:
         mode: none
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
@@ -9514,12 +9394,6 @@ paths:
       x-pagination-mode: none
       x-idempotency:
         mode: none
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
@@ -11514,12 +11388,6 @@ paths:
       x-pagination-mode: none
       x-idempotency:
         mode: none
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
@@ -11716,12 +11584,6 @@ paths:
       x-pagination-mode: none
       x-idempotency:
         mode: none
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
@@ -11855,12 +11717,6 @@ paths:
       x-pagination-mode: none
       x-idempotency:
         mode: none
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
@@ -12530,12 +12386,6 @@ paths:
       x-pagination-mode: none
       x-idempotency:
         mode: none
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
@@ -12722,12 +12572,6 @@ paths:
       x-pagination-mode: none
       x-idempotency:
         mode: none
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
@@ -12807,12 +12651,6 @@ paths:
       x-pagination-mode: none
       x-idempotency:
         mode: none
-      x-known-issue:
-        - id: B1-02-D1
-          summary: DTO gvalid 校验失败实际返回 HTTP 500 + code 51（框架码穿透），不是 400 + 1001
-          actual_http_status: 500
-          actual_business_code: 51
-          remediation: 需单独立项在 codes.FromError / Response 中间件中把 gvalid 归一为 1001；B1-02 不修改错误码映射
       responses:
         "200":
           description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
@@ -14651,10 +14489,6 @@ x-planned-apis:
     implemented: false
     counted_in_api_total: false
 x-known-issues:
-  - id: B1-02-D1
-    summary: DTO gvalid 校验失败返回 HTTP 500 + code 51，与目标规范 400 + 1001 不一致
-    affected: 27 条带 v:"required" 的写接口，见各 operation 的 x-known-issue
-    remediation: 需单独立项修复错误码映射；B1-02 仅在契约层标注
   - id: B1-01-H15.4
     summary: 分页三种形态并存：clamp（静默归一）/ strict（越界 400）/ none（无分页）
     contract_representation: operation 级 x-pagination-mode

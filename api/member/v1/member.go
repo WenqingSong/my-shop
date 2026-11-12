@@ -49,9 +49,9 @@ type GrowthLog struct {
 	ChangeAmount int64       `json:"change_amount" dc:"带符号变动值：正=增加、负=扣减"`
 	GrowthBefore int64       `json:"growth_before" dc:"变动前成长值"`
 	GrowthAfter  int64       `json:"growth_after" dc:"变动后成长值（恒 ≥ 0）"`
-	ChangeType   string      `json:"change_type" dc:"语义类型：order_reward/refund_deduct/admin_adjust"`
-	BizType      string      `json:"biz_type" dc:"关联业务类型：order/refund/manual"`
-	BizId        *int64      `json:"biz_id" dc:"关联业务 id（订单 id 或退款单 id）；手动调整时为 null"`
+	ChangeType   string      `json:"change_type" dc:"语义类型：order_reward/refund_deduct（当前仅实现这两种）"`
+	BizType      string      `json:"biz_type" dc:"关联业务类型：order/refund（当前仅实现这两种）"`
+	BizId        *int64      `json:"biz_id" dc:"关联业务 id（订单 id 或退款单 id）"`
 	Remark       string      `json:"remark" dc:"备注"`
 	CreatedAt    *gtime.Time `json:"created_at" dc:"发生时间"`
 }
