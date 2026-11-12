@@ -7,6 +7,7 @@
 #   2. 重试边界：proxy_next_upstream off（任何方法不自动重试）；
 #   3. 上游 DNS 再解析：resolver 127.0.0.11 + server app:8000 resolve + zone；
 #   4. 监控隔离：location = /metrics 返回 404；
+#   4b. 路径契约（R1）：/api/ 剥离前缀（proxy_pass 带尾部 /）、/storage/ 保留原样 URI；
 #   5. 安全响应头：X-Content-Type-Options nosniff / X-Frame-Options DENY / server_tokens off；
 #   6. 日志关联：X-Request-ID 覆盖透传、log_format 含 $request_id 与 $upstream_response_time，
 #      且不记录 Authorization / Cookie 等敏感信息；
@@ -50,6 +51,41 @@ grep -qF 'zone my_shop_backend 64k;' "${NGINX_CONF}" \
   || fail "nginx.conf upstream 缺少 zone（server resolve 需共享内存区）"
 grep -qF 'keepalive 32;' "${NGINX_CONF}" \
   || fail "nginx.conf upstream 缺少 keepalive 连接复用"
+
+# 4b) 路径契约（R1）：/api 前缀剥离、/storage 原样透传。
+#     必须以 location 块为单位断言：全局 grep 会把 /health 的
+#     proxy_pass http://my_shop_backend; 误判为 /storage 已正确配置。
+nginx_block() {
+  awk -v pat="$1" '
+    $0 ~ pat && /\{/ { inside = 1 }
+    inside { print }
+    inside && /^[[:space:]]*\}[[:space:]]*$/ { exit }
+  ' "${NGINX_CONF}"
+}
+
+api_block="$(nginx_block '^[[:space:]]*location /api/ \{')"
+[[ -n "${api_block}" ]] || fail "nginx.conf 缺少 location /api/ 块"
+grep -qF 'proxy_pass http://my_shop_backend/;' <<<"${api_block}" \
+  || fail "location /api/ 的 proxy_pass 缺少尾部斜杠：/api 前缀不会被剥离，后端收到 /api/... 将 404（R1）"
+grep -qF '            proxy_set_header X-Forwarded-For $remote_addr;' <<<"${api_block}" \
+  || fail "location /api/ 丢失单跳信任边界（X-Forwarded-For 覆盖）"
+grep -qF 'proxy_next_upstream off;' <<<"${api_block}" \
+  || fail "location /api/ 丢失 proxy_next_upstream off（非幂等请求不得自动重试）"
+grep -qF 'proxy_read_timeout    30s;' <<<"${api_block}" \
+  || fail "location /api/ 丢失 proxy_read_timeout（代理超时配置退化）"
+
+storage_block="$(nginx_block '^[[:space:]]*location /storage/ \{')"
+[[ -n "${storage_block}" ]] \
+  || fail "nginx.conf 缺少 location /storage/ 块（/storage 资源会落入 React SPA fallback 并返回 HTML）"
+grep -qxF '            proxy_pass http://my_shop_backend;' <<<"${storage_block}" \
+  || fail "location /storage/ 的 proxy_pass 必须不带 URI（保留 /storage/ 前缀，R1）"
+if grep -qF 'proxy_pass http://my_shop_backend/;' <<<"${storage_block}"; then
+  fail "location /storage/ 误加尾部斜杠：前缀被替换为 /，后端收到 /banners/... 将 404"
+fi
+grep -qF 'proxy_next_upstream off;' <<<"${storage_block}" \
+  || fail "location /storage/ 丢失 proxy_next_upstream off"
+grep -qF 'proxy_read_timeout    30s;' <<<"${storage_block}" \
+  || fail "location /storage/ 丢失 proxy_read_timeout（代理超时配置退化）"
 
 # 5) 监控隔离：/metrics 公共入口 404。
 grep -qF 'location = /metrics {' "${NGINX_CONF}" \
