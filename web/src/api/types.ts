@@ -32,26 +32,86 @@ export interface Product {
   main_image: string
   detail: string
   status: ProductStatus
+  /** 运费模板 id；null 表示未绑定（该商品零运费）。 */
+  freight_template_id: number | null
   view_count: number
   images: string[]
   created_at: string | null
   updated_at: string | null
 }
 
-/** 商品 SKU。后端仅提供 id/name/price/status，没有规格维度与库存字段。 */
+/** SKU 的一个规格取值（api/sku/v1/sku.go SkuSpecValue）。 */
+export interface SkuSpecValue {
+  spec_id: number
+  spec_name: string
+  spec_value_id: number
+  value: string
+  /** 规格组排序值（升序展示）。 */
+  sort: number
+}
+
+/**
+ * 商品 SKU。
+ *
+ * 事实来源：`api/sku/v1/sku.go`。
+ * **不含 stock**：库存只在商品详情的 `productValue[]` 中按 `sku_id` 提供。
+ */
 export interface Sku {
   id: number
+  /** SKU 业务唯一编码；下单可优先按它定位 SKU。 */
+  sku_code: string
   product_id: number
   name: string
+  /** 规格图 URL；空串表示回退商品主图。 */
+  image_url: string
   price: number
+  /** 原价/划线价（整数分）；等于售价表示无划线价。 */
+  original_price: number
   status: SkuStatus
+  /** 规格组合指纹（MD5，无规格为空串）。 */
+  spec_key: string
+  /** 规格取值列表（按规格组 sort 升序；无规格为空数组）。 */
+  spec_values: SkuSpecValue[]
   created_at: string | null
   updated_at: string | null
 }
 
-/** 前台商品详情：SPU 字段 + 仅 enabled 的 SKU 列表。 */
+/** van-sku 规格组：组名 + 该组全部可选值文本（按 sort 升序）。 */
+export interface SkuAttr {
+  attrName: string
+  attrValueArr: string[]
+}
+
+/**
+ * van-sku 规格组合项（键为按 attr 顺序逗号连接的规格值文本，如「黑色,M」）。
+ * `sku_id` 是稳定引用键；`stock` 是该组合的可售库存。
+ */
+export interface SkuProductValue {
+  /** SKU 业务唯一编码（sku_code）。 */
+  unique: string
+  /** 规格展示文本；无规格时为 SKU 名称。 */
+  sku: string
+  sku_id: number
+  sku_name: string
+  price: number
+  original_price: number
+  /** 可售库存；后端对无库存记录返回 0。 */
+  stock: number
+  /** 规格图 URL；空串表示回退商品主图。 */
+  image: string
+}
+
+/**
+ * 前台商品详情：SPU 字段 + 仅 enabled 的 SKU 列表。
+ *
+ * `attr` / `productValue` 是后端为规格选择器准备的组合结构：
+ * 无规格商品返回空数组与空对象，因此**无规格商品的库存不可知**，
+ * 前端不得把缺失的 productValue 当成 0 库存。
+ */
 export interface ProductDetail extends Product {
   skus: Sku[]
+  attr: SkuAttr[]
+  productValue: Record<string, SkuProductValue>
 }
 
 /** GET /products 响应 data。 */

@@ -28,12 +28,13 @@ export interface CheckoutCouponSectionProps {
 }
 
 /**
- * 结算页优惠券选择（W4-04）。
+ * 结算页优惠券选择（W4-04，R2 起联动服务端试算）。
  *
  * 重要边界：
- * - 后端**没有**「订单可用券查询 / 优惠试算」接口，本组件给出的「可选/不可选/预估优惠」
- *   全部是前端基于券状态、有效期、门槛与预估商品金额的**估算**；
- * - 最终可用性、优惠金额与订单金额由 `POST /orders` 服务端计算（19007 表示券不可用）；
+ * - 「可选/不可选」是前端基于券状态、有效期、门槛与商品金额的预筛选，用于减少必然失败的请求；
+ * - 真正的优惠金额由 `POST /orders/quote` 的 `coupon_discount` 返回，并由结算页金额区展示；
+ *   试算失败时页面显示错误与重试入口，不回退到前端估算；
+ * - 最终可用性与金额仍由 `POST /orders` 事务复核（19007 表示券不可用）；
  * - 不提供金额输入，用户只能选择「用哪张券」或「不使用」；
  * - 后端没有商品/分类适用范围字段，因此这里没有范围匹配判断。
  */
@@ -76,7 +77,7 @@ export function CheckoutCouponSection({
       </div>
 
       <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
-        优惠券适用性及最终优惠金额以服务端下单校验结果为准。当前选择只影响本单提交的优惠券 id。
+        优惠券适用性以服务端试算与下单校验结果为准；这里的「预估优惠」仅按券面与商品金额预筛选。
       </p>
 
       {isLoading ? (
@@ -178,7 +179,7 @@ export function CheckoutCouponSection({
                       <span>状态 {describeCouponStatus(coupon.status)}</span>
                       {evaluation.selectable ? (
                         <span className="text-foreground">
-                          预估优惠 {formatCentsAsYuan(evaluation.estimatedDiscount)}（以服务端为准）
+                          券面预估减免 {formatCentsAsYuan(evaluation.estimatedDiscount)}（以试算为准）
                         </span>
                       ) : null}
                     </span>

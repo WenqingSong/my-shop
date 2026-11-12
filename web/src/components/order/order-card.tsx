@@ -7,7 +7,12 @@ import { PriceDisplay } from '@/components/common/price-display'
 import { ProductImage } from '@/components/product/product-image'
 import { RefundStatusBadge } from '@/components/refund/refund-status-badge'
 import { Button } from '@/components/ui/button'
-import { formatOrderTime, orderTotalQuantity } from '@/utils/orders'
+import {
+  formatOrderTime,
+  hasOrderItemOriginalPrice,
+  orderItemSpecText,
+  orderTotalQuantity,
+} from '@/utils/orders'
 
 export interface OrderCardProps {
   order: Order
@@ -70,12 +75,17 @@ export function OrderCard({ order, latestRefund }: OrderCardProps) {
                   {item.product_name}
                 </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  规格：{item.sku_name} · 数量 {item.quantity}
+                  规格：{orderItemSpecText(item)} · 数量 {item.quantity}
                 </p>
               </div>
               <div className="shrink-0 text-right">
                 <p className="text-[11px] text-muted-foreground">成交单价</p>
                 <PriceDisplay value={item.price} size="sm" tone="neutral" />
+                {hasOrderItemOriginalPrice(item) ? (
+                  <p className="mt-0.5 text-[11px] text-muted-foreground line-through">
+                    <PriceDisplay value={item.original_price} size="sm" tone="neutral" />
+                  </p>
+                ) : null}
               </div>
             </li>
           ))}

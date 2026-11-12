@@ -15,11 +15,14 @@ function makeItem(overrides: Partial<OrderItem> = {}): OrderItem {
   return {
     id: 11,
     sku_id: 9,
+    sku_code: 'SKU-TEST-0009',
     product_id: 3,
     sku_name: '默认规格',
+    spec_text: '',
     product_name: '测试商品',
     product_main_image: '',
     price: 999,
+    original_price: 999,
     quantity: 2,
     ...overrides,
   }

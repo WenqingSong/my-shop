@@ -23,8 +23,10 @@ import {
   getMockOrder,
   getMockOrderActionDelay,
   getMockOrderRequestDelay,
+  getMockQuoteRequestDelay,
   listMockOrders,
   payMockOrder,
+  quoteMockOrder,
   receiveMockOrder,
 } from '@/mocks/data/orders'
 import { listMockCoupons } from '@/mocks/data/coupons'
@@ -331,6 +333,28 @@ export const handlers = [
     }
 
     return HttpResponse.json(ok({ items: listMockOrders(user.id) }))
+  }),
+
+  // 订单试算：只读预览，不检查库存、不锁定券、不落库（对齐 POST /orders/quote）。
+  http.post(`${API}/orders/quote`, async ({ request }) => {
+    const user = findMockUserByAccessToken(bearerToken(request))
+
+    if (!user) {
+      return fail(401, 1002, '未授权')
+    }
+
+    const body = await readJsonObject(request)
+    const wait = getMockQuoteRequestDelay()
+
+    if (wait > 0) {
+      await delay(wait)
+    }
+
+    const result = quoteMockOrder(user.id, body)
+
+    return result.ok
+      ? HttpResponse.json(ok(result.quote))
+      : fail(result.status, result.code, result.message)
   }),
 
   http.post(`${API}/orders`, async ({ request }) => {

@@ -34,6 +34,35 @@ test.describe('商品详情与 SKU 选择', () => {
     await expect(pricePanel).toContainText('4,349')
   })
 
+  test('按规格组选择 SKU：价格、划线价、库存与规格图联动', async ({ page }) => {
+    await page.goto('/products/11')
+
+    await expect(
+      page.getByRole('heading', { level: 1, name: '简行 男士纯棉衬衫' }),
+    ).toBeVisible()
+
+    await page.getByRole('button', { name: '黑色' }).click()
+    await page.getByRole('button', { name: 'M' }).click()
+
+    await expect(page.getByText('已选规格：黑色,M')).toBeVisible()
+    await expect(page.getByText('当前规格库存 5 件')).toBeVisible()
+
+    const pricePanel = page.getByText('当前价格').locator('..')
+    await expect(pricePanel).toContainText('169')
+    await expect(pricePanel).toContainText('199')
+
+    // SKU 规格图优先于商品主图。
+    await expect(page.getByRole('img', { name: '简行 男士纯棉衬衫' })).toHaveAttribute(
+      'src',
+      /product-1\.svg/,
+    )
+
+    // 无库存规格：明确提示无货，而不是伪造库存数量。
+    // 未登录时加购区只展示登录引导，不展示库存导致的禁用文案（由组件测试覆盖）。
+    await page.getByRole('button', { name: 'L' }).click()
+    await expect(page.getByText('该规格当前无货')).toBeVisible()
+  })
+
   test('商品图册支持切换缩略图', async ({ page }) => {
     await page.goto('/products/1')
 

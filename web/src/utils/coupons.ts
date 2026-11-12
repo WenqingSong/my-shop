@@ -167,7 +167,7 @@ export function evaluateCouponForCheckout(
   if (estimatedGoodsAmount < coupon.threshold_amount) {
     return {
       selectable: false,
-      reason: `商品金额未达到使用门槛（需满 ${formatCentsAsYuan(coupon.threshold_amount)}，按预估金额判断）`,
+      reason: `商品金额未达到使用门槛（需满 ${formatCentsAsYuan(coupon.threshold_amount)}，按当前商品金额判断）`,
       estimatedDiscount: 0,
     }
   }

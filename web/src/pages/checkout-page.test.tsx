@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 
 import { fetchCart } from '@/api/cart'
+import { queryKeys } from '@/api/query-keys'
 import { createMockAddress } from '@/mocks/data/addresses'
 import {
   markMockProductOffShelf,
@@ -14,8 +15,12 @@ import {
   createMockOrder,
   getMockOrderCreatePayloads,
   getMockOrderCreateRequestCount,
+  getMockQuotePayloads,
+  getMockQuoteRequestCount,
   setMockOrderErrorOnce,
   setMockOrderRequestDelay,
+  setMockQuoteErrorOnce,
+  setMockQuoteRequestDelay,
 } from '@/mocks/data/orders'
 import { server } from '@/mocks/server'
 import { signInAsDemo } from '@/test/auth'
@@ -72,7 +77,7 @@ describe('结算页', () => {
     expect(screen.queryByRole('button', { name: '提交订单' })).not.toBeInTheDocument()
   })
 
-  it('展示商品清单与预估金额，并明确标注不是后端试算', async () => {
+  it('展示服务端试算的商品原价、优惠、运费与应付金额', async () => {
     await signInAsDemo()
     seedMockCartItem(DEMO_USER_ID, mockCartSkuId(1, 0), 2)
     seedMockCartItem(DEMO_USER_ID, mockCartSkuId(2, 0), 1)
@@ -86,24 +91,137 @@ describe('结算页', () => {
     expect(within(itemList).getByText(PRODUCT_ONE)).toBeInTheDocument()
     expect(within(itemList).getByText(PRODUCT_TWO)).toBeInTheDocument()
     expect(within(itemList).getAllByText('规格：标准款')).toHaveLength(2)
-    // 2 × ¥4,299.00 与 1 × ¥1,999.00（数量为 1 时单价与小计相同）
-    expect(within(itemList).getByText('4,299')).toBeInTheDocument()
-    expect(within(itemList).getAllByText('1,999')).toHaveLength(2)
 
     const amountPanel = screen.getByRole('complementary', { name: '订单金额' })
+    // 试算返回后才有金额；试算中不展示客户端估算。
+    expect(await within(amountPanel).findByText('商品原价')).toBeInTheDocument()
     expect(within(amountPanel).getByText('3 件')).toBeInTheDocument()
-    // 4,299 × 2 + 1,999 = 10,597
-    expect(within(amountPanel).getAllByText('10,597').length).toBeGreaterThanOrEqual(1)
-    expect(
-      within(amountPanel).getByText(/不是后端订单试算结果/),
-    ).toBeInTheDocument()
-    // 运费仍未接入；优惠券区域已接入（W4-04），未选券时展示「未使用优惠券」而不是虚构金额。
-    expect(within(amountPanel).getAllByText('暂未接入')).toHaveLength(1)
-    expect(within(amountPanel).getByText('未使用优惠券')).toBeInTheDocument()
+    // 4,299 × 2 + 1,999 = 10,597（服务端试算）
+    expect(within(amountPanel).getAllByText('10,597').length).toBeGreaterThanOrEqual(2)
+    expect(within(amountPanel).getByText('优惠券优惠')).toBeInTheDocument()
+    expect(within(amountPanel).getByText('会员优惠')).toBeInTheDocument()
+    expect(within(amountPanel).getByText('积分优惠')).toBeInTheDocument()
+    expect(within(amountPanel).getByText('运费')).toBeInTheDocument()
+    expect(within(amountPanel).getByText('应付金额')).toBeInTheDocument()
+    expect(within(amountPanel).getByText(/金额来自服务端试算/)).toBeInTheDocument()
+    expect(within(amountPanel).queryByText('暂未接入')).not.toBeInTheDocument()
+    expect(within(amountPanel).getByText('未使用')).toBeInTheDocument()
+
+    // 商品行金额同样来自服务端试算明细。
+    expect(within(itemList).getAllByText('8,598')).toHaveLength(1)
+    expect(within(itemList).getAllByText('1,999').length).toBeGreaterThanOrEqual(1)
 
     // 默认地址自动选中
     expect(await screen.findByRole('radio', { name: '使用收货地址：张三' })).toBeChecked()
-    expect(screen.getByRole('button', { name: '提交订单' })).toBeEnabled()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '提交订单' })).toBeEnabled()
+    })
+  })
+
+  it('未选择收货地址时不发起试算', async () => {
+    await signInAsDemo()
+    seedMockCartItem(DEMO_USER_ID, mockCartSkuId(1, 0), 1)
+
+    renderApp('/checkout')
+
+    expect(await screen.findByText('还没有收货地址')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '提交订单' })).toBeDisabled()
+    expect(getMockQuoteRequestCount()).toBe(0)
+    expect(screen.getByText(/请先选择收货地址，试算需要地址信息计算运费/)).toBeInTheDocument()
+  })
+
+  it('试算失败时展示错误与重试入口，不退回客户端金额', async () => {
+    const user = userEvent.setup()
+    await signInAsDemo()
+    seedMockCartItem(DEMO_USER_ID, mockCartSkuId(1, 0), 1)
+    seedDefaultAddress()
+    // 使用 4xx 业务错误：试算不会对确定性 4xx 做自动重试，页面必须停在错误态。
+    setMockQuoteErrorOnce({ status: 409, code: 9003, message: '商品不可购买' })
+
+    renderApp('/checkout')
+
+    const amountPanel = await screen.findByRole('complementary', { name: '订单金额' })
+    expect(await within(amountPanel).findByRole('alert')).toHaveTextContent(
+      '部分商品已下架或规格已停售',
+    )
+    expect(within(amountPanel).getByText('待服务端试算')).toBeInTheDocument()
+    expect(within(amountPanel).queryByText('4,299')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '提交订单' })).toBeDisabled()
+
+    // 重试成功后展示服务端金额。
+    await user.click(within(amountPanel).getByRole('button', { name: '重新试算' }))
+
+    expect(await within(amountPanel).findByText('商品原价')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '提交订单' })).toBeEnabled()
+    })
+  })
+
+  it('地址变化后重新试算，试算中不展示上一份金额', async () => {
+    const user = userEvent.setup()
+    await signInAsDemo()
+    seedMockCartItem(DEMO_USER_ID, mockCartSkuId(1, 0), 1)
+
+    createMockAddress(DEMO_USER_ID, {
+      recipient_name: '张三',
+      phone: '13800138000',
+      province: '广东省',
+      city: '深圳市',
+      district: '南山区',
+      detail: '科技园路 1 号',
+    })
+    createMockAddress(DEMO_USER_ID, {
+      recipient_name: '李四',
+      phone: '13900139000',
+      province: '上海市',
+      city: '上海市',
+      district: '浦东新区',
+      detail: '世纪大道 2 号',
+      is_default: true,
+    })
+
+    renderApp('/checkout')
+    const amountPanel = await screen.findByRole('complementary', { name: '订单金额' })
+    await within(amountPanel).findByText('商品原价')
+    const initialRequests = getMockQuoteRequestCount()
+
+    // 地址切换后的试算延迟返回：期间不得继续展示旧地址的金额。
+    setMockQuoteRequestDelay(150)
+
+    await user.click(screen.getByRole('radio', { name: '使用收货地址：张三' }))
+
+    expect(within(amountPanel).getAllByText(/正在向服务端试算金额/).length).toBeGreaterThan(0)
+    expect(within(amountPanel).getByText('待服务端试算')).toBeInTheDocument()
+    expect(within(amountPanel).queryByText('商品原价')).not.toBeInTheDocument()
+
+    await waitFor(() => {
+      expect(getMockQuoteRequestCount()).toBe(initialRequests + 1)
+    })
+    expect(getMockQuotePayloads().at(-1)).toMatchObject({ source: 'cart' })
+    expect(within(amountPanel).getByText('商品原价')).toBeInTheDocument()
+  })
+
+  it('购物车数量变化后重新试算', async () => {
+    await signInAsDemo()
+    const skuId = mockCartSkuId(1, 0)
+    seedMockCartItem(DEMO_USER_ID, skuId, 1)
+    seedDefaultAddress()
+
+    const { client } = renderApp('/checkout')
+    const amountPanel = await screen.findByRole('complementary', { name: '订单金额' })
+    await within(amountPanel).findByText('商品原价')
+    const initialRequests = getMockQuoteRequestCount()
+
+    // 模拟购物车页面修改数量后回到结算页：服务端数量与缓存同时变化。
+    seedMockCartItem(DEMO_USER_ID, skuId, 2)
+    client.setQueryData(queryKeys.cart.list(), await fetchCart())
+
+    await waitFor(() => {
+      expect(getMockQuoteRequestCount()).toBe(initialRequests + 1)
+    })
+    await waitFor(() => {
+      expect(within(amountPanel).getAllByText('8,598').length).toBeGreaterThan(0)
+    })
   })
 
   it('默认地址优先，支持切换收货地址', async () => {
@@ -168,6 +286,8 @@ describe('结算页', () => {
     ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '提交订单' })).toBeDisabled()
     expect(getMockOrderCreateRequestCount()).toBe(0)
+    // 不可购买条目没有有效试算语义，不应发起 Quote。
+    expect(getMockQuoteRequestCount()).toBe(0)
   })
 
   it('正常创建订单后进入成功页，并按后端快照清理已购条目', async () => {
@@ -181,6 +301,9 @@ describe('结算页', () => {
 
     const { router } = renderApp('/checkout')
     await screen.findByRole('heading', { level: 1, name: '确认订单' })
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '提交订单' })).toBeEnabled()
+    })
 
     await user.click(screen.getByRole('button', { name: '提交订单' }))
 
@@ -228,6 +351,7 @@ describe('结算页', () => {
     await screen.findByRole('heading', { level: 1, name: '确认订单' })
 
     const submit = screen.getByRole('button', { name: '提交订单' })
+    await waitFor(() => expect(submit).toBeEnabled())
     await user.click(submit)
     await user.click(submit)
 
@@ -253,6 +377,9 @@ describe('结算页', () => {
 
     const { router } = renderApp('/checkout')
     await screen.findByRole('heading', { level: 1, name: '确认订单' })
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '提交订单' })).toBeEnabled()
+    })
 
     await user.click(screen.getByRole('button', { name: '提交订单' }))
 
@@ -272,6 +399,9 @@ describe('结算页', () => {
 
     renderApp('/checkout')
     await screen.findByRole('heading', { level: 1, name: '确认订单' })
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '提交订单' })).toBeEnabled()
+    })
 
     await user.click(screen.getByRole('button', { name: '提交订单' }))
 
@@ -295,6 +425,9 @@ describe('结算页', () => {
 
     const { router } = renderApp('/checkout')
     await screen.findByRole('heading', { level: 1, name: '确认订单' })
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '提交订单' })).toBeEnabled()
+    })
 
     await user.click(screen.getByRole('button', { name: '提交订单' }))
     expect(await screen.findByRole('alert')).toHaveTextContent(/不会重复创建订单/)
@@ -364,7 +497,8 @@ describe('下单成功页', () => {
     expect(within(info).getByText('待支付')).toBeInTheDocument()
     // 商品总额与应付金额均展示该数值（未使用优惠券）。
     expect(within(info).getAllByText('4,299').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByText(/支付与售后操作将在后续阶段开放/)).toBeInTheDocument()
+    expect(within(info).getByText('运费')).toBeInTheDocument()
+    expect(screen.getByText(/可在订单中心查看该订单的完整快照/)).toBeInTheDocument()
     // W4-01：成功页提供进入订单详情的入口。
     expect(screen.getByRole('link', { name: '查看订单' })).toHaveAttribute(
       'href',

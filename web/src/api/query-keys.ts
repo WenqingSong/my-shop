@@ -8,6 +8,18 @@ import type { ProductSort } from '@/api/products'
  * - 列表 key 携带完整查询参数，参数变化自动产生新缓存；
  * - 详情 key 用 String(id) 归一化，避免路由参数 "12" 与数字 12 命中不同缓存。
  */
+/**
+ * 订单试算 key 参数：所有会改变金额的输入都必须参与。
+ *
+ * `lines` 是已勾选行的预处理指纹（`sku_id:quantity:current_price`，按 sku_id 排序），
+ * 用字符串而不是数组，保证同一份输入在任何渲染顺序下都命中同一个 key。
+ */
+export interface OrderQuoteKeyParams {
+  addressId: number
+  couponId: number
+  lines: string
+}
+
 export interface ProductListKeyParams {
   page: number
   size: number
@@ -78,6 +90,14 @@ export const queryKeys = {
     list: () => ['orders', 'list'] as const,
     details: () => ['orders', 'detail'] as const,
     detail: (orderId: number) => ['orders', 'detail', String(orderId)] as const,
+    /**
+     * 订单试算（POST /orders/quote）。
+     *
+     * key 携带全部影响金额的输入：地址、优惠券与已勾选商品行指纹（含当前单价）。
+     * 任一输入变化都会产生新 key，从而不会把上一份试算结果当作最新金额展示。
+     */
+    quotes: () => ['orders', 'quote'] as const,
+    quote: (params: OrderQuoteKeyParams) => ['orders', 'quote', params] as const,
   },
   /**
    * 退款：W4-03 新增。
@@ -100,7 +120,7 @@ export const queryKeys = {
    * 优惠券：W4-04 新增。
    *
    * 后端只有「我的优惠券」一个用户端查询接口（GET /my/coupons），
-   * 没有分页、状态筛选、可用券查询与优惠试算，因此只有一个列表 key。
+   * 没有分页、状态筛选与可用券查询；优惠金额试算走 orders.quote，因此这里只有一个列表 key。
    */
   coupons: {
     all: ['coupons'] as const,

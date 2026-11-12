@@ -17,6 +17,8 @@ import {
   describeOrderStatus,
   formatOrderAddress,
   formatOrderTime,
+  hasOrderItemOriginalPrice,
+  orderItemSpecText,
   orderTotalQuantity,
 } from '@/utils/orders'
 
@@ -28,7 +30,7 @@ import {
  * - 同时仍会以 GET /orders/:id 重新拉取，确保展示的是服务端最终数据；
  * - 金额、状态、订单号全部直接展示后端字段，前端不做任何金额推导。
  *
- * 不包含支付入口与订单管理：支付/退款/订单列表属于后续阶段。
+ * 本页不直接提供支付/退款操作入口：这些操作集中在订单中心，避免成功页重复承载履约状态机。
  */
 export function CheckoutSuccessPage() {
   useDocumentTitle('订单提交成功 | SurgeCart 商城')
@@ -150,7 +152,7 @@ export function CheckoutSuccessPage() {
               </div>
             </dl>
 
-            {/* 金额全部来自服务端创建订单响应，前端不做任何换算（W4-04 增加优惠明细）。 */}
+            {/* 金额全部来自服务端创建订单响应，前端不做任何换算（R2 补齐会员优惠与运费）。 */}
             <dl className="mt-4 flex flex-col gap-2 border-t border-border pt-4 text-sm">
               <div className="flex items-center justify-between gap-3">
                 <dt className="text-muted-foreground">商品总额</dt>
@@ -159,7 +161,7 @@ export function CheckoutSuccessPage() {
                 </dd>
               </div>
               <div className="flex items-center justify-between gap-3">
-                <dt className="text-muted-foreground">优惠金额</dt>
+                <dt className="text-muted-foreground">优惠券优惠</dt>
                 <dd>
                   {order.discount_amount > 0 ? (
                     <span className="inline-flex items-baseline gap-1">
@@ -169,6 +171,28 @@ export function CheckoutSuccessPage() {
                   ) : (
                     <span className="text-xs text-muted-foreground">未使用优惠券</span>
                   )}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-muted-foreground">会员优惠</dt>
+                <dd>
+                  {order.member_discount_amount > 0 ? (
+                    <span className="inline-flex items-baseline gap-1">
+                      <span className="text-sm text-foreground">-</span>
+                      <PriceDisplay value={order.member_discount_amount} size="sm" tone="neutral" />
+                    </span>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">无会员优惠</span>
+                  )}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-muted-foreground">运费</dt>
+                <dd>
+                  <span className="inline-flex items-baseline gap-1">
+                    <span className="text-sm text-foreground">+</span>
+                    <PriceDisplay value={order.shipping_fee} size="sm" tone="neutral" />
+                  </span>
                 </dd>
               </div>
             </dl>
@@ -221,12 +245,17 @@ export function CheckoutSuccessPage() {
                       {item.product_name}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      规格：{item.sku_name} · 数量 {item.quantity}
+                      规格：{orderItemSpecText(item)} · 数量 {item.quantity}
                     </p>
                   </div>
                   <div className="shrink-0 text-right">
                     <p className="text-xs text-muted-foreground">成交单价</p>
                     <PriceDisplay value={item.price} size="sm" tone="neutral" />
+                    {hasOrderItemOriginalPrice(item) ? (
+                      <p className="mt-0.5 text-[11px] text-muted-foreground line-through">
+                        <PriceDisplay value={item.original_price} size="sm" tone="neutral" />
+                      </p>
+                    ) : null}
                   </div>
                 </li>
               ))}
@@ -234,7 +263,7 @@ export function CheckoutSuccessPage() {
           </section>
 
           <p className="mt-4 text-xs leading-5 text-muted-foreground">
-            支付与售后操作将在后续阶段开放；可在订单中心查看该订单的完整快照与当前状态。
+            可在订单中心查看该订单的完整快照与当前状态，并继续模拟支付、取消订单或申请退款。
           </p>
 
           <div className="mt-6 flex flex-wrap gap-3">

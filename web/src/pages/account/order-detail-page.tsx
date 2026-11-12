@@ -19,8 +19,11 @@ import { useOrderDetail } from '@/hooks/use-orders'
 import { useRefundList } from '@/hooks/use-refunds'
 import {
   describeCancelReason,
+  describePayType,
   formatOrderAddress,
   formatOrderTime,
+  hasOrderItemOriginalPrice,
+  orderItemSpecText,
   orderTotalQuantity,
 } from '@/utils/orders'
 import {
@@ -232,12 +235,24 @@ function OrderDetailContent({ order }: { order: Order }) {
                 <p className="line-clamp-2 text-sm font-medium leading-6 text-foreground">
                   {item.product_name}
                 </p>
-                <p className="mt-0.5 text-xs text-muted-foreground">规格：{item.sku_name}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  规格：{orderItemSpecText(item)}
+                </p>
+                {item.sku_code.trim() !== '' ? (
+                  <p className="mt-0.5 break-all text-xs text-muted-foreground">
+                    SKU 编码：{item.sku_code}
+                  </p>
+                ) : null}
                 <p className="mt-0.5 text-xs text-muted-foreground">数量：{item.quantity}</p>
               </div>
               <div className="shrink-0 text-right">
                 <p className="text-[11px] text-muted-foreground">成交单价</p>
                 <PriceDisplay value={item.price} size="sm" tone="neutral" />
+                {hasOrderItemOriginalPrice(item) ? (
+                  <p className="mt-0.5 text-[11px] text-muted-foreground line-through">
+                    <PriceDisplay value={item.original_price} size="sm" tone="neutral" />
+                  </p>
+                ) : null}
               </div>
             </li>
           ))}
@@ -262,9 +277,24 @@ function OrderDetailContent({ order }: { order: Order }) {
             </dd>
           </div>
           <div className="flex items-center justify-between gap-3">
-            <dt className="text-muted-foreground">优惠金额</dt>
-            <dd>
+            <dt className="text-muted-foreground">优惠券优惠</dt>
+            <dd className="inline-flex items-baseline gap-1">
+              <span className="text-sm text-foreground">-</span>
               <PriceDisplay value={order.discount_amount} size="sm" tone="neutral" />
+            </dd>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-muted-foreground">会员优惠</dt>
+            <dd className="inline-flex items-baseline gap-1">
+              <span className="text-sm text-foreground">-</span>
+              <PriceDisplay value={order.member_discount_amount} size="sm" tone="neutral" />
+            </dd>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-muted-foreground">运费</dt>
+            <dd className="inline-flex items-baseline gap-1">
+              <span className="text-sm text-foreground">+</span>
+              <PriceDisplay value={order.shipping_fee} size="sm" tone="neutral" />
             </dd>
           </div>
           <div className="flex items-center justify-between gap-3 border-t border-border pt-2">
@@ -274,9 +304,15 @@ function OrderDetailContent({ order }: { order: Order }) {
             </dd>
           </div>
         </dl>
-        <p className="mt-2 text-right text-xs text-muted-foreground">
-          三项金额均为下单时由服务端计算并写入的订单快照，前端不做任何金额运算。
+        <p className="mt-2 text-right text-xs leading-5 text-muted-foreground">
+          应付金额 = 商品总金额 − 优惠券优惠 − 会员优惠 + 运费（积分抵扣当前恒 0）。
+          以上均为下单时由服务端计算并写入的订单快照，前端不做任何金额运算。
         </p>
+        {order.pay_type !== '' ? (
+          <p className="mt-1 text-right text-xs text-muted-foreground">
+            支付方式：{describePayType(order.pay_type)}
+          </p>
+        ) : null}
         {order.user_coupon_id !== null ? (
           <p className="mt-1 text-right text-xs text-muted-foreground">
             本单使用了优惠券（券 id：{order.user_coupon_id}）

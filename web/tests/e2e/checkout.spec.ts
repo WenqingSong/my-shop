@@ -87,8 +87,11 @@ test.describe('订单结算与创建', () => {
 
     const amountPanel = page.getByRole('complementary', { name: '订单金额' })
     await expect(amountPanel).toContainText('1 件')
+    // 金额由 POST /orders/quote 返回：商品原价 / 优惠 / 运费 / 应付金额。
+    await expect(amountPanel).toContainText('商品原价')
+    await expect(amountPanel).toContainText('应付金额')
     await expect(amountPanel).toContainText('459')
-    await expect(amountPanel).toContainText('不是后端订单试算结果')
+    await expect(amountPanel).toContainText('金额来自服务端试算')
 
     // 5. 提交订单 → 成功页展示服务端返回的订单号/金额/状态。
     await page.getByRole('button', { name: '提交订单' }).click()
