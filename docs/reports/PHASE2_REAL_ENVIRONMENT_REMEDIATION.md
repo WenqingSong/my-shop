@@ -28,8 +28,9 @@
 | 起点与远端同步 | 是（`0 0`） |
 | 起点工作区 | clean |
 | 修复分支 | `fix/phase2-real-env-acceptance`（独立 worktree，基于起点 SHA） |
-| 修复分支提交 | 见 `git log fix/phase2-real-env-acceptance` |
-| 集成分支合并提交 | 见 `git log feat/phase2-ecommerce-business`（普通 `--no-ff` 合并） |
+| 修复分支提交 | `055b99bc82f70fb05dfd8156dc26816c9fbb35ac` |
+| 集成分支合并提交 | `f0d6faa9e98777d6a18aac35a43a9bb2522621df`（普通 `--no-ff` 合并） |
+| 报告回填提交 | 见 `git log -1`（仅元数据） |
 | main | 未修改 |
 
 未重置到旧 SHA，未改写历史，未使用 force push，未删除任何原始开发分支。
