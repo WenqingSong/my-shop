@@ -1,0 +1,119 @@
+# 本文件是 openapi/surgecart.openapi.yaml 的分域视图，由 tools/openapi-gen 生成，禁止手工编辑。
+# OpenAPI 3.1 的 Path Item 允许 $ref，但本生成器刻意把 Path Item 内联进主文件：
+#   1) 单一入口自洽：主文件不依赖分域文件即可被 Spectral / Redocly 等工具完整解析，避免跨文件 Path Item 解析差异；
+#   2) 门禁可靠：check 的路径/参数/operation 结构与分域名结构化比对，比跨文件 $ref 解析更容易定位差异；
+#   3) 分域文件只承担评审视图职责，不参与运行时或工具链解析。
+# 因此本文件用于分域评审与主/分域一致性校验，不是主文件的引用目标。
+/profile:
+  get:
+    tags:
+      - 用户资料
+    summary: 查询当前登录用户资料
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: profileGet
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: profile.Get
+    x-source: routes_frontend.go
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ProfileGetResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 2015
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "500":
+        $ref: '#/components/responses/InternalError'
+  put:
+    tags:
+      - 用户资料
+    summary: 更新当前登录用户资料
+    description: 认证方式：用户 JWT。校验签名、有效期、type=user、Redis 会话有效、users.status=1 且 auth_epoch 匹配；任一失败返回 401/1002（身份类型不符为 403/1003）。
+    operationId: profileUpdate
+    security:
+      - bearerAuth: []
+    x-auth: user
+    x-handler: profile.Update
+    x-source: routes_frontend.go
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              nickname:
+                type: [string, "null"]
+                description: 昵称；省略表示不修改，空串表示清空；trim 后 ≤32 字符
+              avatar_url:
+                type: [string, "null"]
+                description: 头像 URL；省略表示不修改，空串表示清空；非空须为 http/https 且 ≤512 字符
+              phone:
+                type: [string, "null"]
+                description: 手机号；省略表示不修改，空串表示清空为未设置；格式 ^1[3-9]\d{9}$
+              birthday:
+                type: [string, "null"]
+                description: 生日；省略表示不修改，空串表示清空；格式 YYYY-MM-DD
+    x-pagination-mode: none
+    x-idempotency:
+      mode: none
+    responses:
+      "200":
+        description: 成功。响应体为 {code:0,message:"OK",data:<业务数据>}。
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Success'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ProfileUpdateResponse'
+      x-error-codes:
+        codes:
+          - 1000
+          - 1001
+          - 1002
+          - 1003
+          - 2015
+          - 2016
+        scope: static-call-chain
+        note: controller→service 与 logic 同包调用链中静态可达的业务错误码 + 经代码核实的跨包补充登记 + 通用码；这是静态上界，不表示运行时必然触发，也不覆盖按数据内容动态分派的分支。码值/HTTP/message 见 components/error-codes.yaml。
+      "400":
+        $ref: '#/components/responses/BadRequest'
+      "401":
+        $ref: '#/components/responses/Unauthorized'
+      "403":
+        $ref: '#/components/responses/Forbidden'
+      "404":
+        $ref: '#/components/responses/NotFound'
+      "409":
+        $ref: '#/components/responses/Conflict'
+      "500":
+        $ref: '#/components/responses/InternalError'

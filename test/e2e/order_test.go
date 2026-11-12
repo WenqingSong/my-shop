@@ -42,7 +42,10 @@ func setupOrderServer(t *testing.T) string {
 
 	ctx := context.Background()
 	// 按外键依赖顺序清空（子表先于父表）。
+	// 拼团三表必须先于 skus/products：group_buy_activities 对 skus/products 为 FK RESTRICT，
+	// 残留活动会阻止订单域清理 SKU（B1-04-06）。
 	for _, table := range []string{
+		"group_buy_participants", "group_buy_teams", "group_buy_activities",
 		"order_items", "orders", "cart_items",
 		"inventory_logs", "inventories",
 		"skus", "product_images", "products",

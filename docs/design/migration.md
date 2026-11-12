@@ -13,7 +13,10 @@
 
 追踪表 `schema_migrations` 由 golang-migrate 自动创建；并发迁移串行化由 MySQL driver 默认 `GET_LOCK` 提供；迁移文件经 `//go:embed` 内嵌，运行时经 `iofs` source 挂载，不依赖工作目录。事实来源为单一 MySQL。
 
-不提供 `migrate down`（无回滚能力、无 `.down.sql`）。
+CLI **不提供 `down` 子命令**（只有 `up`/`force`/`version`）。历史批次多数只有 `.up.sql`；
+自 `20261001000024` 起按需提供 `.down.sql`（outbox、B1-03-01 的 product_spec/user_profile/regions、
+B1-03-02 的六项交易与资金迁移、B1-04-01 的 profile_region_address），仅用于测试库验证与人工显式回滚，
+生产发布流程不执行 down。
 
 ### 1.1 独立执行（T2-05）
 
@@ -31,10 +34,11 @@
 
 ### 2.1 迁移文件
 
-- 目录：`internal/migrations/sql/`，文件命名 `{version}_{title}.up.sql`。
-- `version` 为 **14 位时间戳**（`YYYYMMDDHHMMSS`），数字升序即时间升序。
-- 仅提供 `.up.sql`，不提供 `.down.sql`。
-- DDL 不使用 `IF NOT EXISTS`（迁移只执行一次，由 `schema_migrations` 追踪）。
+- 目录：`internal/migrations/sql/`，文件命名 `{version}_{title}.up.sql`（回滚文件为 `{version}_{title}.down.sql`）。
+- `version` 为 **14 位时间戳**（`YYYYMMDDHHMMSS`），数字升序即时间升序；同一版本至多一组 up/down，版本号全局唯一。
+- `.up.sql` 必须提供；`.down.sql` 至少覆盖「新增表/新增列」的批次（如 `20261001000024` 与 B1-03-01 三个迁移），
+  其余历史批次无 down（回滚会因缺少 down 文件报错）。
+- DDL 不使用 `IF NOT EXISTS`（迁移只执行一次，由 `schema_migrations` 追踪）；down 中允许 `DROP ... IF EXISTS` 以容忍部分执行。
 
 当前迁移清单：
 
@@ -63,6 +67,28 @@
 | `20261001000021` | `coupon` | `coupon_templates` + `user_coupons`（优惠券模板 + 用户券两表） |
 | `20261001000022` | `order_coupon_amounts` | `orders` 增 `original_amount`/`discount_amount`/`user_coupon_id`（优惠券抵扣金额与用券回填） |
 | `20261001000023` | `legacy_id_map` | `legacy_id_map`（历史数据旧 ID→新 ID 映射表） |
+| `20261001000024` | `flash_sale_request_outbox` | `flash_sale_order_requests` 增 Outbox 发布状态列 + `idx_outbox_claim`（含 down） |
+| `20261110000001` | `product_spec` | `product_specs` + `product_spec_values` + `sku_spec_values`；`skus` 增 `image_url`/`spec_signature` + `uk_product_signature`（含 down） |
+| `20261110000002` | `user_profile` | `users` 增 `nickname`/`avatar_url`/`phone` + `uk_phone`（含 down） |
+| `20261110000003` | `regions` | `regions`（省/市/区三级地区字典，仅结构，不导数据；含 down） |
+| `20261110000004` | `order_shipping_payment` | `orders` 增 `shipping_fee`/`pay_type`/`transaction_no`/`delivery_type`/`delivery_name`/`delivery_sn`；`order_items` 增 `spec_text`（无回填；含 down） |
+| `20261110000005` | `order_status_logs` | `order_status_logs`（订单状态流水，append-only；含 down） |
+| `20261110000006` | `wallet` | `wallet_accounts` + `wallet_transactions`（钱包账户 + 资金流水；含 down） |
+| `20261110000007` | `recharge_orders` | `recharge_orders`（Mock 充值订单；含 down） |
+| `20261110000008` | `points` | `user_points_accounts` + `user_points_logs`（积分账户 + 流水；含 down） |
+| `20261110000009` | `coupon_snapshot` | `user_coupons` 增 `coupon_title`/`coupon_price`/`use_min_price`/`end_time` 可空快照列（无回填；含 down） |
+| `20261110000010` | `coupon_batch` | `coupon_templates` 增 `discount_type`/`discount_rate_bp`/`per_user_limit`；新增 `coupon_batches`/`coupon_template_scopes`；`user_coupons` 增 `batch_id`/`claim_no`，`uk_user_template` 替换为 `uk_user_template_claim`（含 down，down 会裁剪 `claim_no>1` 的多领记录） |
+| `20261110000011` | `group_buy` | `group_buy_activities` + `group_buy_teams` + `group_buy_participants`（拼团活动/团/参与记录；含 down）。B1-04-06 拼团业务直接复用本版本，未新增/修改任何 DDL |
+| `20261110000012` | `bargain` | `bargain_activities` + `bargain_instances` + `bargain_help_records`（砍价活动/实例/助力；含 down） |
+| `20261110000013` | `member` | `member_levels` + `user_memberships` + `member_growth_logs`（等级/用户会员/成长值流水；不重复创建积分账本；含 down） |
+| `20261110000014` | `distribution` | `user_referrals` + `distribution_commissions`（一级推荐关系/订单佣金；含 down） |
+| `20261110000015` | `profile_region_address` | `users` 增 `birthday DATE NULL`；`addresses` 增 `region_id`（可空，软引用 `regions.level=3`）+ `idx_region_id`（含 down；不重建/不回填 `regions`） |
+| `20261111000001` | `sku_code_pricing` | `skus` 增 `sku_code`（唯一）/`original_price` + `uk_sku_code`，历史行回填 `SKU<id>` 与售价；`order_items` 增 `sku_code`/`original_price`（含 down；不回算历史订单金额） |
+| `20261111000002` | `freight` | `freight_templates` + `freight_template_rules`（运费模板与区域计费规则）；`products` 增可空 `freight_template_id`（无回填；含 down） |
+| `20261111000003` | `order_member_discount` | `orders` 增 `member_discount_amount`（会员折扣金额快照，默认 0、不回填；含 down） |
+| `20261111000004` | `referral_graph_guard` | `referral_graph_guard`（推荐关系图全局变更锁，单行 `id=1`；不承载业务数据；含 down） |
+
+**版本分配（B1-04 八分支集成核实，2026-11-11）**：集成时逐一核对实际 SQL 文件、Registry 与已知数据库的 `schema_migrations`——`20261110000015` 仅由 B1-04-01（`profile_region_address`）使用，B1-04-08 分支内的同名版本 `order_member_discount` 从未进入任何持久化环境，已按 Registry 规则上移为 `20261111000003`，不存在同一版本号对应两套 Schema 的数据库。`my_shop` 已应用到 `20261111000001`，因此 B1-04-03 的运费迁移从原拟 `20261110000016` 上移为 `20261111000002`：否则 golang-migrate 会因版本号小于当前版本而**静默跳过**该迁移。B1-04-FIX-01（分销并发成环修复）已在 Registry 领取 `20261111000004`（`referral_graph_guard`）。当前最高版本为 `20261111000004`，下一个可用版本为 `20261111000005`；新增迁移必须按 Registry 规则单独领取，不得复用已被实现占用的版本号。
 
 ### 2.2 baseline 模型
 
@@ -74,6 +100,31 @@ baseline 内容 = 迁移前 `boot.go` 中 7 张既有表的等价 DDL（`users`�
 
 `schema_migrations` 结构为 `version bigint`（主键）+ `dirty bool`，由 golang-migrate 首次 `Up()` 时自动创建。dirty 表示「存在执行失败的中间态」。
 
+### 2.4 并发控制表：`referral_graph_guard`
+
+| 项 | 说明 |
+| --- | --- |
+| 引入版本 | `20261111000004_referral_graph_guard`（B1-04-FIX-01） |
+| 结构 | `id TINYINT UNSIGNED PRIMARY KEY`（固定 1）、`created_at DATETIME`；迁移内初始化唯一记录 |
+| 用途 | 一级分销推荐关系图变更的全局串行化：绑定事务 `SELECT ... FOR UPDATE` 该行，跨连接/实例共用一把 InnoDB 行锁 |
+| 生命周期 | 随 migration 创建；锁随事务提交/回滚自动释放，无租约、无过期、无后台清理；down 直接 `DROP TABLE` |
+| 数据属性 | 不承载业务数据、不建外键、无外键引用；不属于用户/交易域 |
+| 缺失语义 | 记录缺失时应用 fail-closed（拒绝绑定并返回内部错误），不回退为无锁写入 |
+| 运维注意 | 不得在运行期手工 `DELETE` / `INSERT` 该表；如被误删，重新执行迁移或补插 `id=1` 即可恢复（无数据损失） |
+
+### 2.5 数据初始化（不属于 migration）
+
+migration 只负责 schema。少数**只读基础字典**的数据初始化与 schema 分离，以保证「migrate 幂等、可重复、不因数据内容变化而重跑 DDL」：
+
+| 数据 | 初始化入口 | 数据文件 | 幂等语义 |
+| --- | --- | --- | --- |
+| 地区字典 `regions`（3938 条） | `my-shop region-seed import`（`region-seed dry-run` 只校验） | `internal/regiondata/regions_v1.tsv`（`go:embed`） | 空库全量写入；已有数据只补缺失；同 id 内容冲突或存在额外节点时**拒绝写入**；单事务提交并复核总行数 |
+
+- 集成测试 setup（`internal/controller/region`、`internal/controller/address`）调用同一 `regiondata.Ensure`，
+  新建隔离测试库无需人工导入；
+- 数据来源、字段映射、更新与故障恢复见 `docs/dev/region-data-initialization.md`；
+- 不要把地区数据写成新的 migration：migration 是一次性版本，无法表达「补缺失 / 拒绝覆盖」的幂等语义。
+
 ## 3. 业务不变量
 
 - INV-001（幂等、按序一次）：同一 version 在任何后续 `migrate up` 中不重复执行；未应用 migration 按 version 升序各执行一次（由 `schema_migrations` 保证）。
@@ -82,6 +133,8 @@ baseline 内容 = 迁移前 `boot.go` 中 7 张既有表的等价 DDL（`users`�
 - INV-004（seed 依赖与结果不变）：seed 仅在 readiness check 通过后执行；`seedSuperAdmin`（1 个 `is_super=1`）与 `seedPermissions` 幂等写入（按 `code` 唯一、1062 兜底），seed 语义不因迁移机制改变而改变（权限清单见 `rbac.md`）。
 - INV-005（serve 无 DDL、migrate 无 serve）：serve 只做只读 readiness check，不执行任何 DDL；migration 仅由 `migrate` 子命令执行。
 - INV-006（并发单实例执行）：多实例并发 `migrate up` 由 MySQL driver 默认 `GET_LOCK` 串行化，最终结构正确、`schema_migrations` 无重复版本。
+- INV-007（新增批次可回滚且不改变既有语义）：自 B1-03-01 起，新增表/列的迁移必须成对提供 up/down；
+  down 只删除本批次新增的表/列/索引，不回改既有列，且必须在注释中说明破坏性（数据丢失）影响。
 
 ## 4. 一致性模型与失败语义
 
@@ -108,12 +161,17 @@ migration 不新增业务错误码；失败通过 `gerror` 返回并由 CLI 进�
 
 ## 7. 跨模块关系
 
-- 所有业务表（`products`/`product_images`、`skus`、`inventories`/`inventory_logs`、`addresses`、`cart_items`、`orders`/`order_items`、`refresh_tokens`）均经本机制新增迁移，serve 不建表。
-- 部署顺序为 `build → migrate up → serve`；`product.md`/`sku.md`/`inventory.md`/`category.md`/`rbac.md`/`address.md`/`cart.md`/`order.md`/`iam.md` 的数据模型均以本机制建立，不再回退到 `boot.go` 建表。
+- 所有业务表（`products`/`product_images`、`skus`、`inventories`/`inventory_logs`、`addresses`、`cart_items`、`orders`/`order_items`、`refresh_tokens`、
+  `product_specs`/`product_spec_values`/`sku_spec_values`、`regions`、`order_status_logs`、`wallet_accounts`/`wallet_transactions`、
+  `recharge_orders`、`user_points_accounts`/`user_points_logs`、`coupon_batches`/`coupon_template_scopes`、
+  `group_buy_activities`/`group_buy_teams`/`group_buy_participants`、`bargain_activities`/`bargain_instances`/`bargain_help_records`、
+  `member_levels`/`user_memberships`/`member_growth_logs`、`user_referrals`/`distribution_commissions`）均经本机制新增迁移，serve 不建表。
+- 部署顺序为 `build → migrate up → serve`；`product.md`/`sku.md`/`inventory.md`/`category.md`/`rbac.md`/`address.md`/`cart.md`/`order.md`/`iam.md`/`coupon.md`/`marketing.md`/`member.md`/`distribution.md` 的数据模型均以本机制建立，不再回退到 `boot.go` 建表。
 
 ## 8. Deferred / 已知留白
 
-- 仅提供 `.up.sql`，任何 `down` 调用会报错；V1 已禁止 down，风险可控。
+- 历史批次（`20261001000001`–`20261001000023`）无 `.down.sql`，对它们调用 down 会报错；
+  生产流程不执行 down，新增批次虽提供 down，但仍只用于测试库与人工回滚，缺少自动化 down 门禁。
 - 14 位时间戳作 version，`force` 需指定完整时间戳数字，可读性差；需在 CLI 帮助中明确 baseline 版本号与 `force` 语义（不执行 SQL、不校验结构）。
 - dirty 恢复依赖人工 `force`，存在误操作风险。
 - 迁移 Job 未在真实 Kubernetes 集群验证（调度、`kubectl wait`、TTL 清理、NetworkPolicy、镜像拉取凭据）；已用本地真实二进制 + 真实 MySQL + 独立进程覆盖锁、超时、终止与恢复语义。

@@ -1,0 +1,61 @@
+# 通用响应组件（由 tools/openapi-gen 生成）。
+SuccessResponse:
+  description: 通用成功响应（不含具体 data 类型；具体 operation 使用 allOf 扩展 data）
+  content:
+    application/json:
+      schema:
+        $ref: schemas.yaml#/Success
+ErrorResponse:
+  description: 通用失败响应。HTTP 状态由业务码派生，见 components/error-codes.yaml。
+  content:
+    application/json:
+      schema:
+        $ref: schemas.yaml#/Error
+BadRequest:
+  description: 参数校验失败：HTTP 400 + code 1001（参数错误）。注意：部分带 v:"required" 的接口实际返回 HTTP 500 + code 51，见 operation 的 x-known-issue。
+  content:
+    application/json:
+      schema:
+        $ref: schemas.yaml#/Error
+Unauthorized:
+  description: 未授权：HTTP 401 + code 1002（未授权）。包括 token 缺失/签名无效/过期/会话已撤销/refresh token 无效等。
+  content:
+    application/json:
+      schema:
+        $ref: schemas.yaml#/Error
+Forbidden:
+  description: 禁止访问：HTTP 403 + code 1003（禁止访问），或业务域内的 403 码。包括身份类型不符、权限码未命中、超级管理员受保护、不能操作自身。
+  content:
+    application/json:
+      schema:
+        $ref: schemas.yaml#/Error
+NotFound:
+  description: 未找到：HTTP 404 + code 1004（未找到）或业务域内的 404 码（如 4001/9001/18001）。防枚举接口对「不存在」与「不属于当前用户」返回同一码。
+  content:
+    application/json:
+      schema:
+        $ref: schemas.yaml#/Error
+Conflict:
+  description: 业务冲突：HTTP 409 + 业务域错误码（如 9002 非法状态迁移、9006 幂等键冲突、6001 库存不足）。
+  content:
+    application/json:
+      schema:
+        $ref: schemas.yaml#/Error
+TooManyRequests:
+  description: 限流或排队拒绝：HTTP 429 + code 12009/12010（无副作用，可稍后重试）。
+  content:
+    application/json:
+      schema:
+        $ref: schemas.yaml#/Error
+InternalError:
+  description: 内部错误：HTTP 500 + code 1000（内部错误）。已知例外：DTO gvalid 校验失败会以 code 51 + message "内部错误" 出现，见 x-known-issue。
+  content:
+    application/json:
+      schema:
+        $ref: schemas.yaml#/Error
+ServiceUnavailable:
+  description: 服务不可用：HTTP 503 + code 1005。就绪探针失败时返回。
+  content:
+    application/json:
+      schema:
+        $ref: schemas.yaml#/Error

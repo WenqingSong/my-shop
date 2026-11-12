@@ -46,8 +46,31 @@
 | 17 | 17000-17999 | object-storage-upload | ACTIVE |
 | 18 | 18000-18999 | order-refund-v1 | ACTIVE |
 | 19 | 19000-19999 | coupon-v1 | ACTIVE |
+| 20 | 20000-20999 | distribution-v1 | RESERVED |
+| 21 | 21000-21999 | freight-pricing（B1-04-03） | RESERVED |
+| 22 | 22000-22999 | wallet（B1-04-04） | RESERVED |
+| 23 | 23000-23999 | bargain（B1-04-07） | RESERVED |
+| 24 | 24000-24999 | member（B1-04-08） | RESERVED |
 
 （本表为长期设计快照；分配状态与未来 RESERVED/ACTIVE/RELEASED 变化以 `.agent/registry/error-codes.md` 为唯一权威。）
+
+B1-04 八分支集成结果（2026-11-11，最终）：
+
+| 域序 | 区间 | 归属 | 最终编号 |
+| --- | --- | --- | --- |
+| 20 | 20000-20999 | distribution-v1 | 20001 自荐 / 20002 推荐人不可用 / 20003 已绑定不可改绑 / 20004 推荐关系成环 / 20005 佣金记录不存在 / 20006 佣金状态迁移非法 |
+| 21 | 21000-21999 | freight-pricing | 21001-21009 运费模板与区域规则 / 21010-21012 计价校验 |
+| 22 | 22000-22999 | wallet | 22001-22010 账户/余额/充值/扣款/退款入账 |
+| 23 | 23000-23999 | bargain | 23001-23009 活动/实例/助力/状态迁移 |
+| 24 | 24000-24999 | member | 24001-24005 等级配置/成长值 |
+| 25 | 25000-25999 | group-buy（B1-04-06） | 25001-25009 活动/团/参与/成团状态 |
+
+集成前各分支报告中的编号存在实质冲突（运费 20001-20012、会员 20001-20005、钱包/砍价 21001-21010、
+分销 21001-21007）。按「域序 = max(已记录域序)+1」规则，以合入顺序重新分配：运费 → 21、钱包 → 22、
+砍价 → 23、会员 → 24；分销保留既有 20 域并在域内追加 20004-20006；拼团（B1-04-06）原拟 21001-21009 与运费域冲突，
+按域序 25 重新分配为 25001-25009。代码、测试、OpenAPI
+（`components/error-codes.yaml`）与 `.agent/registry/error-codes.md` 已同步，未只改 Registry。
+下一个空闲域序为 26（`26000-26999`）。
 
 ## 5. 已落地错误码兼容性
 
@@ -69,4 +92,4 @@
 
 各业务模块 Design 继续在自身「错误码域」章节记录本模块具体错误码与归属声明，不在此重复，也不要求各模块重复全局 Namespace 规则：
 
-- `iam.md`、`rbac.md`、`category.md`、`product.md`、`sku.md`、`inventory.md`、`address.md`、`cart.md`、`order.md`、`review.md`、`favorite.md`、`like.md`、`flash-sale.md`、`banner.md`、`recommendation.md`、`article.md`、`storage.md`、`refund.md`、`coupon.md`。
+- `iam.md`、`rbac.md`、`category.md`、`product.md`、`sku.md`、`inventory.md`、`address.md`、`cart.md`、`order.md`、`review.md`、`favorite.md`、`like.md`、`flash-sale.md`、`banner.md`、`recommendation.md`、`article.md`、`storage.md`、`refund.md`、`coupon.md`、`freight.md`（含统一计价错误码 `21010`–`21012`，与运费同处域序 21）、`wallet.md`（域序 22）、`marketing.md`（砍价域 `23000-23999`，域序 23）、`member.md`（域序 24）、`distribution.md`（域序 20）。

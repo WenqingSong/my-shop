@@ -59,7 +59,7 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 
 | 组件 | 角色 |
 | --- | --- |
-| MySQL `users` | 前台用户身份事实来源（id/username/password_hash/status/auth_epoch） |
+| MySQL `users` | 前台用户身份事实来源（id/username/password_hash/status/auth_epoch + 基础资料 nickname/avatar_url/phone） |
 | MySQL `admins` | 后台管理员身份事实来源（id/username/password_hash/status/is_super） |
 | MySQL `refresh_tokens` | 前台 refresh token 事实来源（token_hash、family 血缘、revoked/过期状态，见 3.6） |
 | Redis `iam:session:{sid}` | 前台会话状态事实来源（存在性 + revoked + user_id 绑定 + 元数据） |
@@ -152,6 +152,57 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 - `users.status`：`TINYINT NOT NULL DEFAULT 1`，`1=启用`/`0=禁用`（对齐 `admins.status`）；旧用户升级后默认启用。
 - `users.auth_epoch`：`BIGINT UNSIGNED NOT NULL DEFAULT 0`，每用户认证版本，仅在实际「启用→禁用」迁移时 +1，启用不递减、不重签。它是「重新启用不复活旧凭证」与「禁用即时失效」的最终保证：旧凭证（会话 Hash / refresh token）绑定旧版本，禁用后落后于当前版本即永久失效，必须重新登录。
 - `user_status_audits`（append-only，软引用无 FK）：`target_user_id`、`operator_admin_id`、`operator_username`（快照）、`action`（`enable`/`disable`）、`before_status`、`after_status`、`reason`、`result`（`1=成功`）、`created_at`。仅实际状态迁移落审计；幂等 no-op 不写审计、不递增版本、不重复撤销。
+
+### 3.8 用户基础资料与手机号唯一性
+
+migration `20261110000002_user_profile` 在 `users` 上以纯加列方式补齐基础资料，不改动任何认证列、登录凭证与密码算法：
+
+| 字段 | 类型 | 约束/说明 |
+| --- | --- | --- |
+| `nickname` | VARCHAR(32) NOT NULL DEFAULT '' | 展示昵称，空串表示未设置（前端回退 `username`） |
+| `avatar_url` | VARCHAR(512) NOT NULL DEFAULT '' | 头像地址，空串表示未设置 |
+| `phone` | VARCHAR(20) NULL | 手机号，NULL 表示未设置；已设置时由 `uk_phone` 保证全局唯一 |
+
+- `uk_phone` 为普通唯一索引：MySQL 允许多个 NULL，因此「未设置手机号」的用户不受限制；**不得写入空串 `''`**，
+  未设置一律写 NULL（第二个空串会撞唯一键）。手机号格式（大陆 11 位）由应用层校验，DB 不引入 CHECK，避免阻塞国际号码扩展。
+- `username` 仍是唯一登录凭证；`phone` 不作为登录标识，也不参与会话/JWT 声明。
+- 资料字段是「账号数据的附属信息」，与 `refresh_tokens`/`user_status_audits` 无关联；删除用户时随行删除（当前无用户删除接口）。
+- 资料读写接口于 B1-04-01 落地，见 §3.9；`GET /me` 保持原有 `id`/`username` 契约不变（兼容旧客户端）。
+
+### 3.9 用户资料读写（B1-04-01）
+
+`profile` 是独立模块（`api/profile/v1` + `internal/controller/profile` + `internal/logic/profile`），
+数据仍落在 `users` 表，**不新建 `user_profiles` 表**，不复用也不改变任何认证逻辑。
+
+| 字段 | 列类型 | 业务语义 |
+| --- | --- | --- |
+| `nickname` | VARCHAR(32) NOT NULL DEFAULT '' | 空串=未设置；可清空 |
+| `avatar_url` | VARCHAR(512) NOT NULL DEFAULT '' | 空串=未设置；非空须 http/https 绝对 URL；可清空 |
+| `phone` | VARCHAR(20) NULL | NULL=未设置；`uk_phone` 全局唯一；可清空（写 NULL） |
+| `birthday` | DATE NULL | `YYYY-MM-DD` 日期语义，无时间/时区；NULL=未设置；可清空 |
+
+API：
+
+| 方法/路径 | 认证 | 说明 |
+| --- | --- | --- |
+| `GET /profile` | `Auth` | 查询当前登录用户资料；用户 id 取自 `Principal.UserID` |
+| `PUT /profile` | `Auth` | 更新当前登录用户资料；字段省略=不修改，空串=清空 |
+
+语义与不变量：
+
+- **身份隔离**：请求体/查询参数均不接受 `user_id`；归属恒为 `Principal.UserID`，未认证 401（1002）。
+- **字段区分**：DTO 全部使用指针字段；`nil`（省略/null）=不修改，`""`=主动清空
+  （`nickname`/`avatar_url` 清为空串，`phone`/`birthday` 清为 NULL）。
+- **手机号唯一**：由 `uk_phone` 在 DB 层保证；并发写入同一号码时后到者命中 1062 →
+  `2016 PHONE_EXISTS`（409）。不做「先查再写」的判定。
+- **手机号格式**：应用层 `^1[3-9]\d{9}$`；空串表示清空（写 NULL），绝不写空串。
+- **生日**：严格 `YYYY-MM-DD`（拒绝未补零与 `02-30` 溢出）；返回统一该格式。
+- **头像**：`http`/`https` 绝对 URL 且 ≤512 字符，拒绝 `javascript:`/`data:` 等协议。
+- **不返回敏感字段**：响应只含 `id`/`username`/`nickname`/`avatar_url`/`phone`/`birthday`，
+  不含 `password_hash`、`status`、`auth_epoch`。
+- **用户不存在**：更新/查询目标行缺失返回 `2015 USER_NOT_FOUND`（404）；正常请求下由 `Auth`
+  中间件保证用户存在，该分支为防御性处理。
+- 错误码：字段非法 `1001`（400）、未认证 `1002`（401）、手机号冲突 `2016`（409）、内部错误 `1000`（500）。
 
 ## 4. 鉴权与登出流程
 
@@ -266,6 +317,7 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 | refresh token 过期 | 2013 | 401 |
 | refresh token 重放（已轮换 token 再次提交） | 2014 | 401 |
 | 用户状态管理目标用户不存在 | 2015 | 404 |
+| 手机号已被使用（`uk_phone` 唯一约束冲突） | 2016 | 409 |
 
 ## 7. 失败与一致性语义
 
@@ -277,6 +329,8 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 - 撤销：逻辑标记 `revoked=1` 并保留 key 与 TTL；`revoke-others`/`revoke-all` 经 Lua 原子批量撤销，并联动撤销对应 refresh family；Redis 写失败 → 500 + 日志（不吞错误伪报成功）；重复撤销幂等，非本人/不存在 → 404 无写入。
 - reuse：撤销该用户全部 refresh families + 全部 access sessions，为 MySQL 更新 + Redis Lua 撤销，非跨系统事务（Redis 失败时 family 已撤销、session 由 TTL/后续校验兜底）。
 - 用户状态管理：`status`/`auth_epoch`/审计/family 撤销在同一 MySQL 事务内全有或全无；`SELECT ... FOR UPDATE` 串行化并发状态变更，区分「不存在（404）/已一致（幂等）/实际迁移（更新+审计+禁用撤销 family）」三态；仅实际禁用递增 `auth_epoch`；Redis 会话撤销在事务提交后 best-effort（失败仅日志，由每请求 status/版本校验兜底）。
+- 手机号唯一：由 `users.uk_phone` 在 DB 层保证（多个 NULL 允许）；并发写入同一手机号时后到者命中 1062，
+  资料更新接口将其映射为 `2016`（409），不做「先查再写」，最终唯一性只依赖数据库约束。
 - 无 MQ、无异步；MySQL 与 Redis 间为顺序写，无跨系统事务。
 
 ## 8. 配置
@@ -299,6 +353,7 @@ IAM 采用「无状态 JWT 签名 + 有状态 Redis 会话」的混合模型：
 | 后台鉴权中间件 | `internal/middleware/auth.go`（`AdminAuth` / `AdminAuthSignatureOnly` / `RequirePermission`） |
 | 身份注入 | `internal/middleware/principal.go` |
 | 前台登录/登出/刷新/会话列表/撤销业务 | `internal/logic/iam/iam.go` |
+| 用户资料读写（昵称/头像/手机号/生日） | `internal/logic/profile/profile.go`、`internal/controller/profile/profile.go`、`api/profile/v1/profile.go` |
 | 后台登录/登出与 RBAC 业务 | `internal/logic/admin/admin.go` |
 | 前台路由 | `internal/cmd/routes_frontend.go` |
 | 后台路由 | `internal/cmd/routes_admin.go` |

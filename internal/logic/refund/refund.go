@@ -43,6 +43,10 @@ var activeRefundStatuses = []int{refundStatusApplying, refundStatusPendingRefund
 // 订单状态 paid(20)：与 internal/logic/order 状态机一致（order 模块未导出常量，此处按设计文档硬编码）。
 const orderStatusPaid = 20
 
+// payTypeBalance 是订单的余额支付渠道值（orders.pay_type）。
+// 只有该渠道的订单在退款成功时才允许把金额退回钱包。
+const payTypeBalance = "balance"
+
 // 审计动作（refund_audits.action）。
 const (
 	auditActionApply          = "apply"
@@ -521,6 +525,36 @@ func (s *sRefund) Execute(ctx context.Context, adminID int64, req *v1.ExecuteReq
 			}
 			if affected, _ := result.RowsAffected(); affected == 0 {
 				return codes.New(codes.CodeRefundInvalidStatusTransition)
+			}
+			// 钱包退款入账：仅当订单原支付渠道为余额（pay_type='balance'）时调用；
+			// 其它渠道不得凭空增加余额。幂等键 refund:<refund_id>，重复执行不会重复入账。
+			var paidOrder struct {
+				UserId  int64  `json:"user_id"`
+				PayType string `json:"pay_type"`
+			}
+			if e := tx.Model("orders").Ctx(ctx).
+				Fields("user_id", "pay_type").
+				Where("id", r.OrderId).Scan(&paidOrder); e != nil {
+				return codes.Wrap(codes.CodeInternalError, fmt.Errorf("读取订单支付渠道: %w", e))
+			}
+			if paidOrder.PayType == payTypeBalance && r.Amount > 0 {
+				if _, e := service.Wallet().CreditForRefundInTx(ctx, tx, service.WalletCreditInput{
+					UserID:   paidOrder.UserId,
+					RefundID: req.Id,
+					OrderID:  r.OrderId,
+					Amount:   r.Amount,
+				}); e != nil {
+					return e
+				}
+			}
+			// 一级分销冲回：与退款成功、订单 20→70、库存恢复同事务提交。
+			// 条件更新 status ∈ (10,20) 保证只冲一次；订单无佣金时 0 行 no-op，不伪造记录。
+			if e := service.Distribution().ReverseOrderCommissionInTx(ctx, tx, req.Id, r.OrderId); e != nil {
+				return e
+			}
+			// 会员成长值扣减：按该订单当初发放额原额扣减（幂等键 growth:refund_deduct:<refund_id>）。
+			if e := service.Member().DeductForRefundInTx(ctx, tx, r.OrderId, req.Id); e != nil {
+				return e
 			}
 			return s.insertAudit(ctx, tx, req.Id, auditActionExecuteSuccess, operatorTypeAdmin, adminID, username, before, refundStatusRefundSucceeded, reason)
 		})

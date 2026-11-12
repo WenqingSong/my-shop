@@ -17,9 +17,13 @@ source "${SCRIPT_DIR}/lib.sh"
 
 export DATABASE_DEFAULT_PASS="${DATABASE_DEFAULT_PASS:-root}"
 
+# 本脚本包含会清空业务表的迁移/E2E 测试，必须先确认目标是隔离测试库。
+assert_isolated_test_db
+
 # 各测试包共享同一个 MySQL/Redis 实例（docker-compose），并会清理/写入 admins、roles、
 # permissions 等同一批表；跨包并行执行会产生数据竞争导致 flaky。因此用 -p 1 串行执行。
-log_info "go test -p 1 ./...（需 MySQL/Redis 就绪）"
-( cd "${ROOT_DIR}" && go test -p 1 ./... )
+# -count=1 禁用测试结果缓存：集成测试的结论必须来自本次真实执行。
+log_info "go test -p 1 -count=1 ./...（需 MySQL/Redis 就绪）"
+( cd "${ROOT_DIR}" && go test -p 1 -count=1 ./... )
 
 log_info "集成测试全部通过"

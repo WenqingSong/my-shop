@@ -26,6 +26,8 @@ type IInventory interface {
 	// ListLogs 分页查询指定 SKU 的库存流水（id 倒序；SKU 不存在返回 5001）。
 	// page < 1 回退 1，size < 1 回退 20，size > 100 截断为 100。
 	ListLogs(ctx context.Context, skuID int64, page, size int) (*v1.ListLogsRes, error)
+	// QuantitiesBySkuIDs 批量查询多个 SKU 的可售库存（无记录 = 0），供商品详情一次性组装。
+	QuantitiesBySkuIDs(ctx context.Context, skuIDs []int64) (map[int64]int64, error)
 }
 
 var localInventory IInventory

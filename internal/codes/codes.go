@@ -33,6 +33,7 @@ const (
 	CodeRefreshTokenExpired Code = 2013 // refresh token 已过期 → 401
 	CodeRefreshTokenReuse   Code = 2014 // refresh token 被重放（已轮换 token 再次提交）→ 401
 	CodeUserNotFound        Code = 2015 // 用户状态管理目标用户不存在 → 404
+	CodePhoneExists         Code = 2016 // 手机号已被使用（users.uk_phone 唯一约束冲突）→ 409
 
 	// 后台管理员身份与 RBAC（IAM 段扩展）。
 	CodeAdminNotFound          Code = 2003 // 管理员不存在 → 404
@@ -67,6 +68,15 @@ const (
 	CodeSkuNameExists    Code = 5004 // 同商品下 name 已存在 → 409
 	CodeSkuHasInventory  Code = 5005 // SKU 存在库存记录，不能删除 → 409
 
+	// 商品规格与 SKU 组合（B1-04-02，仍属 SKU 域）。
+	CodeSpecNotFound     Code = 5010 // 规格组/规格值不存在 → 404
+	CodeSpecNameExists   Code = 5011 // 同商品下规格组名已存在 → 409
+	CodeSpecValueExists  Code = 5012 // 同规格组下规格值已存在 → 409
+	CodeSpecValueInUse   Code = 5013 // 规格值已被 SKU 引用，不能删除 → 409
+	CodeSkuSpecMissing   Code = 5015 // 商品未配置规格，无法生成组合 → 400
+	CodeSkuSpecDuplicate Code = 5016 // 相同规格组合已存在 → 409
+	CodeSkuCodeExists    Code = 5017 // SKU 编码已存在（唯一约束兜底）→ 409
+
 	// 库存域（Inventory）6000-6999。
 	CodeInventoryInsufficient    Code = 6001 // 库存不足 → 409
 	CodeInventoryInvalidQuantity Code = 6002 // 库存数量非正整数 → 400
@@ -87,6 +97,7 @@ const (
 	CodeOrderCartEmpty               Code = 9004 // 从购物车下单无勾选项 → 400
 	CodeOrderInvalidQuantity         Code = 9005 // 直接购买数量非法 → 400
 	CodeOrderIdempotencyConflict     Code = 9006 // 同幂等键不同请求内容 → 409
+	CodeOrderPriceMismatch           Code = 9007 // 客户端提交单价与服务端权威定价不一致 → 409
 
 	// 商品评价域（Review）10000-10999。
 	CodeReviewNotFound      Code = 10001 // 评价不存在/非本人/不可见（防枚举）→ 404
@@ -148,6 +159,76 @@ const (
 	CodeCouponClaimUnavailable Code = 19005 // 未开始/已结束/已停止，不可领取 → 409
 	CodeCouponClaimSoldOut     Code = 19006 // 发放总量已满 → 409
 	CodeCouponUnavailable      Code = 19007 // 下单用券：已使用/被占用/不在使用期/未达门槛 → 409
+
+	// 一级分销域（Distribution）20000-20999（域序 20，B1-04-05）。
+	CodeDistributionSelfReferral        Code = 20001 // 绑定自己为推荐人 → 400
+	CodeDistributionReferrerUnavailable Code = 20002 // 推荐人不存在或已禁用 → 404
+	CodeDistributionAlreadyBound        Code = 20003 // 已绑定其他推荐人，不可改绑 → 409
+	CodeDistributionCycle               Code = 20004 // 绑定会形成推荐关系环 → 409
+	CodeDistributionCommissionNotFound  Code = 20005 // 佣金记录不存在 → 404
+	CodeDistributionCommissionStatus    Code = 20006 // 佣金状态迁移非法（已冲回不可结算）→ 409
+
+	// 运费与统一计价域（Freight / Pricing）21000-21999（域序 21）。
+	// B1-04 集成：B1-04-03 原编号 20001-20012 与已合入的一级分销域（域序 20）冲突，
+	// 按 Registry「域序 = max(已记录域序)+1」规则整体迁移到域序 21，语义与 HTTP 状态不变。
+	CodeFreightTemplateNotFound   Code = 21001 // 运费模板不存在 → 404
+	CodeFreightTemplateNameExists Code = 21002 // 模板名已存在 → 409
+	CodeFreightTemplateInvalid    Code = 21003 // 模板参数非法（名称/阈值/状态）→ 400
+	CodeFreightTemplateDisabled   Code = 21004 // 模板已停用，不可用于计价 → 409
+	CodeFreightRuleNotFound       Code = 21005 // 区域运费规则不存在 → 404
+	CodeFreightRuleDuplicate      Code = 21006 // 同一模板下区域规则重复配置 → 409
+	CodeFreightRuleInvalid        Code = 21007 // 规则参数非法（首件/续件数量为 0、金额越界）→ 400
+	CodeFreightRegionNotFound     Code = 21008 // 地区不存在 → 404
+	CodeFreightRegionRuleMissing  Code = 21009 // 模板无匹配当前地区的规则，拒绝静默免费 → 409
+	CodePricingInvalidAmount      Code = 21010 // 计价金额非法（负数/超上限）→ 400
+	CodePricingDiscountExceeds    Code = 21011 // 优惠累计超过可优惠金额 → 400
+	CodePricingAmountOverflow     Code = 21012 // 计价金额溢出 int64 安全区间 → 400
+
+	// 钱包域（Wallet）22000-22999（域序 22，B1-04-04）。
+	// B1-04 集成：原编号 21001-21010 与运费/计价域（域序 21）冲突，整体迁移到域序 22；
+	// 约定 22001-22099 为钱包业务码，22000 保留不用。
+	CodeWalletAccountUnavailable       Code = 22001 // 钱包账户不存在或初始化失败 → 500
+	CodeWalletInsufficientBalance      Code = 22002 // 余额不足（扣款条件更新 0 行）→ 409
+	CodeWalletInvalidRechargeAmount    Code = 22003 // 充值金额非法（非正/超上限）→ 400
+	CodeWalletRechargeOrderNotFound    Code = 22004 // 充值订单不存在或不属于当前用户（防枚举）→ 404
+	CodeWalletRechargeStatusNotAllowed Code = 22005 // 充值订单状态不允许该操作 → 409
+	CodeWalletDuplicatePayment         Code = 22006 // 重复支付（订单已扣款）→ 409
+	CodeWalletRefundCreditFailed       Code = 22007 // 退款入账失败 → 409
+	CodeWalletIdempotencyConflict      Code = 22008 // 资金流水幂等键冲突（同键不同业务金额）→ 409
+	CodeWalletMockRechargeDisabled     Code = 22009 // Mock 充值未启用（安全开关关闭）→ 403
+	CodeWalletAmountOverflow           Code = 22010 // 金额溢出（余额超出 INT UNSIGNED 可表示范围）→ 409
+
+	// 砍价域（Bargain）23000-23999（域序 23）。
+	// B1-04 八分支集成：原编号 21001-21009 与运费/计价域（域序 21）冲突，按域序 23 重新分配。
+	CodeBargainActivityNotFound        Code = 23001 // 砍价活动不存在 → 404
+	CodeBargainActivityInvalid         Code = 23002 // 活动参数非法（价格/时间/商品/SKU/助力参数）→ 400
+	CodeBargainActivityUnavailable     Code = 23003 // 活动不可参与（停用/未开始/已结束）→ 409
+	CodeBargainInstanceNotFound        Code = 23004 // 砍价实例不存在或不属于当前用户（防枚举）→ 404
+	CodeBargainInstanceExists          Code = 23005 // 同一活动已存在进行中的实例 → 409
+	CodeBargainSelfHelpForbidden       Code = 23006 // 不能给自己的砍价助力 → 409
+	CodeBargainHelpUnavailable         Code = 23007 // 实例不可助力（已成功/已失败/已过期/次数用尽/已到底价）→ 409
+	CodeBargainHelpDuplicated          Code = 23008 // 已助力过该实例 → 409
+	CodeBargainInvalidStatusTransition Code = 23009 // 砍价实例状态迁移非法（终态不可重复推进）→ 409
+
+	// 会员等级与成长值域（Member）24000-24999（域序 24，B1-04-08）。
+	// B1-04 八分支集成：原编号 20001-20005 与一级分销域（域序 20）冲突，整体迁移到域序 24。
+	CodeMemberLevelNotFound      Code = 24001 // 会员等级配置不存在 → 404
+	CodeMemberLevelInvalid       Code = 24002 // 等级配置非法（名称/门槛/折扣率/状态/单调性）→ 400
+	CodeMemberLevelInUse         Code = 24003 // 等级被用户会员记录引用，不可删除 → 409
+	CodeMemberLevelDuplicate     Code = 24004 // 等级序号或成长值门槛已被占用 → 409
+	CodeMemberGrowthInsufficient Code = 24005 // 成长值扣减超过当前余额（防御性拒绝）→ 409
+
+	// 拼团域（Group Buy）25000-25999（域序 25，B1-04-06）。
+	// B1-04 八分支集成：原编号 21001-21009 与运费/计价域（域序 21）冲突，按域序 25 重新分配。
+	CodeGroupBuyNotFound         Code = 25001 // 拼团活动不存在 → 404
+	CodeGroupBuyInvalidArgument  Code = 25002 // 活动/参团参数非法（价格、人数、有效期、时间窗）→ 400
+	CodeGroupBuyActivityInactive Code = 25003 // 活动未开始/已结束/已停用，不可开团 → 409
+	CodeGroupBuyPriceInvalid     Code = 25004 // 拼团价非法（<=0 或高于 SKU 现价）→ 400
+	CodeGroupBuyTeamNotFound     Code = 25005 // 团不存在或不可见 → 404
+	CodeGroupBuyTeamNotJoinable  Code = 25006 // 团已满/已成团/已失败/已过期，不可参与 → 409
+	CodeGroupBuyAlreadyJoined    Code = 25007 // 该用户已在本团中（uk_team_user 兜底）→ 409
+	CodeGroupBuySkuUnavailable   Code = 25008 // 拼团商品不可购买（SKU 禁用/商品下架）→ 409
+	CodeGroupBuyTeamNotClosable  Code = 25009 // 团不在拼团中，不可关闭 → 409
 )
 
 // codeInfo 绑定错误码 → HTTP 状态与用户安全 message。
@@ -171,6 +252,7 @@ var codeTable = map[Code]codeInfo{
 	CodeRefreshTokenExpired:    {http.StatusUnauthorized, "refresh token 已过期"},
 	CodeRefreshTokenReuse:      {http.StatusUnauthorized, "refresh token 已失效，请重新登录"},
 	CodeUserNotFound:           {http.StatusNotFound, "用户不存在"},
+	CodePhoneExists:            {http.StatusConflict, "手机号已被使用"},
 	CodeAdminNotFound:          {http.StatusNotFound, "管理员不存在"},
 	CodeAdminUsernameExists:    {http.StatusConflict, "管理员用户名已存在"},
 	CodeSuperAdminProtected:    {http.StatusForbidden, "超级管理员受保护"},
@@ -199,6 +281,14 @@ var codeTable = map[Code]codeInfo{
 	CodeSkuNameExists:    {http.StatusConflict, "SKU 名称已存在"},
 	CodeSkuHasInventory:  {http.StatusConflict, "SKU 存在库存记录，不能删除"},
 
+	CodeSpecNotFound:     {http.StatusNotFound, "规格不存在"},
+	CodeSpecNameExists:   {http.StatusConflict, "规格组名已存在"},
+	CodeSpecValueExists:  {http.StatusConflict, "规格值已存在"},
+	CodeSpecValueInUse:   {http.StatusConflict, "规格值已被 SKU 使用，不能删除"},
+	CodeSkuSpecMissing:   {http.StatusBadRequest, "商品未配置规格"},
+	CodeSkuSpecDuplicate: {http.StatusConflict, "规格组合已存在"},
+	CodeSkuCodeExists:    {http.StatusConflict, "SKU 编码已存在"},
+
 	CodeInventoryInsufficient:    {http.StatusConflict, "库存不足"},
 	CodeInventoryInvalidQuantity: {http.StatusBadRequest, "库存数量非法"},
 
@@ -215,6 +305,7 @@ var codeTable = map[Code]codeInfo{
 	CodeOrderCartEmpty:               {http.StatusBadRequest, "购物车无勾选商品"},
 	CodeOrderInvalidQuantity:         {http.StatusBadRequest, "购买数量非法"},
 	CodeOrderIdempotencyConflict:     {http.StatusConflict, "幂等键冲突"},
+	CodeOrderPriceMismatch:           {http.StatusConflict, "商品价格与当前售价不一致"},
 
 	CodeReviewNotFound:      {http.StatusNotFound, "评价不存在"},
 	CodeReviewNotEligible:   {http.StatusConflict, "暂不可评价"},
@@ -264,6 +355,62 @@ var codeTable = map[Code]codeInfo{
 	CodeCouponClaimUnavailable: {http.StatusConflict, "优惠券暂不可领取"},
 	CodeCouponClaimSoldOut:     {http.StatusConflict, "优惠券已领完"},
 	CodeCouponUnavailable:      {http.StatusConflict, "优惠券不可用"},
+
+	CodeDistributionSelfReferral:        {http.StatusBadRequest, "不能绑定自己为推荐人"},
+	CodeDistributionReferrerUnavailable: {http.StatusNotFound, "推荐人不存在或不可用"},
+	CodeDistributionAlreadyBound:        {http.StatusConflict, "已绑定推荐人，不可变更"},
+	CodeDistributionCycle:               {http.StatusConflict, "推荐关系成环"},
+	CodeDistributionCommissionNotFound:  {http.StatusNotFound, "佣金记录不存在"},
+	CodeDistributionCommissionStatus:    {http.StatusConflict, "佣金状态迁移非法"},
+
+	CodeFreightTemplateNotFound:   {http.StatusNotFound, "运费模板不存在"},
+	CodeFreightTemplateNameExists: {http.StatusConflict, "运费模板名称已存在"},
+	CodeFreightTemplateInvalid:    {http.StatusBadRequest, "运费模板参数非法"},
+	CodeFreightTemplateDisabled:   {http.StatusConflict, "运费模板已停用"},
+	CodeFreightRuleNotFound:       {http.StatusNotFound, "运费区域规则不存在"},
+	CodeFreightRuleDuplicate:      {http.StatusConflict, "该地区规则已存在"},
+	CodeFreightRuleInvalid:        {http.StatusBadRequest, "运费规则参数非法"},
+	CodeFreightRegionNotFound:     {http.StatusNotFound, "地区不存在"},
+	CodeFreightRegionRuleMissing:  {http.StatusConflict, "该地区未配置运费规则"},
+	CodePricingInvalidAmount:      {http.StatusBadRequest, "计价金额非法"},
+	CodePricingDiscountExceeds:    {http.StatusBadRequest, "优惠金额超过可优惠金额"},
+	CodePricingAmountOverflow:     {http.StatusBadRequest, "计价金额溢出"},
+
+	CodeWalletAccountUnavailable:       {http.StatusInternalServerError, "钱包账户不可用"},
+	CodeWalletInsufficientBalance:      {http.StatusConflict, "余额不足"},
+	CodeWalletInvalidRechargeAmount:    {http.StatusBadRequest, "充值金额非法"},
+	CodeWalletRechargeOrderNotFound:    {http.StatusNotFound, "充值订单不存在"},
+	CodeWalletRechargeStatusNotAllowed: {http.StatusConflict, "充值订单状态不允许该操作"},
+	CodeWalletDuplicatePayment:         {http.StatusConflict, "订单已支付"},
+	CodeWalletRefundCreditFailed:       {http.StatusConflict, "退款入账失败"},
+	CodeWalletIdempotencyConflict:      {http.StatusConflict, "资金流水幂等冲突"},
+	CodeWalletMockRechargeDisabled:     {http.StatusForbidden, "Mock 充值未启用"},
+	CodeWalletAmountOverflow:           {http.StatusConflict, "金额超出可表示范围"},
+	CodeBargainActivityNotFound:        {http.StatusNotFound, "砍价活动不存在"},
+	CodeBargainActivityInvalid:         {http.StatusBadRequest, "砍价活动参数非法"},
+	CodeBargainActivityUnavailable:     {http.StatusConflict, "砍价活动暂不可参与"},
+	CodeBargainInstanceNotFound:        {http.StatusNotFound, "砍价记录不存在"},
+	CodeBargainInstanceExists:          {http.StatusConflict, "已有进行中的砍价"},
+	CodeBargainSelfHelpForbidden:       {http.StatusConflict, "不能给自己砍价"},
+	CodeBargainHelpUnavailable:         {http.StatusConflict, "该砍价不可助力"},
+	CodeBargainHelpDuplicated:          {http.StatusConflict, "已助力过该砍价"},
+	CodeBargainInvalidStatusTransition: {http.StatusConflict, "砍价状态迁移非法"},
+
+	CodeMemberLevelNotFound:      {http.StatusNotFound, "会员等级不存在"},
+	CodeMemberLevelInvalid:       {http.StatusBadRequest, "会员等级配置非法"},
+	CodeMemberLevelInUse:         {http.StatusConflict, "会员等级已被用户使用，不能删除"},
+	CodeMemberLevelDuplicate:     {http.StatusConflict, "会员等级序号或成长值门槛已存在"},
+	CodeMemberGrowthInsufficient: {http.StatusConflict, "成长值不足"},
+
+	CodeGroupBuyNotFound:         {http.StatusNotFound, "拼团活动不存在"},
+	CodeGroupBuyInvalidArgument:  {http.StatusBadRequest, "拼团参数非法"},
+	CodeGroupBuyActivityInactive: {http.StatusConflict, "拼团活动当前不可参与"},
+	CodeGroupBuyPriceInvalid:     {http.StatusBadRequest, "拼团价格非法"},
+	CodeGroupBuyTeamNotFound:     {http.StatusNotFound, "拼团不存在"},
+	CodeGroupBuyTeamNotJoinable:  {http.StatusConflict, "该团已满或已结束，不可参与"},
+	CodeGroupBuyAlreadyJoined:    {http.StatusConflict, "您已参与该团"},
+	CodeGroupBuySkuUnavailable:   {http.StatusConflict, "拼团商品不可购买"},
+	CodeGroupBuyTeamNotClosable:  {http.StatusConflict, "拼团状态不允许关闭"},
 }
 
 // HTTPStatus 返回业务错误码对应的 HTTP 状态码；未知码按 500 处理。
@@ -294,6 +441,14 @@ func Wrap(code Code, err error) error {
 }
 
 // FromError 从 error 链中提取业务错误码；未识别时返回内部错误码。
+//
+// 特殊处理：GoFrame 参数校验（gvalid）失败时返回框架码 51
+// （gcode.CodeValidationFailed），它不是项目的业务错误码，若原样透传会被
+// HTTPStatus 当作未知码映射为 500。这里在统一错误层归一为业务码 1001
+// （参数校验失败 → 400），不逐个 Controller 打补丁。
+//
+// 仅归一「参数校验」这一确定的框架语义，其余未知错误码仍按原值返回并由
+// HTTPStatus 兜底为 500，避免把真正的内部错误误报为客户端参数错误。
 func FromError(err error) Code {
 	if err == nil {
 		return CodeOK
@@ -301,6 +456,9 @@ func FromError(err error) Code {
 	c := gerror.Code(err)
 	if c == gcode.CodeNil {
 		return CodeInternalError
+	}
+	if c.Code() == gcode.CodeValidationFailed.Code() {
+		return CodeInvalidArgument
 	}
 	return Code(c.Code())
 }

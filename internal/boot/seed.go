@@ -36,6 +36,9 @@ var seedPermissionList = []permissionSeed{
 	{Code: "sku:create", Name: "创建 SKU"},
 	{Code: "sku:update", Name: "更新 SKU"},
 	{Code: "sku:delete", Name: "删除 SKU"},
+	{Code: "spec:create", Name: "创建商品规格"},
+	{Code: "spec:update", Name: "更新商品规格"},
+	{Code: "spec:delete", Name: "删除商品规格"},
 	{Code: "inventory:increase", Name: "增加库存"},
 	{Code: "inventory:deduct", Name: "扣减库存"},
 	{Code: "admin:create", Name: "创建管理员"},
@@ -75,6 +78,32 @@ var seedPermissionList = []permissionSeed{
 	{Code: "coupon:create", Name: "创建优惠券模板"},
 	{Code: "coupon:list", Name: "查看优惠券模板"},
 	{Code: "coupon:stop", Name: "停止优惠券领取"},
+	{Code: "distribution:referral_list", Name: "查看分销关系与分销用户"},
+	{Code: "distribution:commission_list", Name: "查看佣金记录与佣金统计"},
+	{Code: "distribution:settle", Name: "人工结算佣金（仅状态流转，不含资金转账）"},
+
+	{Code: "freight:create", Name: "创建运费模板"},
+	{Code: "freight:list", Name: "查看运费模板列表"},
+	{Code: "freight:view", Name: "查看运费模板详情与区域规则"},
+	{Code: "freight:update", Name: "更新运费模板与区域规则"},
+
+	{Code: "bargain:create", Name: "创建砍价活动"},
+	{Code: "bargain:update", Name: "编辑砍价活动"},
+	{Code: "bargain:list", Name: "查看砍价活动列表"},
+	{Code: "bargain:view", Name: "查看砍价活动详情"},
+
+	{Code: "member:list", Name: "查看会员等级配置"},
+	{Code: "member:view", Name: "查看用户会员信息"},
+	{Code: "member:create", Name: "创建会员等级"},
+	{Code: "member:update", Name: "更新会员等级"},
+	{Code: "member:delete", Name: "删除会员等级"},
+
+	// B1-04-06 拼团（活动管理、团查询与关闭）
+	{Code: "group_buy:create", Name: "创建拼团活动"},
+	{Code: "group_buy:update", Name: "修改与启停拼团活动"},
+	{Code: "group_buy:list", Name: "查看拼团活动与拼团列表"},
+	{Code: "group_buy:view", Name: "查看拼团活动与拼团详情"},
+	{Code: "group_buy:close", Name: "关闭拼团"},
 }
 
 // seedPermissions 幂等写入标准权限：已存在（code 唯一）则跳过。

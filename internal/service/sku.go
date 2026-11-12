@@ -18,8 +18,12 @@ type ISku interface {
 	ListByProduct(ctx context.Context, productID int64, onlyEnabled bool) ([]*v1.Sku, error)
 	// Exists 判断 SKU 是否存在（供库存校验 sku_id 存在性）。
 	Exists(ctx context.Context, id int64) (bool, error)
-	// GetByID 按 id 查询单个 SKU 全字段（含 status），不存在返回 nil（供购物车加购校验）。
+	// GetByID 按 id 查询单个 SKU 全字段（含 status、规格取值），不存在返回 nil（供购物车加购校验）。
 	GetByID(ctx context.Context, id int64) (*v1.Sku, error)
+	// GetByCode 按 sku_code 查询单个 SKU（含规格取值），不存在或编码为空返回 nil（供下单服务端定价）。
+	GetByCode(ctx context.Context, code string) (*v1.Sku, error)
+	// Generate 按商品规格组与规格值生成 SKU 组合（幂等，已存在组合保留原 SKU 与编码）。
+	Generate(ctx context.Context, req *v1.GenerateReq) (*v1.GenerateRes, error)
 }
 
 var localSku ISku

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -22,6 +23,8 @@ import (
 	_ "cnb.cool/go-cloud-devops/my-shop/internal/logic"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 	"cnb.cool/go-cloud-devops/my-shop/internal/migrations"
+	"cnb.cool/go-cloud-devops/my-shop/internal/regiondata"
+	"cnb.cool/go-cloud-devops/my-shop/internal/testdb"
 )
 
 const (
@@ -107,9 +110,39 @@ func authHeader(token string) map[string]string {
 	return map[string]string{"Authorization": "Bearer " + token}
 }
 
+// safeTestDBs 是允许执行破坏性测试的隔离测试库白名单（统一来源：internal/testdb）。
+// 测试会 DELETE users/addresses，必须在任何写操作前核实真实连接库名。
+var safeTestDBs = testdb.Allowed()
+
+// isSafeTestDB 判断库名是否属于隔离测试库。
+func isSafeTestDB(name string) bool {
+	return testdb.IsAllowed(name)
+}
+
+// requireIsolatedTestDB 第一道隔离检查：只允许显式指定的独立测试库。
+func requireIsolatedTestDB(t *testing.T) {
+	t.Helper()
+	if got := os.Getenv("DATABASE_DEFAULT_NAME"); !isSafeTestDB(got) {
+		t.Fatalf("拒绝执行破坏性测试：DATABASE_DEFAULT_NAME=%q，必须显式设为隔离测试库 %v", got, safeTestDBs)
+	}
+}
+
+// requireActualDB 第二道隔离检查：核实真实连接库名，不依赖环境变量名称推断。
+func requireActualDB(t *testing.T) {
+	t.Helper()
+	v, err := g.DB().GetValue(context.Background(), "SELECT DATABASE()")
+	if err != nil {
+		t.Fatalf("查询当前数据库失败: %v", err)
+	}
+	if got := v.String(); !isSafeTestDB(got) {
+		t.Fatalf("拒绝执行破坏性测试：实际连接库为 %q，不是隔离测试库 %v", got, safeTestDBs)
+	}
+}
+
 // setupAddressServer 迁移 + Bootstrap + 清空 users/addresses + flush Redis，挂载真实路由，返回 base URL。
 func setupAddressServer(t *testing.T) string {
 	t.Helper()
+	requireIsolatedTestDB(t)
 	t.Setenv("AUTH_JWT_SECRET", testJWTSecret)
 	t.Setenv("ADMIN_SUPER_PASSWORD", testAdminPassword)
 	t.Setenv("REDIS_DEFAULT_DB", "4")
@@ -121,6 +154,14 @@ func setupAddressServer(t *testing.T) string {
 	if err := boot.Bootstrap(ctx); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
+	requireActualDB(t)
+
+	// 地区字典初始化：与 `my-shop region-seed import` 完全同一实现，幂等可重复执行。
+	// 结构化地址（region_id=3/203）依赖真实地区数据，这里保证新建测试库也能自愈。
+	if _, err := regiondata.Ensure(ctx, g.DB(), false); err != nil {
+		t.Fatalf("初始化地区字典: %v", err)
+	}
+
 	// 清空前台用户与地址表，保证每个用例从干净状态开始（不触碰后台 admins/RBAC seed）。
 	for _, table := range []string{"addresses", "users"} {
 		if _, err := g.DB().Exec(ctx, "DELETE FROM "+table); err != nil {

@@ -3,6 +3,7 @@ package logx
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 )
 
@@ -50,5 +51,38 @@ func TestRenderEmptyMessage(t *testing.T) {
 	}
 	if _, ok := m["message"]; ok {
 		t.Errorf("空 message 不应输出 message 字段")
+	}
+}
+
+// TestEmitInvokesLogger 验证 emit 把渲染后的单行 JSON 原样交给 logger；
+// 字段无法序列化时仅降级为不记录，不得 panic，也不能把错误暴露给业务调用方。
+func TestEmitInvokesLogger(t *testing.T) {
+	var lines []string
+	logger := func(_ context.Context, v ...any) {
+		if len(v) != 1 {
+			t.Fatalf("logger 收到 %d 个参数，期望 1", len(v))
+		}
+		lines = append(lines, fmt.Sprint(v[0]))
+	}
+
+	emit(logger, context.Background(), "order_created", "下单成功", Fields{"order_id": int64(7)})
+	if len(lines) != 1 {
+		t.Fatalf("emit 调用 logger %d 次，期望 1", len(lines))
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &m); err != nil {
+		t.Fatalf("emit 输出非合法 JSON: %v", err)
+	}
+	if m["event"] != "order_created" {
+		t.Errorf("event = %v, 期望 order_created", m["event"])
+	}
+	if m["order_id"] != float64(7) {
+		t.Errorf("order_id = %v, 期望 7", m["order_id"])
+	}
+
+	// chan 不可 JSON 序列化：必须静默降级，不调用 logger、不 panic。
+	emit(logger, context.Background(), "bad_event", "", Fields{"ch": make(chan int)})
+	if len(lines) != 1 {
+		t.Fatalf("序列化失败时不应调用 logger，实际调用 %d 次", len(lines))
 	}
 }

@@ -56,9 +56,9 @@
 | 申请中(10) | 待退款(20) | 管理员审核同意（`refund:review`） | 订单保持 `paid` |
 | 申请中(10) | 审核拒绝(40) | 管理员审核拒绝（`refund:review`） | 订单保持 `paid` |
 | 申请中(10) | 已撤销(50) | 用户撤销（本人） | 订单保持 `paid` |
-| 待退款(20) | 退款成功(60) | 管理员执行成功（`refund:execute`） | 订单 `paid→refunded` + 恢复库存 |
+| 待退款(20) | 退款成功(60) | 管理员执行成功（`refund:execute`） | 订单 `paid→refunded` + 恢复库存 + 冲回佣金 + 扣减成长值 |
 | 待退款(20) | 退款失败(30) | 管理员执行失败（`refund:execute`） | 订单/库存不变 |
-| 退款失败(30) | 退款成功(60) | 管理员重试成功（`refund:execute`） | 订单 `paid→refunded` + 恢复库存 |
+| 退款失败(30) | 退款成功(60) | 管理员重试成功（`refund:execute`） | 订单 `paid→refunded` + 恢复库存 + 冲回佣金 + 扣减成长值 |
 | 退款失败(30) | 已关闭(70) | 管理员人工关闭（`refund:execute`） | 订单/库存不变，解除发货阻塞 |
 
 终态：审核拒绝(40)、已撤销(50)、退款成功(60)、已关闭(70)。非法迁移返回 18002 且状态不变。
@@ -77,7 +77,8 @@
 - INV-006（审核不直接退款）：审核同意→待退款、拒绝→审核拒绝；订单保持 `paid`。
 - INV-007（退款与发货互斥）：最终不「既已发货又退款成功」；有效申请（{10,20,30}）存在即拒绝发货；申请与发货、退款成功与发货分别经订单行锁串行化。
 - INV-008（退款执行幂等/只补偿一次）：重复确认成功不重复推进、不重复恢复库存、不超额。
-- INV-009（退款成功一致性）：退款成功 = `refund_requests.status=60` ∧ `orders.status=70` ∧ 库存恢复一次，同事务。
+- INV-009（退款成功一致性）：退款成功 = `refund_requests.status=60` ∧ `orders.status=70` ∧ 库存恢复一次
+  ∧ 佣金冲回一次 ∧ 成长值扣减一次，同事务。
 - INV-010（退款失败安全 + 关闭出口）：退款失败 = `status=30`、订单 `paid`、库存不恢复；可重试（30→60）或人工关闭（30→70）；关闭仅从明确 `status=30` 迁入，不恢复库存、不改订单状态，仅解除发货阻塞。
 - INV-011（撤销）：审核通过前可撤销（10→50）；不恢复库存、不改订单状态；可再次申请。
 - INV-012（权限）：管理端退款接口需 `refund:*` 权限（超管放行）；普通用户 token 返回 403 且零写入。
@@ -86,7 +87,9 @@
 ## 5. 一致性模型与失败语义
 
 - 事实来源：单一 MySQL。`orders`（订单状态）、`inventories`/`inventory_logs`（库存）、`refund_requests`（退款状态）、`refund_audits`（审计）同库；无 MQ、无跨系统事务。
-- 成功语义：申请 = 写 `refund_requests`（`uk_active` 兜底）+ 审计，不碰订单/库存；审核 = 仅推进退款状态 + 审计；执行成功 = 单事务「订单 `20→70` + 库存恢复 + 退款状态 60 + 审计」；执行失败 = 退款状态 30 + 审计，订单/库存不变；关闭 = 退款状态 70 + 审计，订单/库存不变。
+- 成功语义：申请 = 写 `refund_requests`（`uk_active` 兜底）+ 审计，不碰订单/库存；审核 = 仅推进退款状态 + 审计；
+  执行成功 = 单事务「订单 `20→70` + 库存恢复 + 退款状态 60 + 钱包入账（余额渠道）+ 佣金冲回 + 成长值扣减 + 审计」；
+  执行失败 = 退款状态 30 + 审计，订单/库存不变；关闭 = 退款状态 70 + 审计，订单/库存不变。
 - 并发互斥：申请与发货用「同一 `orders` 行 `SELECT ... FOR UPDATE`」串行化；退款成功与发货用「订单 `status=20` 条件更新」行锁闸门；杜绝「已发货 + 申请中退款」「已发货 + 退款成功」及「退款=60 但订单=30」中间态。
 - 幂等与重复：重复执行成功 → 退款状态条件更新 0 行（已 60）→ 幂等返回；订单闸门 0 行（已 70）→ 不再恢复库存。
 - 部分完成：无跨系统，所有写为单事务，无中间态残留。
@@ -115,16 +118,38 @@
 
 ## 8. 跨模块关系
 
+- 拼团（B1-04-06）：拼团订单就是普通订单，退款规则完全复用本文（仅「已支付未发货」整单全额；
+  用户发起 → 管理员审核 → 执行成功推进 `paid→refunded` 并恢复库存）。拼团失败（过期/运营关闭）
+  只会取消**待支付**订单，已支付订单保持 `paid` 由用户发起退款，**不存在系统自动退款**；
+  退款成功不回补团名额（`joined_count` 不变），详见 `marketing.md` §2.8。
 - `refund_requests.order_id` → `orders.id`（软引用，无 FK），`refund_requests.user_id` → `users.id`（软引用）。
 - 退款成功推进订单状态：复用订单模块 tx 感知方法（`IOrder.CompleteRefundInTx`），订单 `20→70` + `refunded_at` + 恢复库存（`WHERE status=20` 闸门）；退款模块只协调外层事务，不复制订单状态迁移与库存恢复业务规则。
 - 库存恢复复用 `IInventory.IncreaseInTx`（「只补偿一次」不变量由订单状态条件更新闸门保证）。
 - 发货互斥：订单模块 `Ship` 在事务内检查有效退款申请（`service.Refund().HasActiveRequestInTx`），存在即拒绝。
+- 一级分销：退款成功事务内调用 `IDistribution.ReverseOrderCommissionInTx(ctx, tx, refundID, orderID)`，
+  把该订单佣金 `10/20 → 30` 并写 `reversed_amount/reversed_at/refund_id/reversal_reason`；
+  `WHERE status IN (10,20)` + `uk_refund_id` 保证同一退款单只冲一次，无佣金时 no-op。佣金不回写退款单与订单，
+  详见 `distribution.md`。
+- 会员成长值：退款成功事务内调用 `IMember.DeductForRefundInTx`，按该订单原发放额扣减，幂等键
+  `growth:refund_deduct:<refund_id>`，等级只升不降，详见 `member.md`。
+- 钱包：退款成功事务内调用 `IWallet.CreditForRefundInTx`（`tx_type=order_refund`、`biz_type=refund`、
+  `biz_id=refund_requests.id`、幂等键 `refund:<refund_id>`），**仅当订单原支付渠道为余额（`pay_type='balance'`）**时调用，
+  见 `wallet.md` §6/§7。三者在「订单 `20→70` + 库存恢复 + 退款 `→60`」的同一事务内完成，任一步失败整体回滚。
+- 订单状态流水：退款成功推进订单 `paid→refunded` 时写入 `order_status_logs`（`change_type=refund`），见 `order.md` §2.4。
 - 建表经 golang-migrate 迁移（`20261001000020_refund.up.sql`），见 `migration.md`。
 
 ## 9. Deferred / 已知留白
 
 - 真实支付平台退款、到账、对账、资金回调（执行退款为人工 Mock 确认）。
+- 退款钱包入账/余额回退：B1-04 集成后 `refund.Execute` 已在退款成功事务内对**余额支付渠道**调用 `CreditForRefundInTx`（幂等键 `refund:<id>`）；非余额渠道不增加余额，退款成功后余额不变。
+- 部分退款：`refund_requests.amount` 当前恒等于订单 `total_amount`，`CreditForRefundInTx` 已按传入金额入账，支持未来部分退款接入。
 - 部分退款、多次累计退款、换货、退货物流（寄回、物流单号、入库验收）。
 - 自动审核、自动退款、超时自动处理、自动重试。
 - 秒杀订单退款（无支付、下单即成交、库存独立不恢复）。
 - 退款申请的用户侧频率/次数限制。
+
+## 拼团订单（B1-04-06）
+
+拼团订单就是普通订单，退款规则完全复用本文（仅「已支付未发货」整单全额；用户发起 → 管理员审核 → 执行成功
+推进 `paid→refunded` 并恢复库存）。拼团失败（过期/运营关闭）只会取消**待支付**订单，已支付订单保持 `paid`
+由用户发起退款，**不存在系统自动退款**；退款成功不回补团名额（`joined_count` 不变）。

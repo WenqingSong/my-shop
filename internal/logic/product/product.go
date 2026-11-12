@@ -12,6 +12,8 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	v1 "cnb.cool/go-cloud-devops/my-shop/api/product/v1"
+	skuv1 "cnb.cool/go-cloud-devops/my-shop/api/sku/v1"
+	specv1 "cnb.cool/go-cloud-devops/my-shop/api/spec/v1"
 	"cnb.cool/go-cloud-devops/my-shop/internal/codes"
 	"cnb.cool/go-cloud-devops/my-shop/internal/service"
 )
@@ -61,17 +63,19 @@ func New() *sProduct {
 
 // product 是 products 表的一条记录。
 type product struct {
-	Id         int64       `json:"id"`
-	Name       string      `json:"name"`
-	Brand      string      `json:"brand"`
-	CategoryId int64       `json:"category_id"`
-	Price      int64       `json:"price"`
-	MainImage  string      `json:"main_image"`
-	Detail     *string     `json:"detail"`
-	Status     int         `json:"status"`
-	ViewCount  int64       `json:"view_count"`
-	CreatedAt  *gtime.Time `json:"created_at"`
-	UpdatedAt  *gtime.Time `json:"updated_at"`
+	Id         int64   `json:"id"`
+	Name       string  `json:"name"`
+	Brand      string  `json:"brand"`
+	CategoryId int64   `json:"category_id"`
+	Price      int64   `json:"price"`
+	MainImage  string  `json:"main_image"`
+	Detail     *string `json:"detail"`
+	Status     int     `json:"status"`
+	// FreightTemplateId 是商品绑定的运费模板 id（可空）。
+	FreightTemplateId *int64      `json:"freight_template_id"`
+	ViewCount         int64       `json:"view_count"`
+	CreatedAt         *gtime.Time `json:"created_at"`
+	UpdatedAt         *gtime.Time `json:"updated_at"`
 }
 
 // productImage 是 product_images 表的一条记录。
@@ -118,10 +122,19 @@ func (s *sProduct) Detail(ctx context.Context, id int64) (*v1.DetailRes, error) 
 	if err != nil {
 		return nil, err
 	}
-	return &v1.DetailRes{Product: *p, Skus: skus}, nil
+	groups, err := service.Spec().ListByProduct(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	stocks, err := service.Inventory().QuantitiesBySkuIDs(ctx, skuIDsOf(skus))
+	if err != nil {
+		return nil, err
+	}
+	attr, productValue := buildSkuSelector(groups, skus, stocks)
+	return &v1.DetailRes{Product: *p, Skus: skus, Attr: attr, ProductValue: productValue}, nil
 }
 
-// AdminDetail 后台详情：全部状态，并组合该商品的全部状态 SKU。
+// AdminDetail 后台详情：全部状态，并组合该商品的全部状态 SKU 与规格定义（含 id）。
 func (s *sProduct) AdminDetail(ctx context.Context, id int64) (*v1.AdminDetailRes, error) {
 	p, err := s.load(ctx, id, false)
 	if err != nil {
@@ -131,7 +144,70 @@ func (s *sProduct) AdminDetail(ctx context.Context, id int64) (*v1.AdminDetailRe
 	if err != nil {
 		return nil, err
 	}
-	return &v1.AdminDetailRes{Product: *p, Skus: skus}, nil
+	groups, err := service.Spec().ListByProduct(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return &v1.AdminDetailRes{Product: *p, Skus: skus, Specs: groups}, nil
+}
+
+// skuIDsOf 提取 SKU id 列表（供库存批量查询）。
+func skuIDsOf(skus []*skuv1.Sku) []int64 {
+	ids := make([]int64, 0, len(skus))
+	for _, item := range skus {
+		ids = append(ids, item.Id)
+	}
+	return ids
+}
+
+// buildSkuSelector 把商品规格组与 SKU 组合转换为原 APP 端 van-sku 直接消费的 attr/productValue：
+//   - attr[i].attrName 为规格组名，attrValueArr 为该组全部可选值文本（顺序与 productValue 键一致）；
+//   - productValue 键为按 attr 顺序逗号连接的规格值文本，值为该组合的 SKU 编码/售价/原价/库存；
+//   - 无规格商品返回空数组与空对象；规格值不完整的历史 SKU 不进入 productValue（避免伪造组合键），
+//     但仍保留在 skus 列表中，按 sku_id 直接下单不受影响。
+func buildSkuSelector(
+	groups []*specv1.SpecGroup,
+	skus []*skuv1.Sku,
+	stocks map[int64]int64,
+) ([]*v1.SkuAttr, map[string]*v1.SkuProductValue) {
+	attr := make([]*v1.SkuAttr, 0, len(groups))
+	for _, group := range groups {
+		values := make([]string, 0, len(group.Values))
+		for _, value := range group.Values {
+			values = append(values, value.Value)
+		}
+		attr = append(attr, &v1.SkuAttr{AttrName: group.Name, AttrValueArr: values})
+	}
+
+	productValue := make(map[string]*v1.SkuProductValue, len(skus))
+	if len(groups) == 0 {
+		return attr, productValue
+	}
+	for _, item := range skus {
+		if len(item.SpecValues) != len(groups) {
+			continue
+		}
+		parts := make([]string, 0, len(item.SpecValues))
+		for _, specValue := range item.SpecValues {
+			parts = append(parts, specValue.Value)
+		}
+		key := strings.Join(parts, ",")
+		display := key
+		if display == "" {
+			display = item.Name
+		}
+		productValue[key] = &v1.SkuProductValue{
+			Unique:        item.SkuCode,
+			Sku:           display,
+			SkuId:         item.Id,
+			SkuName:       item.Name,
+			Price:         item.Price,
+			OriginalPrice: item.OriginalPrice,
+			Stock:         stocks[item.Id],
+			Image:         item.ImageUrl,
+		}
+	}
+	return attr, productValue
 }
 
 // Create 创建商品：校验后事务写入 products 与 product_images，status 强制 draft。
@@ -159,17 +235,26 @@ func (s *sProduct) Create(ctx context.Context, req *v1.CreateReq) (*v1.CreateRes
 	if err != nil {
 		return nil, err
 	}
+	// 运费模板绑定：必须存在且启用，不允许把商品绑到无效模板上（避免下单时静默零运费）。
+	var freightTemplateID *int64
+	if req.FreightTemplateId != nil && *req.FreightTemplateId > 0 {
+		if err := service.Freight().ValidateTemplateForBinding(ctx, *req.FreightTemplateId); err != nil {
+			return nil, err
+		}
+		freightTemplateID = req.FreightTemplateId
+	}
 
 	var id int64
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		pid, e := tx.Model("products").Ctx(ctx).Data(g.Map{
-			"name":        name,
-			"brand":       brand,
-			"category_id": req.CategoryId,
-			"price":       price,
-			"main_image":  mainImage,
-			"detail":      req.Detail,
-			"status":      statusDraft,
+			"name":                name,
+			"brand":               brand,
+			"category_id":         req.CategoryId,
+			"price":               price,
+			"main_image":          mainImage,
+			"detail":              req.Detail,
+			"status":              statusDraft,
+			"freight_template_id": freightTemplateID,
 		}).InsertAndGetId()
 		if e != nil {
 			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("写入商品: %w", e))
@@ -256,15 +341,31 @@ func (s *sProduct) Update(ctx context.Context, req *v1.UpdateReq) (*v1.UpdateRes
 		needReplaceImg = true
 	}
 
+	data := g.Map{
+		"name":        name,
+		"brand":       brand,
+		"category_id": categoryID,
+		"price":       price,
+		"main_image":  mainImage,
+		"detail":      detail,
+	}
+	// 运费模板绑定：省略=不修改；0=解绑写 NULL；>0=必须存在且启用。
+	if req.FreightTemplateId != nil {
+		if *req.FreightTemplateId < 0 {
+			return nil, codes.New(codes.CodeInvalidArgument)
+		}
+		if *req.FreightTemplateId == 0 {
+			data["freight_template_id"] = nil
+		} else {
+			if err := service.Freight().ValidateTemplateForBinding(ctx, *req.FreightTemplateId); err != nil {
+				return nil, err
+			}
+			data["freight_template_id"] = *req.FreightTemplateId
+		}
+	}
+
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		if _, e := tx.Model("products").Ctx(ctx).Where("id", req.Id).Data(g.Map{
-			"name":        name,
-			"brand":       brand,
-			"category_id": categoryID,
-			"price":       price,
-			"main_image":  mainImage,
-			"detail":      detail,
-		}).Update(); e != nil {
+		if _, e := tx.Model("products").Ctx(ctx).Where("id", req.Id).Data(data).Update(); e != nil {
 			return codes.Wrap(codes.CodeInternalError, fmt.Errorf("更新商品: %w", e))
 		}
 		if needReplaceImg {
@@ -486,18 +587,19 @@ func (s *sProduct) toProduct(r *product, images []string) *v1.Product {
 		images = []string{}
 	}
 	return &v1.Product{
-		Id:         r.Id,
-		Name:       r.Name,
-		Brand:      r.Brand,
-		CategoryId: r.CategoryId,
-		Price:      r.Price,
-		MainImage:  r.MainImage,
-		Detail:     productDetail(r),
-		Status:     statusToString(r.Status),
-		ViewCount:  r.ViewCount,
-		Images:     images,
-		CreatedAt:  r.CreatedAt,
-		UpdatedAt:  r.UpdatedAt,
+		Id:                r.Id,
+		Name:              r.Name,
+		Brand:             r.Brand,
+		CategoryId:        r.CategoryId,
+		Price:             r.Price,
+		MainImage:         r.MainImage,
+		Detail:            productDetail(r),
+		Status:            statusToString(r.Status),
+		FreightTemplateId: r.FreightTemplateId,
+		ViewCount:         r.ViewCount,
+		Images:            images,
+		CreatedAt:         r.CreatedAt,
+		UpdatedAt:         r.UpdatedAt,
 	}
 }
 

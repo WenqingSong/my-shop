@@ -1,6 +1,8 @@
 package v1
 
 import (
+	"encoding/json"
+
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 )
@@ -30,57 +32,67 @@ const (
 
 // Order 订单结构（查询与写接口复用）。
 type Order struct {
-	Id             int64        `json:"id" dc:"订单 id"`
-	OrderNo        string       `json:"order_no" dc:"全局唯一订单号"`
-	UserId         int64        `json:"user_id" dc:"归属用户 id"`
-	Status         string       `json:"status" dc:"状态：pending_payment/paid/shipped/received/completed/cancelled/refunded"`
-	TotalAmount    int64        `json:"total_amount" dc:"应付金额（整数分，快照 = original_amount - discount_amount）"`
-	OriginalAmount int64        `json:"original_amount" dc:"优惠前金额（整数分，快照 = Σ 订单项 price×quantity）"`
-	DiscountAmount int64        `json:"discount_amount" dc:"优惠金额（整数分，快照，无券为 0）"`
-	UserCouponId   *int64       `json:"user_coupon_id" dc:"下单时使用的用户券 id（软引用，快照，无券为空）"`
-	IdempotencyKey string       `json:"idempotency_key" dc:"幂等键"`
-	RecipientName  string       `json:"recipient_name" dc:"收货人姓名快照"`
-	Phone          string       `json:"phone" dc:"手机号快照"`
-	Province       string       `json:"province" dc:"省快照"`
-	City           string       `json:"city" dc:"市快照"`
-	District       string       `json:"district" dc:"区快照"`
-	Detail         string       `json:"detail" dc:"详细地址快照"`
-	AddressId      *int64       `json:"address_id" dc:"下单时地址 id（软引用，可空）"`
-	ExpireAt       *gtime.Time  `json:"expire_at" dc:"支付截止时间"`
-	CancelReason   *int         `json:"cancel_reason" dc:"取消原因：1=用户、2=超时；未取消为 null"`
-	PaidAt         *gtime.Time  `json:"paid_at" dc:"支付时间"`
-	ShippedAt      *gtime.Time  `json:"shipped_at" dc:"发货时间"`
-	ReceivedAt     *gtime.Time  `json:"received_at" dc:"收货时间"`
-	CompletedAt    *gtime.Time  `json:"completed_at" dc:"完成时间"`
-	CancelledAt    *gtime.Time  `json:"cancelled_at" dc:"取消时间"`
-	RefundedAt     *gtime.Time  `json:"refunded_at" dc:"退款时间"`
-	CreatedAt      *gtime.Time  `json:"created_at" dc:"创建时间"`
-	UpdatedAt      *gtime.Time  `json:"updated_at" dc:"更新时间"`
-	Items          []*OrderItem `json:"items" dc:"订单项列表"`
+	Id                   int64        `json:"id" dc:"订单 id"`
+	OrderNo              string       `json:"order_no" dc:"全局唯一订单号"`
+	UserId               int64        `json:"user_id" dc:"归属用户 id"`
+	Status               string       `json:"status" dc:"状态：pending_payment/paid/shipped/received/completed/cancelled/refunded"`
+	TotalAmount          int64        `json:"total_amount" dc:"应付金额（整数分，快照 = original_amount - discount_amount - member_discount_amount）"`
+	OriginalAmount       int64        `json:"original_amount" dc:"优惠前金额（整数分，快照 = Σ 订单项 price×quantity）"`
+	DiscountAmount       int64        `json:"discount_amount" dc:"优惠券优惠金额（整数分，快照，无券为 0）"`
+	MemberDiscountAmount int64        `json:"member_discount_amount" dc:"会员等级折扣金额（整数分，快照，无会员权益/无折扣为 0；不占用 discount_amount 的券语义）"`
+	ShippingFee          int64        `json:"shipping_fee" dc:"运费（整数分，快照；未绑定运费模板的商品为 0）"`
+	PayType              string       `json:"pay_type" dc:"支付方式：mock（默认）/balance（钱包余额）；未支付为空串"`
+	UserCouponId         *int64       `json:"user_coupon_id" dc:"下单时使用的用户券 id（软引用，快照，无券为空）"`
+	IdempotencyKey       string       `json:"idempotency_key" dc:"幂等键"`
+	RecipientName        string       `json:"recipient_name" dc:"收货人姓名快照"`
+	Phone                string       `json:"phone" dc:"手机号快照"`
+	Province             string       `json:"province" dc:"省快照"`
+	City                 string       `json:"city" dc:"市快照"`
+	District             string       `json:"district" dc:"区快照"`
+	Detail               string       `json:"detail" dc:"详细地址快照"`
+	AddressId            *int64       `json:"address_id" dc:"下单时地址 id（软引用，可空）"`
+	ExpireAt             *gtime.Time  `json:"expire_at" dc:"支付截止时间"`
+	CancelReason         *int         `json:"cancel_reason" dc:"取消原因：1=用户、2=超时；未取消为 null"`
+	PaidAt               *gtime.Time  `json:"paid_at" dc:"支付时间"`
+	ShippedAt            *gtime.Time  `json:"shipped_at" dc:"发货时间"`
+	ReceivedAt           *gtime.Time  `json:"received_at" dc:"收货时间"`
+	CompletedAt          *gtime.Time  `json:"completed_at" dc:"完成时间"`
+	CancelledAt          *gtime.Time  `json:"cancelled_at" dc:"取消时间"`
+	RefundedAt           *gtime.Time  `json:"refunded_at" dc:"退款时间"`
+	CreatedAt            *gtime.Time  `json:"created_at" dc:"创建时间"`
+	UpdatedAt            *gtime.Time  `json:"updated_at" dc:"更新时间"`
+	Items                []*OrderItem `json:"items" dc:"订单项列表"`
 }
 
 // OrderItem 订单项（商品/SKU/价格快照，自足）。
 type OrderItem struct {
 	Id               int64  `json:"id" dc:"订单项 id"`
 	SkuId            int64  `json:"sku_id" dc:"SKU id（软引用）"`
+	SkuCode          string `json:"sku_code" dc:"SKU 编码快照（下单时 sku_code）"`
 	ProductId        int64  `json:"product_id" dc:"商品 id（软引用）"`
 	SkuName          string `json:"sku_name" dc:"SKU 名称快照"`
+	SpecText         string `json:"spec_text" dc:"规格文本快照（如「红色,S」；无规格为空串）"`
 	ProductName      string `json:"product_name" dc:"商品名快照"`
 	ProductMainImage string `json:"product_main_image" dc:"商品主图快照"`
 	Price            int64  `json:"price" dc:"成交价（整数分，下单时 skus.price 快照）"`
+	OriginalPrice    int64  `json:"original_price" dc:"原价快照（整数分，下单时 skus.original_price）"`
 	Quantity         int64  `json:"quantity" dc:"数量"`
 }
 
-// CreateReq 创建订单请求（source=cart 时从购物车勾选项下单，忽略 sku_id/quantity；
-// source=direct 时按单个 SKU + 数量直接购买）。
+// CreateReq 创建订单请求（source=cart 时从购物车勾选项下单，忽略 sku_id/sku_code/quantity；
+// source=direct 时按单个 SKU（sku_code 优先，兼容 sku_id）+ 数量直接购买）。
+// 单价一律由服务端按 skus.price 确定；price 字段仅用于检测客户端伪造/篡改价格，
+// 与服务端定价不一致时拒绝下单，不参与任何金额计算。
 type CreateReq struct {
 	g.Meta         `path:"/orders" method:"post" tags:"订单" summary:"创建订单"`
-	Source         string `json:"source" v:"required" dc:"来源：cart/direct"`
-	AddressId      int64  `json:"address_id" v:"required" dc:"收货地址 id（必须属于当前用户）"`
-	IdempotencyKey string `json:"idempotency_key" v:"required" dc:"幂等键（同键同内容幂等，同键不同内容 9006）"`
-	SkuId          int64  `json:"sku_id" dc:"直接购买 SKU id（source=direct 必填）"`
-	Quantity       int64  `json:"quantity" dc:"直接购买数量（source=direct 必填，正整数）"`
-	CouponId       int64  `json:"coupon_id" dc:"可选使用的用户券 id（一笔订单最多一张，0 或缺省表示不使用）"`
+	Source         string       `json:"source" v:"required" dc:"来源：cart/direct"`
+	AddressId      int64        `json:"address_id" v:"required" dc:"收货地址 id（必须属于当前用户）"`
+	IdempotencyKey string       `json:"idempotency_key" v:"required" dc:"幂等键（同键同内容幂等，同键不同内容 9006）"`
+	SkuCode        string       `json:"sku_code" dc:"直接购买 SKU 编码（source=direct 推荐；与 sku_id 至少填一个）"`
+	SkuId          int64        `json:"sku_id" dc:"直接购买 SKU id（source=direct 兼容字段；与 sku_code 二选一或同时一致）"`
+	Quantity       int64        `json:"quantity" dc:"直接购买数量（source=direct 必填，正整数）"`
+	CouponId       int64        `json:"coupon_id" dc:"可选使用的用户券 id（一笔订单最多一张，0 或缺省表示不使用）"`
+	Price          *json.Number `json:"price" dc:"客户端单价（仅用于防伪校验）：必须等于服务端 skus.price，否则 9007 拒绝"`
 }
 
 // CreateRes 创建订单响应。
@@ -109,10 +121,55 @@ type DetailRes struct {
 	Order
 }
 
-// PayReq 支付请求（Mock 支付，仅本人）。
+// 订单支付方式（pay_type）。
+const (
+	PayTypeMock    = "mock"    // Mock 支付（默认）：只推进订单状态，不产生资金流水
+	PayTypeBalance = "balance" // 钱包余额支付：同事务内扣减余额并写资金流水
+)
+
+// PayReq 支付请求（仅本人）。
+//
+// pay_type 为空视为 mock；balance 走钱包余额渠道，余额不足返回 22002 且订单状态不变。
 type PayReq struct {
-	g.Meta `path:"/orders/:id/pay" method:"post" tags:"订单" summary:"支付订单（Mock）"`
-	Id     int64 `json:"id" in:"path" v:"required" dc:"订单 id"`
+	g.Meta  `path:"/orders/:id/pay" method:"post" tags:"订单" summary:"支付订单（Mock / 钱包余额）"`
+	Id      int64  `json:"id" in:"path" v:"required" dc:"订单 id"`
+	PayType string `json:"pay_type" dc:"支付方式：mock（默认）/balance；其它值返回 1001"`
+}
+
+// QuoteReq 订单算价预览请求（不接受客户端金额）。
+//
+// 预览金额不是最终可信金额：创建订单时会在事务内重新读取 SKU 权威价格、会员折扣与运费并复核。
+type QuoteReq struct {
+	g.Meta    `path:"/orders/quote" method:"post" tags:"订单" summary:"订单算价预览"`
+	Source    string `json:"source" v:"required" dc:"来源：cart/direct"`
+	AddressId int64  `json:"address_id" v:"required" dc:"收货地址 id（必须属于当前用户，决定运费）"`
+	SkuCode   string `json:"sku_code" dc:"直接购买 SKU 编码（source=direct 推荐）"`
+	SkuId     int64  `json:"sku_id" dc:"直接购买 SKU id（source=direct 兼容字段）"`
+	Quantity  int64  `json:"quantity" dc:"直接购买数量（source=direct 必填）"`
+	CouponId  int64  `json:"coupon_id" dc:"可选使用的用户券 id（只读预览，不占用/不核销）"`
+}
+
+// QuoteItem 算价明细行（服务端权威价格快照，仅用于展示）。
+type QuoteItem struct {
+	SkuId     int64  `json:"sku_id" dc:"SKU id"`
+	SkuCode   string `json:"sku_code" dc:"SKU 编码"`
+	ProductId int64  `json:"product_id" dc:"商品 id"`
+	Name      string `json:"name" dc:"SKU 名称"`
+	SpecText  string `json:"spec_text" dc:"规格文本"`
+	Price     int64  `json:"price" dc:"服务端成交价（整数分）"`
+	Quantity  int64  `json:"quantity" dc:"数量"`
+	Amount    int64  `json:"amount" dc:"行金额 = price × quantity（整数分）"`
+}
+
+// QuoteRes 订单算价预览响应（六槽位与守恒关系）。
+type QuoteRes struct {
+	OriginalAmount int64        `json:"original_amount" dc:"商品原始金额（整数分）"`
+	CouponDiscount int64        `json:"coupon_discount" dc:"优惠券折扣（整数分）"`
+	MemberDiscount int64        `json:"member_discount" dc:"会员折扣（整数分）"`
+	PointsDiscount int64        `json:"points_discount" dc:"积分抵扣（整数分，当前恒 0）"`
+	ShippingFee    int64        `json:"shipping_fee" dc:"运费（整数分）"`
+	PayableAmount  int64        `json:"payable_amount" dc:"应付金额（整数分）"`
+	Items          []*QuoteItem `json:"items" dc:"算价明细（服务端权威价格）"`
 }
 
 // PayRes 支付响应。

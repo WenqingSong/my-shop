@@ -296,6 +296,11 @@ func (r *dbConfigReader) value(key config.Key) string {
 	return value
 }
 
+// LatestVersion 返回内嵌迁移文件的最高版本号（只读，不连接数据库）。
+//
+// 供跨包测试与运维工具断言「目标库已迁移到最新」，避免硬编码版本号在新增迁移后失效。
+func LatestVersion() uint { return latestVersion() }
+
 // latestVersion 返回内嵌迁移文件的最高版本号（按数字升序取最大值）。
 func latestVersion() uint {
 	var latest uint

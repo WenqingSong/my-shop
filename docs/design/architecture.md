@@ -64,10 +64,17 @@ SurgeCart 基于 GoFrame v2 提供 HTTP API，MySQL 保存交易与身份数据�
 | 模块 | 职责 | 主要实现位置 |
 | --- | --- | --- |
 | IAM（身份与权限） | 前台用户与后台管理员两套独立身份域；JWT 签发 + Redis 会话、Refresh Token 轮换与会话撤销；管理员 RBAC（角色/权限/超级管理员） | `internal/auth`、`internal/middleware`、`controller/iam`、`controller/admin`、`logic/iam`、`logic/admin` |
+| 用户资料与地区 | 当前登录用户资料读取/更新（昵称、头像、手机号唯一、生日）；省/市/区地区字典只读查询；地址以 `region_id` 软引用地区字典（文本字段保留兼容） | `controller/profile`、`controller/region`、`controller/address`、`logic/profile`、`logic/region`、`logic/address` |
 | 订单 | 普通订单下单（服务端定价、快照、幂等、状态机）、支付（模拟）、取消、发货、收货；购物车与收货地址作为下单前置 | `controller/order`、`controller/cart`、`controller/address`、`logic/order`、`logic/cart`、`logic/address` |
 | 库存 | SKU 库存查询、增减与流水；条件扣减防超卖；与订单/秒杀共享库存事实 | `controller/inventory`、`controller/sku`、`logic/inventory`、`logic/sku` |
 | 优惠券 | 优惠券模板管理与用户领券/查询（核销与订单的耦合边界见领域设计） | `controller/coupon`、`logic/coupon` |
-| 退款 | 退款申请、审核、执行、撤销、关闭与审计 | `controller/refund`、`logic/refund` |
+| 退款 | 退款申请、审核、执行、撤销、关闭与审计；退款成功同事务退回钱包、冲回分销佣金、扣减会员成长值 | `controller/refund`、`logic/refund` |
+| 会员 | 会员等级配置（后台维护）、用户当前等级与成长值、成长值流水、会员折扣算价快照 | `controller/member`、`logic/member`、`api/member/v1` |
+| 一级分销 | 一级推荐关系绑定（含环校验）、订单支付计佣、佣金人工结算（仅状态流转）、退款佣金冲回、用户端与后台查询 | `controller/distribution`、`logic/distribution`、`api/distribution/v1` |
+| 运费与计价 | 运费模板/区域规则维护、服务端运费计算、订单统一计价入口 | `controller/freight`、`logic/freight`、`logic/pricing` |
+| 钱包 | 余额查询、资金流水、Mock 充值、订单扣款与退款入账事务原语 | `controller/wallet`、`logic/wallet` |
+| 拼团 | 拼团活动管理、开团/参团（条件更新控量）、成团/过期/运营关闭、失败补偿（取消待支付订单并恢复库存） | `controller/groupbuy`、`logic/groupbuy`、`api/groupbuy/v1` |
+| 砍价 | 砍价活动管理、用户发起砍价、好友助力、实例状态推进（砍价后下单未实现） | `controller/bargain`、`logic/bargain` |
 | 秒杀 | Redis + Lua 准入、MySQL 出队表异步落单、崩溃重投、幂等库存收敛、死信修复、限流/排队上限/熔断/对账与指标 | `controller/flashsale`、`logic/flashsale`、`internal/metrics` |
 | CMS（内容与运营） | 轮播图、文章、推荐位、评价、数据大屏等运营/内容能力 | `controller/banner`、`controller/article`、`controller/recommendation`、`controller/review`、`controller/dashboard`、`logic/*` |
 | 对象存储 | 静态资源存储边界：本地文件（轮播图占位图）与七牛云直传凭证签发 | `internal/storage`、`controller/upload`、`logic/upload` |
@@ -79,7 +86,7 @@ SurgeCart 基于 GoFrame v2 提供 HTTP API，MySQL 保存交易与身份数据�
 
 路由组织（`internal/cmd/routes_frontend.go`、`routes_admin.go`）：
 
-- **前台**：公开接口（注册/登录/刷新/分类/商品/轮播图/文章等）+ 登录用户接口（`Auth`）+ 登出（`AuthSignatureOnly`，仅验签幂等撤销）。
+- **前台**：公开接口（注册/登录/刷新/地区字典/分类/商品/轮播图/文章等）+ 登录用户接口（`Auth`，含 `/profile`、地址、订单、分销等）+ 登出（`AuthSignatureOnly`，仅验签幂等撤销）。
 - **后台**：`/admin` 前缀，公开登录 + `AdminAuth` + `RequirePermission(code)` 双层保护；超级管理员 `IsSuper` 直接放行，其余按角色持有的权限 code 判断，DB 查询失败 fail-closed。
 
 ## 3. 核心业务流程
@@ -98,13 +105,18 @@ SurgeCart 基于 GoFrame v2 提供 HTTP API，MySQL 保存交易与身份数据�
    │                             5. 提交事务，返回订单
    │◄───────────────────────────
    │   POST /orders/:id/pay      → 状态机：模拟支付（Mock，不接真实支付机构）
+   │                              同事务：券核销 + 会员成长值发放 + 一级佣金计提
    │   POST /orders/:id/cancel   → 取消并恢复库存（只恢复一次）
    │   POST /orders/:id/receive  → 确认收货
    │   POST /orders/:id/refund   → 发起退款（转退款模块）
+   │                              退款成功同事务：恢复库存 + 佣金冲回 + 成长值扣减
 ```
 
 - **超时取消**：后台扫描器（`startOrderCancelScanner`，默认每 60s）扫描 `status=待支付` 且已过期的订单，用「条件状态更新 + RowsAffected」原子闸门逐单取消并恢复库存，多实例并发下同一订单只被处理一次。
-- **一致性**：服务端定价 + 快照防篡改；条件扣减 + `RowsAffected` 防超卖；取消/退款只恢复一次库存。
+- **计价**：`total_amount = original_amount - discount_amount(券) - member_discount_amount(会员折扣) + shipping_fee`；
+  会员折扣按等级折扣率计算并按券后剩余金额夹紧，`total_amount ≥ 0`（见 `pricing.md`）。
+- **一致性**：服务端定价 + 快照防篡改；条件扣减 + `RowsAffected` 防超卖；取消/退款只恢复一次库存；
+  支付/退款链路的会员成长值与佣金写入与订单状态推进同事务，且各自幂等。
 - 详见 `docs/design/order.md`、`docs/design/inventory.md`。
 
 ### 3.2 秒杀流程
@@ -224,6 +236,7 @@ CNB CI（`.cnb.yml`）：
 | 库存 | `docs/design/inventory.md` |
 | 优惠券 | `docs/design/coupon.md` |
 | 退款 | `docs/design/refund.md` |
+| 一级分销 | `docs/design/distribution.md` |
 | 秒杀 | `docs/design/flash-sale.md` |
 | 轮播图 | `docs/design/banner.md` |
 | 文章 | `docs/design/article.md` |
@@ -233,6 +246,9 @@ CNB CI（`.cnb.yml`）：
 | 收藏 | `docs/design/favorite.md` |
 | 点赞 | `docs/design/like.md` |
 | 对象存储 | `docs/design/storage.md` |
+| 会员等级与成长值 | `docs/design/member.md` |
+| 一级分销与佣金 | `docs/design/distribution.md` |
+| API 时间字段语义（时区 / 序列化格式） | `docs/design/api-time-semantics.md` |
 | 错误码 | `docs/design/error-codes.md` |
 | 数据库迁移（机制） | `docs/design/migration.md` |
 | 数据库迁移（运维 / K8s Job） | `docs/development/migrations.md` |

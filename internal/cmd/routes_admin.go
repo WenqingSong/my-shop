@@ -5,18 +5,24 @@ import (
 
 	adminController "cnb.cool/go-cloud-devops/my-shop/internal/controller/admin"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/banner"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/bargain"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/coupon"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/dashboard"
+	distributionController "cnb.cool/go-cloud-devops/my-shop/internal/controller/distribution"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/flashsale"
+	freightController "cnb.cool/go-cloud-devops/my-shop/internal/controller/freight"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/groupbuy"
 	iamController "cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/inventory"
+	memberAdminCtrl "cnb.cool/go-cloud-devops/my-shop/internal/controller/member"
 	orderController "cnb.cool/go-cloud-devops/my-shop/internal/controller/order"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/product"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/recommendation"
 	refundController "cnb.cool/go-cloud-devops/my-shop/internal/controller/refund"
 	reviewController "cnb.cool/go-cloud-devops/my-shop/internal/controller/review"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/sku"
+	specController "cnb.cool/go-cloud-devops/my-shop/internal/controller/spec"
 	uploadCtrl "cnb.cool/go-cloud-devops/my-shop/internal/controller/upload"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 )
@@ -37,6 +43,7 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 	categoriesCtrl := categories.NewV1()
 	productCtrl := product.NewV1()
 	skuCtrl := sku.NewV1()
+	specCtrl := specController.NewV1()
 	inventoryCtrl := inventory.NewV1()
 	orderAdminCtrl := orderController.NewAdminV1()
 	flashsaleAdminCtrl := flashsale.NewAdminV1()
@@ -47,6 +54,11 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 	dashboardCtrl := dashboard.NewV1()
 	refundAdminCtrl := refundController.NewAdminV1()
 	couponAdminCtrl := coupon.NewAdminV1()
+	distributionAdminCtrl := distributionController.NewAdminV1()
+	groupBuyAdminCtrl := groupbuy.NewAdminV1()
+	freightAdminCtrl := freightController.NewAdminV1()
+	bargainAdminCtrl := bargain.NewAdminV1()
+	memberAdminCtrlV1 := memberAdminCtrl.NewAdminV1()
 
 	// 后台公开接口：管理员登录（无需 token）。
 	root.POST("/admin/login", adminCtrl.Login)
@@ -112,10 +124,20 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 		require("product:on_shelf").POST("/admin/products/:id/on-shelf", productCtrl.OnShelf)
 		require("product:off_shelf").POST("/admin/products/:id/off-shelf", productCtrl.OffShelf)
 
+		// 商品规格写入（AdminAuth + RequirePermission）：规格组/规格值随商品维护。
+		require("spec:create").POST("/admin/product-specs", specCtrl.CreateGroup)
+		require("spec:update").PUT("/admin/product-specs/:id", specCtrl.UpdateGroup)
+		require("spec:delete").DELETE("/admin/product-specs/:id", specCtrl.DeleteGroup)
+		require("spec:create").POST("/admin/product-specs/:id/values", specCtrl.CreateValue)
+		require("spec:update").PUT("/admin/product-spec-values/:id", specCtrl.UpdateValue)
+		require("spec:delete").DELETE("/admin/product-spec-values/:id", specCtrl.DeleteValue)
+
 		// SKU 写操作（AdminAuth + RequirePermission，扁平路由）。
 		require("sku:create").POST("/admin/skus", skuCtrl.Create)
 		require("sku:update").PUT("/admin/skus/:id", skuCtrl.Update)
 		require("sku:delete").DELETE("/admin/skus/:id", skuCtrl.Delete)
+		// 按商品规格组合生成 SKU（幂等：已存在的组合保留原 SKU 与编码）。
+		require("sku:create").POST("/admin/products/:id/skus/generate", skuCtrl.Generate)
 
 		// 库存查询（后台仅 AdminAuth，无读权限）。
 		admin.GET("/admin/inventories/:sku_id", inventoryCtrl.Get)
@@ -185,5 +207,53 @@ func RegisterAdminRoutes(root *ghttp.RouterGroup) {
 		require("coupon:create").POST("/admin/coupons", couponAdminCtrl.AdminCreate)
 		require("coupon:list").GET("/admin/coupons", couponAdminCtrl.AdminList)
 		require("coupon:stop").POST("/admin/coupons/:id/stop", couponAdminCtrl.AdminStop)
+
+		// 一级分销后台只读查询与人工结算（AdminAuth + RequirePermission）：
+		//   - 关系与分销用户汇总持 distribution:referral_list；
+		//   - 佣金记录与佣金统计持 distribution:commission_list；
+		//   - 人工结算（10→20，仅状态流转，不含真实资金转账）持 distribution:settle。
+		//   - stats 静态段登记在 /commissions 子路径下，不与任何 :id 路由冲突。
+		require("distribution:referral_list").GET("/admin/distributions/referrals", distributionAdminCtrl.AdminListReferrals)
+		require("distribution:referral_list").GET("/admin/distributions/distributors", distributionAdminCtrl.AdminListDistributors)
+		require("distribution:commission_list").GET("/admin/distributions/commissions", distributionAdminCtrl.AdminListCommissions)
+		require("distribution:commission_list").GET("/admin/distributions/commissions/stats", distributionAdminCtrl.AdminCommissionStats)
+
+		// B1-04-06 BEGIN：拼团后台（活动管理与团查询/关闭）
+		require("group_buy:create").POST("/admin/group-buys", groupBuyAdminCtrl.AdminCreate)
+		require("group_buy:update").PUT("/admin/group-buys/:id", groupBuyAdminCtrl.AdminUpdate)
+		require("group_buy:update").POST("/admin/group-buys/:id/status", groupBuyAdminCtrl.AdminStatus)
+		require("group_buy:list").GET("/admin/group-buys", groupBuyAdminCtrl.AdminList)
+		require("group_buy:view").GET("/admin/group-buys/:id", groupBuyAdminCtrl.AdminDetail)
+		require("group_buy:list").GET("/admin/group-buy-teams", groupBuyAdminCtrl.AdminListTeams)
+		require("group_buy:view").GET("/admin/group-buy-teams/:id", groupBuyAdminCtrl.AdminTeamDetail)
+		require("group_buy:close").POST("/admin/group-buy-teams/:id/close", groupBuyAdminCtrl.AdminCloseTeam)
+		// B1-04-06 END
+		require("distribution:settle").POST("/admin/distributions/commissions/:id/settle", distributionAdminCtrl.AdminSettleCommission)
+
+		// 会员等级后台维护（AdminAuth + RequirePermission）。
+		require("member:list").GET("/admin/member-levels", memberAdminCtrlV1.AdminListLevels)
+		require("member:create").POST("/admin/member-levels", memberAdminCtrlV1.AdminCreateLevel)
+		require("member:update").PUT("/admin/member-levels/:id", memberAdminCtrlV1.AdminUpdateLevel)
+		require("member:delete").DELETE("/admin/member-levels/:id", memberAdminCtrlV1.AdminDeleteLevel)
+		require("member:view").GET("/admin/members/:user_id", memberAdminCtrlV1.AdminMember)
+
+		// 运费模板后台管理（AdminAuth + RequirePermission）。
+		//   - 模板与区域规则的写操作持 freight:update；查询持 freight:list/freight:view。
+		//   - 区域规则采用整体替换（PUT .../rules），保证「同模板同区域至多一条规则」。
+		require("freight:create").POST("/admin/freight-templates", freightAdminCtrl.AdminCreate)
+		require("freight:list").GET("/admin/freight-templates", freightAdminCtrl.AdminList)
+		require("freight:view").GET("/admin/freight-templates/:id", freightAdminCtrl.AdminDetail)
+		require("freight:update").PUT("/admin/freight-templates/:id", freightAdminCtrl.AdminUpdate)
+		require("freight:update").PUT("/admin/freight-templates/:id/status", freightAdminCtrl.AdminUpdateStatus)
+		require("freight:view").GET("/admin/freight-templates/:id/rules", freightAdminCtrl.AdminListRules)
+		require("freight:update").PUT("/admin/freight-templates/:id/rules", freightAdminCtrl.AdminReplaceRules)
+		// 砍价活动后台管理（AdminAuth + RequirePermission）：
+		//   - 列表持 bargain:list、详情持 bargain:view；
+		//   - 创建持 bargain:create，编辑与启停持 bargain:update。
+		require("bargain:create").POST("/admin/bargain-activities", bargainAdminCtrl.AdminCreate)
+		require("bargain:list").GET("/admin/bargain-activities", bargainAdminCtrl.AdminList)
+		require("bargain:view").GET("/admin/bargain-activities/:id", bargainAdminCtrl.AdminDetail)
+		require("bargain:update").PUT("/admin/bargain-activities/:id", bargainAdminCtrl.AdminUpdate)
+		require("bargain:update").POST("/admin/bargain-activities/:id/status", bargainAdminCtrl.AdminStatus)
 	})
 }

@@ -7,7 +7,10 @@
 package legacymigrate
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -228,6 +231,30 @@ func SplitSliderImages(s string) []string {
 		}
 	}
 	return out
+}
+
+// SpecAssociation 是 SKU 在一个规格组下选中的规格值（目标库新 ID）。
+type SpecAssociation struct {
+	SpecID  int64
+	ValueID int64
+}
+
+// SpecSignature 按 docs/design/sku.md §2.4 生成规格组合指纹：
+// 按 spec_id 升序，组合 "spec_id:spec_value_id"，逗号连接后取小写 MD5。
+// 无规格关联返回空串（调用方写入 NULL）。
+func SpecSignature(assocs []SpecAssociation) string {
+	if len(assocs) == 0 {
+		return ""
+	}
+	sorted := make([]SpecAssociation, len(assocs))
+	copy(sorted, assocs)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].SpecID < sorted[j].SpecID })
+	parts := make([]string, 0, len(sorted))
+	for _, a := range sorted {
+		parts = append(parts, fmt.Sprintf("%d:%d", a.SpecID, a.ValueID))
+	}
+	sum := md5.Sum([]byte(strings.Join(parts, ",")))
+	return hex.EncodeToString(sum[:])
 }
 
 // SkuStatusForProduct 计算 SKU 状态：enabled(1) 当且仅当商品 on_shelf(1)，其余 disabled(0)。

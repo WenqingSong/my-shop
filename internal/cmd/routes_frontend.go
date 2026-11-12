@@ -6,19 +6,28 @@ import (
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/address"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/article"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/banner"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/bargain"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/cart"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/categories"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/coupon"
+	distributionCtrl "cnb.cool/go-cloud-devops/my-shop/internal/controller/distribution"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/favorite"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/flashsale"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/groupbuy"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/iam"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/like"
+	memberCtrl "cnb.cool/go-cloud-devops/my-shop/internal/controller/member"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/order"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/product"
+	// B1-04-01 BEGIN：用户资料与地区字典
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/profile"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/region"
+	// B1-04-01 END
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/recommendation"
 	refundCtrl "cnb.cool/go-cloud-devops/my-shop/internal/controller/refund"
 	"cnb.cool/go-cloud-devops/my-shop/internal/controller/review"
 	uploadCtrl "cnb.cool/go-cloud-devops/my-shop/internal/controller/upload"
+	"cnb.cool/go-cloud-devops/my-shop/internal/controller/wallet"
 	"cnb.cool/go-cloud-devops/my-shop/internal/middleware"
 )
 
@@ -43,10 +52,19 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	likeCtrl := like.NewV1()
 	bannerCtrl := banner.NewV1()
 	recommendationCtrl := recommendation.NewV1()
+	// B1-04-01 BEGIN：用户资料与地区字典
+	profileCtrl := profile.NewV1()
+	regionCtrl := region.NewV1()
+	// B1-04-01 END
 	articleCtrl := article.NewV1()
 	uploadCtrlV1 := uploadCtrl.NewV1()
 	refundCtrlV1 := refundCtrl.NewV1()
 	couponCtrl := coupon.NewV1()
+	distributionCtrlV1 := distributionCtrl.NewV1()
+	walletCtrl := wallet.NewV1()
+	bargainCtrl := bargain.NewV1()
+	groupBuyCtrl := groupbuy.NewV1()
+	memberCtrlV1 := memberCtrl.NewV1()
 
 	// 前台公开接口：注册、登录、刷新、分类查询、商品查询、轮播图列表（无需 token）。
 	root.POST("/register", iamCtrl.Register)
@@ -64,15 +82,35 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 	root.GET("/banners", bannerCtrl.List)
 	// 公开推荐位查询（无需 token，仅返回启用位中的可售商品）。
 	root.GET("/recommendations/:code", recommendationCtrl.Frontend)
+	// 公开砍价活动列表/详情（无需 token；列表仅返回启用且在时间窗内的活动）。
+	root.GET("/bargain-activities", bargainCtrl.List)
+	root.GET("/bargain-activities/:id", bargainCtrl.Detail)
+
+	// B1-04-06 BEGIN：拼团活动浏览（公开只读；团详情需登录，见下方 Auth 分组）
+	root.GET("/group-buys", groupBuyCtrl.ListActivities)
+	root.GET("/group-buys/:id", groupBuyCtrl.ActivityDetail)
+	root.GET("/group-buys/:id/teams", groupBuyCtrl.ListTeams)
+	// B1-04-06 END
 	// 公开文章列表/详情/点赞数（无需 token）。
 	root.GET("/articles", articleCtrl.List)
 	root.GET("/articles/:id", articleCtrl.Detail)
 	root.GET("/articles/:id/like/count", articleCtrl.LikeCount)
 
+	// B1-04-01 BEGIN：地区字典（公开只读；/regions/tree 先于 /regions/:id 注册）
+	root.GET("/regions", regionCtrl.List)
+	root.GET("/regions/tree", regionCtrl.Tree)
+	root.GET("/regions/:id", regionCtrl.Detail)
+	// B1-04-01 END
+
 	// 前台登录用户接口：/me、收货地址、购物车与会话管理均需要认证 + 会话有效性校验。
 	root.Group("/", func(user *ghttp.RouterGroup) {
 		user.Middleware(middleware.Auth)
 		user.GET("/me", iamCtrl.Me)
+
+		// B1-04-01 BEGIN：用户资料（仅登录用户，作用于本人数据）
+		user.GET("/profile", profileCtrl.Get)
+		user.PUT("/profile", profileCtrl.Update)
+		// B1-04-01 END
 
 		// 收货地址（仅登录用户，作用于本人数据）。
 		user.POST("/addresses", addressCtrl.Create)
@@ -90,6 +128,7 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 
 		// 订单（仅登录用户，作用于本人数据）。
 		user.POST("/orders", orderCtrl.Create)
+		user.POST("/orders/quote", orderCtrl.Quote)
 		user.GET("/orders", orderCtrl.List)
 		user.GET("/orders/:id", orderCtrl.Detail)
 		user.POST("/orders/:id/pay", orderCtrl.Pay)
@@ -141,6 +180,31 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 		user.POST("/coupons/:template_id/claim", couponCtrl.Claim)
 		user.GET("/my/coupons", couponCtrl.ListMine)
 
+		// 会员等级与权益（仅登录用户；等级配置为只读，会员信息作用于本人）。
+		user.GET("/members/levels", memberCtrlV1.Levels)
+		user.GET("/my/membership", memberCtrlV1.My)
+		user.GET("/my/membership/growth-logs", memberCtrlV1.GrowthLogs)
+
+		// 一级分销（仅登录用户，作用于本人数据；被推荐人恒取自已认证身份）。
+		user.POST("/distribution/referral", distributionCtrlV1.BindReferral)
+		user.GET("/distribution/me", distributionCtrlV1.MyInfo)
+		user.GET("/distribution/subordinates", distributionCtrlV1.ListSubordinates)
+		user.GET("/distribution/commissions", distributionCtrlV1.ListMyCommissions)
+		// 砍价（仅登录用户，作用于本人数据；实例详情与助力记录允许登录用户查看已分享的实例）。
+		// B1-04-06 BEGIN：拼团开团/参团与本人的拼团记录（身份取自 Principal）
+		user.POST("/group-buys/:id/teams", groupBuyCtrl.CreateTeam)
+		user.POST("/group-buy-teams/:id/join", groupBuyCtrl.JoinTeam)
+		user.GET("/group-buy-teams/:id", groupBuyCtrl.TeamDetail)
+		user.GET("/my/group-buys", groupBuyCtrl.MyList)
+		// B1-04-06 END
+
+		user.POST("/bargain-activities/:id/instances", bargainCtrl.Start)
+		user.GET("/my/bargain-instances", bargainCtrl.MyList)
+		user.GET("/bargain-instances/:id", bargainCtrl.InstanceDetail)
+		user.GET("/bargain-instances/:id/helps", bargainCtrl.Helps)
+		user.POST("/bargain-instances/:id/help", bargainCtrl.Help)
+		user.POST("/bargain-instances/:id/abandon", bargainCtrl.Abandon)
+
 		user.GET("/sessions", iamCtrl.ListSessions)
 		user.DELETE("/sessions/:sid", iamCtrl.RevokeSession)
 		user.POST("/sessions/revoke-others", iamCtrl.RevokeOthers)
@@ -148,6 +212,11 @@ func RegisterFrontendRoutes(root *ghttp.RouterGroup) {
 
 		// 文件上传（仅登录用户，签发七牛云直传凭证）。
 		user.GET("/qiniu/upload/token", uploadCtrlV1.FrontendToken)
+
+		// 钱包（仅登录用户，作用于本人余额与本人流水；不接受客户端 user_id）。
+		user.GET("/wallet", walletCtrl.Account)
+		user.GET("/wallet/transactions", walletCtrl.Transactions)
+		user.POST("/wallet/recharges", walletCtrl.Recharge)
 	})
 
 	// 前台登出：仅验签（幂等撤销，即使 session 已撤销/缺失也能到达 handler）。

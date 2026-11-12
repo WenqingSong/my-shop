@@ -1,0 +1,6 @@
+# 认证方案（由 tools/openapi-gen 生成）。
+bearerAuth:
+  type: http
+  scheme: bearer
+  bearerFormat: JWT
+  description: 'JWT（HS256，iss=surgecart）。通过 Authorization: Bearer <token> 传递，不支持 Cookie。用户 token 的 type=user，管理员 token 的 type=admin，两者身份隔离：用户 token 不能访问管理端接口，管理员 token 不能访问用户端接口。用户接口额外校验 Redis 会话、users.status 与 auth_epoch；管理员接口额外校验 Redis 会话与 admins.status。仅验签登出接口（x-auth-mode=signature_only）不查询 Redis 会话。'
