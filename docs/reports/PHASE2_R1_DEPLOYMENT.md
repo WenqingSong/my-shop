@@ -312,13 +312,20 @@ nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
 | 开发基线 | `ddfd5ab77ced617ae0b0020c46a8220396b52145` |
 | 开发分支 | `feat/p2-r1-deployment` |
 | 配置与测试提交 | `a589a50` fix(nginx): 修复生产 API 前缀剥离与 storage 静态资源代理 |
-| 报告提交 | `<见文末 Git 元数据回填>` |
+| 报告提交 | `ee8fbca` docs(report): 新增 R1 生产部署与 Nginx 路由修复报告 |
+| 远端分支 | `origin/feat/p2-r1-deployment` |
 
 ---
 
 ## 8. 是否已 Push
 
-`git push -u origin feat/p2-r1-deployment` 普通推送（无 `--force`），结果见文末元数据。
+已普通推送（无 `--force`、无 `--force-with-lease`）：
+
+```text
+To https://cnb.cool/framework-station/my-shop
+ * [new branch]      feat/p2-r1-deployment -> feat/p2-r1-deployment
+branch 'feat/p2-r1-deployment' set up to track 'origin/feat/p2-r1-deployment'.
+```
 
 ---
 
@@ -339,8 +346,11 @@ nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
 
 ## Git 元数据（提交后回填）
 
+- 基线：`ddfd5ab77ced617ae0b0020c46a8220396b52145`（`feat/phase2-ecommerce-business`）
 - 分支：`feat/p2-r1-deployment`
 - 代码提交：`a589a50`
-- 报告提交：待回填
-- 推送：待回填
-- 工作区：待回填
+- 报告提交：`ee8fbca`
+- 元数据回填提交：本提交（仅改 `docs/reports/PHASE2_R1_DEPLOYMENT.md` 的 Git 元数据，不含代码变更）
+- 推送：`origin/feat/p2-r1-deployment`，普通 push，非 force
+- 工作区：clean（无未提交改动、无未跟踪文件）
+- 未合并集成分支、未修改 `main`
