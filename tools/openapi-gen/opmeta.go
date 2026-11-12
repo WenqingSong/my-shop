@@ -53,7 +53,7 @@ var opMetaByKey = map[string]*opMeta{
 	"POST /distribution/referral":          {KnownIssues: []*OMap{d1Issue()}},
 	// B1-04 八分支集成：以下 5 条写接口同样带「非 path 的 required 字段」，
 	// 绑定阶段 gvalid 失败仍返回 500/51（未在本次集成中改变错误码映射）。
-	"POST /orders/quote":                      {KnownIssues: []*OMap{d1Issue()}},
+	"POST /orders/quote": {KnownIssues: []*OMap{d1Issue()}},
 	// 钱包充值带 body.idempotency_key（v:"required"），因此在 D1 之外还要按 D5 声明幂等键。
 	"POST /wallet/recharges":                  {KnownIssues: []*OMap{d1Issue()}, Idempotency: idemBody("idempotency_key", true)},
 	"POST /admin/freight-templates":           {KnownIssues: []*OMap{d1Issue()}},

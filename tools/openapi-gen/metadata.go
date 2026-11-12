@@ -177,7 +177,7 @@ var enumRegistry = map[string]enumDef{
 
 	// 砍价（B1-04-07）
 	// Activity.status 为整数枚举（DB TINYINT 0/1）；Instance.status 为字符串枚举。
-	"BargainActivity.status":          intEnum(0, 1).withLabels("0", "停用", "1", "启用"),
+	"BargainActivity.status":           intEnum(0, 1).withLabels("0", "停用", "1", "启用"),
 	"BargainAdminStatusRequest.status": intEnum(0, 1).withLabels("0", "停用", "1", "启用"),
 	"BargainAdminListRequest.status": intEnum(0, 1).
 		withLabels("0", "停用", "1", "启用"),
@@ -226,10 +226,10 @@ var enumRegistry = map[string]enumDef{
 		withLabels("0", "停用", "1", "启用"),
 
 	// 运费（B1-04-03）：模板状态与包邮开关均为整数枚举（DB TINYINT 0/1）
-	"FreightTemplate.status":              intEnum(0, 1).withLabels("0", "停用", "1", "启用"),
-	"FreightTemplate.is_free":             intEnum(0, 1).withLabels("0", "按区域规则计费", "1", "模板级无条件包邮"),
-	"FreightAdminCreateRequest.is_free":   intEnum(0, 1).withLabels("0", "按区域规则计费", "1", "无条件包邮"),
-	"FreightAdminUpdateRequest.is_free":   intEnum(0, 1).withLabels("0", "按区域规则计费", "1", "无条件包邮"),
+	"FreightTemplate.status":                 intEnum(0, 1).withLabels("0", "停用", "1", "启用"),
+	"FreightTemplate.is_free":                intEnum(0, 1).withLabels("0", "按区域规则计费", "1", "模板级无条件包邮"),
+	"FreightAdminCreateRequest.is_free":      intEnum(0, 1).withLabels("0", "按区域规则计费", "1", "无条件包邮"),
+	"FreightAdminUpdateRequest.is_free":      intEnum(0, 1).withLabels("0", "按区域规则计费", "1", "无条件包邮"),
 	"FreightAdminUpdateStatusRequest.status": intEnum(0, 1).withLabels("0", "停用", "1", "启用"),
 
 	// 订单算价（B1-04 集成）与秒杀活动更新
@@ -253,18 +253,18 @@ var moneyExactFields = map[string]bool{
 	"price_snapshot":     true,
 	"product_price":      true,
 	// B1-04 集成：钱包余额、算价明细、运费模板与砍价助力价格（均为整数分）。
-	"balance":          true,
-	"balance_before":   true,
-	"balance_after":    true,
-	"shipping_fee":     true,
-	"coupon_discount":  true,
-	"member_discount":  true,
-	"points_discount":  true,
-	"first_fee":        true,
-	"additional_fee":   true,
-	"free_threshold":   true,
-	"price_before":     true,
-	"price_after":      true,
+	"balance":         true,
+	"balance_before":  true,
+	"balance_after":   true,
+	"shipping_fee":    true,
+	"coupon_discount": true,
+	"member_discount": true,
+	"points_discount": true,
+	"first_fee":       true,
+	"additional_fee":  true,
+	"free_threshold":  true,
+	"price_before":    true,
+	"price_after":     true,
 }
 
 // unixSecondFields 是经逐一核实的 unix 秒时间戳字段（不是毫秒、不是金额）。
