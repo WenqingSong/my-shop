@@ -62,7 +62,7 @@ Redis 预扣仅作准入闸门，MySQL 始终是订单与已售数量的最终�
 - **版本化迁移**：golang-migrate 管理 schema，`migrate up` 幂等 + `GET_LOCK` 串行，schema 未就绪不对外。
 - **凭据分离**：敏感值仅经环境变量注入（`${VAR:?}` 必填，无内置默认回退），`config.yaml` 敏感字段保持空值。
 - **健康检查与优雅停机**：`/health` liveness、`/ready` readiness（DB/Redis 不可达返回 503），`SIGTERM` 后先 stop accepting 并 drain 在途请求（有界），再按 Publisher → Consumer → Producer → Scanner 关闭后台组件。
-- **可观测与 CI/CD**：Prometheus 秒杀指标与 recording rules；CNB 流水线覆盖测试、竞态检测、构建与镜像发布。
+- **可观测与 CI/CD**：Prometheus 秒杀指标与 recording rules；CNB 流水线的完整门禁为「测试 → 竞态检测 → 构建 → 镜像发布」，当前因组织 CPU 额度不足仅保留 1 核 `ci-smoke`，恢复方式见 `.cnb.yml` 内注释。
 
 详见 [部署设计](docs/design/deployment.md)、[数据库迁移](docs/design/migration.md)。
 
@@ -310,7 +310,7 @@ make test-serve-lifecycle   # 进程级 serve 生命周期（真实 SIGTERM 与�
 
 - **本地/单机**：Docker Compose 编排 nginx/app/MySQL/Redis/Prometheus 五个服务，Nginx 为对外唯一入口，app 仅暴露 Compose 内网端口；`make init` + `make up` 两阶段拉起。
 - **镜像发布**：`make docker-build` / `make docker-push` 构建并推送短 SHA + `latest` 双标签镜像（同源同 digest）。
-- **CI/CD**：CNB 流水线（`.cnb.yml`）按「测试 → 竞态检测 → 构建 → 镜像发布」顺序执行，任一阶段失败即中断；`latest` 仅指向测试全绿的构建。
+- **CI/CD**：CNB 流水线（`.cnb.yml`）的完整设计为「测试 → 竞态检测 → 构建 → 镜像发布」，任一阶段失败即中断；但当前根组织 CI CPU 额度不足（8 核预冻结需 1.33 核时），重型阶段已注释，仅保留 1 核 `ci-smoke` 门禁，额度恢复后按文件内注释恢复。
 - **Kubernetes（Kustomize，单副本）**：两个独立构建入口——应用 `manifest/kubernetes/overlays/production`、迁移 `manifest/kubernetes/migration/overlays/production`。发布顺序固定为「构建镜像 → 获取发布锁（Lease）→ 版本降级保护 → 执行迁移 Job → 应用 Deployment → 发布成功判定 → 释放锁」，由 `make deploy-k8s`（`scripts/deploy-k8s.sh`）强制；清单校验用 `make test-k8s-manifest`，发布脚本行为用 `make test-deploy-k8s`。默认 `ClusterIP`，不含 Ingress/TLS（无真实域名与证书方案）。详见 [Kubernetes 部署体系](docs/development/kubernetes.md) 与 [发布锁设计](docs/design/deploy-lock.md)。
 - **本地 Kubernetes（kind）**：单节点 kind 集群 + 集群内 MySQL/Redis/Kafka（均单副本，Kafka 为 KRaft 单节点），应用 1 副本、PVC 5Gi、`restricted` Pod Security。T3-01 在真实集群完成基础设施验证（Node Ready、PVC Bound、MySQL `SELECT 1`、Redis `PING`、Kafka 生产消费回读），T3-02 完成应用部署与 `db_scanner` / `kafka` 两种模式的真实业务链路验证。**这是本地验证环境，不是生产部署**：无多节点、无高可用、无容量结论。见 [本地 Kubernetes 基础设施](docs/development/local-infrastructure.md) 与[验证报告](docs/reports/t3-02-application-deployment-validation/E2E_REPORT.md)。
 - **Kubernetes 监控栈（独立入口）**：`kubectl apply -k manifest/kubernetes/monitoring/prometheus/overlays/local`，再执行 `kubectl apply -k manifest/kubernetes/monitoring/grafana/overlays/local`。监控栈不参与 `deploy-k8s.sh` 的发布顺序，也不消费应用命名空间的 ConfigMap/Secret，只通过网络抓取 `surgecart.surgecart.svc.cluster.local:8000/metrics`；无告警、无 Ingress，UI 仅用 `port-forward` 访问。详见 [Prometheus 监控栈](docs/development/prometheus.md)、[Grafana 看板栈](docs/development/grafana.md)。
@@ -326,7 +326,7 @@ make test-serve-lifecycle   # 进程级 serve 生命周期（真实 SIGTERM 与�
 | 本地 Compose 抓取 | 已配置：`prometheus/prometheus.yml` 以 15s 间隔抓取 `app:8000/metrics`；p95 / p99 recording rules 由 `make test-prometheus` 校验 |
 | Kubernetes 监控栈 | 已交付：`manifest/kubernetes/monitoring/` 下 Prometheus 2.53.0 + Grafana 11.2.2，单副本、`restricted` PSS、`ClusterIP`（仅 port-forward 访问）；Grafana 自动加载 14 面板 `SurgeCart Overview` 看板；清单由 `make test-k8s-manifest` 静态断言 |
 | 告警 | **未交付**：无 Alertmanager、无告警规则、无通知渠道；`up == 0` 不会自动通知 |
-| k6 性能与可靠性 | 框架与实验已交付：`test/k6`（smoke / read-load / flashsale-order）；T5-02 只读负载 1/5/10 VU、T5-03 `kafka` 模式并发正确性、T5-04 积压与故障恢复实验。结论仅限本地 kind 单节点，不构成生产容量承诺 |
+| k6 性能与可靠性 | 框架与实验已交付：`test/k6`（smoke / read-load / flashsale-order）；T5-02 只读负载 1/5/10 VU；T5-03 `kafka` 模式并发正确性（40 用户抢 20 库存 → 恰好 20 单成交，一人一单与同键重放均只产生 1 单）；T5-04 消费暂停积压 20 条后 Lag 归零、Broker 停机 59s 零丢失、Pod `SIGKILL` 重投不重不漏、4 类永久错误全部进 DLQ。结论仅限本地 kind 单节点，不构成生产容量承诺 |
 | 已知监控缺陷 | T5-04 实测 `surgecart_outbox_oldest_age_seconds` 在 `Asia/Shanghai` 下恒定多报 8 小时（MySQL 会话时区 `NOW(6)` 与 `created_at` UTC 墙钟混用），**未修复**，见交付报告 |
 
 指标语义、抓取边界与部署命令见 [Prometheus 监控栈](docs/development/prometheus.md)、[Grafana 看板栈](docs/development/grafana.md)；性能实验口径见 [k6 测试框架](test/k6/README.md)。

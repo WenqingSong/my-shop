@@ -2,7 +2,7 @@
 
 > **文档性质**：本文件是 SurgeCart（`my-shop`）的独立事实手册，专门写给大型语言模型与自动化编码代理阅读，目标是让模型在不逐文件通读整个仓库的前提下，准确理解系统边界、关键不变量、失败语义与改动风险。
 >
-> **事实基线**：`main` @ `c60e432`（2026-11-19）。代码统计：`api/` + `internal/` 约 210 个 Go 文件，全仓 125 个 `*_test.go`，25 个 SQL migration，52 个 Kubernetes YAML，41 个 Shell 脚本。数字会随演进变化，只用于建立规模感。
+> **事实基线**：`main` @ `c89fbd9`（2026-11-19，本文档更新前的最后一次代码提交；此后仅有文档与 CI 配置变更）。代码统计：`api/` + `internal/` 约 210 个 Go 文件，全仓 125 个 `*_test.go`，25 个 SQL migration，52 个 Kubernetes YAML，41 个 Shell 脚本。数字会随演进变化，只用于建立规模感。
 >
 > **与 README 的关系**：README 面向人类读者，强调定位、状态与快速开始；本文档面向模型，强调「事实在哪里、边界是什么、什么不能声称、改动会破坏什么」。两者冲突时以代码为准，并按本文 §1.3 的规则处理文档漂移。
 
@@ -389,6 +389,20 @@ Nginx（生成/透传 X-Request-ID）
 - 支付：同一事务内将券从 `locked` 核销为 `used`，重复支付不重复核销。
 - 取消：将券从 `locked` 释放回 `available`（清 `order_id`/`locked_at`），只释放一次。当前退款路径不负责释放优惠券，退款后的券状态沿用支付时的 `used`。
 - 券的可用性（门槛、有效期）在锁定时用 SQL 判定，避免 Go↔MySQL 时区漂移。
+
+### 6.6 退款链路（已支付未发货整单退款）
+
+- 边界：仅普通订单 `orders.status=20`（已支付、未发货）可申请；秒杀订单「下单即成交」，不走支付/取消/退款。
+- 数据：`refund_requests`（申请主数据）+ `refund_audits`（append-only，无 UPDATE/DELETE 接口）；生成列 `active_key = (status IN (10,20,30) ? order_id : NULL)` + `UNIQUE(active_key)` 机械保证同一订单至多一条有效申请，拒绝/撤销/关闭后可再次申请。
+- 状态机：`10 申请中 → 20 待退款 → 60 退款成功`；`20 → 30 退款失败`；`30 → 60`（重试成功）或 `30 → 70`（人工关闭）；`10 → 40`（审核拒绝）、`10 → 50`（用户撤销）。非法迁移返回 `18002` 且状态不变。
+- 事务与互斥：
+  - 申请/撤销/审核只写退款表 + 审计，不碰订单与库存；
+  - 执行成功 = 单事务「`orders` `20→70` + `IncreaseInTx` 恢复库存 + 退款 `60` + 审计」，复用 `IOrder.CompleteRefundInTx` 的 `WHERE status=20` 闸门，保证只补偿一次；
+  - 执行失败 = 退款 `30`，订单/库存不变；
+  - 退款与发货互斥：申请与发货对同一 `orders` 行 `SELECT ... FOR UPDATE` 串行化，`Ship` 事务内检查有效申请（{10,20,30}），存在即拒绝（`18005`）。
+- 幂等：重复确认成功时退款状态条件更新 0 行、订单闸门 0 行，幂等返回，不重复恢复库存。
+- 权限：`refund:list` / `refund:view` / `refund:review` / `refund:execute`（`execute` 覆盖执行与关闭）；错误码域 18000–18999。
+- 已知留白：退款不释放优惠券，券状态沿用支付时的 `used`（见 §6.5）；完整设计见 `docs/design/refund.md`。
 
 ---
 
@@ -821,6 +835,8 @@ kubectl apply -k manifest/kubernetes/overlays/local
 | `make deploy-k8s` | 生产发布（锁 + 迁移 Job + Deployment） |
 | `make test*` | 各类门禁（见 §12） |
 
+- CI：`.cnb.yml` 的完整门禁为「测试 → 竞态 → 构建 → 镜像发布」，当前因根组织 CI CPU 额度不足（8 核预冻结需 1.33 核时 > 余额），重型阶段被注释，仅保留 1 核 `ci-smoke`；额度恢复后按文件内注释恢复。
+
 ---
 
 ## 12. 测试与质量门禁
@@ -891,6 +907,21 @@ kubectl apply -k manifest/kubernetes/overlays/local
 | 生产容量 / 多副本 / 高可用 | **未验证** | 无相关实验与数据 |
 | 告警 | **未实现** | 无 Alertmanager/规则/通知 |
 | 真实支付 | **未实现** | 普通订单支付为 Mock |
+
+### 12.5 关键实验结论（仅代表本地 kind 单节点）
+
+| 实验 | 结论 |
+| --- | --- |
+| T5-03 A | 40 用户抢 20 库存：20 单成交、20 条 `12003` 拒绝，`sold=20`，未超卖 |
+| T5-03 B | 同一用户 10 并发 → 1 单（一人一单，`dup_one_per_user=0`） |
+| T5-03 C | 同一用户 + 同一幂等键 10 并发 → 1 请求行 + 1 单，`sold` 只 +1 |
+| T5-04 A | 消费暂停积压 20 条 → 恢复后全部转化、Lag 归零，无重复订单 |
+| T5-04 B | Broker 停机 59s → 10 条事件保留在 Outbox，恢复后自动重发，零丢失 |
+| T5-04 C | 应用 Pod `SIGKILL` → 10 条未提交消息跨崩溃重投，订单不重不漏 |
+| T5-04 D | 4 类永久错误全部进 DLQ（`dlq_source_offset` 与投递偏移对应）；重试预算耗尽走「先死信、后 dead 终态」 |
+| 最终一致性 | `LOG-END=136 / COMMITTED=136 / LAG=0`；`queued=0`、`unpublished=0`、`dup_order_no=0`、`sold>total_stock=0` |
+
+数字与原始证据见 `docs/reports/t5-03-high-concurrency-correctness/`、`docs/reports/t5-04-kafka-backlog-failure-recovery/`；这些结论不能外推为生产容量或高可用承诺。
 
 ---
 
