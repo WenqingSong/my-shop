@@ -1,5 +1,9 @@
 # SurgeCart（my-shop）
 
+> **面向 LLM / AI 代码代理的完整项目上下文：[`docs/LLM_CONTEXT.md`](docs/LLM_CONTEXT.md)**
+>
+> 这是一份专门写给大型语言模型与自动化编码代理的事实手册，覆盖仓库地图、启动与请求生命周期、数据模型、订单/秒杀一致性不变量、配置契约、可观测性、部署与测试门禁、已知缺陷与常见修改配方。人类读者可继续阅读本 README 与 `docs/design/*`。
+
 ## 项目介绍
 
 SurgeCart（`my-shop`）是基于 [GoFrame v2](https://goframe.org) 的电商后端项目。项目以**普通订单**与**秒杀**为两条核心交易链路，覆盖前台用户与后台管理员的身份与权限体系，以及商品、购物车、库存、优惠券、退款、运营内容等电商核心域。
@@ -13,11 +17,12 @@ SurgeCart（`my-shop`）是基于 [GoFrame v2](https://goframe.org) 的电商后
 | 任务一 | Kafka 秒杀改造（B1–B4.1） | **已完成**（已集成 main） |
 | 任务二 | Kubernetes 适配（T2-01 – T2-07） | **已完成**（已集成 main；T2-07 的集群级验证由 T3-01 在真实 kind 集群补齐） |
 | 任务三 | 本地 Kubernetes 部署与真实业务链路验证（T3-01、T3-02） | **已完成**（已集成 main） |
-| 任务四 | Prometheus 基础监控 | **开发中**（未集成，main 不含任务四产物） |
-| 任务五 | k6 性能与可靠性测试 | **待开始** |
+| 任务四 | Prometheus 基础监控（T4-01 – T4-04） | **已完成**（已集成 main；应用指标 + K8s Prometheus + Grafana 看板，无告警） |
+| 任务五 | k6 性能与可靠性测试（T5-01 – T5-04） | **已完成**（已集成 main；本地单节点实验，不构成容量结论） |
+| 阶段一 | 阶段一五项任务集成到 develop → main | **已完成**（2026-11-10） |
 | 阶段二 | 真实电商业务演进与后续云原生架构建设 | **即将启动** |
 
-当前工程能力是**单机 / 单节点本地环境**：Docker Compose 五服务栈与 kind 单节点集群。仓库不包含生产集群、多副本高可用、Ingress/TLS 或容量压测结论。
+当前工程能力是**单机 / 单节点本地环境**：Docker Compose 五服务栈、kind 单节点集群，以及 K8s 侧单实例 Prometheus + Grafana 监控栈。仓库不包含生产集群、多副本高可用、Ingress/TLS、告警通知或容量压测结论。任务五结论仅来自本地 kind 单节点实验，其中 `db_scanner` 模式的高并发正确性为 **NOT_VERIFIED**，并记录了一个**未修复**的 Outbox 最老事件年龄时区缺陷；详见 [LLM 上下文手册](docs/LLM_CONTEXT.md) 与 [T5-04 报告](docs/reports/t5-04-kafka-backlog-failure-recovery/T5-04_KAFKA_BACKLOG_FAILURE_RECOVERY_REPORT.md)。
 
 ## 核心能力
 
@@ -82,7 +87,8 @@ Redis 预扣仅作准入闸门，MySQL 始终是订单与已售数量的最终�
 | 消息队列 | Kafka 3.9.1（KRaft 单节点，本地；秒杀请求事件的传输管道，可选模式） |
 | 对象存储 | 七牛云（上传直传凭证签发） |
 | 反向代理 | Nginx（对外唯一 HTTP 入口） |
-| 监控 | Prometheus（秒杀指标与 p95/p99 recording rules；Kubernetes 基础监控开发中） |
+| 监控 | Prometheus（秒杀 `flashsale_*` 与应用 `surgecart_*` 指标、p95/p99 recording rules）；Kubernetes 内单实例 Prometheus + Grafana 看板（无告警） |
+| 性能测试 | k6（`test/k6`：smoke / 只读负载 / 秒杀下单场景） |
 | 容器化 | Docker + Docker Compose |
 | 容器编排 | Kubernetes（Kustomize；本地 kind 单节点集群） |
 | CI/CD | CNB 流水线（`.cnb.yml`） |
@@ -153,7 +159,7 @@ MySQL 事务内按 request_id 加锁读权威数据 → 条件扣减 → 建单
 - MySQL 是订单、已售数量与请求生命周期的唯一权威来源；Kafka 只传输「已受理请求需要落单」事件，不承载业务状态。
 - 消息 Key 固定为 `<activity_id>:<sku_id>`，同一活动 SKU 进入同一分区；单 SKU 的消费并行度上限为 1，这是当前明确接受的取舍。
 - 业务幂等回到 MySQL 请求行状态判断，不把 `event_id` 当作永久去重台账；`event_id` 由 `request_id` 确定性生成。
-- 本地 Topic 为 12 分区、副本 1；单节点 KRaft 只用于本地联调，不代表生产高可用。
+- Topic 必须显式创建（Broker 禁止自动建 Topic）：`docs/development/kafka.md` 的手动本地示例为 12 分区、副本 1；K8s 基础设施 Job 默认 `TOPIC_ORDER_REQUESTED_PARTITIONS=1`、副本 1。两者都只用于本地单节点 KRaft 联调，不代表生产高可用（生产建议 3 Broker、RF=3、min.insync.replicas=2）。
 - `db_scanner` 与 `kafka` 严格互斥，切换需重启进程；默认 `db_scanner`，不需要安装 Kafka。
 
 ## 快速开始
@@ -272,18 +278,20 @@ kubectl -n surgecart get deploy,pods
 ## 测试
 
 ```bash
-make test                    # 统一入口：go vet + 单元测试 + 集成测试 + Registry 校验 + 容器化静态断言
+make test                    # 统一入口：go vet + 单元测试 + 集成测试 + 迁移门禁 + Registry/容器化/K8s 清单/发布脚本断言
 make test-race               # 竞态检测
 make test-container-runtime  # 真实镜像构建 + 容器生命周期（非 root/只读/SIGTERM/drain/退出码）
 make test-kafka-e2e         # 真实 Kafka 秒杀端到端（需专用 MySQL/Redis/Kafka）
 make test-serve-lifecycle   # 进程级 serve 生命周期（真实 SIGTERM 与重启收敛）
 ```
 
-`make test` 依次执行 `go vet`、单元测试（不依赖 MySQL/Redis）、集成测试（需 MySQL/Redis）、数据库迁移门禁（真实 MySQL + 多进程）、Registry 一致性校验、容器化静态断言、Kustomize 部署体系校验（真实构建 + 构建产物断言 + API Schema，需要 kubectl）与发布脚本行为门禁（真实执行 `deploy-k8s.sh` + fake kubectl，无需集群）。集成测试前需先就绪依赖（`make init` 或 `make deps-start`）。独立目标：`test-unit` / `test-integration` / `test-race` / `test-migration` / `test-prometheus` / `test-container` / `test-container-runtime` / `test-k8s-manifest` / `test-deploy-k8s` / `test-nginx` / `test-lib` / `test-storage`（真实存储 E2E，需七牛凭据）。容器构建、运行安全、扫描与排障详见 [容器构建与运行安全](docs/development/container-security.md)，迁移执行与并发锁详见 [数据库迁移运维](docs/development/migrations.md)，Kubernetes 发布流程详见 [Kubernetes 部署体系](docs/development/kubernetes.md)。
+性能与可靠性实验脚本位于 `test/k6`（smoke / read-load / flashsale-order）与 `scripts/kafka-reliability`（积压、Broker 停机、崩溃重投、DLQ）。它们不属于 `make test` 的默认门禁，需要真实集群、Prometheus 与端口转发，结果与局限见 `docs/reports/t5-*`。
+
+`make test` 依次执行 `go vet`、lib.sh 加载语义校验、单元测试（不依赖 MySQL/Redis）、集成测试（需 MySQL/Redis）、数据库迁移门禁（真实 MySQL + 多进程）、Registry 一致性校验、Prometheus 配置校验、容器化静态断言、Kustomize 部署体系校验（真实构建 + 构建产物断言 + API Schema，需要 kubectl）、发布脚本行为门禁（真实执行 `deploy-k8s.sh` + fake kubectl，无需集群）、K8s 基础设施/集群脚本门禁与 Nginx 配置校验。集成测试前需先就绪依赖（`make init` 或 `make deps-start`）。独立目标：`test-unit` / `test-integration` / `test-race` / `test-migration` / `test-kafka-e2e` / `test-serve-lifecycle` / `test-prometheus` / `test-container` / `test-container-runtime` / `test-k8s-manifest` / `test-deploy-k8s` / `test-k8s-infra` / `test-k8s-cluster` / `test-nginx` / `test-lib` / `test-storage`（真实存储 E2E，需七牛凭据）。容器构建、运行安全、扫描与排障详见 [容器构建与运行安全](docs/development/container-security.md)，迁移执行与并发锁详见 [数据库迁移运维](docs/development/migrations.md)，Kubernetes 发布流程详见 [Kubernetes 部署体系](docs/development/kubernetes.md)。
 
 ## Task 管理（Agent Workflow）
 
-当前框架为 Agent Workflow `4.0.0`（上游发布线 `refs/tags/v4.0.0`，升级于 2026-11-05，见[升级报告](docs/reports/2026-11-05-agent-workflow-upgrade-v4.0.0.md)）。V4 删除了 Workflow Engine、`state.yaml`、五个 Gate 与 Stage 推导：工作流由 Lead Agent 组织，事实写在 Markdown 与 Git 里，机器只做静态校验。历史 Task 平铺在 `.agent/tasks/<task-id>/`（29 个 V3 记录作为冻结证据保留），22 个更早的历史任务隔离在 `.agent/tasks/_archive/`。人类可读导航与兼容说明见 [Task 管理入口](docs/task-management/README.md)：
+当前框架为 Agent Workflow `4.0.0`（上游发布线 `refs/tags/v4.0.0`，升级于 2026-11-05，见[升级报告](docs/reports/2026-11-05-agent-workflow-upgrade-v4.0.0.md)）。V4 删除了 Workflow Engine、`state.yaml`、五个 Gate 与 Stage 推导：工作流由 Lead Agent 组织，事实写在 Markdown 与 Git 里，机器只做静态校验。历史 Task 平铺在 `.agent/tasks/<task-id>/`（30 个 V3 记录作为冻结证据保留），23 个更早的历史任务隔离在 `.agent/tasks/_archive/`。人类可读导航与兼容说明见 [Task 管理入口](docs/task-management/README.md)：
 
 - [Task 目录](docs/task-management/task-catalog.md)：51 项的状态、领域、交付与证据（快照 2026-10-18）。
 - [Task 关系图](docs/task-management/task-relationships.md)：版本演进、前置依赖与业务关联。
@@ -296,7 +304,7 @@ make test-serve-lifecycle   # 进程级 serve 生命周期（真实 SIGTERM 与�
 
 新任务由 [TaskBuilderPrompt](.agent/roles/TaskBuilderPrompt.md) 建档到 `.agent/tasks/<task-slug>/`，使用六份 Markdown 记录（`task.md`、`plan.md`、`handoff.md`、`findings.md`、`delivery.md`、`decisions.md`）；角色是能力边界、由 Lead 按需调用，入口见 [`.agent/README.md`](.agent/README.md) 与 [WorkflowAgentDirective](.agent/specs/WorkflowAgentDirective.md)。
 
-29 个在用历史任务是 V3 证据：其 `state.yaml`、`route` 与 Gate 结论均为冻结事实，V4 不解析、不续用，也不得为通过旧校验补写字段。`.agent/engine/`、`.agent/bin/workflow-check`、`.agent/workflow.yaml` 已随 V4 删除；`.agent/registry/*.md` 保留为普通 Markdown 文档，不再有机器 schema。
+30 个在用历史任务是 V3 证据：其 `state.yaml`、`route` 与 Gate 结论均为冻结事实，V4 不解析、不续用，也不得为通过旧校验补写字段。`.agent/engine/`、`.agent/bin/workflow-check`、`.agent/workflow.yaml` 已随 V4 删除；`.agent/registry/*.md` 保留为普通 Markdown 文档，不再有机器 schema。
 
 ## 部署
 
@@ -305,29 +313,32 @@ make test-serve-lifecycle   # 进程级 serve 生命周期（真实 SIGTERM 与�
 - **CI/CD**：CNB 流水线（`.cnb.yml`）按「测试 → 竞态检测 → 构建 → 镜像发布」顺序执行，任一阶段失败即中断；`latest` 仅指向测试全绿的构建。
 - **Kubernetes（Kustomize，单副本）**：两个独立构建入口——应用 `manifest/kubernetes/overlays/production`、迁移 `manifest/kubernetes/migration/overlays/production`。发布顺序固定为「构建镜像 → 获取发布锁（Lease）→ 版本降级保护 → 执行迁移 Job → 应用 Deployment → 发布成功判定 → 释放锁」，由 `make deploy-k8s`（`scripts/deploy-k8s.sh`）强制；清单校验用 `make test-k8s-manifest`，发布脚本行为用 `make test-deploy-k8s`。默认 `ClusterIP`，不含 Ingress/TLS（无真实域名与证书方案）。详见 [Kubernetes 部署体系](docs/development/kubernetes.md) 与 [发布锁设计](docs/design/deploy-lock.md)。
 - **本地 Kubernetes（kind）**：单节点 kind 集群 + 集群内 MySQL/Redis/Kafka（均单副本，Kafka 为 KRaft 单节点），应用 1 副本、PVC 5Gi、`restricted` Pod Security。T3-01 在真实集群完成基础设施验证（Node Ready、PVC Bound、MySQL `SELECT 1`、Redis `PING`、Kafka 生产消费回读），T3-02 完成应用部署与 `db_scanner` / `kafka` 两种模式的真实业务链路验证。**这是本地验证环境，不是生产部署**：无多节点、无高可用、无容量结论。见 [本地 Kubernetes 基础设施](docs/development/local-infrastructure.md) 与[验证报告](docs/reports/t3-02-application-deployment-validation/E2E_REPORT.md)。
+- **Kubernetes 监控栈（独立入口）**：`kubectl apply -k manifest/kubernetes/monitoring/prometheus/overlays/local`，再执行 `kubectl apply -k manifest/kubernetes/monitoring/grafana/overlays/local`。监控栈不参与 `deploy-k8s.sh` 的发布顺序，也不消费应用命名空间的 ConfigMap/Secret，只通过网络抓取 `surgecart.surgecart.svc.cluster.local:8000/metrics`；无告警、无 Ingress，UI 仅用 `port-forward` 访问。详见 [Prometheus 监控栈](docs/development/prometheus.md)、[Grafana 看板栈](docs/development/grafana.md)。
 - **秒杀消费模式**：`flash_sale.dispatch_mode` 二选一——`db_scanner`（默认，仅 MySQL 扫描器）或 `kafka`（Redis 准入 + MySQL Outbox + Kafka Publisher/Consumer，需同时设置 `kafka.enabled=true`）。两种模式严格互斥，切换需重启进程；默认模式不需要安装 Kafka。详见 [Kafka 开发说明](docs/development/kafka.md#10-b4serve-集成与运行闭环)。
 
 详细部署模型、启动生命周期、持久化与健康检查语义见 [部署设计](docs/design/deployment.md)；Kubernetes 资源、配置边界与发布命令见 [Kubernetes 部署体系](docs/development/kubernetes.md)。
 
-## 监控建设进度
+## 监控与性能实验
 
 | 能力 | 现状 |
 | --- | --- |
-| 应用指标 | 已实现秒杀相关 Prometheus 指标；`/metrics` 仅在 `flash_sale.metrics.enabled=true` 时暴露 |
-| 本地 Compose 抓取 | 已配置：`prometheus/prometheus.yml` 以 15s 间隔抓取 `app:8000/metrics` |
-| 秒杀延迟 recording rules | 已配置 p95 / p99（`prometheus/rules/flashsale_latency.yml`），由 `make test-prometheus` 校验 |
-| Kubernetes 基础监控（任务四） | **开发中**，未集成；main 不含任务四的监控清单、告警或看板 |
-| k6 性能与可靠性测试（任务五） | **待开始**；现有指标与脚本不构成性能结论 |
+| 应用指标 | 秒杀域 `flashsale_*`（下单/消费/Outbox/Consumer）+ 应用级 `surgecart_*`（HTTP、Kafka Consumer Lag、Outbox 积压与最老年龄）；`/metrics` 仅在 `flash_sale.metrics.enabled=true` 时暴露 |
+| 本地 Compose 抓取 | 已配置：`prometheus/prometheus.yml` 以 15s 间隔抓取 `app:8000/metrics`；p95 / p99 recording rules 由 `make test-prometheus` 校验 |
+| Kubernetes 监控栈 | 已交付：`manifest/kubernetes/monitoring/` 下 Prometheus 2.53.0 + Grafana 11.2.2，单副本、`restricted` PSS、`ClusterIP`（仅 port-forward 访问）；Grafana 自动加载 14 面板 `SurgeCart Overview` 看板；清单由 `make test-k8s-manifest` 静态断言 |
+| 告警 | **未交付**：无 Alertmanager、无告警规则、无通知渠道；`up == 0` 不会自动通知 |
+| k6 性能与可靠性 | 框架与实验已交付：`test/k6`（smoke / read-load / flashsale-order）；T5-02 只读负载 1/5/10 VU、T5-03 `kafka` 模式并发正确性、T5-04 积压与故障恢复实验。结论仅限本地 kind 单节点，不构成生产容量承诺 |
+| 已知监控缺陷 | T5-04 实测 `surgecart_outbox_oldest_age_seconds` 在 `Asia/Shanghai` 下恒定多报 8 小时（MySQL 会话时区 `NOW(6)` 与 `created_at` UTC 墙钟混用），**未修复**，见交付报告 |
 
-现有能力仅为**秒杀链路的指标暴露与本地抓取**，不包含 Kubernetes 监控栈、告警规则、看板或压测结论。
+指标语义、抓取边界与部署命令见 [Prometheus 监控栈](docs/development/prometheus.md)、[Grafana 看板栈](docs/development/grafana.md)；性能实验口径见 [k6 测试框架](test/k6/README.md)。
 
 ## 文档索引
 
+- **[LLM / AI 代理上下文手册](docs/LLM_CONTEXT.md)**：为大型语言模型准备的完整事实手册（仓库地图、生命周期、数据模型、不变量、配置、监控、部署、测试、已知缺陷与修改配方）。
 - [项目导览](docs/project-overview.md)：系统与两条核心交易链路的总览。
 - [系统架构](docs/design/architecture.md)：分层结构、模块边界、核心业务流程与基础设施。
 - 核心设计：[订单](docs/design/order.md)、[秒杀](docs/design/flash-sale.md)、[商品](docs/design/product.md)、[分类](docs/design/category.md)、[SKU](docs/design/sku.md)、[库存](docs/design/inventory.md)、[购物车](docs/design/cart.md)、[IAM](docs/design/iam.md)、[RBAC](docs/design/rbac.md)、[优惠券](docs/design/coupon.md)、[退款](docs/design/refund.md)。
-- 部署与运维：[容器化部署](docs/design/deployment.md)、[Kubernetes 部署体系](docs/development/kubernetes.md)、[本地 Kubernetes 基础设施](docs/development/local-infrastructure.md)、[容器构建与运行安全](docs/development/container-security.md)、[数据库迁移（机制）](docs/design/migration.md)、[数据库迁移（运维 / K8s Job）](docs/development/migrations.md)、[错误码](docs/design/error-codes.md)、[对象存储](docs/design/storage.md)。
-- 交付报告：[T2-06.1.3 审计](docs/reports/t2-06-1-3-rbac-renewal-budget/FINAL-AUDIT.md)、[T2-06.1.4 部署安全加固](docs/reports/t2-06-1-4-deploy-safety-hardening/IMPLEMENTATION_REPORT.md)、[T2-06.1.5 RBAC 最终集成](docs/reports/t2-06-1-5-rbac-resource-name-final/FINAL_INTEGRATION_REPORT.md)、[T2-07 本地集群依赖](docs/reports/t2-07-local-cluster-dependencies/IMPLEMENTATION_REPORT.md)、[T3-01 集群验证](docs/reports/t3-01-local-kubernetes-validation/VALIDATION_REPORT.md)、[T3-02 应用与业务链路验证](docs/reports/t3-02-application-deployment-validation/E2E_REPORT.md)。
+- 部署与运维：[容器化部署](docs/design/deployment.md)、[Kubernetes 部署体系](docs/development/kubernetes.md)、[本地 Kubernetes 基础设施](docs/development/local-infrastructure.md)、[容器构建与运行安全](docs/development/container-security.md)、[Prometheus 监控栈](docs/development/prometheus.md)、[Grafana 看板栈](docs/development/grafana.md)、[数据库迁移（机制）](docs/design/migration.md)、[数据库迁移（运维 / K8s Job）](docs/development/migrations.md)、[错误码](docs/design/error-codes.md)、[对象存储](docs/design/storage.md)。
+- 交付报告：[T2-06.1.3 审计](docs/reports/t2-06-1-3-rbac-renewal-budget/FINAL-AUDIT.md)、[T2-06.1.4 部署安全加固](docs/reports/t2-06-1-4-deploy-safety-hardening/IMPLEMENTATION_REPORT.md)、[T2-06.1.5 RBAC 最终集成](docs/reports/t2-06-1-5-rbac-resource-name-final/FINAL_INTEGRATION_REPORT.md)、[T2-07 本地集群依赖](docs/reports/t2-07-local-cluster-dependencies/IMPLEMENTATION_REPORT.md)、[T3-01 集群验证](docs/reports/t3-01-local-kubernetes-validation/VALIDATION_REPORT.md)、[T3-02 应用与业务链路验证](docs/reports/t3-02-application-deployment-validation/E2E_REPORT.md)、[T4-03 Prometheus 部署](docs/reports/t4-03-prometheus-deployment/T4-03_PROMETHEUS_DEPLOYMENT_REPORT.md)、[T4-04 Grafana 看板](docs/reports/t4-04-grafana-dashboard/T4-04_GRAFANA_DASHBOARD_REPORT.md)、[T5-02 负载测试](docs/reports/t5-02-load-performance-analysis/T5-02_LOAD_PERFORMANCE_ANALYSIS_REPORT.md)、[T5-03 并发正确性](docs/reports/t5-03-high-concurrency-correctness/T5-03_HIGH_CONCURRENCY_CORRECTNESS_REPORT.md)、[T5-04 Kafka 故障恢复](docs/reports/t5-04-kafka-backlog-failure-recovery/T5-04_KAFKA_BACKLOG_FAILURE_RECOVERY_REPORT.md)、[阶段一 main 集成](docs/reports/stage1-main-integration/STAGE1_MAIN_INTEGRATION_REPORT.md)。
 - 开发环境：[Kafka 开发说明](docs/development/kafka.md)（B4 已完成：两种运行模式、serve 装配、Publisher/Consumer 生命周期、F-03/F-04 修复、优雅关闭与真实端到端门禁）。
 - Task 管理：[Task 管理入口](docs/task-management/README.md)、[Task 目录](docs/task-management/task-catalog.md)、[Task 关系图](docs/task-management/task-relationships.md)、[Owner 决策清单](docs/task-management/owner-decisions.md)。
 - 运营与内容：[轮播图](docs/design/banner.md)、[文章](docs/design/article.md)、[推荐位](docs/design/recommendation.md)、[评价](docs/design/review.md)、[数据大屏](docs/design/dashboard.md)、[收藏](docs/design/favorite.md)、[点赞](docs/design/like.md)。
