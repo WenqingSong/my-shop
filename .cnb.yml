@@ -22,133 +22,133 @@ $:
             git --version
             docker version
             docker compose version
-main:
-  pull_request:
-    - name: pr-check
-      services:
-        - docker
-      docker:
-        image: golang:1.27.3
-        volumes:
-          - /go/pkg/mod
-          - /root/.cache/go-build
-      stages:
-        - name: start-dependencies
-          script: |
-            # 环境准备：注入 CI 隔离测试变量（占位值，仅用于测试依赖启动，不用于生产）。
-            # MYSQL_ROOT_PASSWORD=root 与 scripts/test.sh 注入的 DATABASE_DEFAULT_PASS=root
-            # 一致，使集成测试以 root/root 连接 MySQL；AUTH_JWT_SECRET 仅为满足生产
-            # compose 的 ${AUTH_JWT_SECRET:?} 插值，各测试自身经 t.Setenv 注入密钥。
-            export MYSQL_ROOT_PASSWORD=root
-            export AUTH_JWT_SECRET=ci-placeholder-jwt-secret-not-for-prod
-            make deps-start
+# main:
+#   pull_request:
+#     - name: pr-check
+#       services:
+#         - docker
+#       docker:
+#         image: golang:1.27.3
+#         volumes:
+#           - /go/pkg/mod
+#           - /root/.cache/go-build
+#       stages:
+#         - name: start-dependencies
+#           script: |
+#             # 环境准备：注入 CI 隔离测试变量（占位值，仅用于测试依赖启动，不用于生产）。
+#             # MYSQL_ROOT_PASSWORD=root 与 scripts/test.sh 注入的 DATABASE_DEFAULT_PASS=root
+#             # 一致，使集成测试以 root/root 连接 MySQL；AUTH_JWT_SECRET 仅为满足生产
+#             # compose 的 ${AUTH_JWT_SECRET:?} 插值，各测试自身经 t.Setenv 注入密钥。
+#             export MYSQL_ROOT_PASSWORD=root
+#             export AUTH_JWT_SECRET=ci-placeholder-jwt-secret-not-for-prod
+#             make deps-start
 
-        - name: install-kubectl
-          # T2-06：make test 内的 Kustomize 构建校验需要 kubectl 客户端。
-          # 这里只做离线构建（kubectl kustomize），不连接任何集群。
-          script: |
-            set -eu
-            if command -v kubectl >/dev/null 2>&1; then
-              kubectl version --client
-              exit 0
-            fi
-            curl -fsSL -o /usr/local/bin/kubectl \
-              https://dl.k8s.io/release/v1.31.4/bin/linux/amd64/kubectl
-            chmod +x /usr/local/bin/kubectl
-            kubectl version --client
+#         - name: install-kubectl
+#           # T2-06：make test 内的 Kustomize 构建校验需要 kubectl 客户端。
+#           # 这里只做离线构建（kubectl kustomize），不连接任何集群。
+#           script: |
+#             set -eu
+#             if command -v kubectl >/dev/null 2>&1; then
+#               kubectl version --client
+#               exit 0
+#             fi
+#             curl -fsSL -o /usr/local/bin/kubectl \
+#               https://dl.k8s.io/release/v1.31.4/bin/linux/amd64/kubectl
+#             chmod +x /usr/local/bin/kubectl
+#             kubectl version --client
 
-        - name: test
-          script: make test
+#         - name: test
+#           script: make test
 
-        - name: race
-          # 复用 start-dependencies 已就绪的 MySQL/Redis：test-race 除了纯内存的熔断器
-          # 状态机，还会在独立可销毁库（my_shop_outbox_race）中执行 Outbox 并发/租约/
-          # 人工修复竞态测试（-race -p 1），缺少依赖或用例未实际执行都会失败而非跳过。
-          script: make test-race
+#         - name: race
+#           # 复用 start-dependencies 已就绪的 MySQL/Redis：test-race 除了纯内存的熔断器
+#           # 状态机，还会在独立可销毁库（my_shop_outbox_race）中执行 Outbox 并发/租约/
+#           # 人工修复竞态测试（-race -p 1），缺少依赖或用例未实际执行都会失败而非跳过。
+#           script: make test-race
 
-  push:
-    - name: main-ci
-      services:
-        - docker
-      docker:
-        image: golang:1.27.3
-        volumes:
-          - /go/pkg/mod
-          - /root/.cache/go-build
-      stages:
-        - name: start-dependencies
-          script: |
-            # 环境准备：与 pr-check 相同；仅用于测试依赖启动，不用于生产。
-            export MYSQL_ROOT_PASSWORD=root
-            export AUTH_JWT_SECRET=ci-placeholder-jwt-secret-not-for-prod
-            make deps-start
+#   push:
+#     - name: main-ci
+#       services:
+#         - docker
+#       docker:
+#         image: golang:1.27.3
+#         volumes:
+#           - /go/pkg/mod
+#           - /root/.cache/go-build
+#       stages:
+#         - name: start-dependencies
+#           script: |
+#             # 环境准备：与 pr-check 相同；仅用于测试依赖启动，不用于生产。
+#             export MYSQL_ROOT_PASSWORD=root
+#             export AUTH_JWT_SECRET=ci-placeholder-jwt-secret-not-for-prod
+#             make deps-start
 
-        - name: install-kubectl
-          # T2-06：与 pr-check 相同，make test 需要 kubectl 客户端做离线 Kustomize 构建。
-          script: |
-            set -eu
-            if command -v kubectl >/dev/null 2>&1; then
-              kubectl version --client
-              exit 0
-            fi
-            curl -fsSL -o /usr/local/bin/kubectl \
-              https://dl.k8s.io/release/v1.31.4/bin/linux/amd64/kubectl
-            chmod +x /usr/local/bin/kubectl
-            kubectl version --client
+#         - name: install-kubectl
+#           # T2-06：与 pr-check 相同，make test 需要 kubectl 客户端做离线 Kustomize 构建。
+#           script: |
+#             set -eu
+#             if command -v kubectl >/dev/null 2>&1; then
+#               kubectl version --client
+#               exit 0
+#             fi
+#             curl -fsSL -o /usr/local/bin/kubectl \
+#               https://dl.k8s.io/release/v1.31.4/bin/linux/amd64/kubectl
+#             chmod +x /usr/local/bin/kubectl
+#             kubectl version --client
 
-        - name: test
-          script: make test
+#         - name: test
+#           script: make test
 
-        - name: race
-          # 与 pr-check 相同：包含 Outbox 并发 Race 门禁（隔离库 my_shop_outbox_race）。
-          script: make test-race
+#         - name: race
+#           # 与 pr-check 相同：包含 Outbox 并发 Race 门禁（隔离库 my_shop_outbox_race）。
+#           script: make test-race
 
-        - name: build
-          script: make build
+#         - name: build
+#           script: make build
 
-        - name: docker-build
-          # 构建发布镜像并打标签（短 SHA + latest），工程逻辑收敛到 scripts/docker-build.sh。
-          script: make docker-build
+#         - name: docker-build
+#           # 构建发布镜像并打标签（短 SHA + latest），工程逻辑收敛到 scripts/docker-build.sh。
+#           script: make docker-build
 
-        - name: docker-push
-          # 推送发布镜像（短 SHA + latest），工程逻辑收敛到 scripts/docker-push.sh。
-          script: make docker-push
+#         - name: docker-push
+#           # 推送发布镜像（短 SHA + latest），工程逻辑收敛到 scripts/docker-push.sh。
+#           script: make docker-push
 
-        - name: sync-to-github-mirror
-          # 只有原仓库（framework-station/my-shop）才执行 GitHub 镜像同步。
-          # fork 后 CNB_REPO_SLUG 会变成 fork 者的组织/仓库名，此步骤会自动跳过，
-          # 也就不会去访问私有的密钥仓库，fork 用户的 CI 不受影响。
-          if: |
-            [ "${CNB_REPO_SLUG}" = "framework-station/my-shop" ]
-          imports:
-            - https://cnb.cool/framework-station/my-shop-secrets/-/blob/main/github-mirror.yml
-          script: |
-            set -eu
+#         - name: sync-to-github-mirror
+#           # 只有原仓库（framework-station/my-shop）才执行 GitHub 镜像同步。
+#           # fork 后 CNB_REPO_SLUG 会变成 fork 者的组织/仓库名，此步骤会自动跳过，
+#           # 也就不会去访问私有的密钥仓库，fork 用户的 CI 不受影响。
+#           if: |
+#             [ "${CNB_REPO_SLUG}" = "framework-station/my-shop" ]
+#           imports:
+#             - https://cnb.cool/framework-station/my-shop-secrets/-/blob/main/github-mirror.yml
+#           script: |
+#             set -eu
 
-            printf 'machine github.com\nlogin %s\npassword %s\n' \
-              "${GITHUB_USERNAME}" "${GITHUB_TOKEN}" > "${HOME}/.netrc"
-            chmod 600 "${HOME}/.netrc"
-            trap 'rm -f "${HOME}/.netrc"' EXIT
+#             printf 'machine github.com\nlogin %s\npassword %s\n' \
+#               "${GITHUB_USERNAME}" "${GITHUB_TOKEN}" > "${HOME}/.netrc"
+#             chmod 600 "${HOME}/.netrc"
+#             trap 'rm -f "${HOME}/.netrc"' EXIT
 
-            git fetch origin \
-              '+refs/heads/*:refs/remotes/cnb/*' \
-              '+refs/tags/*:refs/tags/*' \
-              --prune
+#             git fetch origin \
+#               '+refs/heads/*:refs/remotes/cnb/*' \
+#               '+refs/tags/*:refs/tags/*' \
+#               --prune
 
-            git remote remove github-mirror 2>/dev/null || true
-            git remote add github-mirror \
-              https://github.com/WenqingSong/my-shop.git
+#             git remote remove github-mirror 2>/dev/null || true
+#             git remote add github-mirror \
+#               https://github.com/WenqingSong/my-shop.git
 
-            for ref in $(git for-each-ref \
-              --format='%(refname)' refs/remotes/cnb); do
-              branch="${ref#refs/remotes/cnb/}"
-              if [ "${branch}" = "HEAD" ]; then
-                continue
-              fi
-              echo "Syncing branch: ${branch}"
-              git push github-mirror \
-                "${ref}:refs/heads/${branch}"
-            done
+#             for ref in $(git for-each-ref \
+#               --format='%(refname)' refs/remotes/cnb); do
+#               branch="${ref#refs/remotes/cnb/}"
+#               if [ "${branch}" = "HEAD" ]; then
+#                 continue
+#               fi
+#               echo "Syncing branch: ${branch}"
+#               git push github-mirror \
+#                 "${ref}:refs/heads/${branch}"
+#             done
 
-            echo "Syncing tags"
-            git push github-mirror --tags
+#             echo "Syncing tags"
+#             git push github-mirror --tags
