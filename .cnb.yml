@@ -22,6 +22,34 @@ $:
             git --version
             docker version
             docker compose version
+
+# --- 轻量门禁（额度受限模式）------------------------------------------------
+# 背景：根组织云原生构建 CPU 额度不足时，原 8 核流水线的预冻结（10 min ≈ 1.33
+# 核时）会被拒绝，构建在 Prepare 阶段失败：
+#   Root Group's events CPU core-hours are insufficient for pre-freezing
+# 这里改为 1 核轻量门禁（预冻结 ≈ 0.17 核时），保证 main 的提交能拿到成功构建。
+# 额度恢复后：删除本段，并取消下方重型流水线的注释。
+main:
+  push:
+    - name: main-ci
+      runner:
+        cpus: 1
+      docker:
+        image: golang:1.27.3
+      stages:
+        - name: ci-smoke
+          script: |
+            set -eu
+            echo "repo: $(git config --get remote.origin.url)"
+            echo "branch: $(git branch --show-current)"
+            echo "commit: $(git rev-parse HEAD)"
+            git log -1 --format='%h %s'
+            test -f go.mod
+            test -f .cnb.yml
+            git status --short
+            echo "ci-smoke ok"
+
+# --- 重型流水线（额度恢复后取消注释）----------------------------------------
 # main:
 #   pull_request:
 #     - name: pr-check
